@@ -8,13 +8,15 @@ import {
   ShieldCheck,
   CheckCircle2,
   Database,
-  BookOpen
+  BookOpen,
+  Lock,
+  LogOut
 } from 'lucide-react';
 import { isConfigured } from '../lib/supabase';
 
-export default function Navbar({ currentView, onViewChange, onOpenTutorial }) {
+export default function Navbar({ currentView, onViewChange, onOpenTutorial, onLockAdmin }) {
   return (
-    <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 print:hidden">
+    <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 print:hidden">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           
@@ -29,7 +31,7 @@ export default function Navbar({ currentView, onViewChange, onOpenTutorial }) {
                   Wholesale RMA
                 </span>
                 <span className="text-[10px] uppercase font-mono font-bold bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/30">
-                  v2.0
+                  Staff View
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 hidden sm:block">
@@ -86,8 +88,8 @@ export default function Navbar({ currentView, onViewChange, onOpenTutorial }) {
             </button>
           </nav>
 
-          {/* Right Action: Prominent Tutorial Guide Button + DB Status */}
-          <div className="flex items-center gap-3">
+          {/* Right Action: Tutorial Guide + Lock Staff Button */}
+          <div className="flex items-center gap-2.5">
             <button
               type="button"
               onClick={onOpenTutorial}
@@ -95,15 +97,25 @@ export default function Navbar({ currentView, onViewChange, onOpenTutorial }) {
               title="Open Interactive System Tutorial & Workflow Guide"
             >
               <BookOpen className="w-4 h-4 text-indigo-400 shrink-0" />
-              <span className="hidden md:inline">📖 System Guide & Tutorial</span>
-              <span className="md:hidden">Guide</span>
+              <span className="hidden md:inline">📖 Guide</span>
+            </button>
+
+            {/* Lock / Exit to Public Lockdown View */}
+            <button
+              type="button"
+              onClick={onLockAdmin}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 hover:text-rose-300 border border-slate-700 hover:border-rose-500/40 text-slate-300 text-xs font-semibold transition-all"
+              title="Lock staff access and simulate customer view"
+            >
+              <Lock className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden lg:inline">Customer View</span>
             </button>
 
             {/* Database Vault Status Indicator */}
-            <div className="hidden xl:flex items-center gap-2 text-xs text-slate-400">
+            <div className="hidden xl:flex items-center gap-2 text-xs text-slate-400 pl-1">
               <Database className="w-3.5 h-3.5 text-indigo-400" />
               <span className="font-mono text-[11px]">
-                {isConfigured ? 'Supabase: Live Cloud' : 'Vault: Local / Mock'}
+                {isConfigured ? 'Supabase' : 'Local'}
               </span>
             </div>
           </div>

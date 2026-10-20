@@ -7,6 +7,8 @@ import {
 import { COMPANIES, RMA_STATUSES } from '../data/mockCatalog';
 import StatusBadge from './StatusBadge';
 import ResolutionModal from './ResolutionModal';
+import EmailDispatchSettingsModal from './EmailDispatchSettingsModal';
+import QATestWidget from './QATestWidget';
 import { 
   Search, 
   Filter, 
@@ -23,12 +25,15 @@ import {
   Building2, 
   Calendar, 
   User, 
+  Users,
   Database,
   Info,
-  ChevronDown
+  ChevronDown,
+  Mail,
+  Send
 } from 'lucide-react';
 
-export default function ReturnsDashboard({ onViewPortal }) {
+export default function ReturnsDashboard({ onViewPortal, onNavigateStudio }) {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dataSource, setDataSource] = useState('local');
@@ -39,6 +44,7 @@ export default function ReturnsDashboard({ onViewPortal }) {
   // Modal states
   const [activeEditingTicket, setActiveEditingTicket] = useState(null);
   const [activePhotoModal, setActivePhotoModal] = useState(null);
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
 
   // Load tickets on mount
   const loadData = async () => {
@@ -169,6 +175,16 @@ export default function ReturnsDashboard({ onViewPortal }) {
             title="Refresh returns registry"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-indigo-400' : ''}`} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsEmailModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 hover:text-white text-xs font-semibold transition-all shadow-sm"
+            title="Configure AE & operations recipient routing rules"
+          >
+            <Mail className="w-3.5 h-3.5 text-purple-400" />
+            <span>Email Routing</span>
           </button>
 
           <button
@@ -312,6 +328,7 @@ export default function ReturnsDashboard({ onViewPortal }) {
                 <th className="py-3.5 px-4">Filing Date</th>
                 <th className="py-3.5 px-4">Customer</th>
                 <th className="py-3.5 px-4">Item & Packaging</th>
+                <th className="py-3.5 px-4">Assigned AE</th>
                 <th className="py-3.5 px-4">Defect Reason</th>
                 <th className="py-3.5 px-4 text-center">Defect Photo</th>
                 <th className="py-3.5 px-4">Status</th>
@@ -322,7 +339,7 @@ export default function ReturnsDashboard({ onViewPortal }) {
             <tbody className="divide-y divide-slate-800 text-slate-300">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                  <td colSpan={9} className="py-12 text-center text-slate-400">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
                       <span>Querying Supabase 'rma_tickets_vault'...</span>
@@ -331,7 +348,7 @@ export default function ReturnsDashboard({ onViewPortal }) {
                 </tr>
               ) : filteredTickets.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                  <td colSpan={9} className="py-12 text-center text-slate-400">
                     <p className="text-sm font-semibold text-slate-300">No returns match the selected filter criteria.</p>
                     <p className="text-xs text-slate-500 mt-1">Try resetting the search filters or filing a return from the customer portal.</p>
                   </td>
@@ -386,6 +403,18 @@ export default function ReturnsDashboard({ onViewPortal }) {
                           {ticket.packaging_unit}
                         </span>
                       </div>
+                    </td>
+
+                    {/* Assigned AE & Routing */}
+                    <td className="py-3.5 px-4 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5 font-medium text-white">
+                        <Users className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                        <span className="truncate max-w-[130px]">{ticket.assigned_ae || 'Rodrigo Galvez'}</span>
+                      </div>
+                      <span className="text-[10px] text-purple-300 font-mono flex items-center gap-1 mt-0.5">
+                        <Send className="w-2.5 h-2.5 text-purple-400" />
+                        <span>{ticket.dispatch_email_status || 'Auto-Routed'}</span>
+                      </span>
                     </td>
 
                     {/* Defect Description */}
@@ -479,6 +508,19 @@ export default function ReturnsDashboard({ onViewPortal }) {
           </div>
         </div>
       )}
+
+      {/* EMAIL DISPATCH ROUTING SETTINGS MODAL */}
+      <EmailDispatchSettingsModal
+        isOpen={isEmailModalOpen}
+        onClose={() => setIsEmailModalOpen(false)}
+      />
+
+      {/* DOCKED QA TEST MODE & WALKTHROUGH WIDGET */}
+      <QATestWidget
+        onNavigateStudio={onNavigateStudio}
+        onNavigatePortal={onViewPortal}
+        onRefreshDashboard={loadData}
+      />
 
     </div>
   );

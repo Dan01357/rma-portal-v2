@@ -5,6 +5,7 @@ import {
   CATALOG_PRODUCTS, 
   SAMPLE_CUSTOMERS 
 } from '../data/mockCatalog';
+import { ACCOUNT_EXECUTIVES } from '../lib/emailRouting';
 import PrintableLabel from './PrintableLabel';
 import { 
   Building2, 
@@ -12,6 +13,7 @@ import {
   Layers, 
   Hash, 
   User, 
+  Users,
   Sparkles, 
   RefreshCw, 
   QrCode, 
@@ -34,6 +36,7 @@ export default function QRStickerStudio({ onOpenPortalSim }) {
   const [packagingUnit, setPackagingUnit] = useState('PC');
   const [deliveryRef, setDeliveryRef] = useState('DR-88950');
   const [customerName, setCustomerName] = useState('Metro Commercial Supplies Co.');
+  const [assignedAE, setAssignedAE] = useState('Rodrigo Galvez');
 
   // Dynamic QR Code Destination Base URL (defaults to active origin, editable for public domain)
   const activeOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
@@ -95,10 +98,11 @@ export default function QRStickerStudio({ onOpenPortalSim }) {
       pkg: packagingUnit,
       ref: deliveryRef.trim(),
       cust: customerName.trim(),
-      company: selectedCompany
+      company: selectedCompany,
+      ae: assignedAE
     });
     return `${cleanBase}/?${params.toString()}`;
-  }, [qrBaseUrl, activeOrigin, activeSku, activeItemName, packagingUnit, deliveryRef, customerName, selectedCompany]);
+  }, [qrBaseUrl, activeOrigin, activeSku, activeItemName, packagingUnit, deliveryRef, customerName, selectedCompany, assignedAE]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-fade-in">
@@ -306,7 +310,7 @@ export default function QRStickerStudio({ onOpenPortalSim }) {
             </div>
           </div>
 
-          {/* 4. Delivery Reference (DR # / SI #) & Customer Name */}
+          {/* 4. Delivery Reference, Customer & Assigned AE */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Delivery Reference */}
             <div>
@@ -344,6 +348,25 @@ export default function QRStickerStudio({ onOpenPortalSim }) {
                   <option key={cust} value={cust} />
                 ))}
               </datalist>
+            </div>
+
+            {/* Assigned Account Executive (AE) */}
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Assigned Account Executive (AE)</span>
+              </label>
+              <select
+                value={assignedAE}
+                onChange={(e) => setAssignedAE(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+              >
+                {ACCOUNT_EXECUTIVES.map((ae) => (
+                  <option key={ae.id} value={ae.name}>
+                    {ae.name} (AE)
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -403,6 +426,7 @@ export default function QRStickerStudio({ onOpenPortalSim }) {
             packagingUnit={packagingUnit}
             deliveryRef={deliveryRef}
             customerName={customerName}
+            assignedAE={assignedAE}
             portalUrl={portalUrl}
           />
         </div>

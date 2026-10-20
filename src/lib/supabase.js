@@ -1,18 +1,32 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const rawUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+const supabaseUrl = rawUrl.trim();
+const supabaseAnonKey = rawKey.trim();
 
 // Check if credentials are valid and not default placeholders
-export const isConfigured = 
-  Boolean(supabaseUrl && 
-  supabaseAnonKey && 
+// Explicitly supports new publishable keys (sb_publishable_...), sbp_..., legacy JWT (eyJ...), etc.
+export const isConfigured = Boolean(
+  supabaseUrl &&
+  supabaseAnonKey &&
   !supabaseUrl.includes('your-project-id') &&
   !supabaseAnonKey.includes('your-anon-key-here') &&
-  supabaseUrl.startsWith('https://'));
+  (supabaseUrl.startsWith('https://') || supabaseUrl.startsWith('http://')) &&
+  (supabaseAnonKey.startsWith('sb_publishable_') ||
+   supabaseAnonKey.startsWith('sbp_') ||
+   supabaseAnonKey.startsWith('eyJ') ||
+   supabaseAnonKey.length > 20)
+);
 
-export const supabase = isConfigured 
-  ? createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = isConfigured
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false
+      }
+    })
   : null;
 
 const LOCAL_STORAGE_KEY = 'wholesale_rma_tickets_vault_v1';
@@ -37,7 +51,9 @@ const SEED_DATA = [
     resolution_notes: '',
     contact_person: 'Eduardo Santos (Warehouse Receiving)',
     contact_phone: '+63 917 555 4321',
-    contact_email: 'esantos@metrocommercial.ph'
+    contact_email: 'esantos@metrocommercial.ph',
+    assigned_ae: 'Rodrigo Galvez',
+    dispatch_email_status: 'Dispatched to AE & Operations'
   },
   {
     id: 102,
@@ -57,7 +73,9 @@ const SEED_DATA = [
     resolution_notes: 'Inspected by QA. Carrier delivery truck had roof leak during heavy rain. Replacement 3 cases scheduled under DR-89011.',
     contact_person: 'Marissa Lim (Logistics Lead)',
     contact_phone: '+63 920 888 1234',
-    contact_email: 'returns@apexhypermarket.com'
+    contact_email: 'returns@apexhypermarket.com',
+    assigned_ae: 'Allan Valmeo',
+    dispatch_email_status: 'Dispatched to AE & Operations'
   },
   {
     id: 103,
@@ -77,7 +95,9 @@ const SEED_DATA = [
     resolution_notes: 'Hardware internal diagnostic confirmed failure on secondary capacitor. Credit Memo #CM-2026-104 issued to customer ledger.',
     contact_person: 'Dave Concepcion',
     contact_phone: '+63 918 222 9988',
-    contact_email: 'dave@megamart.com.ph'
+    contact_email: 'dave@megamart.com.ph',
+    assigned_ae: 'Dennis Morta',
+    dispatch_email_status: 'Dispatched to AE & Operations'
   }
 ];
 
@@ -115,13 +135,13 @@ export async function fetchRMATickets() {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.warn('Supabase fetch error, using fallback:', error.message);
-        return { data: getLocalVault(), source: 'local', error: error.message };
+        console.error('❌ Supabase SELECT from rma_tickets_vault failed:', error);
+        return { data: [], source: 'supabase', error: error.message };
       }
       return { data: data || [], source: 'supabase', error: null };
     } catch (err) {
-      console.warn('Supabase network error, using fallback:', err.message);
-      return { data: getLocalVault(), source: 'local', error: err.message };
+      console.error('❌ Supabase network exception on SELECT:', err);
+      return { data: [], source: 'supabase', error: err.message };
     }
   }
 
@@ -130,37 +150,43 @@ export async function fetchRMATickets() {
 
 /**
  * Insert a new RMA ticket into 'rma_tickets_vault'
+ * Strict cloud mode: when Supabase is configured, writes directly to PostgreSQL table.
  */
 export async function createRMATicket(ticketData) {
   const newTicket = {
     ...ticketData,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-    status: ticketData.status || 'Pending Inspection'
+    status: ticketData.status || 'Pending Inspection',
+    assigned_ae: ticketData.assigned_ae || 'Rodrigo Galvez',
+    dispatch_email_status: ticketData.dispatch_email_status || 'Ready for Dispatch'
   };
 
   if (isConfigured && supabase) {
     try {
+      console.log('📡 Submitting directly to Supabase PostgreSQL table [rma_tickets_vault]...', newTicket);
+      
       const { data, error } = await supabase
         .from('rma_tickets_vault')
         .insert([newTicket])
         .select()
         .single();
 
-      if (!error && data) {
-        // Also keep local copy updated
-        const local = getLocalVault();
-        saveLocalVault([data, ...local]);
-        return { data, error: null };
-      } else if (error) {
-        console.warn('Supabase insert failed, saving to local vault:', error.message);
+      if (error) {
+        console.error('❌ Supabase INSERT to rma_tickets_vault failed:', error);
+        return { data: null, error: error.message };
       }
+
+      console.log('✅ Supabase INSERT successful:', data);
+      return { data, error: null };
     } catch (err) {
-      console.warn('Supabase connection error on insert:', err.message);
+      console.error('❌ Supabase INSERT exception:', err);
+      return { data: null, error: err.message };
     }
   }
 
-  // Fallback to local storage
+  // Local Storage fallback ONLY when live cloud is unconfigured
+  console.info('ℹ️ Operating in Local Vault mode (no live Supabase credentials detected).');
   const local = getLocalVault();
   const ticketWithId = {
     ...newTicket,
@@ -189,21 +215,22 @@ export async function updateRMATicket(id, updates) {
         .select()
         .single();
 
-      if (!error && data) {
-        // Update local copy
-        const local = getLocalVault().map(t => t.id === id ? data : t);
-        saveLocalVault(local);
-        return { data, error: null };
+      if (error) {
+        console.error('❌ Supabase UPDATE to rma_tickets_vault failed:', error);
+        return { data: null, error: error.message };
       }
+
+      return { data, error: null };
     } catch (err) {
-      console.warn('Supabase update failed:', err);
+      console.error('❌ Supabase UPDATE exception:', err);
+      return { data: null, error: err.message };
     }
   }
 
   // Local fallback
   const local = getLocalVault();
   let updatedRecord = null;
-  const updatedList = local.map(ticket => {
+  const updatedList = local.map((ticket) => {
     if (ticket.id === id || ticket.rma_id === id) {
       updatedRecord = { ...ticket, ...payload };
       return updatedRecord;
@@ -216,7 +243,7 @@ export async function updateRMATicket(id, updates) {
 
 /**
  * Helper to upload photo to Supabase Storage or convert to data URL
- * Targets bucket 'rma-defect-photos' (with fallback to 'rma_photos')
+ * Targets bucket 'rma-defect-photos'
  */
 export async function uploadDefectPhoto(file, rmaId) {
   if (!file) return null;
@@ -245,18 +272,19 @@ export async function uploadDefectPhoto(file, rmaId) {
             .getPublicUrl(filePath);
 
           if (publicData?.publicUrl) {
+            console.log(`✅ Uploaded photo to Supabase storage bucket '${bucketName}':`, publicData.publicUrl);
             return publicData.publicUrl;
           }
         } else if (error) {
-          console.info(`Supabase storage bucket '${bucketName}' upload note:`, error.message);
+          console.warn(`Supabase storage bucket '${bucketName}' upload note:`, error.message);
         }
       } catch (e) {
-        console.info(`Storage bucket '${bucketName}' attempt notice:`, e.message);
+        console.warn(`Storage bucket '${bucketName}' attempt notice:`, e.message);
       }
     }
   }
 
-  // Robust client-side fallback: Return base64 Data URL
+  // Fallback: Convert to base64 Data URL
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {

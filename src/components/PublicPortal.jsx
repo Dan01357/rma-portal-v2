@@ -6,6 +6,7 @@ import {
 } from '../lib/supabase';
 import { generateRMAId } from '../lib/rmaGenerator';
 import { DEFECT_CATEGORIES } from '../data/mockCatalog';
+import { dispatchRMANotification } from '../lib/emailRouting';
 import DefectUploader from './DefectUploader';
 import { 
   ShieldCheck, 
@@ -27,7 +28,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 
-export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDashboard }) {
+export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDashboard, isAdmin = false }) {
   // Read locked parameters from URL / props
   const [params, setParams] = useState({
     company: 'PINGCON',
@@ -35,7 +36,8 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
     item: 'PINGCON 32" HD Commercial Display Panel',
     pkg: 'PC',
     ref: 'DR-88902',
-    cust: 'Metro Commercial Supplies Co.'
+    cust: 'Metro Commercial Supplies Co.',
+    ae: 'Rodrigo Galvez'
   });
 
   // Return submission form states
@@ -67,6 +69,7 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
       const urlRef = searchParams.get('ref') || initialParams.ref;
       const urlCust = searchParams.get('cust') || initialParams.cust;
       const urlCompany = searchParams.get('company') || initialParams.company;
+      const urlAe = searchParams.get('ae') || initialParams.ae;
 
       setParams({
         company: urlCompany || 'PINGCON',
@@ -74,7 +77,8 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
         item: urlItem || 'PINGCON 32" HD Commercial Display Panel',
         pkg: urlPkg || 'PC',
         ref: urlRef || 'DR-88902',
-        cust: urlCust || 'Metro Commercial Supplies Co.'
+        cust: urlCust || 'Metro Commercial Supplies Co.',
+        ae: urlAe || 'Rodrigo Galvez'
       });
     }
   }, [initialParams]);
@@ -141,17 +145,29 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
         resolution_notes: '',
         contact_person: contactPerson.trim() || params.cust,
         contact_phone: contactPhone.trim(),
-        contact_email: contactEmail.trim()
+        contact_email: contactEmail.trim(),
+        assigned_ae: params.ae || 'Rodrigo Galvez',
+        dispatch_email_status: 'Dispatched to AE & Operations'
       };
 
       // 5. Submit to Supabase table 'rma_tickets_vault'
       const { data, error } = await createRMATicket(ticketPayload);
 
       if (error) {
-        console.error('Submission error:', error);
+        console.error('❌ Supabase INSERT failure in PublicPortal:', error);
+        setErrorMessage(`Database submission error: ${error}. Please try again.`);
+        setIsSubmitting(false);
+        return;
       }
 
-      // 6. Display green confirmation card
+      // 6. Automated AE & Dispatch Email Trigger
+      try {
+        await dispatchRMANotification(data || ticketPayload);
+      } catch (dispatchErr) {
+        console.warn('Email dispatch notification warning:', dispatchErr);
+      }
+
+      // 7. Display green confirmation card
       setSubmittedRMA(data || ticketPayload);
       if (onRMAFiled) {
         onRMAFiled(data || ticketPayload);
@@ -272,10 +288,24 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
                 <span className="text-slate-500">Defect Reason:</span>
                 <span className="font-medium text-rose-300">{submittedRMA.defect_category}</span>
               </div>
+              <div className="flex justify-between py-1 border-b border-slate-800">
+                <span className="text-slate-500">Assigned AE:</span>
+                <span className="font-medium text-indigo-300">{submittedRMA.assigned_ae || params.ae}</span>
+              </div>
               <div className="flex justify-between py-1">
                 <span className="text-slate-500">Delivery Ref:</span>
                 <span className="font-mono text-slate-200">{submittedRMA.delivery_reference}</span>
               </div>
+            </div>
+
+            {/* Email Notification Status */}
+            <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center justify-between">
+              <span className="font-semibold flex items-center gap-1.5">
+                <Send className="w-3.5 h-3.5" /> Auto Email Dispatched
+              </span>
+              <span className="font-mono text-[10px] bg-emerald-500/20 px-2 py-0.5 rounded text-emerald-200">
+                AE & Operations Notified
+              </span>
             </div>
 
             {/* Next Steps Info */}
@@ -295,7 +325,7 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
                 <span>File Another Return</span>
               </button>
 
-              {onGoToDashboard && (
+              {isAdmin && onGoToDashboard && (
                 <button
                   type="button"
                   onClick={onGoToDashboard}
@@ -349,8 +379,8 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
                 </div>
               </div>
 
-              {/* Consignee & Company */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              {/* Consignee, Company & Assigned AE */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
                 <div className="p-2.5 bg-slate-950/50 rounded-xl border border-slate-800/80">
                   <span className="text-[10px] text-slate-500 font-mono block">Consignee Customer:</span>
                   <p className="font-semibold text-slate-200 mt-0.5 truncate">{params.cust}</p>
@@ -358,6 +388,10 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
                 <div className="p-2.5 bg-slate-950/50 rounded-xl border border-slate-800/80">
                   <span className="text-[10px] text-slate-500 font-mono block">Distributor Company:</span>
                   <p className="font-semibold text-slate-200 mt-0.5">{params.company}</p>
+                </div>
+                <div className="p-2.5 bg-slate-950/50 rounded-xl border border-slate-800/80">
+                  <span className="text-[10px] text-slate-500 font-mono block">Assigned AE:</span>
+                  <p className="font-semibold text-indigo-300 mt-0.5 truncate">{params.ae}</p>
                 </div>
               </div>
             </div>

@@ -80,6 +80,9 @@ export default function ResolutionModal({ ticket, isOpen, onClose, onSave }) {
               <div className="text-right">
                 <span className="text-slate-500 block text-[10px] uppercase font-mono">Ref DR #</span>
                 <span className="font-mono text-xs font-bold text-slate-200">{ticket.delivery_reference}</span>
+                <span className="text-indigo-400 block text-[11px] font-semibold mt-1">
+                  AE: {ticket.assigned_ae || 'Rodrigo Galvez'}
+                </span>
               </div>
             </div>
 

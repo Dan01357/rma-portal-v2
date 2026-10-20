@@ -9,6 +9,7 @@ export default function PrintableLabel({
   packagingUnit,
   deliveryRef,
   customerName,
+  assignedAE,
   portalUrl
 }) {
   const fallbackOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
@@ -87,14 +88,26 @@ export default function PrintableLabel({
               </p>
             </div>
 
-            {/* Packaging Unit */}
-            <div>
-              <span className="text-[10px] font-bold uppercase text-slate-500 flex items-center gap-1">
-                <PackageCheck className="w-3 h-3 text-slate-400" /> Packaging:
-              </span>
-              <span className="inline-block bg-slate-100 border border-slate-300 text-slate-800 font-mono font-bold px-2 py-0.5 rounded text-[11px]">
-                {packagingUnit || 'PC'}
-              </span>
+            {/* Packaging Unit & Assigned AE */}
+            <div className="flex items-center justify-between gap-1">
+              <div>
+                <span className="text-[10px] font-bold uppercase text-slate-500 flex items-center gap-1">
+                  <PackageCheck className="w-3 h-3 text-slate-400" /> Pkg:
+                </span>
+                <span className="inline-block bg-slate-100 border border-slate-300 text-slate-800 font-mono font-bold px-2 py-0.5 rounded text-[11px]">
+                  {packagingUnit || 'PC'}
+                </span>
+              </div>
+              {assignedAE && (
+                <div className="text-right">
+                  <span className="text-[9px] font-bold uppercase text-slate-500 block">
+                    Assigned AE:
+                  </span>
+                  <span className="font-semibold text-[11px] text-slate-800 truncate max-w-[110px] block">
+                    {assignedAE}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>

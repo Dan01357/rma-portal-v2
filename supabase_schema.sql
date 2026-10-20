@@ -23,53 +23,60 @@ CREATE TABLE IF NOT EXISTS public.rma_tickets_vault (
     resolution_notes TEXT,
     contact_person VARCHAR(255),
     contact_phone VARCHAR(100),
-    contact_email VARCHAR(255)
+    contact_email VARCHAR(255),
+    assigned_ae VARCHAR(150),
+    dispatch_email_status VARCHAR(100) DEFAULT 'Ready for Dispatch'
 );
+
+-- If table already exists in existing projects, add new columns cleanly:
+ALTER TABLE public.rma_tickets_vault ADD COLUMN IF NOT EXISTS assigned_ae VARCHAR(150);
+ALTER TABLE public.rma_tickets_vault ADD COLUMN IF NOT EXISTS dispatch_email_status VARCHAR(100) DEFAULT 'Ready for Dispatch';
 
 -- 2. Indexes for high performance lookup & filtering
 CREATE INDEX IF NOT EXISTS idx_rma_tickets_rma_id ON public.rma_tickets_vault (rma_id);
 CREATE INDEX IF NOT EXISTS idx_rma_tickets_company ON public.rma_tickets_vault (company);
 CREATE INDEX IF NOT EXISTS idx_rma_tickets_status ON public.rma_tickets_vault (status);
 CREATE INDEX IF NOT EXISTS idx_rma_tickets_created_at ON public.rma_tickets_vault (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_rma_tickets_assigned_ae ON public.rma_tickets_vault (assigned_ae);
 
 -- 3. Enable Row Level Security (RLS)
 ALTER TABLE public.rma_tickets_vault ENABLE ROW LEVEL SECURITY;
 
--- 4. Set Policies for Public Zero-Login Submissions and Supervisor Management
--- Allow anyone (public/anon) to insert new tickets from the QR portal
-CREATE POLICY "Allow public anon inserts into rma_tickets_vault"
-ON public.rma_tickets_vault
-FOR INSERT
-TO anon, authenticated
+-- 4. Open Policies for Public Zero-Login Submissions and Supervisor Management
+DROP POLICY IF EXISTS "Allow public inserts" ON public.rma_tickets_vault;
+DROP POLICY IF EXISTS "Allow public anon inserts into rma_tickets_vault" ON public.rma_tickets_vault;
+CREATE POLICY "Allow public inserts" 
+ON public.rma_tickets_vault 
+FOR INSERT 
 WITH CHECK (true);
 
--- Allow public/authenticated to read tickets
+DROP POLICY IF EXISTS "Allow read access to rma_tickets_vault" ON public.rma_tickets_vault;
 CREATE POLICY "Allow read access to rma_tickets_vault"
 ON public.rma_tickets_vault
 FOR SELECT
-TO anon, authenticated
 USING (true);
 
--- Allow updates (for supervisor updates to status and resolution notes)
+DROP POLICY IF EXISTS "Allow updates to rma_tickets_vault" ON public.rma_tickets_vault;
 CREATE POLICY "Allow updates to rma_tickets_vault"
 ON public.rma_tickets_vault
 FOR UPDATE
-TO anon, authenticated
 USING (true)
 WITH CHECK (true);
 
 -- 5. Supabase Storage Bucket for RMA Defect Photos ('rma-defect-photos')
--- Run in Storage settings or execute below SQL to auto-create public bucket:
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('rma-defect-photos', 'rma-defect-photos', true) 
 ON CONFLICT (id) DO NOTHING;
 
--- Policy to allow anonymous uploads to rma-defect-photos
-CREATE POLICY "Allow public anon uploads to rma-defect-photos"
-ON storage.objects FOR INSERT TO anon, authenticated
+DROP POLICY IF EXISTS "Allow public uploads" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public anon uploads to rma-defect-photos" ON storage.objects;
+CREATE POLICY "Allow public uploads" 
+ON storage.objects 
+FOR INSERT 
 WITH CHECK (bucket_id = 'rma-defect-photos');
 
--- Policy to allow public viewing of defect photos
+DROP POLICY IF EXISTS "Allow public read of rma-defect-photos" ON storage.objects;
 CREATE POLICY "Allow public read of rma-defect-photos"
-ON storage.objects FOR SELECT TO anon, authenticated
+ON storage.objects 
+FOR SELECT 
 USING (bucket_id = 'rma-defect-photos');
