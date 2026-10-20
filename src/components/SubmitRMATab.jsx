@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Camera, 
   Barcode, 
@@ -21,7 +21,8 @@ import {
   Layers,
   DollarSign,
   Hash,
-  X
+  X,
+  Loader2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import ScannerModal from './ScannerModal';
@@ -39,6 +40,9 @@ export default function SubmitRMATab({
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [manualSkuInput, setManualSkuInput] = useState('');
   const [isSearchingManually, setIsSearchingManually] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [liveSearchResults, setLiveSearchResults] = useState([]);
+  const [isSearchingLive, setIsSearchingLive] = useState(false);
 
   // Form State (Simplified for Repackers & Store Customers)
   const [formData, setFormData] = useState({
@@ -89,44 +93,82 @@ export default function SubmitRMATab({
     }, 4500);
   };
 
+  // Live Search Debounce Effect (queries 5,793 live ERPLY products)
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setLiveSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setIsSearchingLive(true);
+      try {
+        const results = await rmaApi.searchLiveProducts(searchQuery, 12);
+        setLiveSearchResults(results);
+      } catch (e) {
+        console.warn('Live search error:', e);
+      } finally {
+        setIsSearchingLive(false);
+      }
+    }, 280);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   // Handle scanned or selected product
-  const handleProductIdentified = (productOrCode) => {
+  const handleProductIdentified = async (productOrCode) => {
     let matched = null;
 
     if (typeof productOrCode === 'object' && productOrCode !== null) {
       matched = productOrCode;
     } else {
-      const query = String(productOrCode).trim().toLowerCase();
-      matched = catalog.find(p => 
-        p.barcode?.toLowerCase() === query || 
-        p.sku?.toLowerCase() === query ||
-        p.name?.toLowerCase().includes(query)
-      );
-    }
+      const cleanCode = String(productOrCode).trim();
+      if (!cleanCode) return;
 
-    if (matched) {
       // If same product is scanned again, increment quantity +1!
-      if (selectedProduct && selectedProduct.sku === matched.sku) {
+      if (selectedProduct && (
+        String(selectedProduct.sku).toLowerCase() === cleanCode.toLowerCase() || 
+        String(selectedProduct.barcode).toLowerCase() === cleanCode.toLowerCase()
+      )) {
         playBeep('increment');
-        setFormData(prev => ({ ...prev, quantity: prev.quantity + 1 }));
-        showBannerNotification(`Re-scanned ${matched.sku}: Quantity incremented to ${formData.quantity + 1}!`, 'success');
+        setFormData(prev => ({ ...prev, quantity: (Number(prev.quantity) || 0) + 1 }));
+        showBannerNotification(`Re-scanned ${selectedProduct.sku}: Quantity incremented to ${(Number(formData.quantity) || 1) + 1}!`, 'success');
         return;
       }
 
+      // 1. Live ERPLY API lookup
+      try {
+        matched = await rmaApi.findProductByBarcode(cleanCode);
+      } catch (err) {
+        console.warn('Live barcode lookup failed:', err);
+      }
+
+      // 2. Fallback to local catalog
+      if (!matched) {
+        const query = cleanCode.toLowerCase();
+        matched = catalog.find(p => 
+          p.barcode?.toLowerCase() === query || 
+          p.sku?.toLowerCase() === query ||
+          p.name?.toLowerCase().includes(query)
+        );
+      }
+    }
+
+    if (matched) {
       playBeep('success');
       setSelectedProduct(matched);
       setManualSkuInput('');
+      setSearchQuery('');
       setIsSearchingManually(false);
-      showBannerNotification(`Product Matched: "${matched.name}" (${matched.sku})`, 'success');
+      showBannerNotification(`Product Matched: "${matched.name}" (${matched.sku}) • Supplier: ${matched.supplier}`, 'success');
     } else {
       playBeep('error');
-      // Create ad-hoc uncatalogued item
+      // Boss rule: If product does not appear, still accept barcode scanner
       const unlisted = {
         id: `unreg-${Date.now()}`,
-        sku: `SKU-${String(productOrCode).slice(-6).toUpperCase()}`,
+        sku: `SKU-${String(productOrCode).slice(-8).toUpperCase()}`,
         barcode: String(productOrCode),
-        name: `Unlisted Product (${productOrCode})`,
-        brand: 'Standard Return',
+        name: `Uncatalogued Product (${productOrCode})`,
+        brand: 'Wholesale Distribution',
         supplier: 'Wholesale Supplier Hub',
         unit_price: 100.00,
         case_pack: 'Custom Carton',
@@ -135,7 +177,7 @@ export default function SubmitRMATab({
         requires_serial: false
       };
       setSelectedProduct(unlisted);
-      showBannerNotification(`Unlisted barcode "${productOrCode}". You can adjust product details below.`, 'warning');
+      showBannerNotification(`Uncatalogued Barcode "${productOrCode}". Accepted with default profile.`, 'warning');
     }
   };
 
@@ -361,11 +403,15 @@ export default function SubmitRMATab({
                   1
                 </span>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
-                  Scan Product QR Code
+                  Scan Product Barcode / SKU
                 </h2>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                  5,793 Live Products
+                </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Scan the QR / Barcode on the box, or search by SKU
+                Scan the factory barcode or SKU on the carton, or search by code
               </p>
             </div>
 
@@ -392,35 +438,116 @@ export default function SubmitRMATab({
             </button>
           </div>
 
-          {/* Manual SKU Search Dropdown / Input (Collapsible or searchable) */}
+          {/* Live SKU Search Dropdown / Input (Connected to 5,793 live ERPLY items) */}
           {isSearchingManually && (
             <div className="p-4 bg-slate-50 dark:bg-slate-950/70 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 animate-in fade-in duration-200">
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Select from Product Catalog:
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
-                {catalog.map(prod => (
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <Search className="w-3.5 h-3.5 text-brand-600" />
+                  Live Product Lookup (5,793 ERPLY Items):
+                </label>
+                <span className="text-[10px] text-slate-500 font-mono">
+                  Type code or brand name
+                </span>
+              </div>
+
+              {/* Real-time search bar */}
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search code, SKU, or name (e.g. CDO, Fibisco, P2478, Swiss Miss, Royal)..."
+                  className="w-full pl-10 pr-10 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 shadow-sm"
+                  autoFocus
+                />
+                {isSearchingLive && (
+                  <Loader2 className="w-4 h-4 text-brand-600 dark:text-brand-400 animate-spin absolute right-3.5 top-3" />
+                )}
+                {searchQuery && !isSearchingLive && (
                   <button
-                    key={prod.sku}
                     type="button"
-                    onClick={() => handleProductIdentified(prod)}
-                    className="p-2.5 text-left bg-white dark:bg-slate-900 hover:border-brand-500 border border-slate-200 dark:border-slate-800 rounded-xl transition-all flex items-center space-x-3 group"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3.5 top-3 text-slate-400 hover:text-slate-600"
                   >
-                    <img 
-                      src={prod.image_url} 
-                      alt={prod.name} 
-                      className="w-10 h-10 rounded-lg object-cover border border-slate-100 dark:border-slate-800 shrink-0" 
-                    />
-                    <div className="truncate flex-1">
-                      <div className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 truncate">
-                        {prod.name}
-                      </div>
-                      <div className="text-[11px] text-slate-500 font-mono">
-                        {prod.sku} • {prod.brand}
-                      </div>
-                    </div>
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Fast Quick Filter Chips */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <span className="text-[10px] font-semibold text-slate-400">Quick suggestions:</span>
+                {['CDO', 'Fibisco', 'Swiss Miss', 'Royal', 'P2478P', 'Pingcon'].map(tag => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setSearchQuery(tag)}
+                    className="px-2 py-0.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-300 hover:border-brand-500 hover:text-brand-600 transition-colors"
+                  >
+                    {tag}
                   </button>
                 ))}
+              </div>
+
+              {/* Results Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1 pt-1">
+                {liveSearchResults.length > 0 ? (
+                  liveSearchResults.map(prod => (
+                    <button
+                      key={prod.id || prod.sku}
+                      type="button"
+                      onClick={() => handleProductIdentified(prod)}
+                      className="p-2.5 text-left bg-white dark:bg-slate-900 hover:border-brand-500 border border-slate-200 dark:border-slate-800 rounded-xl transition-all flex items-start space-x-3 group shadow-sm hover:shadow"
+                    >
+                      <img 
+                        src={prod.image_url} 
+                        alt={prod.name} 
+                        className="w-10 h-10 rounded-lg object-cover border border-slate-100 dark:border-slate-800 shrink-0 mt-0.5" 
+                      />
+                      <div className="truncate flex-1 min-w-0">
+                        <div className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 truncate">
+                          {prod.name}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono flex items-center justify-between mt-0.5">
+                          <span className="font-semibold text-brand-600 dark:text-brand-400">{prod.sku}</span>
+                          <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatPeso(prod.unit_price)}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                          Supplier: {prod.supplier}
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                ) : searchQuery ? (
+                  <div className="col-span-2 text-center py-6 text-xs text-slate-500">
+                    {isSearchingLive ? 'Searching live ERPLY database...' : `No matching products found for "${searchQuery}". You can still type the barcode manually or launch the camera.`}
+                  </div>
+                ) : (
+                  catalog.slice(0, 6).map(prod => (
+                    <button
+                      key={prod.sku}
+                      type="button"
+                      onClick={() => handleProductIdentified(prod)}
+                      className="p-2.5 text-left bg-white dark:bg-slate-900 hover:border-brand-500 border border-slate-200 dark:border-slate-800 rounded-xl transition-all flex items-center space-x-3 group"
+                    >
+                      <img 
+                        src={prod.image_url} 
+                        alt={prod.name} 
+                        className="w-10 h-10 rounded-lg object-cover border border-slate-100 dark:border-slate-800 shrink-0" 
+                      />
+                      <div className="truncate flex-1">
+                        <div className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 truncate">
+                          {prod.name}
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-mono">
+                          {prod.sku} • {prod.brand}
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -438,15 +565,24 @@ export default function SubmitRMATab({
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  {catalog.slice(0, 5).map((item) => (
+                  {[
+                    { sku: 'P2478P', label: 'CDO Luncheon Meat (Live ERPLY)' },
+                    { sku: 'P1728P', label: 'Fibisco Crunchies (Live ERPLY)' },
+                    { sku: 'SS1247P', label: 'Swiss Miss Choco (Live ERPLY)' },
+                    { sku: 'SS1561P', label: 'Royal Filipino (Live ERPLY)' },
+                    { sku: 'PC-TIS-001', label: 'Pingcon Jumbo Tissue' },
+                    { sku: 'BON-FAC-001', label: 'Bonita Facial Box' }
+                  ].map((item) => (
                     <button
-                      key={item.barcode}
+                      key={item.sku}
                       type="button"
-                      onClick={() => handleProductIdentified(item.barcode)}
-                      className="px-2.5 py-1 bg-white dark:bg-slate-900 hover:border-amber-500 border border-amber-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 transition-all flex items-center space-x-1.5"
+                      onClick={() => handleProductIdentified(item.sku)}
+                      className="px-2.5 py-1 bg-white dark:bg-slate-900 hover:border-amber-500 border border-amber-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 transition-all flex items-center space-x-1.5 shadow-sm"
+                      title={item.label}
                     >
                       <Barcode className="w-3 h-3 text-amber-600" />
                       <span className="font-bold">{item.sku}</span>
+                      <span className="text-[10px] text-slate-400 font-sans">({item.label.split(' ')[0]})</span>
                     </button>
                   ))}
                 </div>

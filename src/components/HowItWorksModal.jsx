@@ -100,15 +100,16 @@ export default function HowItWorksModal({ isOpen, onClose }) {
                     </span>
                     <Barcode className="w-4 h-4 text-brand-600 dark:text-brand-400" />
                   </div>
-                  <h3 className="font-bold text-slate-900 dark:text-white text-sm">Scan & File Return (Intake)</h3>
+                  <h3 className="font-bold text-slate-900 dark:text-white text-sm">Scan Existing Barcode & File Return</h3>
                   <p className="text-slate-600 dark:text-slate-400 text-xs">
-                    Repackers or drivers scan retail carton barcodes via phone camera. The system instantly displays the product profile.
+                    Repackers scan the <strong>existing factory barcode or SKU on the box</strong> via phone camera. The app queries <strong>5,793 live ERPLY items</strong> in real-time. No need to pre-print product QR codes!
                   </p>
                   <ul className="text-xs text-slate-600 dark:text-slate-300 space-y-1 list-disc list-inside">
+                    <li><strong>Live SKU Lookup:</strong> Automatically fills official Product Name, Supplier Name, and Contract Price from ERP database.</li>
                     <li><strong>Re-scan increment:</strong> Scanning the same barcode again increments quantity by +1.</li>
                     <li><strong>Direct numeric box:</strong> Click the box and type large quantities (e.g. <code>20</code> or <code>100</code>) immediately.</li>
-                    <li><strong>AI Defect Detection:</strong> Generates automated technical diagnosis for packaging collapse or seal failure.</li>
-                    <li><strong>GPS Grabber:</strong> Automatically logs dock geolocation coordinates.</li>
+                    <li><strong>Defect Photo & GPS:</strong> Upload carton photos and capture dock GPS coordinates.</li>
+                    <li><strong>Return QR Label:</strong> Generated AFTER filing so repacker can slap 1 tracking sticker on the return box.</li>
                   </ul>
                 </div>
 
