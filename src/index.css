@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-100;
+  }
+}
+
+/* Custom Print Styles for High-Resolution Label Printing */
+@media print {
+  /* Hide all non-printable application elements */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Reset body and background for crisp printing */
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Only display the designated print container */
+  #printable-sticker-container,
+  #printable-sticker-container * {
+    visibility: visible !important;
+  }
+
+  #printable-sticker-container {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 4in !important;
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border: 2px solid #000 !important;
+    background: #fff !important;
+    page-break-inside: avoid;
+  }
+
+  @page {
+    size: auto;
+    margin: 5mm;
+  }
+}
+
+/* Smooth transitions & animations */
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
