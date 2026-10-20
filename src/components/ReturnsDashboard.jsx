@@ -2,12 +2,14 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   fetchRMATickets, 
   updateRMATicket, 
-  isConfigured 
+  isConfigured,
+  syncPendingLocalTickets
 } from '../lib/supabase';
 import { COMPANIES, RMA_STATUSES } from '../data/mockCatalog';
 import StatusBadge from './StatusBadge';
 import ResolutionModal from './ResolutionModal';
 import EmailDispatchSettingsModal from './EmailDispatchSettingsModal';
+import EmailOutboxModal from './EmailOutboxModal';
 import QATestWidget from './QATestWidget';
 import { isSandboxMode } from '../lib/emailRouting';
 import { 
@@ -32,7 +34,9 @@ import {
   ChevronDown,
   Mail,
   Send,
-  FlaskConical
+  FlaskConical,
+  AlertCircle,
+  CloudUpload
 } from 'lucide-react';
 
 export default function ReturnsDashboard({ onViewPortal, onNavigateStudio }) {
@@ -47,6 +51,11 @@ export default function ReturnsDashboard({ onViewPortal, onNavigateStudio }) {
   const [activeEditingTicket, setActiveEditingTicket] = useState(null);
   const [activePhotoModal, setActivePhotoModal] = useState(null);
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [isOutboxOpen, setIsOutboxOpen] = useState(false);
+
+  // Sync state
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
 
   // Sandbox mode badge — re-reads from localStorage each render
   const sandboxActive = isSandboxMode();
@@ -62,6 +71,20 @@ export default function ReturnsDashboard({ onViewPortal, onNavigateStudio }) {
       console.error('Failed to load tickets:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSyncToCloud = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await syncPendingLocalTickets();
+      setSyncResult(res);
+      await loadData();
+    } catch (err) {
+      setSyncResult({ success: false, error: err.message });
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -183,7 +206,7 @@ export default function ReturnsDashboard({ onViewPortal, onNavigateStudio }) {
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-xs font-mono">
             <span className={`w-2 h-2 rounded-full ${dataSource === 'supabase' ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
             <span className="text-slate-300">
-              {dataSource === 'supabase' ? 'Supabase Table: rma_tickets_vault' : 'Vault: Local / Seed Mode'}
+              {dataSource === 'supabase' ? 'Supabase: Cloud PostgreSQL' : 'Vault: Local Fallback Mode'}
             </span>
           </div>
 
@@ -195,6 +218,16 @@ export default function ReturnsDashboard({ onViewPortal, onNavigateStudio }) {
             title="Refresh returns registry"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-indigo-400' : ''}`} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsOutboxOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 hover:text-white text-xs font-semibold transition-all shadow-sm"
+            title="View dispatched emails, delivery status, and launch Gmail"
+          >
+            <Send className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Email Outbox</span>
           </button>
 
           <button
@@ -217,6 +250,54 @@ export default function ReturnsDashboard({ onViewPortal, onNavigateStudio }) {
           </button>
         </div>
       </div>
+
+      {/* Unsynced Local Tickets Banner */}
+      {(() => {
+        const pendingCount = tickets.filter(t => t._syncPending || (typeof t.id === 'number' && t.id > 1000)).length;
+        if (pendingCount === 0) return null;
+        return (
+          <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-amber-300">
+                  {pendingCount} Return Ticket{pendingCount > 1 ? 's' : ''} Stored Locally in Browser
+                </p>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Saved locally because Supabase returned an error or schema mismatch. After updating your Supabase SQL schema, sync them to cloud storage.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleSyncToCloud}
+              disabled={syncing}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shrink-0 flex items-center gap-1.5 transition-all shadow-md shadow-amber-500/20"
+            >
+              <CloudUpload className={`w-4 h-4 ${syncing ? 'animate-bounce' : ''}`} />
+              <span>{syncing ? 'Syncing to Cloud...' : 'Sync to Supabase Now'}</span>
+            </button>
+          </div>
+        );
+      })()}
+
+      {/* Sync result notification */}
+      {syncResult && (
+        <div className={`mb-6 p-3 rounded-2xl border text-xs flex items-center gap-2 animate-fade-in ${
+          syncResult.success 
+            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
+            : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+        }`}>
+          {syncResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" /> : <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />}
+          <span>
+            {syncResult.success 
+              ? `Successfully synced ${syncResult.synced} ticket(s) to Supabase cloud table rma_tickets_vault!` 
+              : `Sync failed: ${syncResult.error || 'Ensure table columns match supabase_schema.sql'}`}
+          </span>
+        </div>
+      )}
 
       {/* KPI METRIC CARDS */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5 mb-8">
@@ -494,7 +575,11 @@ export default function ReturnsDashboard({ onViewPortal, onNavigateStudio }) {
         {/* Table footer with counts */}
         <div className="px-6 py-3 bg-slate-900/90 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
           <span>Showing {filteredTickets.length} of {tickets.length} total return tickets</span>
-          <span>Supabase table: <code className="text-indigo-400">public.rma_tickets_vault</code></span>
+          <span>
+            Storage: <code className={dataSource === 'supabase' ? 'text-emerald-400 font-mono' : 'text-amber-400 font-mono'}>
+              {dataSource === 'supabase' ? 'public.rma_tickets_vault (Cloud)' : 'Local Storage Fallback'}
+            </code>
+          </span>
         </div>
       </div>
 
@@ -528,6 +613,13 @@ export default function ReturnsDashboard({ onViewPortal, onNavigateStudio }) {
           </div>
         </div>
       )}
+
+      {/* EMAIL OUTBOX & AUDIT MODAL */}
+      <EmailOutboxModal
+        isOpen={isOutboxOpen}
+        onClose={() => setIsOutboxOpen(false)}
+        onOpenSettings={() => setIsEmailModalOpen(true)}
+      />
 
       {/* EMAIL DISPATCH ROUTING SETTINGS MODAL */}
       <EmailDispatchSettingsModal

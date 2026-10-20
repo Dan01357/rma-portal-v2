@@ -57,6 +57,7 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [submittedRMA, setSubmittedRMA] = useState(null);
+  const [dispatchResult, setDispatchResult] = useState(null);
   const [copied, setCopied] = useState(false);
 
   // Initialize from props or window URL parameters
@@ -171,7 +172,8 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
 
       // 6. Automated AE & Dispatch Email Trigger
       try {
-        await dispatchRMANotification(data || ticketPayload);
+        const dispatchInfo = await dispatchRMANotification(data || ticketPayload);
+        setDispatchResult(dispatchInfo);
       } catch (dispatchErr) {
         console.warn('Email dispatch notification warning:', dispatchErr);
       }
@@ -203,6 +205,7 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
 
   const resetFormForNewReturn = () => {
     setSubmittedRMA(null);
+    setDispatchResult(null);
     setDefectDescription('');
     setPhotoFile(null);
     setPhotoPreview(null);
@@ -308,13 +311,35 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
             </div>
 
             {/* Email Notification Status */}
-            <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center justify-between">
-              <span className="font-semibold flex items-center gap-1.5">
-                <Send className="w-3.5 h-3.5" /> Auto Email Dispatched
-              </span>
-              <span className="font-mono text-[10px] bg-emerald-500/20 px-2 py-0.5 rounded text-emerald-200">
-                AE & Operations Notified
-              </span>
+            <div className="p-3.5 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                  <Mail className="w-3.5 h-3.5 text-indigo-400" /> AE &amp; Operations Email Notification
+                </span>
+                <span className={`font-mono text-[10px] px-2 py-0.5 rounded border ${
+                  dispatchResult?.sendResult?.success
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300'
+                }`}>
+                  {dispatchResult?.sendResult?.status || 'Logged to Outbox'}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+                <span>To: <code className="text-slate-300 font-mono">{dispatchResult?.mainRecipient || 'finance2@keysysincorporated.com'}</code></span>
+                {dispatchResult?.gmailComposeUrl && (
+                  <a
+                    href={dispatchResult.gmailComposeUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-red-400 hover:text-red-300 font-semibold underline text-xs"
+                  >
+                    <Send className="w-3 h-3" />
+                    <span>Send / Verify in Gmail</span>
+                    <ExternalLink className="w-3 h-3 opacity-60" />
+                  </a>
+                )}
+              </div>
             </div>
 
             {/* Next Steps Info */}

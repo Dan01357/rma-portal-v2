@@ -4,8 +4,10 @@
 -- Table Target: 'rma_tickets_vault'
 -- ==============================================================================
 
--- 1. Create the rma_tickets_vault table
-CREATE TABLE IF NOT EXISTS public.rma_tickets_vault (
+-- 1. Drop old table if existing with mismatched columns, then recreate cleanly
+DROP TABLE IF EXISTS public.rma_tickets_vault CASCADE;
+
+CREATE TABLE public.rma_tickets_vault (
     id BIGSERIAL PRIMARY KEY,
     rma_id VARCHAR(50) UNIQUE NOT NULL,
     created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,

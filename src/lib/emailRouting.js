@@ -45,16 +45,22 @@ function sandboxEmailList(list) {
 }
 
 // ─── Brand Sender Identities ─────────────────────────────────────────────────
+// Master sender account: finance2@keysysincorporated.com
+// Aliases: finance@pingconmarketing.com and finance2@a2z2go.net
+export const MASTER_SENDER_EMAIL = 'finance2@keysysincorporated.com';
+
 export const BRAND_SENDERS = {
   a2zGroup: {
-    fromEmail:    'finance2@a2z2go.net',
-    fromName:     'A2Z2GO / KEYSYS Warranty & RMA',
-    replyTo:      'finance2@a2z2go.net'
+    fromEmail:    'finance2@keysysincorporated.com',
+    aliasEmail:   'finance2@a2z2go.net',
+    fromName:     'KEYSYS & A2Z2GO Warranty & RMA',
+    replyTo:      'finance2@keysysincorporated.com'
   },
   pingconGroup: {
-    fromEmail:    'finance@pingconmarketing.com',
-    fromName:     'Pingcon Logistics RMA',
-    replyTo:      'finance@pingconmarketing.com'
+    fromEmail:    'finance2@keysysincorporated.com',
+    aliasEmail:   'finance@pingconmarketing.com',
+    fromName:     'Pingcon & Bonita Logistics RMA',
+    replyTo:      'finance2@keysysincorporated.com'
   }
 };
 
@@ -76,10 +82,11 @@ export const ACCOUNT_EXECUTIVES = [
 
 // ─── Routing Config (saved to localStorage) ──────────────────────────────────
 const ROUTING_STORAGE_KEY = 'rma_email_routing_config_v2';
+const WEBHOOK_STORAGE_KEY = 'rma_email_webhook_url';
 
 export const DEFAULT_EMAIL_ROUTING = {
   a2zGroup: {
-    mainRecipient: 'azgodev@gmail.com',
+    mainRecipient: 'finance2@keysysincorporated.com',
     ccRecipients: [
       'mgan@a2z2go.net',
       'AZGan@a2z2go.net',
@@ -88,7 +95,7 @@ export const DEFAULT_EMAIL_ROUTING = {
     ]
   },
   pingconGroup: {
-    mainRecipient: 'azgodev@gmail.com',
+    mainRecipient: 'finance2@keysysincorporated.com',
     ccRecipients: [
       'mgan@pingconmarketing.com',
       'AZGan@pingconmarketing.com',
@@ -97,6 +104,26 @@ export const DEFAULT_EMAIL_ROUTING = {
     ]
   }
 };
+
+export function getWebhookUrl() {
+  try {
+    return localStorage.getItem(WEBHOOK_STORAGE_KEY) || import.meta.env.VITE_EMAIL_WEBHOOK_URL || '';
+  } catch {
+    return import.meta.env.VITE_EMAIL_WEBHOOK_URL || '';
+  }
+}
+
+export function saveWebhookUrl(url) {
+  try {
+    if (url) {
+      localStorage.setItem(WEBHOOK_STORAGE_KEY, url.trim());
+    } else {
+      localStorage.removeItem(WEBHOOK_STORAGE_KEY);
+    }
+  } catch (err) {
+    console.error('Error saving webhook URL:', err);
+  }
+}
 
 export function getEmailRoutingConfig() {
   try {
@@ -202,8 +229,15 @@ Supervisor action is required to review defect proof and approve replacement or 
 ${sandbox ? '\n[TEST EMAIL — Sent to .test sink. External delivery blocked.]' : ''}`;
 
   const mailtoUrl = `mailto:${encodeURIComponent(toEmail)}?cc=${encodeURIComponent(ccList.join(','))}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const gmailComposeUrl = generateGmailComposeUrl({
+    mainRecipient: toEmail,
+    ccList,
+    subject,
+    body
+  });
 
   return {
+    rma_id:        ticket.rma_id,
     subject,
     from:          sender.fromEmail,
     fromName:      sender.fromName,
@@ -213,6 +247,7 @@ ${sandbox ? '\n[TEST EMAIL — Sent to .test sink. External delivery blocked.]' 
     ae:            assignedAE,
     body,
     mailtoUrl,
+    gmailComposeUrl,
     group:         a2zBrand ? 'A2Z2GO / KEYSYS' : 'PINGCON / BONITA TISSUE',
     sender,
     isSandbox:     sandbox,
@@ -220,10 +255,116 @@ ${sandbox ? '\n[TEST EMAIL — Sent to .test sink. External delivery blocked.]' 
   };
 }
 
+// ─── Direct Gmail Web Compose Link Generator ─────────────────────────────────
+/**
+ * Generates direct mail.google.com compose link so staff can click once to open
+ * Gmail in browser with To, CC, Subject, and formatted body populated.
+ */
+export function generateGmailComposeUrl({ mainRecipient, ccList, subject, body }) {
+  const to   = encodeURIComponent(mainRecipient || '');
+  const cc   = encodeURIComponent((ccList || []).join(','));
+  const su   = encodeURIComponent(subject || '');
+  const b    = encodeURIComponent(body || '');
+  return `https://mail.google.com/mail/?view=cm&fs=1&to=${to}&cc=${cc}&su=${su}&body=${b}`;
+}
+
+// ─── Automated Webhook Dispatch (Google Apps Script / Serverless) ────────────
+/**
+ * Sends dispatch payload via Google Apps Script Webhook or custom endpoint.
+ * Content-Type: text/plain prevents CORS preflight OPTIONS redirect issues with Google Apps Script.
+ */
+export async function sendEmailViaWebhook(payload) {
+  const webhookUrl = getWebhookUrl();
+  if (!webhookUrl) {
+    return { 
+      success: false, 
+      status: 'Ready to Send in Gmail', 
+      message: 'No webhook configured. Ready to dispatch via Gmail compose.' 
+    };
+  }
+
+  if (payload.isSandbox) {
+    return { 
+      success: true, 
+      status: 'Sandbox Simulated', 
+      message: 'Sandbox active (.test sink). Email delivery simulated.' 
+    };
+  }
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify({
+        to:       payload.mainRecipient,
+        cc:       (payload.ccList || []).join(', '),
+        subject:  payload.subject,
+        body:     payload.body,
+        fromName: payload.fromName,
+        replyTo:  payload.replyTo,
+        rma_id:   payload.rma_id || 'RMA'
+      })
+    });
+
+    const rawText = await response.text();
+    let result = null;
+    try {
+      result = JSON.parse(rawText);
+    } catch {
+      result = { raw: rawText };
+    }
+
+    if (response.ok || result?.status === 'success') {
+      return {
+        success: true,
+        status:  'Delivered via Google Webhook',
+        message: 'Dispatched successfully via Google Apps Script Webhook.'
+      };
+    } else {
+      return {
+        success: false,
+        status:  'Webhook Error',
+        message: result?.message || `Webhook returned status ${response.status}`
+      };
+    }
+  } catch (err) {
+    console.warn('⚠️ Webhook send network note:', err);
+    return {
+      success: false,
+      status:  'Webhook Network Failure',
+      message: err.message
+    };
+  }
+}
+
+// ─── Dispatch Logs (Outbox Audit Trail) ──────────────────────────────────────
+const DISPATCH_LOGS_KEY = 'rma_email_dispatch_log';
+
+export function getDispatchLogs() {
+  try {
+    const raw = localStorage.getItem(DISPATCH_LOGS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function clearDispatchLogs() {
+  try {
+    localStorage.removeItem(DISPATCH_LOGS_KEY);
+  } catch (e) {
+    console.error('Error clearing dispatch logs:', e);
+  }
+}
+
 // ─── Dispatch Trigger ─────────────────────────────────────────────────────────
 /**
- * Triggers the dispatch: logs payload, stores in dispatch event log.
- * Falls back to mailto: if no backend SMTP is configured.
+ * Triggers the dispatch:
+ * 1. Builds structured payload
+ * 2. Attempts automated Webhook send (if configured)
+ * 3. Records detailed event into Outbox Dispatch Logs
  */
 export async function dispatchRMANotification(ticket) {
   const payload = buildDispatchEmailPayload(ticket);
@@ -237,23 +378,40 @@ export async function dispatchRMANotification(ticket) {
     sandbox: payload.isSandbox
   });
 
-  // Persist to local dispatch event log
+  // Attempt silent webhook delivery (e.g. Google Apps Script)
+  let sendResult = { status: 'Ready to Send in Gmail', success: false };
   try {
-    const key  = 'rma_email_dispatch_log';
-    const logs = JSON.parse(localStorage.getItem(key) || '[]');
-    logs.unshift({
+    sendResult = await sendEmailViaWebhook(payload);
+  } catch (webhookErr) {
+    console.warn('Webhook dispatch exception:', webhookErr);
+    sendResult = { status: 'Webhook Exception', message: webhookErr.message, success: false };
+  }
+
+  // Persist to local dispatch outbox event log
+  try {
+    const logs = getDispatchLogs();
+    const entry = {
+      id:         `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       rma_id:     ticket.rma_id,
       timestamp:  new Date().toISOString(),
       subject:    payload.subject,
       from:       payload.from,
+      fromName:   payload.fromName,
       recipients: { to: payload.mainRecipient, cc: payload.ccList },
-      ae:         payload.ae.name,
-      isSandbox:  payload.isSandbox
-    });
-    localStorage.setItem(key, JSON.stringify(logs.slice(0, 50)));
+      ae:         payload.ae?.name || 'Unassigned',
+      isSandbox:  payload.isSandbox,
+      status:     sendResult.status || (sendResult.success ? 'Delivered' : 'Ready to Send in Gmail'),
+      details:    sendResult.message || '',
+      body:       payload.body,
+      mailtoUrl:  payload.mailtoUrl,
+      gmailUrl:   payload.gmailComposeUrl
+    };
+
+    logs.unshift(entry);
+    localStorage.setItem(DISPATCH_LOGS_KEY, JSON.stringify(logs.slice(0, 100)));
   } catch (e) {
     console.error('Failed to log dispatch email:', e);
   }
 
-  return payload;
+  return { ...payload, sendResult };
 }

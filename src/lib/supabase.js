@@ -379,3 +379,74 @@ export async function uploadDefectPhoto(file, rmaId) {
     reader.readAsDataURL(file);
   });
 }
+
+// ─── Diagnostics Helper ─────────────────────────────────────────────────────
+export function getSupabaseDiagnostics() {
+  return {
+    isConfigured,
+    url: rawUrl || '(not set)',
+    maskedKey: rawKey ? `${rawKey.substring(0, 10)}...${rawKey.substring(rawKey.length - 4)}` : '(not set)',
+    hasValidKey: isValidKey(rawKey)
+  };
+}
+
+// ─── Sync Pending Local Tickets to Supabase ─────────────────────────────────
+/**
+ * Takes any return tickets created during local fallback mode (e.g. RMA-2026-0004-HYUT)
+ * and uploads them to the live Supabase 'rma_tickets_vault' table.
+ */
+export async function syncPendingLocalTickets() {
+  if (!isConfigured || !supabase) {
+    return {
+      success: false,
+      synced: 0,
+      pending: 0,
+      error: 'Supabase credentials not configured. Please ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set and redeployed.'
+    };
+  }
+
+  const local = getLocalVault();
+  // Pending tickets have _syncPending flag or a numeric timestamp id (e.g. Date.now() > 10000)
+  const pending = local.filter(t => t._syncPending || (typeof t.id === 'number' && t.id > 1000));
+  
+  if (pending.length === 0) {
+    return { success: true, synced: 0, pending: 0, message: 'All tickets are already synced.' };
+  }
+
+  let successCount = 0;
+  let lastError = null;
+  const updatedLocal = [...local];
+
+  for (const item of pending) {
+    try {
+      const { id, _syncPending, ...payload } = item;
+      const { data, error } = await supabase
+        .from('rma_tickets_vault')
+        .insert([payload])
+        .select()
+        .single();
+
+      if (!error && data) {
+        successCount++;
+        const idx = updatedLocal.findIndex(t => t.rma_id === item.rma_id);
+        if (idx !== -1) {
+          updatedLocal[idx] = data;
+        }
+      } else if (error) {
+        lastError = error.message;
+        console.error('Failed to sync ticket to Supabase:', item.rma_id, error);
+      }
+    } catch (e) {
+      lastError = e.message;
+      console.error('Exception syncing ticket:', item.rma_id, e);
+    }
+  }
+
+  saveLocalVault(updatedLocal);
+  return {
+    success: successCount > 0,
+    synced: successCount,
+    pending: pending.length - successCount,
+    error: lastError
+  };
+}
