@@ -9,6 +9,7 @@ import StatusBadge from './StatusBadge';
 import ResolutionModal from './ResolutionModal';
 import EmailDispatchSettingsModal from './EmailDispatchSettingsModal';
 import QATestWidget from './QATestWidget';
+import { isSandboxMode } from '../lib/emailRouting';
 import { 
   Search, 
   Filter, 
@@ -30,7 +31,8 @@ import {
   Info,
   ChevronDown,
   Mail,
-  Send
+  Send,
+  FlaskConical
 } from 'lucide-react';
 
 export default function ReturnsDashboard({ onViewPortal, onNavigateStudio }) {
@@ -45,6 +47,9 @@ export default function ReturnsDashboard({ onViewPortal, onNavigateStudio }) {
   const [activeEditingTicket, setActiveEditingTicket] = useState(null);
   const [activePhotoModal, setActivePhotoModal] = useState(null);
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+
+  // Sandbox mode badge — re-reads from localStorage each render
+  const sandboxActive = isSandboxMode();
 
   // Load tickets on mount
   const loadData = async () => {
@@ -142,6 +147,21 @@ export default function ReturnsDashboard({ onViewPortal, onNavigateStudio }) {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-fade-in">
+      
+      {/* Sandbox Mode Banner */}
+      {isSandboxMode() && (
+        <div className="mb-4 flex items-center gap-2.5 px-4 py-3 bg-amber-500/10 border border-amber-500/40 rounded-2xl text-amber-300 text-xs font-semibold">
+          <span className="text-lg">🧪</span>
+          <span>SANDBOX MODE ACTIVE — Emails routed to .test sink. Subject prefixed [TEST]. No external emails will be sent.</span>
+          <button
+            type="button"
+            onClick={() => setIsEmailModalOpen(true)}
+            className="ml-auto text-[10px] px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/30 hover:bg-amber-500/30 text-amber-200"
+          >
+            Email Settings
+          </button>
+        </div>
+      )}
       
       {/* Top Banner & Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">

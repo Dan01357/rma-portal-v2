@@ -151,11 +151,20 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
       };
 
       // 5. Submit to Supabase table 'rma_tickets_vault'
-      const { data, error } = await createRMATicket(ticketPayload);
+      const { data, error, source } = await createRMATicket(ticketPayload);
 
-      if (error) {
-        console.error('❌ Supabase INSERT failure in PublicPortal:', error);
-        setErrorMessage(`Database submission error: ${error}. Please try again.`);
+      // Show network-fallback info (not a blocking error — ticket is still saved locally)
+      if (error && source === 'local_fallback') {
+        console.warn('⚠️ Supabase unreachable — ticket saved to local fallback vault:', error);
+        setErrorMessage(
+          '⚡ Connecting to database… If offline, your return ticket has been saved to the ' +
+          'local fallback vault and will sync automatically when reconnected.'
+        );
+        // Still proceed to show confirmation — the ticket IS recorded locally
+      } else if (error && !data) {
+        // True hard failure with no fallback data
+        console.error('❌ Fatal submission error in PublicPortal:', error);
+        setErrorMessage(`Submission error: ${error}. Please try again or contact support.`);
         setIsSubmitting(false);
         return;
       }
@@ -479,10 +488,14 @@ export default function PublicPortal({ initialParams = {}, onRMAFiled, onGoToDas
 
             </div>
 
-            {/* Error Message if any */}
+            {/* Error / Offline Notice */}
             {errorMessage && (
-              <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-400 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
+              <div className={`p-3 rounded-xl text-xs flex items-start gap-2 ${
+                errorMessage.startsWith('⚡')
+                  ? 'bg-amber-500/10 border border-amber-500/30 text-amber-300'
+                  : 'bg-rose-500/10 border border-rose-500/30 text-rose-400'
+              }`}>
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{errorMessage}</span>
               </div>
             )}
