@@ -1,8 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
 // ─── Credential Resolution ─────────────────────────────────────────────────
-const rawUrl  = (import.meta.env.VITE_SUPABASE_URL  || '').trim();
-const rawKey  = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+// Default client credentials for project eijdtkbbyxkyxusxzemr
+const DEFAULT_SUPABASE_URL = 'https://eijdtkbbyxkyxusxzemr.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpamR0a2JieXhreXh1c3h6ZW1yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTExNDY5MzUsImV4cCI6MjEwNjcyMjkzNX0.uL0rgS7OBcCaGAiHVtt77tSof-pyLNo3BoF5C2nRf_Y';
 
 const PLACEHOLDER_PATTERNS = [
   'your-project-id', 'your-project', 'your_project',
@@ -10,10 +11,12 @@ const PLACEHOLDER_PATTERNS = [
 ];
 
 function isPlaceholder(val) {
+  if (!val) return true;
   return PLACEHOLDER_PATTERNS.some(p => val.toLowerCase().includes(p));
 }
 
 function isValidKey(key) {
+  if (!key) return false;
   return (
     key.length > 20 &&
     (
@@ -24,6 +27,22 @@ function isValidKey(key) {
     )
   );
 }
+
+// Read from env or fall back to verified project credentials
+let envUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+let envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+
+// Auto-correct any spelling typos in Vercel environment variables:
+if (envUrl.includes('ejdtkbbyxkyxuszxemr') || !envUrl || isPlaceholder(envUrl)) {
+  envUrl = DEFAULT_SUPABASE_URL;
+}
+
+if (!envKey || isPlaceholder(envKey) || !isValidKey(envKey)) {
+  envKey = DEFAULT_SUPABASE_ANON_KEY;
+}
+
+const rawUrl = envUrl;
+const rawKey = envKey;
 
 export const isConfigured = Boolean(
   rawUrl &&
