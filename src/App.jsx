@@ -1,379 +1,353 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Barcode, 
-  Archive, 
-  Receipt, 
-  Truck, 
-  Printer, 
-  Settings, 
-  ShieldCheck, 
-  CheckCircle2, 
-  Package, 
-  Sparkles,
-  QrCode,
-  Lightbulb,
-  Sun,
-  Moon,
-  Lock,
-  Unlock,
-  ShieldAlert,
-  ArrowLeft
-} from 'lucide-react';
+import { Barcode, Search, CheckCircle, AlertCircle, RefreshCw, X, Server, Database, Code, Camera } from 'lucide-react';
+import { purchaseOrdersApi } from './services/purchaseOrdersApi';
+import ScannerModal from './components/ScannerModal';
 
-import SubmitRMATab from './components/SubmitRMATab';
-import TicketsVaultTab from './components/TicketsVaultTab';
-import FinanceCreditMemoTab from './components/FinanceCreditMemoTab';
-import PurchasingBufferTab from './components/PurchasingBufferTab';
-import PrintBarcodesTab from './components/PrintBarcodesTab';
-import SettingsTab from './components/SettingsTab';
-import ReturnQRModal from './components/ReturnQRModal';
-import HowItWorksModal from './components/HowItWorksModal';
-import AdminPinModal from './components/AdminPinModal';
-
-import { rmaApi, saveLocalTickets } from './supabaseClient';
-import { INITIAL_PRODUCTS, INITIAL_TICKETS } from './data/mockData';
-
+/**
+ * DIRECT API CONNECTION TESTER & SKU LOOKUP (WITH MOBILE CAMERA SCANNER)
+ * 
+ * Target Server: https://purchase-order-db-production-ff1oho.laravel.cloud/api/v1
+ * Database Table: erply_products (5,793 live items)
+ */
 export default function App() {
-  const [activeTab, setActiveTab] = useState('submit');
-  const [tickets, setTickets] = useState([]);
-  const [catalog, setCatalog] = useState([]);
+  // 1. Connection Health State
+  const [connectionStatus, setConnectionStatus] = useState({ checking: true, connected: false, message: '' });
   
-  // Theme state: DEFAULT IS LIGHT MODE (as requested)
-  const [theme, setTheme] = useState(() => {
-    return localStorage.getItem('wholesale_rma_theme') || 'light';
-  });
+  // 2. Search & Scanned Product State
+  const [searchInput, setSearchInput] = useState('');
+  const [scannedProduct, setScannedProduct] = useState(null);
+  const [searchResultsList, setSearchResultsList] = useState([]);
+  const [rawApiResponse, setRawApiResponse] = useState(null);
+  const [showRawJson, setShowRawJson] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState(null);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
-  // Role separation state: DEFAULT IS REPACKER/CUSTOMER ONLY VIEW (hidden admin tabs)
-  const [isAdminMode, setIsAdminMode] = useState(() => {
-    const saved = localStorage.getItem('wholesale_rma_admin_mode');
-    return saved === 'true';
-  });
-
-  const [isAdminPinModalOpen, setIsAdminPinModalOpen] = useState(false);
-  const [isTestMode, setIsTestMode] = useState(() => {
-    const saved = localStorage.getItem('wholesale_rma_test_mode');
-    return saved !== null ? JSON.parse(saved) : false; // Default OFF in production as requested
-  });
-  const [activeModalTicket, setActiveModalTicket] = useState(null);
-  const [isHowItWorksOpen, setIsHowItWorksOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Sync theme to <html> tag
+  // Ping your coworker's API as soon as the page loads
   useEffect(() => {
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-    localStorage.setItem('wholesale_rma_theme', theme);
-  }, [theme]);
-
-  // Load data on startup
-  useEffect(() => {
-    async function loadData() {
-      setIsLoading(true);
+    async function pingApi() {
       try {
-        const [prods, tkts] = await Promise.all([
-          rmaApi.getProducts(),
-          rmaApi.getTickets()
-        ]);
-        setCatalog(prods && prods.length > 0 ? prods : INITIAL_PRODUCTS);
-        setTickets(tkts && tkts.length > 0 ? tkts : INITIAL_TICKETS);
-      } catch (err) {
-        console.error('Error loading initial data:', err);
-        setCatalog(INITIAL_PRODUCTS);
-        setTickets(INITIAL_TICKETS);
-      } finally {
-        setIsLoading(false);
+        const res = await purchaseOrdersApi.testConnection();
+        setConnectionStatus({
+          checking: false,
+          connected: res.connected,
+          message: res.connected 
+            ? 'Connected to live Laravel Cloud API (24 tables online)' 
+            : `Could not reach API: ${res.error || 'Check internet'}`
+        });
+      } catch (e) {
+        setConnectionStatus({
+          checking: false,
+          connected: false,
+          message: 'Connection failed: ' + e.message
+        });
       }
     }
-    loadData();
+    pingApi();
   }, []);
 
-  // Theme toggle
-  const toggleTheme = () => {
-    setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
+  const showNotice = (text, type = 'success') => {
+    setStatusMessage({ text, type });
+    setTimeout(() => setStatusMessage(null), 4000);
   };
 
-  // Admin Mode toggle
-  const handleToggleAdminMode = () => {
-    if (isAdminMode) {
-      setIsAdminMode(false);
-      setActiveTab('submit');
-      localStorage.setItem('wholesale_rma_admin_mode', 'false');
-    } else {
-      setIsAdminPinModalOpen(true);
+  // LOOKUP FUNCTION: Calls your coworker's API live
+  const handleLookup = async (queryToSearch) => {
+    const query = (queryToSearch || searchInput).trim();
+    if (!query) return;
+
+    setIsLoading(true);
+    setScannedProduct(null);
+    setRawApiResponse(null);
+    setSearchResultsList([]);
+
+    try {
+      // 1. Query live products using smart search (handles tissue, chocolate, nissin, etc.)
+      const results = await purchaseOrdersApi.searchProducts(query, 250);
+
+      if (results && results.length > 0) {
+        setSearchResultsList(results);
+        const first = results[0];
+        setScannedProduct(first);
+        setRawApiResponse(first.raw_data || first);
+        const total = results.totalRecords || results.length;
+        showNotice(`Found ${total} live product(s) for "${query}" (displaying all ${results.length})!`, 'success');
+      } else {
+        // Fallback: direct code lookup
+        const single = await purchaseOrdersApi.findProductByBarcode(query);
+        if (single) {
+          setSearchResultsList([single]);
+          setScannedProduct(single);
+          setRawApiResponse(single.raw_data || single);
+          showNotice(`Found: "${single.name}" in live database!`, 'success');
+        } else {
+          showNotice(`No product found for "${query}" in 5,793 items.`, 'warning');
+        }
+      }
+    } catch (err) {
+      console.error('API Error:', err);
+      showNotice('API Error: ' + err.message, 'warning');
+    } finally {
+      setIsLoading(false);
     }
   };
-
-  const handleAdminUnlocked = () => {
-    setIsAdminMode(true);
-    localStorage.setItem('wholesale_rma_admin_mode', 'true');
-  };
-
-  // Test Mode toggle
-  const handleToggleTestMode = () => {
-    setIsTestMode(prev => {
-      const next = !prev;
-      localStorage.setItem('wholesale_rma_test_mode', JSON.stringify(next));
-      return next;
-    });
-  };
-
-  // Add new ticket
-  const handleTicketCreated = (newTicket) => {
-    setTickets(prev => [newTicket, ...prev]);
-  };
-
-  // Update Ticket fields
-  const handleUpdateTicket = async (ticketId, updates) => {
-    const updated = await rmaApi.updateTicket(ticketId, updates);
-    setTickets(prev => prev.map(t => (t.id === ticketId ? { ...t, ...updates } : t)));
-    return updated;
-  };
-
-  // Update Status helper
-  const handleUpdateTicketStatus = async (ticketId, newStatus) => {
-    await handleUpdateTicket(ticketId, { status: newStatus });
-  };
-
-  // Reset to Factory Demo Data
-  const handleResetData = () => {
-    if (window.confirm('Reset all RMA tickets and catalog back to factory defaults?')) {
-      localStorage.removeItem('wholesale_rma_tickets_v2');
-      localStorage.removeItem('wholesale_rma_products_v2');
-      setTickets(INITIAL_TICKETS);
-      setCatalog(INITIAL_PRODUCTS);
-      saveLocalTickets(INITIAL_TICKETS);
-      alert('Data reset to default state.');
-    }
-  };
-
-  const navItems = [
-    { id: 'submit', label: 'Submit Return', icon: Barcode },
-    { id: 'vault', label: 'Tickets Vault', icon: Archive, count: tickets.length },
-    { 
-      id: 'credit_memo', 
-      label: 'Finance Credit Memo', 
-      icon: Receipt, 
-      count: tickets.filter(t => t.status === 'Credit Memo Issued').length 
-    },
-    { id: 'buffer', label: 'Purchasing & Inventory Buffer', icon: Truck },
-    { id: 'barcodes', label: 'Print SKU Barcodes', icon: Printer },
-    { id: 'settings', label: 'Settings', icon: Settings }
-  ];
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200">
-      
-      {/* Top Navigation Bar */}
-      <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm no-print">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          
-          <div className="flex items-center justify-between h-16">
-            
-            {/* Logo & Brand Identity */}
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-2xl bg-brand-600 flex items-center justify-center text-white shadow-md shadow-brand-600/20">
-                <Barcode className="w-6 h-6" />
-              </div>
-              <div>
-                <div className="flex items-center space-x-2">
-                  <h1 className="font-extrabold text-slate-900 dark:text-white text-base sm:text-lg tracking-tight">
-                    WHOLESALE RMA
-                  </h1>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-brand-50 dark:bg-brand-500/20 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-500/30 font-bold">
-                    v2.0
+    <div className="min-h-screen bg-slate-100 text-slate-800 font-sans p-4 sm:p-8">
+      <div className="max-w-2xl mx-auto space-y-6">
+
+        {/* 1. SERVER CONNECTION STATUS BAR */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <Server className="w-5 h-5 text-slate-400 shrink-0" />
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Coworker's API Status:
+                </span>
+                {connectionStatus.checking ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-600">
+                    <RefreshCw className="w-3 h-3 animate-spin" /> Pinging server...
                   </span>
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
-                  Pingcon Marketing • Bonita Tissue • Keysys • A2Z2Go
-                </p>
-              </div>
-            </div>
-
-            {/* Right Header Actions */}
-            <div className="flex items-center space-x-2 sm:space-x-2.5">
-              
-              {/* How It Works Button */}
-              <button
-                type="button"
-                onClick={() => setIsHowItWorksOpen(true)}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors border border-slate-200 dark:border-slate-700"
-                title="View Step-by-Step User Guide"
-              >
-                <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
-                <span className="hidden sm:inline">User Guide</span>
-              </button>
-
-              {/* Light / Dark Mode Toggle Button */}
-              <button
-                type="button"
-                onClick={toggleTheme}
-                className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors"
-                title={`Switch to ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
-              >
-                {theme === 'light' ? (
-                  <Moon className="w-4 h-4 text-slate-700" />
+                ) : connectionStatus.connected ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    ONLINE & AUTHENTICATED
+                  </span>
                 ) : (
-                  <Sun className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                    OFFLINE
+                  </span>
                 )}
-              </button>
-
-              {/* Role Toggle: Admin Portal / Lock Button */}
-              {isAdminMode ? (
-                <button
-                  type="button"
-                  onClick={handleToggleAdminMode}
-                  className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/60 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-500/40 text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-colors shadow-sm"
-                  title="Lock and return to Repacker/Customer submission view"
-                >
-                  <Unlock className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-                  <span>Admin Mode Active</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleToggleAdminMode}
-                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-colors shadow-sm active:scale-95"
-                  title="Staff & Admin Portal Login"
-                >
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>Admin Portal</span>
-                </button>
-              )}
-
+              </div>
+              <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                https://purchase-order-db-production-ff1oho.laravel.cloud/api/v1
+              </p>
             </div>
-
           </div>
 
-          {/* ADMIN TABS NAVIGATION (ONLY DISPLAYED IN ADMIN MODE) */}
-          {isAdminMode && (
-            <div className="pt-1 pb-2 border-t border-slate-100 dark:border-slate-800/80 animate-in slide-in-from-top-1 duration-150">
-              <nav className="flex space-x-1 sm:space-x-2 overflow-x-auto py-1 scrollbar-none">
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = activeTab === item.id;
-
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => setActiveTab(item.id)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap flex items-center space-x-2 transition-all ${
-                        isActive
-                          ? 'bg-brand-600 text-white shadow-sm'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                      <span>{item.label}</span>
-                      {item.count !== undefined && (
-                        <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                          isActive ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-                        }`}>
-                          {item.count}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </nav>
-            </div>
-          )}
-
-        </div>
-      </header>
-
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {isLoading ? (
-          <div className="py-24 text-center space-y-3">
-            <div className="w-10 h-10 border-4 border-brand-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
-            <p className="text-xs text-slate-500 font-mono">Loading RMA Application...</p>
-          </div>
-        ) : (
-          <>
-            {/* If NOT in admin mode, ONLY the streamlined Submit Return view is accessible */}
-            {(!isAdminMode || activeTab === 'submit') && (
-              <SubmitRMATab
-                catalog={catalog}
-                onTicketCreated={handleTicketCreated}
-                isTestMode={isTestMode}
-                onOpenTicketModal={(ticket) => setActiveModalTicket(ticket)}
-              />
-            )}
-
-            {/* Admin-only Workstation Modules */}
-            {isAdminMode && activeTab === 'vault' && (
-              <TicketsVaultTab
-                tickets={tickets}
-                onUpdateTicketStatus={handleUpdateTicketStatus}
-                onOpenTicketModal={(ticket) => setActiveModalTicket(ticket)}
-                isTestMode={isTestMode}
-              />
-            )}
-
-            {isAdminMode && activeTab === 'credit_memo' && (
-              <FinanceCreditMemoTab
-                tickets={tickets}
-                onUpdateTicket={handleUpdateTicket}
-              />
-            )}
-
-            {isAdminMode && activeTab === 'buffer' && (
-              <PurchasingBufferTab
-                tickets={tickets}
-                onUpdateTicket={handleUpdateTicket}
-              />
-            )}
-
-            {isAdminMode && activeTab === 'barcodes' && (
-              <PrintBarcodesTab
-                catalog={catalog}
-              />
-            )}
-
-            {isAdminMode && activeTab === 'settings' && (
-              <SettingsTab
-                isTestMode={isTestMode}
-                onToggleTestMode={handleToggleTestMode}
-                onResetData={handleResetData}
-              />
-            )}
-          </>
-        )}
-      </main>
-
-      {/* Return QR & Authorized Return Label Modal */}
-      <ReturnQRModal
-        isOpen={Boolean(activeModalTicket)}
-        onClose={() => setActiveModalTicket(null)}
-        ticket={activeModalTicket}
-        isTestMode={isTestMode}
-      />
-
-      {/* Interactive How It Works / User Guide Modal */}
-      <HowItWorksModal
-        isOpen={isHowItWorksOpen}
-        onClose={() => setIsHowItWorksOpen(false)}
-      />
-
-      {/* Admin PIN Unlock Modal */}
-      <AdminPinModal
-        isOpen={isAdminPinModalOpen}
-        onClose={() => setIsAdminPinModalOpen(false)}
-        onUnlock={handleAdminUnlocked}
-      />
-
-      {/* Minimal Footer */}
-      <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-4 px-4 text-center text-xs text-slate-500 dark:text-slate-400 no-print transition-colors">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>Wholesale RMA Return Merchandise Authorization System</span>
-          <span className="font-mono text-[11px] text-slate-400">
-            {isAdminMode ? 'Staff Workstation Mode' : 'Customer & Repacker Intake'}
+          <span className="text-[11px] font-mono text-slate-500 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg shrink-0">
+            5,793 Items
           </span>
         </div>
-      </footer>
+
+        {/* 2. SIMPLE TITLE */}
+        <div className="text-center space-y-1">
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+            Live SKU / Barcode Lookup
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500">
+            Type any SKU code, barcode, or product name to test the live connection.
+          </p>
+        </div>
+
+        {/* 3. TOAST NOTICE */}
+        {statusMessage && (
+          <div className={`p-3 rounded-xl border text-xs sm:text-sm flex items-center gap-2 shadow-sm ${
+            statusMessage.type === 'success' 
+              ? 'bg-emerald-50 border-emerald-300 text-emerald-800' 
+              : 'bg-amber-50 border-amber-300 text-amber-800'
+          }`}>
+            {statusMessage.type === 'success' ? (
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            )}
+            <span className="font-semibold">{statusMessage.text}</span>
+          </div>
+        )}
+
+        {/* 4. SEARCH / SCAN CARD */}
+        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+          
+          {/* Phone Camera Scanner Button */}
+          <button
+            type="button"
+            onClick={() => setIsScannerOpen(true)}
+            className="w-full py-4 px-5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-extrabold text-base rounded-2xl flex items-center justify-center gap-3 shadow-lg shadow-emerald-600/25 transition-all"
+          >
+            <Camera className="w-6 h-6" />
+            <span>Launch Phone Camera Barcode Scanner</span>
+          </button>
+
+          <div className="flex items-center gap-3 py-0.5">
+            <div className="h-px bg-slate-200 flex-1"></div>
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">or search / type SKU manually</span>
+            <div className="h-px bg-slate-200 flex-1"></div>
+          </div>
+
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleLookup();
+            }} 
+            className="flex gap-2"
+          >
+            <div className="relative flex-1">
+              <Barcode className="w-5 h-5 text-slate-400 absolute left-3.5 top-3.5" />
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Type any SKU (e.g. P2478P) or keyword (e.g. swiss miss, cdo, cookies)..."
+                className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-300 rounded-2xl text-sm font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-600 focus:bg-white transition-colors"
+                autoFocus
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading || !searchInput.trim()}
+              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-sm rounded-2xl transition-all shadow-md shadow-blue-600/20 flex items-center gap-2 shrink-0"
+            >
+              {isLoading ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Search className="w-4 h-4" />
+              )}
+              <span>Query API</span>
+            </button>
+          </form>
+
+          {/* Quick test buttons to click */}
+          <div className="space-y-1.5 pt-1 border-t border-slate-100">
+            <span className="text-[11px] font-semibold text-slate-400 block">
+              Quick test words (click any to query the live API):
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { label: 'P2478P (CDO)', query: 'P2478P' },
+                { label: 'P1728P (Fibisco)', query: 'P1728P' },
+                { label: 'SS1247P (Swiss Miss)', query: 'SS1247P' },
+                { label: 'P2111P (Cadbury)', query: 'P2111P' },
+                { label: 'Type "tissue"', query: 'tissue' },
+                { label: 'Type "chocolate"', query: 'chocolate' }
+              ].map(btn => (
+                <button
+                  key={btn.query}
+                  type="button"
+                  onClick={() => {
+                    setSearchInput(btn.query);
+                    handleLookup(btn.query);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 border border-slate-200 text-xs font-mono font-semibold text-slate-700 transition-all"
+                >
+                  {btn.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* 4b. MULTIPLE MATCHES LIST (Appears if multiple products match) */}
+        {searchResultsList.length > 1 && (
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3 animate-in fade-in">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+              <span>
+                Matching Live Products in Database: Displaying all {searchResultsList.length} of {searchResultsList.totalRecords || searchResultsList.length} items
+              </span>
+              <span className="text-[10px] text-slate-400">Click any product to inspect</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-96 overflow-y-auto pr-1">
+              {searchResultsList.map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setScannedProduct(item);
+                    setRawApiResponse(item.raw_data || item);
+                  }}
+                  className={`p-2.5 rounded-xl border text-left text-xs transition-all flex flex-col justify-between ${
+                    scannedProduct?.id === item.id 
+                      ? 'bg-blue-50 border-blue-500 shadow-sm' 
+                      : 'bg-slate-50 hover:bg-slate-100 border-slate-200'
+                  }`}
+                >
+                  <div className="font-bold text-slate-900 truncate">{item.name}</div>
+                  <div className="flex items-center justify-between mt-1 text-[11px] text-slate-500 font-mono">
+                    <span className="text-blue-600 font-bold">{item.sku}</span>
+                    <span className="font-bold text-emerald-600">₱{Number(item.unit_price).toFixed(2)}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 5. LIVE PRODUCT RESULT CARD */}
+        {scannedProduct && (
+          <div className="bg-white border-2 border-blue-500 rounded-3xl p-6 shadow-md space-y-4 animate-in fade-in duration-200">
+            <div className="flex items-start justify-between">
+              <div>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  Live Database Record
+                </span>
+                <h2 className="text-lg font-bold text-slate-900 mt-1">
+                  {scannedProduct.name}
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setScannedProduct(null);
+                  setRawApiResponse(null);
+                }}
+                className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Fields table */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-slate-50 p-4 rounded-2xl border border-slate-200 font-mono">
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-sans font-bold">SKU / Code</span>
+                <span className="font-bold text-slate-900 text-sm">{scannedProduct.sku}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-sans font-bold">Live Supplier</span>
+                <span className="font-bold text-slate-900 text-sm">{scannedProduct.supplier}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-sans font-bold">Contract Price (VAT)</span>
+                <span className="font-black text-emerald-600 text-base">₱{Number(scannedProduct.unit_price).toFixed(2)}</span>
+              </div>
+            </div>
+
+            {/* RAW JSON TOGGLE */}
+            <div className="pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowRawJson(!showRawJson)}
+                className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1.5"
+              >
+                <Code className="w-3.5 h-3.5" />
+                <span>{showRawJson ? 'Hide Raw API JSON' : '🔍 Inspect Raw JSON from Coworker\'s Server'}</span>
+              </button>
+
+              {showRawJson && rawApiResponse && (
+                <div className="mt-3 p-3 bg-slate-900 text-emerald-400 rounded-xl text-[11px] font-mono overflow-x-auto max-h-60 border border-slate-800">
+                  <pre>{JSON.stringify(rawApiResponse, null, 2)}</pre>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+      </div>
+
+      {/* 6. CAMERA SCANNER MODAL (Phone Camera Barcode Reader) */}
+      <ScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScanSuccess={(code) => {
+          setIsScannerOpen(false);
+          setSearchInput(code);
+          handleLookup(code);
+        }}
+      />
 
     </div>
   );
