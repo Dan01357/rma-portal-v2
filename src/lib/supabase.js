@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 // ─── Credential Resolution ─────────────────────────────────────────────────
 // Default client credentials for project eijdtkbbyxkyxusxzemr
 const DEFAULT_SUPABASE_URL = 'https://eijdtkbbyxkyxusxzemr.supabase.co';
-const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpamR0a2JieXhreXh1c3h6ZW1yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTExNDY5MzUsImV4cCI6MjEwNjcyMjkzNX0.uL0rgS7OBcCaGAiHVtt77tSof-pyLNo3BoF5C2nRf_Y';
+const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_im4vs1Ulfd6kT5K_BlOA1w_ROSH0CrO';
 
 const PLACEHOLDER_PATTERNS = [
   'your-project-id', 'your-project', 'your_project',
@@ -37,7 +37,8 @@ if (envUrl.includes('ejdtkbbyxkyxuszxemr') || !envUrl || isPlaceholder(envUrl)) 
   envUrl = DEFAULT_SUPABASE_URL;
 }
 
-if (!envKey || isPlaceholder(envKey) || !isValidKey(envKey)) {
+// If key is missing, a placeholder, invalid, or is the disabled legacy JWT key ('eyJ...'):
+if (!envKey || isPlaceholder(envKey) || !isValidKey(envKey) || envKey.startsWith('eyJ')) {
   envKey = DEFAULT_SUPABASE_ANON_KEY;
 }
 
