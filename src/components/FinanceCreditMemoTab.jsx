@@ -99,56 +99,56 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
       
       {/* Toast Alert */}
       {toastMessage && (
-        <div className="p-4 bg-emerald-950 border border-emerald-500/40 text-emerald-200 rounded-xl flex items-center space-x-3 text-xs sm:text-sm animate-in slide-in-from-top-2">
-          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+        <div className="p-4 bg-emerald-50 dark:bg-emerald-950 border border-emerald-300 dark:border-emerald-500/40 text-emerald-900 dark:text-emerald-200 rounded-2xl flex items-center space-x-3 text-xs sm:text-sm animate-in slide-in-from-top-2 shadow-sm">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
           <span className="font-semibold">{toastMessage}</span>
         </div>
       )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
-          <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs mb-1">
             <span>Total Returns Value</span>
-            <DollarSign className="w-4 h-4 text-brand-400" />
+            <DollarSign className="w-4 h-4 text-brand-600 dark:text-brand-400" />
           </div>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-white">
+          <div className="text-xl sm:text-2xl font-black font-mono text-slate-900 dark:text-white">
             {formatPeso(totalRmaValue)}
           </div>
-          <span className="text-[10px] text-slate-500">Gross claimed merchandise</span>
+          <span className="text-[10px] text-slate-400">Gross claimed merchandise</span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
-          <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs mb-1">
             <span>Credit Memos Issued</span>
-            <Receipt className="w-4 h-4 text-emerald-400" />
+            <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
           </div>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-emerald-400">
+          <div className="text-xl sm:text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
             {formatPeso(totalCreditIssued)}
           </div>
-          <span className="text-[10px] text-slate-500">Credited to customer accounts</span>
+          <span className="text-[10px] text-slate-400">Credited to customer accounts</span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
-          <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs mb-1">
             <span>Pending Credit Balance</span>
-            <Clock className="w-4 h-4 text-amber-400" />
+            <Clock className="w-4 h-4 text-amber-500" />
           </div>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-amber-400">
+          <div className="text-xl sm:text-2xl font-black font-mono text-amber-600 dark:text-amber-400">
             {formatPeso(pendingCreditValue)}
           </div>
-          <span className="text-[10px] text-slate-500">Awaiting finance reconciliation</span>
+          <span className="text-[10px] text-slate-400">Awaiting finance reconciliation</span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
-          <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs mb-1">
             <span>Pull-Out Verified</span>
-            <CheckSquare className="w-4 h-4 text-purple-400" />
+            <CheckSquare className="w-4 h-4 text-purple-600 dark:text-purple-400" />
           </div>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-purple-400">
+          <div className="text-xl sm:text-2xl font-black font-mono text-purple-600 dark:text-purple-400">
             {totalPullOuts} of {tickets.length} Units
           </div>
-          <span className="text-[10px] text-slate-500">Physical receipt at warehouse</span>
+          <span className="text-[10px] text-slate-400">Physical receipt at warehouse</span>
         </div>
       </div>
 
@@ -156,14 +156,14 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Left Column: RMA Pull-out & Returns Table (2 Cols) */}
-        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
             <div>
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <FileCheck2 className="w-5 h-5 text-brand-400" />
+              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <FileCheck2 className="w-5 h-5 text-brand-600 dark:text-brand-400" />
                 <span>Warehouse Pull-Out & Finance Clearance</span>
               </h2>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 Confirm physical pull-out checkbox, then select ticket to authorize Credit Memo.
               </p>
             </div>
@@ -177,12 +177,12 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
               return (
                 <div
                   key={ticket.id}
-                  className={`p-4 rounded-xl border transition-all ${
+                  className={`p-4 rounded-2xl border transition-all ${
                     isSelected 
-                      ? 'bg-brand-950/40 border-brand-500 ring-1 ring-brand-500/40' 
+                      ? 'bg-brand-50/50 dark:bg-brand-950/40 border-brand-500 ring-1 ring-brand-500/40' 
                       : isCredited
-                      ? 'bg-slate-950/40 border-slate-800/80'
-                      : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                      ? 'bg-slate-50/60 dark:bg-slate-950/40 border-slate-200 dark:border-slate-800/80'
+                      : 'bg-white dark:bg-slate-950/70 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -192,38 +192,38 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
                       <button
                         type="button"
                         onClick={() => handleTogglePullOut(ticket)}
-                        className="mt-0.5 text-slate-400 hover:text-brand-400 transition-colors"
+                        className="mt-0.5 text-slate-400 hover:text-brand-600 transition-colors"
                         title="Toggle Physical Pull-Out Confirmation"
                       >
                         {ticket.pull_out_confirmed ? (
-                          <CheckSquare className="w-5 h-5 text-emerald-400" />
+                          <CheckSquare className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                         ) : (
-                          <Square className="w-5 h-5 text-slate-600 hover:text-slate-400" />
+                          <Square className="w-5 h-5 text-slate-400 dark:text-slate-600" />
                         )}
                       </button>
 
                       <div className="space-y-1">
                         <div className="flex items-center space-x-2">
-                          <span className="font-mono font-bold text-white text-sm">{ticket.id}</span>
-                          <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+                          <span className="font-mono font-bold text-slate-900 dark:text-white text-sm">{ticket.id}</span>
+                          <span className="text-xs px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono">
                             {ticket.sku}
                           </span>
                           {ticket.pull_out_confirmed ? (
-                            <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 rounded">
+                            <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 px-1.5 py-0.5 rounded">
                               PULL-OUT CONFIRMED
                             </span>
                           ) : (
-                            <span className="text-[10px] font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">
+                            <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-1.5 py-0.5 rounded">
                               Awaiting Logistics Pull-Out
                             </span>
                           )}
                         </div>
 
-                        <div className="text-xs text-slate-300 font-medium">
+                        <div className="text-xs text-slate-800 dark:text-slate-200 font-medium">
                           {ticket.product_name} ({ticket.quantity} units)
                         </div>
 
-                        <div className="text-[11px] text-slate-400 flex items-center space-x-2">
+                        <div className="text-[11px] text-slate-500 flex items-center space-x-2">
                           <span>{ticket.customer_name}</span>
                           <span>•</span>
                           <span>AE: {ticket.ae_name}</span>
@@ -233,12 +233,12 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
 
                     {/* Right: Value & Issue Action */}
                     <div className="text-right space-y-1.5 shrink-0">
-                      <div className="text-sm font-bold font-mono text-emerald-400">
+                      <div className="text-sm font-bold font-mono text-emerald-600 dark:text-emerald-400">
                         {formatPeso(ticket.total_amount)}
                       </div>
 
                       {isCredited ? (
-                        <div className="text-[11px] font-mono text-emerald-300 bg-emerald-950/60 border border-emerald-500/40 px-2 py-1 rounded-md">
+                        <div className="text-[11px] font-mono text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-500/40 px-2 py-1 rounded-lg">
                           CM #{ticket.credit_memo_no}
                         </div>
                       ) : (
@@ -260,13 +260,13 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
         </div>
 
         {/* Right Column: Issue Credit Memo Form (1 Col) */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4 self-start">
-          <div className="border-b border-slate-800 pb-3">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Receipt className="w-5 h-5 text-emerald-400" />
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4 self-start">
+          <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Receipt className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
               <span>Credit Memo Generator</span>
             </h3>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               {selectedTicketId 
                 ? `Authorizing Credit Memo for ${selectedTicketId}` 
                 : 'Select an RMA ticket from the list to issue credit memo'}
@@ -277,7 +277,7 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
             <form onSubmit={handleIssueCreditMemo} className="space-y-4 text-xs">
               
               <div>
-                <label className="block font-medium text-slate-300 mb-1">
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Credit Memo #
                 </label>
                 <input
@@ -286,12 +286,12 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
                   value={creditMemoNo}
                   onChange={(e) => setCreditMemoNo(e.target.value)}
                   placeholder="e.g. CM-2026-089"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 font-mono focus:outline-none focus:border-brand-500"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-900 dark:text-slate-100 font-mono focus:outline-none focus:border-brand-500"
                 />
               </div>
 
               <div>
-                <label className="block font-medium text-slate-300 mb-1">
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Credit Amount (₱)
                 </label>
                 <div className="relative">
@@ -302,22 +302,19 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
                     required
                     value={creditAmount}
                     onChange={(e) => setCreditAmount(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-7 pr-3 py-2 text-sm text-slate-100 font-mono focus:outline-none focus:border-brand-500 font-bold text-emerald-400"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl pl-7 pr-3 py-2 text-sm text-slate-900 dark:text-slate-100 font-mono focus:outline-none focus:border-brand-500 font-bold text-emerald-600 dark:text-emerald-400"
                   />
                 </div>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Pre-populated with total merchandise claim value. Adjust if partial credit applies.
-                </p>
               </div>
 
               <div>
-                <label className="block font-medium text-slate-300 mb-1">
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Issued By (Finance Officer)
                 </label>
                 <select
                   value={issuedBy}
                   onChange={(e) => setIssuedBy(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-brand-500"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
                 >
                   <option value="Danilo Alvaro (Finance Lead)">Danilo Alvaro (Finance Lead)</option>
                   <option value="Finance Accounting Lead (A2Z2Go)">Finance Accounting Lead (A2Z2Go)</option>
@@ -325,14 +322,14 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
                 </select>
               </div>
 
-              <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1 text-[11px] text-slate-300 font-mono">
+              <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1 text-[11px] text-slate-600 dark:text-slate-300 font-mono">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Authorization Date:</span>
+                  <span className="text-slate-400">Date:</span>
                   <span>{new Date().toLocaleDateString()}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">General Ledger:</span>
-                  <span className="text-brand-300">GL-4010 (Sales Returns & Allowances)</span>
+                  <span className="text-slate-400">General Ledger:</span>
+                  <span className="text-brand-600 dark:text-brand-300">GL-4010 (Sales Returns)</span>
                 </div>
               </div>
 
@@ -340,26 +337,26 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
                 <button
                   type="button"
                   onClick={() => setSelectedTicketId(null)}
-                  className="w-1/3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-xl transition-colors"
+                  className="w-1/3 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium rounded-xl transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center space-x-1.5"
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center space-x-1.5"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>{isSubmitting ? 'Posting...' : 'AUTHORIZE & POST CREDIT'}</span>
+                  <span>{isSubmitting ? 'Posting...' : 'AUTHORIZE CREDIT'}</span>
                 </button>
               </div>
 
             </form>
           ) : (
-            <div className="py-12 px-4 text-center text-slate-500 space-y-2">
-              <Receipt className="w-12 h-12 text-slate-700 mx-auto" />
+            <div className="py-12 px-4 text-center text-slate-400 space-y-2">
+              <Receipt className="w-12 h-12 text-slate-300 dark:text-slate-700 mx-auto" />
               <p className="text-xs">
-                No ticket selected. Click <strong>"Issue Credit Memo"</strong> next to any verified RMA ticket to generate credit documentation.
+                No ticket selected. Click <strong>"Issue Credit Memo"</strong> on any verified return to post credit.
               </p>
             </div>
           )}

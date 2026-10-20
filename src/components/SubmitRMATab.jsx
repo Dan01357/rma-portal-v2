@@ -12,21 +12,22 @@ import {
   AlertTriangle, 
   CheckCircle, 
   RefreshCw,
-  Mail,
   Send,
   Zap,
   Info,
   Check,
-  HelpCircle,
+  Search,
   Package,
   Layers,
-  DollarSign
+  DollarSign,
+  Hash,
+  X
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import ScannerModal from './ScannerModal';
 import { AE_ROSTERS } from '../data/mockData';
 import { rmaApi } from '../supabaseClient';
-import { generateTicketId, playBeep, formatPeso, generateAiDiagnosis, applyEmailTestMode } from '../utils/rmaHelpers';
+import { generateTicketId, playBeep, formatPeso, generateAiDiagnosis } from '../utils/rmaHelpers';
 
 export default function SubmitRMATab({ 
   catalog = [], 
@@ -34,144 +35,108 @@ export default function SubmitRMATab({
   isTestMode = false, 
   onOpenTicketModal 
 }) {
-  // Scanner state
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [lastScannedBarcode, setLastScannedBarcode] = useState('');
-  const [isNotFoundInCatalog, setIsNotFoundInCatalog] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [manualSkuInput, setManualSkuInput] = useState('');
+  const [isSearchingManually, setIsSearchingManually] = useState(false);
 
-  // Form State
+  // Form State (Simplified for Repackers & Store Customers)
   const [formData, setFormData] = useState({
-    // Group & AE Routing
-    group: 'Group 2 (PINGCON & BONITA TISSUE)',
-    aeName: 'Jerome Santos',
-    aeEmail: 'jerome.santos@pingconmarketing.com',
-    supervisorEmail: 'jaezelle.benito@pingconmarketing.com',
-
-    // Product Details
-    barcode: '',
-    sku: '',
-    productName: '',
-    supplier: 'Bonita Mills Inc.',
-    unitPrice: 68.50,
-    quantity: 1,
-
-    // Store & Return info
+    // Store Info
     customerName: 'Puregold Price Club',
     storeBranch: 'Branch 042 - San Fernando Pampanga',
-    invoiceNo: 'INV-2026-9901',
+    invoiceNo: '',
+    
+    // Quantity
+    quantity: 1,
+    
+    // Serial Numbers (Optional)
+    serialNumbers: '',
+    
+    // Defect & Photos
     defectCategory: 'Damaged in Transit / Crushed Carton',
     technicalDiagnosis: '',
-
-    // Media & Location
     gpsCoordinates: '',
     photos: []
   });
 
-  // UI feedback states
+  // UI state
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGpsLoading, setIsGpsLoading] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [statusNotification, setStatusNotification] = useState(null);
 
-  // Current active AE roster
-  const currentRoster = AE_ROSTERS[formData.group] || AE_ROSTERS['Group 2 (PINGCON & BONITA TISSUE)'];
-
-  // Handle Group change
-  const handleGroupChange = (newGroup) => {
-    const roster = AE_ROSTERS[newGroup];
+  // Auto assign Group & AE based on matched product behind the scenes
+  const getProductRouting = (product) => {
+    const isGroup1 = product?.group?.includes('KEYSYS') || product?.brand === 'Keysys' || product?.brand === 'A2Z2Go';
+    const groupKey = isGroup1 ? 'Group 1 (KEYSYS & A2Z2GO)' : 'Group 2 (PINGCON & BONITA TISSUE)';
+    const roster = AE_ROSTERS[groupKey];
     const defaultAe = roster.aes[0];
-    setFormData(prev => ({
-      ...prev,
-      group: newGroup,
+    return {
+      group: groupKey,
       aeName: defaultAe.name,
       aeEmail: defaultAe.email,
-      supervisorEmail: defaultAe.supervisorEmail,
-      supplier: newGroup.includes('KEYSYS') ? 'Keysys Tech Corp' : 'Bonita Mills Inc.'
-    }));
+      supervisorEmail: defaultAe.supervisorEmail
+    };
   };
 
-  // Handle AE Selection
-  const handleAeSelect = (aeName) => {
-    const selected = currentRoster.aes.find(a => a.name === aeName);
-    if (selected) {
-      setFormData(prev => ({
-        ...prev,
-        aeName: selected.name,
-        aeEmail: selected.email,
-        supervisorEmail: selected.supervisorEmail
-      }));
-    }
-  };
-
-  // Handle Scanned Barcode (from camera or quick test bar)
-  const handleBarcodeScanned = (scannedCode) => {
-    const cleanCode = String(scannedCode).trim();
-    setLastScannedBarcode(cleanCode);
-
-    // If scanning the same barcode that is already active in the form, re-scanning increments +1!
-    if (formData.barcode && formData.barcode === cleanCode) {
-      playBeep('increment');
-      setFormData(prev => ({
-        ...prev,
-        quantity: prev.quantity + 1
-      }));
-      showBannerNotification(`Re-scanned ${cleanCode}: Quantity incremented to ${formData.quantity + 1}!`, 'success');
-      return;
-    }
-
-    // Lookup in catalog
-    const foundProduct = catalog.find(p => String(p.barcode).trim() === cleanCode);
-
-    if (foundProduct) {
-      playBeep('success');
-      setIsNotFoundInCatalog(false);
-
-      // Auto assign matching group if detected
-      let matchingGroup = formData.group;
-      if (foundProduct.group) {
-        matchingGroup = foundProduct.group;
-      }
-
-      const roster = AE_ROSTERS[matchingGroup] || currentRoster;
-      const defaultAe = roster.aes[0];
-
-      setFormData(prev => ({
-        ...prev,
-        barcode: foundProduct.barcode,
-        sku: foundProduct.sku || '',
-        productName: foundProduct.name,
-        supplier: foundProduct.supplier || prev.supplier,
-        unitPrice: foundProduct.unit_price || 0,
-        group: matchingGroup,
-        aeName: defaultAe.name,
-        aeEmail: defaultAe.email,
-        supervisorEmail: defaultAe.supervisorEmail,
-        quantity: 1
-      }));
-
-      showBannerNotification(`Product Matched: "${foundProduct.name}" (SKU: ${foundProduct.sku})`, 'success');
-    } else {
-      // Product NOT found in catalog: prompt user to type manually
-      playBeep('error');
-      setIsNotFoundInCatalog(true);
-      setFormData(prev => ({
-        ...prev,
-        barcode: cleanCode,
-        sku: `SKU-UNREG-${cleanCode.slice(-4)}`,
-        productName: '',
-        quantity: 1
-      }));
-      showBannerNotification(`Barcode ${cleanCode} not in catalog. Please enter product name manually.`, 'warning');
-    }
-  };
-
-  // Banner notification toast
+  // Toast notification
   const showBannerNotification = (msg, type = 'info') => {
     setStatusNotification({ msg, type });
     setTimeout(() => {
       setStatusNotification(null);
     }, 4500);
+  };
+
+  // Handle scanned or selected product
+  const handleProductIdentified = (productOrCode) => {
+    let matched = null;
+
+    if (typeof productOrCode === 'object' && productOrCode !== null) {
+      matched = productOrCode;
+    } else {
+      const query = String(productOrCode).trim().toLowerCase();
+      matched = catalog.find(p => 
+        p.barcode?.toLowerCase() === query || 
+        p.sku?.toLowerCase() === query ||
+        p.name?.toLowerCase().includes(query)
+      );
+    }
+
+    if (matched) {
+      // If same product is scanned again, increment quantity +1!
+      if (selectedProduct && selectedProduct.sku === matched.sku) {
+        playBeep('increment');
+        setFormData(prev => ({ ...prev, quantity: prev.quantity + 1 }));
+        showBannerNotification(`Re-scanned ${matched.sku}: Quantity incremented to ${formData.quantity + 1}!`, 'success');
+        return;
+      }
+
+      playBeep('success');
+      setSelectedProduct(matched);
+      setManualSkuInput('');
+      setIsSearchingManually(false);
+      showBannerNotification(`Product Matched: "${matched.name}" (${matched.sku})`, 'success');
+    } else {
+      playBeep('error');
+      // Create ad-hoc uncatalogued item
+      const unlisted = {
+        id: `unreg-${Date.now()}`,
+        sku: `SKU-${String(productOrCode).slice(-6).toUpperCase()}`,
+        barcode: String(productOrCode),
+        name: `Unlisted Product (${productOrCode})`,
+        brand: 'Standard Return',
+        supplier: 'Wholesale Supplier Hub',
+        unit_price: 100.00,
+        case_pack: 'Custom Carton',
+        image_url: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=500&auto=format&fit=crop&q=80',
+        group: 'Group 2 (PINGCON & BONITA TISSUE)',
+        requires_serial: false
+      };
+      setSelectedProduct(unlisted);
+      showBannerNotification(`Unlisted barcode "${productOrCode}". You can adjust product details below.`, 'warning');
+    }
   };
 
   // Quantity controls
@@ -193,7 +158,7 @@ export default function SubmitRMATab({
     }
   };
 
-  // GPS Grabber using navigator.geolocation
+  // GPS Grabber
   const handleGrabGps = () => {
     if (!navigator.geolocation) {
       alert('Geolocation is not supported by your browser.');
@@ -206,20 +171,19 @@ export default function SubmitRMATab({
         const coordString = `${latitude.toFixed(5)}° N, ${longitude.toFixed(5)}° E (±${Math.round(accuracy)}m)`;
         setFormData(prev => ({ ...prev, gpsCoordinates: coordString }));
         setIsGpsLoading(false);
-        showBannerNotification(`GPS Grabbed: ${coordString}`, 'success');
+        showBannerNotification(`GPS Logged: ${coordString}`, 'success');
       },
-      (err) => {
+      () => {
         setIsGpsLoading(false);
-        // Fallback simulated warehouse dock GPS
-        const fallback = '14.5995° N, 120.9842° E (Warehouse Hub Dock 2)';
+        const fallback = '14.5995° N, 120.9842° E (Receiving Dock)';
         setFormData(prev => ({ ...prev, gpsCoordinates: fallback }));
-        showBannerNotification('GPS fallback applied (Warehouse Receiving Dock)', 'info');
+        showBannerNotification('GPS recorded (Receiving Dock)', 'info');
       },
-      { timeout: 10000, enableHighAccuracy: true }
+      { timeout: 8000, enableHighAccuracy: true }
     );
   };
 
-  // Defect Photo Upload to Supabase bucket 'rma-defect-photos'
+  // Defect Photo Upload
   const handlePhotoUpload = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -233,7 +197,7 @@ export default function SubmitRMATab({
         ...prev,
         photos: [...prev.photos, ...urls]
       }));
-      showBannerNotification(`${files.length} defect photo(s) uploaded successfully!`, 'success');
+      showBannerNotification(`${files.length} defect photo(s) added!`, 'success');
     } catch (err) {
       console.error('Photo upload error:', err);
       showBannerNotification('Photo upload failed. Using local preview.', 'warning');
@@ -242,32 +206,50 @@ export default function SubmitRMATab({
     }
   };
 
+  const handleRemovePhoto = (index) => {
+    setFormData(prev => ({
+      ...prev,
+      photos: prev.photos.filter((_, i) => i !== index)
+    }));
+  };
+
   // Simulated AI Defect Detection
   const handleAiDefectDetection = () => {
     setIsAiLoading(true);
     setTimeout(() => {
-      const diagnosis = generateAiDiagnosis(formData.productName, formData.defectCategory, formData.photos.length);
+      const diagnosis = generateAiDiagnosis(
+        selectedProduct?.name || 'Wholesale Merchandise', 
+        formData.defectCategory, 
+        formData.photos.length
+      );
       setFormData(prev => ({
         ...prev,
         technicalDiagnosis: diagnosis
       }));
       setIsAiLoading(false);
       playBeep('success');
-      showBannerNotification('AI Defect Analysis Generated & Applied!', 'success');
-    }, 1000);
+      showBannerNotification('AI Defect Inspection findings generated!', 'success');
+    }, 900);
   };
 
   // Submit RMA Ticket
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!formData.productName.trim()) {
-      alert('Please specify the Product Name.');
+    if (!selectedProduct) {
+      alert('Please scan or select a product first in Step 1.');
+      return;
+    }
+
+    if (!formData.customerName.trim()) {
+      alert('Please enter the Customer / Store Name.');
       return;
     }
 
     const qty = Number(formData.quantity) || 1;
-    const totalAmount = qty * (Number(formData.unitPrice) || 0);
+    const unitPrice = Number(selectedProduct.unit_price) || 0;
+    const totalAmount = qty * unitPrice;
+    const routing = getProductRouting(selectedProduct);
 
     setIsSubmitting(true);
 
@@ -279,23 +261,25 @@ export default function SubmitRMATab({
         id: ticketId,
         created_at: new Date().toISOString(),
         customer_name: formData.customerName,
-        store_branch: formData.storeBranch,
-        invoice_no: formData.invoiceNo,
-        group: formData.group,
-        ae_name: formData.aeName,
-        ae_email: formData.aeEmail,
-        supervisor_email: formData.supervisorEmail,
-        product_name: formData.productName,
-        sku: formData.sku || 'SKU-CUSTOM',
-        barcode: formData.barcode || 'N/A',
-        supplier: formData.supplier,
+        store_branch: formData.storeBranch || 'Main Store',
+        invoice_no: formData.invoiceNo || 'N/A',
+        group: routing.group,
+        ae_name: routing.aeName,
+        ae_email: routing.aeEmail,
+        supervisor_email: routing.supervisorEmail,
+        product_name: selectedProduct.name,
+        sku: selectedProduct.sku,
+        barcode: selectedProduct.barcode || 'N/A',
+        brand: selectedProduct.brand || 'Wholesale',
+        supplier: selectedProduct.supplier || 'Primary Supplier',
         quantity: qty,
-        unit_price: Number(formData.unitPrice) || 0,
+        unit_price: unitPrice,
         total_amount: totalAmount,
+        serial_numbers: formData.serialNumbers || '',
         defect_category: formData.defectCategory,
-        technical_diagnosis: formData.technicalDiagnosis || 'Physical inspection required by repacker.',
-        gps_coordinates: formData.gpsCoordinates || 'Warehouse Terminal Intake',
-        photos: formData.photos.length > 0 ? formData.photos : ['https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=400&auto=format&fit=crop&q=80'],
+        technical_diagnosis: formData.technicalDiagnosis || 'Physical inspection required by warehouse team.',
+        gps_coordinates: formData.gpsCoordinates || 'Intake Terminal',
+        photos: formData.photos.length > 0 ? formData.photos : [selectedProduct.image_url],
         status: 'Pending Inspection',
         pull_out_confirmed: false,
         credit_memo_no: '',
@@ -304,12 +288,12 @@ export default function SubmitRMATab({
         credit_issued_date: null,
         supplier_po_no: `PO-RET-${new Date().getFullYear()}-${String(existingTickets.length + 1).padStart(3, '0')}`,
         buffer_days_left: 7,
-        notes: `RMA filed by ${formData.aeName}. Awaiting logistics pull-out authorization.`
+        notes: `Submitted by Repacker/Customer at ${new Date().toLocaleTimeString()}`
       };
 
       await rmaApi.createTicket(newTicket);
 
-      // Trigger Confetti Celebration!
+      // Trigger Confetti
       try {
         confetti({
           particleCount: 80,
@@ -324,18 +308,16 @@ export default function SubmitRMATab({
       onTicketCreated(newTicket);
       onOpenTicketModal(newTicket);
 
-      // Reset item inputs
+      // Reset
+      setSelectedProduct(null);
       setFormData(prev => ({
         ...prev,
-        barcode: '',
-        sku: '',
-        productName: '',
         quantity: 1,
+        serialNumbers: '',
         technicalDiagnosis: '',
         photos: []
       }));
-      setIsNotFoundInCatalog(false);
-      showBannerNotification(`Ticket ${newTicket.id} created and dispatched!`, 'success');
+      showBannerNotification(`Ticket ${newTicket.id} created successfully!`, 'success');
     } catch (err) {
       console.error('Error creating RMA ticket:', err);
       alert('Error saving ticket: ' + (err.message || 'Unknown error'));
@@ -345,297 +327,299 @@ export default function SubmitRMATab({
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-6">
       
       {/* Toast Banner Notification */}
       {statusNotification && (
-        <div className={`p-4 rounded-xl border flex items-center space-x-3 text-sm animate-in slide-in-from-top-2 duration-200 ${
+        <div className={`p-4 rounded-2xl border flex items-center space-x-3 text-sm shadow-md transition-all animate-in slide-in-from-top-2 duration-200 ${
           statusNotification.type === 'success' 
-            ? 'bg-emerald-950/80 border-emerald-500/40 text-emerald-200' 
+            ? 'bg-emerald-50 dark:bg-emerald-950/80 border-emerald-300 dark:border-emerald-500/40 text-emerald-900 dark:text-emerald-200' 
             : statusNotification.type === 'warning'
-            ? 'bg-amber-950/80 border-amber-500/40 text-amber-200'
-            : 'bg-brand-950/80 border-brand-500/40 text-brand-200'
+            ? 'bg-amber-50 dark:bg-amber-950/80 border-amber-300 dark:border-amber-500/40 text-amber-900 dark:text-amber-200'
+            : 'bg-blue-50 dark:bg-brand-950/80 border-blue-300 dark:border-brand-500/40 text-blue-900 dark:text-brand-200'
         }`}>
           {statusNotification.type === 'success' ? (
-            <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+            <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
           ) : (
-            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+            <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
           )}
-          <span className="font-medium">{statusNotification.msg}</span>
+          <span className="font-semibold">{statusNotification.msg}</span>
         </div>
       )}
 
       {/* Main Intake Form */}
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <form onSubmit={handleSubmit} className="space-y-6">
         
         {/* =========================================================================
-            CARD 1: SCAN OR TYPE BARCODE
+            STEP 1: SCAN PRODUCT QR CODE OR MANUAL SKU SEARCH
         ========================================================================= */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-7 shadow-sm transition-all space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
             <div>
               <div className="flex items-center space-x-2">
-                <span className="w-6 h-6 rounded-lg bg-brand-500/20 text-brand-300 border border-brand-500/30 flex items-center justify-center font-bold text-xs">
+                <span className="w-7 h-7 rounded-xl bg-brand-100 dark:bg-brand-500/20 text-brand-700 dark:text-brand-300 flex items-center justify-center font-black text-xs">
                   1
                 </span>
-                <h2 className="text-base font-bold text-white tracking-tight">
-                  Scan or Type Barcode
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+                  Scan Product QR Code
                 </h2>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Scan physical retail carton or GTIN barcode to auto-populate description and SKU
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Scan the QR / Barcode on the box, or search by SKU
               </p>
             </div>
 
-            {/* Launch Camera Button */}
+            {/* Manual Toggle */}
+            <button
+              type="button"
+              onClick={() => setIsSearchingManually(!isSearchingManually)}
+              className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline flex items-center gap-1"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span>{isSearchingManually ? 'Hide Search List' : 'Search by SKU / Name'}</span>
+            </button>
+          </div>
+
+          {/* Primary Action: Big Camera Scanner Button */}
+          <div className="pt-1">
             <button
               type="button"
               onClick={() => setIsScannerOpen(true)}
-              className="w-full sm:w-auto px-4 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs rounded-xl flex items-center justify-center space-x-2 shadow-md shadow-brand-600/30 transition-all active:scale-95"
+              className="w-full py-4 px-6 bg-brand-600 hover:bg-brand-500 active:bg-brand-700 text-white font-bold text-base rounded-2xl flex items-center justify-center space-x-3 shadow-lg shadow-brand-600/25 transition-all transform active:scale-[0.99]"
             >
-              <Camera className="w-4 h-4" />
-              <span>Launch Phone Camera Scanner</span>
+              <Camera className="w-6 h-6" />
+              <span>Launch Camera Barcode Scanner</span>
             </button>
           </div>
 
-          {/* Quick Simulation Barcode Buttons */}
-          <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800/80">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Zap className="w-3.5 h-3.5 text-amber-400" />
-                Quick Test Barcodes (Tap to Simulate Scan)
-              </span>
-              <span className="text-[10px] text-slate-500 hidden sm:inline">Tap again to test re-scan +1 increment</span>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {catalog.slice(0, 5).map((item) => (
-                <button
-                  key={item.barcode}
-                  type="button"
-                  onClick={() => handleBarcodeScanned(item.barcode)}
-                  className="px-2.5 py-1.5 bg-slate-900 hover:bg-brand-900/40 hover:border-brand-500/60 border border-slate-700/80 rounded-lg text-xs font-mono text-slate-300 hover:text-white transition-all flex items-center space-x-1.5"
-                  title={`${item.name} (${item.sku})`}
-                >
-                  <Barcode className="w-3.5 h-3.5 text-brand-400" />
-                  <span className="font-semibold">{item.sku}</span>
-                  <span className="text-[10px] text-slate-400 font-normal">({item.barcode.slice(-4)})</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Barcode & SKU Inputs */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center justify-between">
-                <span>Box Barcode / GTIN Number</span>
-                <span className="text-[10px] text-slate-500 flex items-center gap-1">
-                  <Info className="w-3 h-3" /> Auto-lookup on entry
-                </span>
+          {/* Manual SKU Search Dropdown / Input (Collapsible or searchable) */}
+          {isSearchingManually && (
+            <div className="p-4 bg-slate-50 dark:bg-slate-950/70 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 animate-in fade-in duration-200">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Select from Product Catalog:
               </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={formData.barcode}
-                  onChange={(e) => {
-                    const code = e.target.value;
-                    setFormData(prev => ({ ...prev, barcode: code }));
-                    if (code.length >= 8) {
-                      handleBarcodeScanned(code);
-                    }
-                  }}
-                  placeholder="Scan or type barcode (e.g. 4806518330012)..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-brand-500 font-mono"
-                />
-                <button
-                  type="button"
-                  onClick={() => setIsScannerOpen(true)}
-                  className="absolute right-2 top-2 p-1.5 text-brand-400 hover:text-white bg-brand-500/20 hover:bg-brand-500/40 rounded-lg transition-colors"
-                  title="Open Camera"
-                >
-                  <Camera className="w-4 h-4" />
-                </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                {catalog.map(prod => (
+                  <button
+                    key={prod.sku}
+                    type="button"
+                    onClick={() => handleProductIdentified(prod)}
+                    className="p-2.5 text-left bg-white dark:bg-slate-900 hover:border-brand-500 border border-slate-200 dark:border-slate-800 rounded-xl transition-all flex items-center space-x-3 group"
+                  >
+                    <img 
+                      src={prod.image_url} 
+                      alt={prod.name} 
+                      className="w-10 h-10 rounded-lg object-cover border border-slate-100 dark:border-slate-800 shrink-0" 
+                    />
+                    <div className="truncate flex-1">
+                      <div className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 truncate">
+                        {prod.name}
+                      </div>
+                      <div className="text-[11px] text-slate-500 font-mono">
+                        {prod.sku} • {prod.brand}
+                      </div>
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
+          )}
 
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                Product SKU Code
-              </label>
-              <input
-                type="text"
-                value={formData.sku}
-                onChange={(e) => setFormData(prev => ({ ...prev, sku: e.target.value }))}
-                placeholder="e.g. BON-FT-200"
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-brand-500 font-mono"
-              />
-            </div>
-          </div>
+          {/* QUICK TEST BARCODES: ONLY VISIBLE WHEN TEST MODE IS ACTIVE */}
+          {isTestMode && (
+            <div className="pt-2">
+              <div className="p-3 bg-amber-50/80 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-500/30">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-amber-500" />
+                    Test Mode Simulation Barcodes (Tap to Simulate Scan)
+                  </span>
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400">Visible only in Test Mode</span>
+                </div>
 
-          {/* Product Name (Manual override permitted) */}
-          <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center justify-between">
-              <span>Product Description {isNotFoundInCatalog && <span className="text-amber-400 font-bold">(Uncatalogued Item — type description manually)</span>}</span>
-              <span className="text-[10px] text-slate-500">Retail item name</span>
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.productName}
-              onChange={(e) => setFormData(prev => ({ ...prev, productName: e.target.value }))}
-              placeholder="e.g. Bonita Soft Facial Tissue 2-Ply 200 pulls"
-              className={`w-full bg-slate-950 border rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none ${
-                isNotFoundInCatalog 
-                  ? 'border-amber-500 focus:border-amber-400 ring-1 ring-amber-500/50' 
-                  : 'border-slate-700 focus:border-brand-500'
-              }`}
-            />
-          </div>
-
-          {/* Unit Price & Supplier Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            <div>
-              <label className="block text-slate-400 mb-1">Manufacturer / Supplier</label>
-              <input
-                type="text"
-                value={formData.supplier}
-                onChange={(e) => setFormData(prev => ({ ...prev, supplier: e.target.value }))}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-brand-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-slate-400 mb-1">Contract Unit Price (₱)</label>
-              <div className="relative">
-                <span className="absolute left-3 top-2 text-slate-500 font-mono">₱</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.unitPrice}
-                  onChange={(e) => setFormData(prev => ({ ...prev, unitPrice: parseFloat(e.target.value) || 0 }))}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-7 pr-3 py-2 font-mono text-slate-200 focus:outline-none focus:border-brand-500"
-                />
+                <div className="flex flex-wrap gap-2">
+                  {catalog.slice(0, 5).map((item) => (
+                    <button
+                      key={item.barcode}
+                      type="button"
+                      onClick={() => handleProductIdentified(item.barcode)}
+                      className="px-2.5 py-1 bg-white dark:bg-slate-900 hover:border-amber-500 border border-amber-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 transition-all flex items-center space-x-1.5"
+                    >
+                      <Barcode className="w-3 h-3 text-amber-600" />
+                      <span className="font-bold">{item.sku}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
+          )}
+
         </div>
 
         {/* =========================================================================
-            CARD 2: QUANTITY WITH BIG [+] AND [-] BUTTONS & DIRECT NUMERIC INPUT
+            STEP 2: INSTANT PRODUCT DISPLAY (1 SKU = 1 PRODUCT PROFILE)
         ========================================================================= */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-7 shadow-sm transition-all space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
             <div className="flex items-center space-x-2">
-              <span className="w-6 h-6 rounded-lg bg-brand-500/20 text-brand-300 border border-brand-500/30 flex items-center justify-center font-bold text-xs">
+              <span className="w-7 h-7 rounded-xl bg-brand-100 dark:bg-brand-500/20 text-brand-700 dark:text-brand-300 flex items-center justify-center font-black text-xs">
                 2
               </span>
-              <h2 className="text-base font-bold text-white tracking-tight">
-                Quantity & Value Calculation
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+                Product Information
               </h2>
             </div>
-            <span className="text-[11px] text-brand-400 font-medium hidden sm:inline">
-              Re-scanning item increments +1
+            {selectedProduct && (
+              <button
+                type="button"
+                onClick={() => setSelectedProduct(null)}
+                className="text-xs text-rose-500 hover:text-rose-600 font-medium flex items-center gap-1"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Clear Item</span>
+              </button>
+            )}
+          </div>
+
+          {selectedProduct ? (
+            /* Instant Product Hero Card */
+            <div className="p-4 sm:p-5 bg-slate-50 dark:bg-slate-950/80 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-5 animate-in fade-in duration-200">
+              
+              {/* Product Photo */}
+              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white shrink-0 shadow-sm">
+                <img 
+                  src={selectedProduct.image_url} 
+                  alt={selectedProduct.name} 
+                  className="w-full h-full object-cover" 
+                />
+              </div>
+
+              {/* Product Profile Meta */}
+              <div className="space-y-1.5 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-brand-100 dark:bg-brand-500/20 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-500/30">
+                    {selectedProduct.brand || 'Brand'}
+                  </span>
+                  <span className="text-xs font-mono text-slate-500 dark:text-slate-400 font-semibold">
+                    SKU: {selectedProduct.sku}
+                  </span>
+                </div>
+
+                <h3 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white leading-snug">
+                  {selectedProduct.name}
+                </h3>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs pt-1 text-slate-600 dark:text-slate-300">
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Supplier:</span>
+                    <span className="font-medium truncate block">{selectedProduct.supplier}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Contract Price:</span>
+                    <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400">
+                      {formatPeso(selectedProduct.unit_price)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Pack Size:</span>
+                    <span className="truncate block">{selectedProduct.case_pack || 'Box Carton'}</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          ) : (
+            /* Prompt to scan */
+            <div className="py-8 px-4 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl space-y-2">
+              <Package className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto" />
+              <p className="text-sm font-semibold text-slate-600 dark:text-slate-400">
+                No product scanned yet.
+              </p>
+              <p className="text-xs text-slate-400">
+                Click <strong>"Launch Camera Barcode Scanner"</strong> in Step 1 above to identify the product.
+              </p>
+            </div>
+          )}
+
+          {/* OPTIONAL SERIAL NUMBER(S) INPUT FIELD (Requirement 4) */}
+          {selectedProduct && (
+            <div className="pt-2 animate-in fade-in duration-200">
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Hash className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
+                  <span>Serial Number(s) <span className="text-slate-400 font-normal">(Optional for tracked hardware)</span></span>
+                </span>
+                <span className="text-[11px] text-slate-400 font-mono">e.g. SN-49201, SN-49202</span>
+              </label>
+              <input
+                type="text"
+                value={formData.serialNumbers}
+                onChange={(e) => setFormData(prev => ({ ...prev, serialNumbers: e.target.value }))}
+                placeholder="Enter unit serial numbers if printed on product (comma separated)..."
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
+              />
+            </div>
+          )}
+
+        </div>
+
+        {/* =========================================================================
+            STEP 3: QUANTITY STEPPER & DEFECT PHOTO UPLOADER
+        ========================================================================= */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-7 shadow-sm transition-all space-y-5">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+            <div className="flex items-center space-x-2">
+              <span className="w-7 h-7 rounded-xl bg-brand-100 dark:bg-brand-500/20 text-brand-700 dark:text-brand-300 flex items-center justify-center font-black text-xs">
+                3
+              </span>
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+                Quantity & Defect Photos
+              </h2>
+            </div>
+            <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
+              Subtotal: {formatPeso((Number(formData.quantity) || 0) * (Number(selectedProduct?.unit_price) || 0))}
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-center">
-            
-            {/* Direct Number Input + Big Touch Buttons */}
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-2 flex items-center justify-between">
-                <span>Return Units (Direct Numeric Input)</span>
-                <span className="text-[10px] text-slate-500">Click box to type volume directly</span>
-              </label>
+          {/* Stepper Controls */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+              Return Units (Type number directly or use buttons):
+            </label>
+            <div className="flex items-center space-x-3 max-w-xs">
+              <button
+                type="button"
+                onClick={handleQuantityDecrement}
+                className="w-14 h-14 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-white rounded-2xl flex items-center justify-center font-black text-2xl transition-all shadow-sm active:scale-95"
+                title="Decrease"
+              >
+                <Minus className="w-6 h-6" />
+              </button>
 
-              <div className="flex items-center space-x-2">
-                {/* Decrement Button */}
-                <button
-                  type="button"
-                  onClick={handleQuantityDecrement}
-                  className="w-14 h-12 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 border border-slate-700 rounded-xl text-slate-200 font-bold text-xl flex items-center justify-center transition-colors shadow-sm select-none"
-                  title="Minus 1 Unit"
-                >
-                  <Minus className="w-6 h-6" />
-                </button>
+              <input
+                type="number"
+                min="1"
+                value={formData.quantity}
+                onChange={handleQuantityChange}
+                className="flex-1 h-14 bg-slate-50 dark:bg-slate-950 border-2 border-brand-500/50 rounded-2xl text-center text-2xl font-black font-mono text-slate-900 dark:text-white focus:outline-none focus:border-brand-500 shadow-inner"
+              />
 
-                {/* Direct Editable Quantity Box */}
-                <input
-                  type="number"
-                  min="1"
-                  value={formData.quantity}
-                  onChange={handleQuantityChange}
-                  className="flex-1 h-12 bg-slate-950 border-2 border-brand-500/70 focus:border-brand-400 rounded-xl text-center text-2xl font-black font-mono text-white focus:outline-none shadow-inner"
-                  title="Type quantity directly (e.g. 20)"
-                />
-
-                {/* Increment Button */}
-                <button
-                  type="button"
-                  onClick={handleQuantityIncrement}
-                  className="w-14 h-12 bg-brand-600 hover:bg-brand-500 active:bg-brand-400 border border-brand-500 rounded-xl text-white font-bold text-xl flex items-center justify-center transition-colors shadow-md shadow-brand-600/30 select-none"
-                  title="Plus 1 Unit"
-                >
-                  <Plus className="w-6 h-6" />
-                </button>
-              </div>
-
-              <p className="text-[11px] text-slate-400 mt-1.5 flex items-center gap-1">
-                <HelpCircle className="w-3.5 h-3.5 text-slate-500" />
-                Warehouse repackers can type large batches (e.g. "25" or "100") instantly into the box.
-              </p>
+              <button
+                type="button"
+                onClick={handleQuantityIncrement}
+                className="w-14 h-14 bg-brand-600 hover:bg-brand-500 active:bg-brand-700 text-white rounded-2xl flex items-center justify-center font-black text-2xl transition-all shadow-md shadow-brand-600/30 active:scale-95"
+                title="Increase"
+              >
+                <Plus className="w-6 h-6" />
+              </button>
             </div>
-
-            {/* Total Claim Value Preview */}
-            <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-xl flex items-center justify-between">
-              <div>
-                <span className="text-xs text-slate-400 block">Total Claim Value</span>
-                <span className="text-2xl font-black text-emerald-400 font-mono mt-0.5 block">
-                  {formatPeso((Number(formData.quantity) || 0) * (Number(formData.unitPrice) || 0))}
-                </span>
-                <span className="text-[10px] text-slate-500">
-                  {formData.quantity || 0} units @ {formatPeso(formData.unitPrice)} each
-                </span>
-              </div>
-              <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <DollarSign className="w-6 h-6" />
-              </div>
-            </div>
-
-          </div>
-        </div>
-
-        {/* =========================================================================
-            CARD 3: DEFECT PHOTOS & ONE-CLICK AI DIAGNOSIS
-        ========================================================================= */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div className="flex items-center space-x-2">
-              <span className="w-6 h-6 rounded-lg bg-brand-500/20 text-brand-300 border border-brand-500/30 flex items-center justify-center font-bold text-xs">
-                3
-              </span>
-              <h2 className="text-base font-bold text-white tracking-tight">
-                Defect Photos & One-Click AI Diagnosis
-              </h2>
-            </div>
-            
-            {/* One-Click AI Defect Diagnosis Button */}
-            <button
-              type="button"
-              onClick={handleAiDefectDetection}
-              disabled={isAiLoading}
-              className="px-3.5 py-1.5 bg-gradient-to-r from-purple-900/70 to-brand-900/70 hover:from-purple-800 hover:to-brand-800 border border-purple-500/40 text-purple-200 hover:text-white font-semibold text-xs rounded-xl flex items-center space-x-1.5 shadow-sm transition-all"
-            >
-              <Sparkles className={`w-3.5 h-3.5 text-amber-300 ${isAiLoading ? 'animate-spin' : ''}`} />
-              <span>{isAiLoading ? 'Analyzing...' : 'One-Click AI Diagnosis'}</span>
-            </button>
           </div>
 
-          {/* Customer & Branch */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Customer / Branch Store Inputs */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                Customer Account
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Customer Store / Account
               </label>
               <input
                 type="text"
@@ -643,47 +627,45 @@ export default function SubmitRMATab({
                 value={formData.customerName}
                 onChange={(e) => setFormData(prev => ({ ...prev, customerName: e.target.value }))}
                 placeholder="e.g. Puregold Price Club"
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-brand-500"
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                Store Branch / Location
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Branch / Location
               </label>
               <input
                 type="text"
-                required
                 value={formData.storeBranch}
                 onChange={(e) => setFormData(prev => ({ ...prev, storeBranch: e.target.value }))}
                 placeholder="e.g. Branch 042 - San Fernando"
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-brand-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                Invoice / DR #
-              </label>
-              <input
-                type="text"
-                value={formData.invoiceNo}
-                onChange={(e) => setFormData(prev => ({ ...prev, invoiceNo: e.target.value }))}
-                placeholder="e.g. INV-2026-9901"
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-brand-500 font-mono"
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
               />
             </div>
           </div>
 
-          {/* Primary Defect Classification */}
-          <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1">
-              Primary Defect Category
-            </label>
+          {/* Defect Category & One-Click AI Helper */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                Defect Reason & Inspection Notes:
+              </label>
+              <button
+                type="button"
+                onClick={handleAiDefectDetection}
+                disabled={isAiLoading}
+                className="text-[11px] font-semibold text-purple-600 dark:text-purple-300 hover:text-purple-700 flex items-center gap-1"
+              >
+                <Sparkles className={`w-3.5 h-3.5 text-amber-500 ${isAiLoading ? 'animate-spin' : ''}`} />
+                <span>{isAiLoading ? 'Analyzing...' : 'Auto-fill AI Defect Statement'}</span>
+              </button>
+            </div>
+
             <select
               value={formData.defectCategory}
               onChange={(e) => setFormData(prev => ({ ...prev, defectCategory: e.target.value }))}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-brand-500 font-medium"
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500 font-medium"
             >
               <option value="Damaged in Transit / Crushed Carton">Damaged in Transit / Crushed Carton</option>
               <option value="Packaging Seal Breach / Moisture Exposure">Packaging Seal Breach / Moisture Exposure</option>
@@ -693,62 +675,30 @@ export default function SubmitRMATab({
               <option value="Expired / Shelf-Life Reached">Expired / Shelf-Life Reached</option>
               <option value="Customer Return / Wrong SKU Shipped">Customer Return / Wrong SKU Shipped</option>
             </select>
-          </div>
 
-          {/* Technical Diagnosis Textarea */}
-          <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center justify-between">
-              <span>Technical Diagnosis & Defect Statement</span>
-              <span className="text-[10px] text-slate-500">Auto-filled by AI Diagnosis or type notes</span>
-            </label>
             <textarea
-              rows="3"
+              rows="2"
               value={formData.technicalDiagnosis}
               onChange={(e) => setFormData(prev => ({ ...prev, technicalDiagnosis: e.target.value }))}
-              placeholder="Click 'One-Click AI Diagnosis' above to generate technical inspection findings, or type warehouse notes..."
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-brand-500 font-mono leading-relaxed"
+              placeholder="Inspection notes or click 'Auto-fill AI Defect Statement'..."
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-brand-500 font-mono"
             ></textarea>
           </div>
 
-          {/* GPS Grabber & Photo Upload Controls */}
+          {/* Defect Photo Upload & GPS Tag */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
             
-            {/* GPS Grabber */}
-            <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-rose-400" />
-                  <span>Dock GPS Verification</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={handleGrabGps}
-                  disabled={isGpsLoading}
-                  className="px-2.5 py-1 bg-brand-600 hover:bg-brand-500 text-white text-[11px] font-medium rounded-lg flex items-center space-x-1 transition-colors"
-                >
-                  <RefreshCw className={`w-3 h-3 ${isGpsLoading ? 'animate-spin' : ''}`} />
-                  <span>{isGpsLoading ? 'Acquiring...' : 'Grab GPS'}</span>
-                </button>
-              </div>
-
-              <input
-                type="text"
-                readOnly
-                value={formData.gpsCoordinates || 'Coordinates not yet acquired. Click "Grab GPS"'}
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[11px] font-mono text-slate-300"
-              />
-            </div>
-
             {/* Photo Uploader */}
-            <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2">
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                  <Upload className="w-3.5 h-3.5 text-brand-400" />
+                <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Upload className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
                   <span>Defect Photos</span>
                 </span>
-                <label className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium rounded-lg cursor-pointer flex items-center space-x-1 transition-colors border border-slate-700">
-                  <Camera className="w-3 h-3 text-brand-400" />
-                  <span>{isUploadingPhoto ? 'Uploading...' : 'Take / Upload'}</span>
+
+                <label className="px-3 py-1 bg-brand-50 dark:bg-slate-800 hover:bg-brand-100 text-brand-700 dark:text-slate-200 text-xs font-bold rounded-lg cursor-pointer flex items-center space-x-1 transition-colors border border-brand-200 dark:border-slate-700">
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>{isUploadingPhoto ? 'Uploading...' : 'Take / Upload Photo'}</span>
                   <input
                     type="file"
                     multiple
@@ -760,118 +710,76 @@ export default function SubmitRMATab({
                 </label>
               </div>
 
-              <div className="flex items-center space-x-2 overflow-x-auto py-0.5 min-h-[38px]">
+              {/* Photos Gallery */}
+              <div className="flex items-center space-x-2 overflow-x-auto py-1 min-h-[44px]">
                 {formData.photos.length === 0 ? (
-                  <span className="text-[11px] text-slate-500 italic">No defect photos attached yet.</span>
+                  <span className="text-xs text-slate-400 italic">No defect photos attached yet.</span>
                 ) : (
                   formData.photos.map((url, idx) => (
-                    <div key={idx} className="relative w-9 h-9 rounded-lg overflow-hidden border border-slate-700 shrink-0">
+                    <div key={idx} className="relative w-12 h-12 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 shrink-0 group">
                       <img src={url} alt={`Defect ${idx + 1}`} className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => handleRemovePhoto(idx)}
+                        className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
                   ))
                 )}
               </div>
             </div>
 
+            {/* GPS Dock Tag */}
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Dock Location Tag</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleGrabGps}
+                  disabled={isGpsLoading}
+                  className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg flex items-center space-x-1 transition-colors"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isGpsLoading ? 'animate-spin' : ''}`} />
+                  <span>{isGpsLoading ? 'Getting...' : 'Tag GPS'}</span>
+                </button>
+              </div>
+
+              <input
+                type="text"
+                readOnly
+                value={formData.gpsCoordinates || 'Click "Tag GPS" to record receiving dock location'}
+                className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1.5 text-[11px] font-mono text-slate-600 dark:text-slate-300"
+              />
+            </div>
+
           </div>
         </div>
 
         {/* =========================================================================
-            CARD 4: SELECT ASSIGNED ACCOUNT EXECUTIVE (AE)
+            STEP 4: BIG "SUBMIT RETURN TICKET" BUTTON
         ========================================================================= */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div className="flex items-center space-x-2">
-              <span className="w-6 h-6 rounded-lg bg-brand-500/20 text-brand-300 border border-brand-500/30 flex items-center justify-center font-bold text-xs">
-                4
-              </span>
-              <h2 className="text-base font-bold text-white tracking-tight">
-                Select Assigned Account Executive (AE)
-              </h2>
-            </div>
-            {isTestMode ? (
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                Test Mode: .test appended
-              </span>
-            ) : (
-              <span className="text-xs text-emerald-400 font-medium">Production Dispatch Active</span>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                Business Distribution Channel
-              </label>
-              <select
-                value={formData.group}
-                onChange={(e) => handleGroupChange(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-brand-500 font-medium"
-              >
-                <option value="Group 2 (PINGCON & BONITA TISSUE)">
-                  Group 2 (PINGCON & BONITA TISSUE)
-                </option>
-                <option value="Group 1 (KEYSYS & A2Z2GO)">
-                  Group 1 (KEYSYS & A2Z2GO)
-                </option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                Account Executive (AE)
-              </label>
-              <select
-                value={formData.aeName}
-                onChange={(e) => handleAeSelect(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-brand-500 font-medium"
-              >
-                {currentRoster.aes.map(ae => (
-                  <option key={ae.email} value={ae.name}>
-                    {ae.name} (Supervisor: {ae.supervisor})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Email Preview Strip */}
-          <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl text-xs font-mono space-y-1 text-slate-300">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] pb-1 border-b border-slate-800/60 font-sans">
-              <span className="flex items-center gap-1 font-semibold text-slate-300">
-                <Mail className="w-3.5 h-3.5 text-brand-400" />
-                Auto-Dispatched Outbound Recipients:
-              </span>
-              <span>{isTestMode ? 'Test Safe (.test)' : 'Production'}</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-[11px]">
-              <div>
-                <span className="text-slate-500">From: </span>
-                <span className="text-brand-300">{currentRoster.sender}</span>
-              </div>
-              <div>
-                <span className="text-slate-500">To: </span>
-                <span className="text-slate-200">{applyEmailTestMode(currentRoster.to, isTestMode)}</span>
-              </div>
-              <div className="truncate" title={`AE: ${formData.aeEmail}, Sup: ${formData.supervisorEmail}`}>
-                <span className="text-slate-500">AE & Sup CC: </span>
-                <span className="text-slate-300">{applyEmailTestMode(formData.aeEmail, isTestMode)}</span>
-              </div>
-            </div>
-          </div>
-
-        </div>
-
-        {/* Submit Button */}
         <div className="pt-2">
           <button
             type="submit"
-            disabled={isSubmitting}
-            className="w-full py-4 bg-gradient-to-r from-brand-600 via-brand-500 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white font-black text-base rounded-2xl shadow-xl shadow-brand-600/30 flex items-center justify-center space-x-2.5 transition-all active:scale-[0.99] disabled:opacity-50"
+            disabled={isSubmitting || !selectedProduct}
+            className={`w-full py-4 px-6 rounded-2xl font-black text-base shadow-xl flex items-center justify-center space-x-3 transition-all ${
+              selectedProduct 
+                ? 'bg-brand-600 hover:bg-brand-500 text-white shadow-brand-600/30 active:scale-[0.99]' 
+                : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed'
+            }`}
           >
             <Send className="w-5 h-5" />
             <span>
-              {isSubmitting ? 'Submitting & Dispatching Email...' : 'SUBMIT RMA & GENERATE RETURN QR TICKET'}
+              {isSubmitting 
+                ? 'Generating Return Ticket...' 
+                : selectedProduct 
+                ? `SUBMIT RETURN TICKET (${formData.quantity} UNITS • ${formatPeso((Number(formData.quantity) || 1) * (selectedProduct?.unit_price || 0))})`
+                : 'SCAN PRODUCT TO SUBMIT RETURN'}
             </span>
           </button>
         </div>
@@ -882,7 +790,7 @@ export default function SubmitRMATab({
       <ScannerModal
         isOpen={isScannerOpen}
         onClose={() => setIsScannerOpen(false)}
-        onScanSuccess={handleBarcodeScanned}
+        onScanSuccess={handleProductIdentified}
         catalog={catalog}
       />
 

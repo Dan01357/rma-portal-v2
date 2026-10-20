@@ -1,129 +1,164 @@
-// Initial Catalog, AE Rosters, and Seed RMA Data
+// 1 SKU = 1 Product Profile Architecture (Verified Wholesale Catalog)
 
 export const INITIAL_PRODUCTS = [
-  // Group 2: Pingcon & Bonita Tissue
+  // Brand: Bonita Retail Tissue (Group 2)
   {
     id: 'prod-1',
-    barcode: '4806518330012',
     sku: 'BON-FT-200',
+    barcode: '4806518330012',
     name: 'Bonita Soft Facial Tissue 2-Ply 200 pulls',
-    category: 'Tissue Paper',
+    brand: 'Bonita',
+    category: 'Facial Tissue',
     supplier: 'Bonita Mills Inc.',
     unit_price: 68.50,
     case_pack: '48 packs / box',
-    group: 'Group 2 (PINGCON & BONITA TISSUE)'
+    image_url: 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500&auto=format&fit=crop&q=80',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)',
+    requires_serial: false
   },
   {
     id: 'prod-2',
-    barcode: '4806518330029',
     sku: 'BON-KT-2R',
+    barcode: '4806518330029',
     name: 'Bonita Kitchen Towel Jumbo Roll 2s',
+    brand: 'Bonita',
     category: 'Kitchen Towels',
     supplier: 'Bonita Mills Inc.',
     unit_price: 145.00,
     case_pack: '24 packs / box',
-    group: 'Group 2 (PINGCON & BONITA TISSUE)'
+    image_url: 'https://images.unsplash.com/photo-1583947215259-38e31be8751f?w=500&auto=format&fit=crop&q=80',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)',
+    requires_serial: false
   },
   {
     id: 'prod-3',
-    barcode: '4806518330036',
     sku: 'BON-BT-12R',
+    barcode: '4806518330036',
     name: 'Bonita Bathroom Tissue 3-Ply 12 Rolls',
+    brand: 'Bonita',
     category: 'Bath Tissue',
     supplier: 'Bonita Mills Inc.',
     unit_price: 295.00,
     case_pack: '8 bundles / bale',
-    group: 'Group 2 (PINGCON & BONITA TISSUE)'
+    image_url: 'https://images.unsplash.com/photo-1584556812952-905ffd0c611a?w=500&auto=format&fit=crop&q=80',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)',
+    requires_serial: false
   },
   {
+    id: 'prod-6',
+    sku: 'BON-PKT-10',
+    barcode: '4806518330067',
+    name: 'Bonita Pocket Travel Tissue 10s x 10 packs',
+    brand: 'Bonita',
+    category: 'Travel Packs',
+    supplier: 'Bonita Mills Inc.',
+    unit_price: 55.00,
+    case_pack: '60 bundles / carton',
+    image_url: 'https://images.unsplash.com/photo-1584556812952-905ffd0c611a?w=500&auto=format&fit=crop&q=80',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)',
+    requires_serial: false
+  },
+
+  // Brand: Pingcon Commercial Paper (Group 2)
+  {
     id: 'prod-4',
-    barcode: '4806518330043',
     sku: 'PC-JRT-500',
+    barcode: '4806518330043',
     name: 'Pingcon Coreless Jumbo Roll Tissue (JRT) 500m',
+    brand: 'Pingcon',
     category: 'Commercial Tissue',
     supplier: 'Pingcon Paper Mills',
     unit_price: 420.00,
     case_pack: '12 rolls / carton',
-    group: 'Group 2 (PINGCON & BONITA TISSUE)'
+    image_url: 'https://images.unsplash.com/photo-1607613009820-a29f7bb81c04?w=500&auto=format&fit=crop&q=80',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)',
+    requires_serial: false
   },
   {
     id: 'prod-5',
-    barcode: '4806518330050',
     sku: 'PC-MHT-250',
+    barcode: '4806518330050',
     name: 'Pingcon Multifold Hand Towel 1-Ply 250s',
+    brand: 'Pingcon',
     category: 'Commercial Towels',
     supplier: 'Pingcon Paper Mills',
     unit_price: 82.00,
     case_pack: '16 packs / carton',
-    group: 'Group 2 (PINGCON & BONITA TISSUE)'
-  },
-  {
-    id: 'prod-6',
-    barcode: '4806518330067',
-    sku: 'BON-PKT-10',
-    name: 'Bonita Pocket Travel Tissue 10s x 10 packs',
-    category: 'Pocket Packs',
-    supplier: 'Bonita Mills Inc.',
-    unit_price: 55.00,
-    case_pack: '60 bundles / carton',
-    group: 'Group 2 (PINGCON & BONITA TISSUE)'
+    image_url: 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500&auto=format&fit=crop&q=80',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)',
+    requires_serial: false
   },
 
-  // Group 1: Keysys & A2Z2Go
+  // Brand: Keysys Point of Sale Hardware (Group 1)
   {
     id: 'prod-7',
-    barcode: '4809012340011',
     sku: 'KS-TRP-8080',
+    barcode: '4809012340011',
     name: 'Keysys Point of Sale Thermal Receipt Paper 80x80mm',
+    brand: 'Keysys',
     category: 'POS Consumables',
     supplier: 'Keysys Tech Corp',
     unit_price: 48.00,
     case_pack: '50 rolls / box',
-    group: 'Group 1 (KEYSYS & A2Z2GO)'
+    image_url: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=500&auto=format&fit=crop&q=80',
+    group: 'Group 1 (KEYSYS & A2Z2GO)',
+    requires_serial: false
   },
   {
     id: 'prod-8',
-    barcode: '4809012340028',
     sku: 'A2Z-SCN-2D',
+    barcode: '4809012340028',
     name: 'A2Z2Go Smart Barcode Laser Scanner 2D USB',
+    brand: 'A2Z2Go',
     category: 'POS Hardware',
     supplier: 'A2Z Innovations Ltd',
     unit_price: 1850.00,
     case_pack: '10 units / carton',
-    group: 'Group 1 (KEYSYS & A2Z2GO)'
+    image_url: 'https://images.unsplash.com/photo-1616401784845-180882ba9ba8?w=500&auto=format&fit=crop&q=80',
+    group: 'Group 1 (KEYSYS & A2Z2GO)',
+    requires_serial: true
   },
   {
     id: 'prod-9',
-    barcode: '4809012340035',
     sku: 'KS-CD-410',
+    barcode: '4809012340035',
     name: 'Keysys Heavy Duty Metal Cash Drawer RJ11 24V',
+    brand: 'Keysys',
     category: 'POS Hardware',
     supplier: 'Keysys Tech Corp',
     unit_price: 2450.00,
     case_pack: '4 units / crate',
-    group: 'Group 1 (KEYSYS & A2Z2GO)'
+    image_url: 'https://images.unsplash.com/photo-1556742049-0a67c5574f73?w=500&auto=format&fit=crop&q=80',
+    group: 'Group 1 (KEYSYS & A2Z2GO)',
+    requires_serial: true
   },
   {
     id: 'prod-10',
-    barcode: '4809012340042',
     sku: 'A2Z-LBL-100',
+    barcode: '4809012340042',
     name: 'A2Z2Go Direct Thermal Barcode Label Rolls 100x150mm',
+    brand: 'A2Z2Go',
     category: 'Barcode Labels',
     supplier: 'A2Z Innovations Ltd',
     unit_price: 210.00,
     case_pack: '20 rolls / box',
-    group: 'Group 1 (KEYSYS & A2Z2GO)'
+    image_url: 'https://images.unsplash.com/photo-1607613009820-a29f7bb81c04?w=500&auto=format&fit=crop&q=80',
+    group: 'Group 1 (KEYSYS & A2Z2GO)',
+    requires_serial: false
   },
   {
     id: 'prod-11',
-    barcode: '4809012340059',
     sku: 'KS-PDA-T1',
+    barcode: '4809012340059',
     name: 'Keysys Android Rugged Handheld Terminal PDA w/ Scanner',
+    brand: 'Keysys',
     category: 'Enterprise Handheld',
     supplier: 'Keysys Tech Corp',
     unit_price: 8900.00,
     case_pack: '5 units / case',
-    group: 'Group 1 (KEYSYS & A2Z2GO)'
+    image_url: 'https://images.unsplash.com/photo-1580910051074-3eb694886505?w=500&auto=format&fit=crop&q=80',
+    group: 'Group 1 (KEYSYS & A2Z2GO)',
+    requires_serial: true
   }
 ];
 
@@ -176,10 +211,12 @@ export const INITIAL_TICKETS = [
     product_name: 'Bonita Soft Facial Tissue 2-Ply 200 pulls',
     sku: 'BON-FT-200',
     barcode: '4806518330012',
+    brand: 'Bonita',
     supplier: 'Bonita Mills Inc.',
     quantity: 48,
     unit_price: 68.50,
     total_amount: 3288.00,
+    serial_numbers: '',
     defect_category: 'Damaged in Transit / Crushed Carton',
     technical_diagnosis: '[AI Inspection Verified] Pallet bottom crush causing packaging seal burst; 48 units crushed with paper fiber exposure. Unfit for retail shelf.',
     gps_coordinates: '15.0345° N, 120.6841° E (Puregold Hub Dock 3)',
@@ -207,10 +244,12 @@ export const INITIAL_TICKETS = [
     product_name: 'Pingcon Coreless Jumbo Roll Tissue (JRT) 500m',
     sku: 'PC-JRT-500',
     barcode: '4806518330043',
+    brand: 'Pingcon',
     supplier: 'Pingcon Paper Mills',
     quantity: 24,
     unit_price: 420.00,
     total_amount: 10080.00,
+    serial_numbers: '',
     defect_category: 'Factory Short-fill / Core Deformation',
     technical_diagnosis: 'Roll core diameter out of spec (38mm instead of 45mm standard), cannot mount on commercial stainless dispenser spindles.',
     gps_coordinates: '14.5901° N, 121.0598° E (Galleria Loading Bay)',
@@ -238,10 +277,12 @@ export const INITIAL_TICKETS = [
     product_name: 'A2Z2Go Smart Barcode Laser Scanner 2D USB',
     sku: 'A2Z-SCN-2D',
     barcode: '4809012340028',
+    brand: 'A2Z2Go',
     supplier: 'A2Z Innovations Ltd',
     quantity: 5,
     unit_price: 1850.00,
     total_amount: 9250.00,
+    serial_numbers: 'SN-SCN-8821, SN-SCN-8822, SN-SCN-8823, SN-SCN-8824, SN-SCN-8825',
     defect_category: 'Defective Electronic / Laser Trigger Stuck',
     technical_diagnosis: '[AI Inspection Verified] Laser trigger microswitch open-circuit; unit powers on with green indicator but fails to trigger beam upon pull.',
     gps_coordinates: '14.6573° N, 121.0024° E (Balintawak Cashier Hub)',
