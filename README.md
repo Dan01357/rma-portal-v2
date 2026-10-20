@@ -1,74 +1,72 @@
-# Wholesale Return Merchandise Authorization (RMA) System
+# Wholesale Return Merchandise Authorization (RMA) Portal v2
 
-A complete, production-ready, mobile-responsive web application for Wholesale Distributors and Warehouses handling warranty claims, return merchandise authorizations, and automated QR sticker generation.
+Enterprise wholesale return merchandise authorization and warehouse intake platform for **Pingcon Marketing**, **Bonita Tissue**, **Keysys Tech Corp**, and **A2Z2Go**.
 
 ---
 
 ## 🚀 Key Modules & Architecture
 
-### 1. Pre-Delivery QR Sticker Studio (Warehouse View)
-- **Multi-Brand Support**: Selector for **PINGCON**, **KEYSYS**, **BONITA TISSUE**, and **A2Z2GO**.
-- **Catalog & Custom SKU**: Searchable dropdown of preloaded wholesale catalog items or manual entry for custom products.
-- **Packaging Units**: Per Piece (`PC`), Per Dozen (`DZ`), Per Case (`CS`), Per Box (`BOX`).
-- **Delivery Document Ref**: DR # or SI # with quick randomizer.
-- **Consignee Customer Selection**: Preloaded enterprise customers or custom customer names.
-- **Live Printable Label**: High-resolution QR code generator (`qrcode.react`) formatted with CSS `@media print` for standard 4x4 or 4x6 label printers.
-- **Encrypted Parameter Query**: QR encodes `?sku=[SKU]&item=[ItemName]&pkg=[Packaging]&ref=[DR]&cust=[Customer]&company=[Company]` pointing directly to the Zero-Login Customer Portal.
+### 1. In-Browser Scanner & Intake (Submit RMA)
+- **Camera Barcode & QR Scanner**: Real-time camera viewfinder powered by `html5-qrcode`.
+- **GTIN / Box Barcode Auto-Population**: Matches retail packaging barcodes with product catalog (`BON-FT-200`, `PC-JRT-500`, etc.).
+- **Uncatalogued Manual Input**: Seamless fallback to type description manually if barcode is unlisted.
+- **Re-scan Increment**: Re-scanning the same box automatically increments quantity `+1`.
+- **Direct Volume Controls**: Big `[ - ]` and `[ + ]` buttons plus editable numeric box (type large quantities e.g. `20` immediately).
+- **One-Click AI Defect Detection**: Generates structured technical defect diagnosis statements based on failure categories.
+- **GPS Dock Location Grabber**: Captures verified receiving dock coordinates via `navigator.geolocation`.
+- **Defect Photo Uploader**: Direct mobile camera or photo upload to Supabase bucket `rma-defect-photos`.
 
-### 2. Zero-Login Customer Return Portal (Mobile-First Public View)
-- **100% Public Access**: No login, no password, no account required.
-- **Pre-filled Data**: Product Name, SKU, Packaging Type, Delivery Ref, and Consignee Name are automatically parsed from the scanned QR code and locked in place with **zero typing required**.
-- **Mandatory Defect Photo**: Smartphone camera direct trigger (`capture="environment"`) or desktop file picker. Submission is strictly blocked without proof of defect.
-- **Defect Classification**: Categorized dropdown (*Damaged on Arrival*, *Cracked Screen / Casing*, *Leaked Packaging*, *Wrong Item*, *Factory Defect*, etc.) + description.
-- **Official Tracking ID Formula**: 
-  ```
-  RMA-[Year]-[4-Digit Sequential Number]-[4-Character Random Alphanumeric]
-  Example: RMA-2026-0001-T21R
-  ```
-- **Live Confirmation Card**: Green status card with tracking ID, one-click copy, and return instructions.
+### 2. Automated Smart AE Routing & Outbound Dispatch
+- **Group 1 (KEYSYS & A2Z2GO)**:
+  - **Sender**: `finance2@a2z2go.net`
+  - **To**: `azgodev@gmail.com`
+  - **CC**: `mgan@a2z2go.net`, `AZGan@a2z2go.net`, `marketing@a2z2go.net`, `jaezelle.benito@pingconmarketing.com` + Assigned AE + Supervisor
+- **Group 2 (PINGCON & BONITA TISSUE)**:
+  - **Sender**: `finance@pingconmarketing.com`
+  - **To**: `azgodev@gmail.com`
+  - **CC**: `mgan@pingconmarketing.com`, `AZGan@pingconmarketing.com`, `marketing@pingconmarketing.com`, `jaezelle.benito@pingconmarketing.com` + Assigned AE + Supervisor
+- **Simulation / Test Mode**: Safety toggle that automatically appends `.test` to all destination emails during testing.
 
-### 3. Returns Management Dashboard (Supervisor View)
-- **Real-time Supabase Queries**: Direct connection to table `rma_tickets_vault`.
-- **KPI Metrics**: Real-time counts of Total Returns, Pending Inspection, Replacement Approved, Credit Memo Issued, and Rejected.
-- **Filtering & Search**: Multi-attribute search by RMA ID, Customer, Item, SKU, or DR, filtered by Company and Status.
-- **Defect Proof Inspector**: High-resolution modal viewer for submitted defect photos.
-- **Supervisor Status Actions**: One-click modal to update status and record resolution/accounting notes.
-- **CSV Data Export**: Generate comprehensive audit spreadsheets for accounting and warehouse management.
+### 3. Tickets Vault (Audit Archive)
+- Complete history of all submitted return tickets with Ticket ID format: `RMA-2026-####-[4 alphanumeric chars]`.
+- Multi-attribute search and status filtering (*Pending Inspection, Approved, In Transit, Buffer Replacement, Credit Memo Issued, Rejected*).
+- Printable return QR code labels formatted for thermal sticker printers.
+- Export to CSV for audit and reporting.
+
+### 4. Finance Credit Memo Workstation
+- Pull-out verification checkbox for logistics confirmation.
+- Direct entry of official Credit Memo number (e.g. `CM-2026-0145`) and Credit Amount (₱).
+- General Ledger integration (GL-4010) and finance officer authorization stamps.
+
+### 5. Purchasing & Inventory Buffer Control
+- Consolidated defective lot grouping by manufacturer/supplier (Bonita Mills, Pingcon Paper, Keysys Tech, A2Z Innovations).
+- 7-Day Vendor Buffer Replacement SLA countdown timer with overdue indicators.
+- One-click vendor replacement PO generation (`PO-RET-2026-###`).
+- Immediate inventory buffer stock dispatch to customer accounts.
+
+### 6. Print SKU Barcodes
+- Printable A4 sheet grid for Pingcon, Bonita, and Keysys SKU barcodes for warehouse repackers labeling unlabelled cartons.
 
 ---
 
 ## 🛠️ Tech Stack
-- **Framework**: React 18 + Vite
+- **Framework**: React 18 + Vite 6
 - **Styling**: Tailwind CSS + PostCSS
 - **Icons**: Lucide React (`lucide-react`)
+- **Scanner**: `html5-qrcode`
 - **QR Code Engine**: `qrcode.react`
-- **Database**: `@supabase/supabase-js` targeting table `rma_tickets_vault`
+- **Backend / Database**: Supabase (`@supabase/supabase-js`) with automatic offline mock redundancy
 
 ---
 
-## ⚙️ Supabase Setup & Environment Configuration
+## 🏃 Running Locally
 
-### 1. Configure `.env`
-Ensure your `.env` file contains your Supabase project credentials:
-```env
-VITE_SUPABASE_URL=https://your-project-id.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.your-anon-key-here
+```powershell
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
 ```
-> **Note**: `.env` is already added to `.gitignore` so your keys are never committed to version control.
 
-### 2. Run Database Migration
-Open your Supabase Project Dashboard -> **SQL Editor**, and run the provided script in [`supabase_schema.sql`](file:///c:/Users/Danilo.Alvaro/Desktop/Finance%20Systems/RMA_System/supabase_schema.sql):
-- Creates `public.rma_tickets_vault`
-- Configures indexes for fast queries
-- Configures Row Level Security (RLS) policies allowing public anonymous submissions and supervisor management.
-
----
-
-## 🏃 Running the Application
-
-1. **Development Server**:
-   ```powershell
-   npm run dev
-   ```
-2. Open `http://localhost:5173` in your browser.
-3. Test the QR scanner simulation by clicking **Test QR Link** on any generated label in the Warehouse Studio or navigating using the top navbar.
+Open `http://localhost:5173` in your browser.

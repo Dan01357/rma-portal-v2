@@ -1,233 +1,309 @@
 import React, { useState, useEffect } from 'react';
-import Navbar from './components/Navbar';
-import QRStickerStudio from './components/QRStickerStudio';
-import PublicPortal from './components/PublicPortal';
-import ReturnsDashboard from './components/ReturnsDashboard';
-import SystemTutorialModal from './components/SystemTutorialModal';
-import AdminPinModal from './components/AdminPinModal';
-import { Database, AlertCircle, ExternalLink, Code2, Lock } from 'lucide-react';
-import { isConfigured } from './lib/supabase';
+import { 
+  Barcode, 
+  Archive, 
+  Receipt, 
+  Truck, 
+  Printer, 
+  Settings, 
+  ShieldCheck, 
+  CheckCircle2, 
+  Package, 
+  Sparkles,
+  QrCode,
+  Lightbulb
+} from 'lucide-react';
+
+import SubmitRMATab from './components/SubmitRMATab';
+import TicketsVaultTab from './components/TicketsVaultTab';
+import FinanceCreditMemoTab from './components/FinanceCreditMemoTab';
+import PurchasingBufferTab from './components/PurchasingBufferTab';
+import PrintBarcodesTab from './components/PrintBarcodesTab';
+import SettingsTab from './components/SettingsTab';
+import ReturnQRModal from './components/ReturnQRModal';
+import HowItWorksModal from './components/HowItWorksModal';
+
+import { rmaApi, saveLocalTickets } from './supabaseClient';
+import { INITIAL_PRODUCTS, INITIAL_TICKETS } from './data/mockData';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState('studio');
-  const [urlParams, setUrlParams] = useState({});
-  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
-  const [pendingTargetView, setPendingTargetView] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('submit');
+  const [tickets, setTickets] = useState([]);
+  const [catalog, setCatalog] = useState([]);
+  const [isTestMode, setIsTestMode] = useState(() => {
+    const saved = localStorage.getItem('wholesale_rma_test_mode');
+    return saved !== null ? JSON.parse(saved) : true; // Default test mode ON for safety
+  });
+  const [activeModalTicket, setActiveModalTicket] = useState(null);
+  const [isHowItWorksOpen, setIsHowItWorksOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Detect query parameters and check admin session or customer lockdown mode
+  // Load data on startup
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const search = new URLSearchParams(window.location.search);
-      const sku = search.get('sku');
-      const item = search.get('item');
-      const pkg = search.get('pkg');
-      const ref = search.get('ref');
-      const cust = search.get('cust');
-      const company = search.get('company');
-      const ae = search.get('ae');
-      const viewParam = search.get('view');
-      const authParam = search.get('auth');
-
-      const isSessionAdmin = sessionStorage.getItem('rma_admin_session') === 'true';
-      const isExplicitAdmin = authParam === 'admin' || authParam === '8888';
-
-      if (isSessionAdmin || isExplicitAdmin) {
-        setIsAdmin(true);
-        sessionStorage.setItem('rma_admin_session', 'true');
-      }
-
-      // If customer scanned QR code or arrived on public portal view
-      if (sku || item || ref || viewParam === 'portal') {
-        setCurrentView('portal');
-        setUrlParams({
-          sku: sku || 'PNG-LED-32F',
-          item: item || 'PINGCON 32" HD Commercial Display Panel',
-          pkg: pkg || 'PC',
-          ref: ref || 'DR-88902',
-          cust: cust || 'Metro Commercial Supplies Co.',
-          company: company || 'PINGCON',
-          ae: ae || 'Rodrigo Galvez'
-        });
-      } else {
-        // Staff arrived at root without portal params:
-        // If not authenticated yet, default to studio with tutorial prompt
-        const hasViewed = localStorage.getItem('has_viewed_guide');
-        if (!hasViewed && (isSessionAdmin || isExplicitAdmin)) {
-          setIsTutorialOpen(true);
-        }
+    async function loadData() {
+      setIsLoading(true);
+      try {
+        const [prods, tkts] = await Promise.all([
+          rmaApi.getProducts(),
+          rmaApi.getTickets()
+        ]);
+        setCatalog(prods && prods.length > 0 ? prods : INITIAL_PRODUCTS);
+        setTickets(tkts && tkts.length > 0 ? tkts : INITIAL_TICKETS);
+      } catch (err) {
+        console.error('Error loading initial data:', err);
+        setCatalog(INITIAL_PRODUCTS);
+        setTickets(INITIAL_TICKETS);
+      } finally {
+        setIsLoading(false);
       }
     }
+    loadData();
   }, []);
 
-  // Handle protected navigation attempts
-  const handleViewChangeRequest = (targetView) => {
-    if (targetView === 'portal') {
-      setCurrentView('portal');
-      return;
+  // Toggle Test Mode
+  const handleToggleTestMode = () => {
+    setIsTestMode(prev => {
+      const next = !prev;
+      localStorage.setItem('wholesale_rma_test_mode', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // Add new ticket
+  const handleTicketCreated = (newTicket) => {
+    setTickets(prev => [newTicket, ...prev]);
+  };
+
+  // Update Ticket fields
+  const handleUpdateTicket = async (ticketId, updates) => {
+    const updated = await rmaApi.updateTicket(ticketId, updates);
+    setTickets(prev => prev.map(t => (t.id === ticketId ? { ...t, ...updates } : t)));
+    return updated;
+  };
+
+  // Update Status helper
+  const handleUpdateTicketStatus = async (ticketId, newStatus) => {
+    await handleUpdateTicket(ticketId, { status: newStatus });
+  };
+
+  // Reset to Factory Demo Data
+  const handleResetData = () => {
+    if (window.confirm('Reset all RMA tickets and catalog back to factory defaults?')) {
+      localStorage.removeItem('wholesale_rma_tickets_v2');
+      localStorage.removeItem('wholesale_rma_products_v2');
+      setTickets(INITIAL_TICKETS);
+      setCatalog(INITIAL_PRODUCTS);
+      saveLocalTickets(INITIAL_TICKETS);
+      alert('Data reset to default demonstration state.');
     }
-
-    if (isAdmin) {
-      setCurrentView(targetView);
-    } else {
-      setPendingTargetView(targetView);
-      setIsAdminModalOpen(true);
-    }
   };
 
-  const handleAdminUnlocked = () => {
-    setIsAdmin(true);
-    setIsAdminModalOpen(false);
-    setCurrentView(pendingTargetView);
-  };
-
-  const handleLockAdmin = () => {
-    sessionStorage.removeItem('rma_admin_session');
-    setIsAdmin(false);
-    setCurrentView('portal');
-  };
-
-  const handleRMAFiled = (newTicket) => {
-    console.log('✅ Return filed successfully:', newTicket);
-  };
-
-  // Determine whether to show the staff navigation bar
-  // STRICT LOCKDOWN: If on customer portal and user is not an authenticated admin, hide Navbar completely!
-  const showNavbar = isAdmin || currentView !== 'portal';
+  const navItems = [
+    { id: 'submit', label: 'Submit RMA', icon: Barcode, badge: 'Intake' },
+    { id: 'vault', label: 'Tickets Vault', icon: Archive, count: tickets.length },
+    { 
+      id: 'credit_memo', 
+      label: 'Finance Credit Memo', 
+      icon: Receipt, 
+      count: tickets.filter(t => t.status === 'Credit Memo Issued').length 
+    },
+    { id: 'buffer', label: 'Purchasing & Inventory Buffer', icon: Truck },
+    { id: 'barcodes', label: 'Print SKU Barcodes', icon: Printer },
+    { id: 'settings', label: 'Settings', icon: Settings }
+  ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Top Navigation: Completely hidden from public customers scanning QR code */}
-      {showNavbar && (
-        <Navbar 
-          currentView={currentView} 
-          onViewChange={handleViewChangeRequest}
-          onOpenTutorial={() => setIsTutorialOpen(true)}
-          onLockAdmin={handleLockAdmin}
-        />
-      )}
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-brand-500 selection:text-white">
+      
+      {/* Top Navigation Bar */}
+      <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 shadow-md no-print">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            
+            {/* Logo & Brand Identity */}
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-700 to-brand-500 flex items-center justify-center text-white shadow-lg shadow-brand-500/30">
+                <Barcode className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h1 className="font-black text-white text-base sm:text-lg tracking-tight">
+                    WHOLESALE RMA PORTAL
+                  </h1>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-brand-500/20 text-brand-300 border border-brand-500/30 font-semibold">
+                    v2.0
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 hidden sm:block">
+                  Pingcon Marketing • Bonita Tissue • Keysys • A2Z2Go
+                </p>
+              </div>
+            </div>
 
-      {/* Supabase Notice Banner if using mock/fallback (Shown only to staff) */}
-      {!isConfigured && showNavbar && (
-        <div className="bg-gradient-to-r from-indigo-950/80 via-purple-950/80 to-slate-900 border-b border-indigo-500/20 px-4 py-2 text-xs text-indigo-200 flex items-center justify-between print:hidden">
-          <div className="flex items-center gap-2 mx-auto sm:mx-0">
-            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-            <span>
-              <strong>Local Vault Active:</strong> App is running in zero-setup mode with persistent local storage. To connect your live Supabase cloud instance, paste your credentials in <code className="text-white bg-slate-800 px-1.5 py-0.5 rounded font-mono">.env</code>.
-            </span>
+            {/* Right Top Status & Test Mode Pill */}
+            <div className="flex items-center space-x-2.5">
+              
+              {/* Prominent How It Works / User Guide Button */}
+              <button
+                type="button"
+                onClick={() => setIsHowItWorksOpen(true)}
+                className="px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-brand-500/20 hover:from-amber-500/30 hover:to-brand-500/30 border border-amber-500/40 text-amber-200 text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-all shadow-sm active:scale-95"
+                title="View 4-Step Workflow Guide & Tab Walkthrough"
+              >
+                <Lightbulb className="w-4 h-4 text-amber-400" />
+                <span className="hidden sm:inline">💡 How It Works / User Guide</span>
+                <span className="sm:hidden">💡 Guide</span>
+              </button>
+
+              {isTestMode ? (
+                <div 
+                  onClick={() => setActiveTab('settings')}
+                  className="cursor-pointer px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold rounded-lg flex items-center space-x-1.5 transition-colors"
+                  title="Test mode active: recipient emails appended with .test"
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                  <span>TEST MODE ON</span>
+                </div>
+              ) : (
+                <div className="hidden sm:flex items-center space-x-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-lg">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  <span>LIVE PRODUCTION</span>
+                </div>
+              )}
+
+              {/* Quick Barcode Print Shortcut */}
+              <button
+                onClick={() => setActiveTab('barcodes')}
+                className="hidden md:flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg border border-slate-700 transition-colors"
+                title="Print SKU Barcode Sheets"
+              >
+                <Printer className="w-3.5 h-3.5 text-brand-400" />
+                <span>Print Box Labels</span>
+              </button>
+            </div>
+
           </div>
-          <span className="hidden md:inline font-mono text-[11px] text-slate-400">
-            Target Table: rma_tickets_vault
-          </span>
+
+          {/* Navigation Tabs Bar */}
+          <nav className="flex space-x-1 sm:space-x-2 overflow-x-auto py-2 scrollbar-none border-t border-slate-800/60">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  className={`px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap flex items-center space-x-2 transition-all ${
+                    isActive
+                      ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/80'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                  <span>{item.label}</span>
+                  {item.count !== undefined && (
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
+                    }`}>
+                      {item.count}
+                    </span>
+                  )}
+                  {item.badge && !isActive && (
+                    <span className="text-[9px] px-1.5 py-0.2 rounded font-bold uppercase bg-brand-500/20 text-brand-300 border border-brand-500/30">
+                      {item.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+
         </div>
-      )}
+      </header>
 
       {/* Main Content Area */}
-      <main className="flex-1">
-        {currentView === 'studio' && (
-          <QRStickerStudio onOpenPortalSim={() => setCurrentView('portal')} />
-        )}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6">
+        {isLoading ? (
+          <div className="py-24 text-center space-y-3">
+            <div className="w-10 h-10 border-4 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <p className="text-xs text-slate-400 font-mono">Initializing Wholesale RMA Workspace...</p>
+          </div>
+        ) : (
+          <>
+            {activeTab === 'submit' && (
+              <SubmitRMATab
+                catalog={catalog}
+                onTicketCreated={handleTicketCreated}
+                isTestMode={isTestMode}
+                onOpenTicketModal={(ticket) => setActiveModalTicket(ticket)}
+              />
+            )}
 
-        {currentView === 'portal' && (
-          <PublicPortal
-            initialParams={urlParams}
-            onRMAFiled={handleRMAFiled}
-            onGoToDashboard={() => handleViewChangeRequest('dashboard')}
-            isAdmin={isAdmin}
-          />
-        )}
+            {activeTab === 'vault' && (
+              <TicketsVaultTab
+                tickets={tickets}
+                onUpdateTicketStatus={handleUpdateTicketStatus}
+                onOpenTicketModal={(ticket) => setActiveModalTicket(ticket)}
+                isTestMode={isTestMode}
+              />
+            )}
 
-        {currentView === 'dashboard' && (
-          <ReturnsDashboard 
-            onViewPortal={(searchQuery) => {
-              if (searchQuery) {
-                const search = new URLSearchParams(searchQuery);
-                setUrlParams({
-                  sku: search.get('sku') || '',
-                  item: search.get('item') || '',
-                  pkg: search.get('pkg') || '',
-                  ref: search.get('ref') || '',
-                  cust: search.get('cust') || '',
-                  company: search.get('company') || '',
-                  ae: search.get('ae') || ''
-                });
-              }
-              setCurrentView('portal');
-            }}
-            onNavigateStudio={() => setCurrentView('studio')}
-          />
+            {activeTab === 'credit_memo' && (
+              <FinanceCreditMemoTab
+                tickets={tickets}
+                onUpdateTicket={handleUpdateTicket}
+              />
+            )}
+
+            {activeTab === 'buffer' && (
+              <PurchasingBufferTab
+                tickets={tickets}
+                onUpdateTicket={handleUpdateTicket}
+              />
+            )}
+
+            {activeTab === 'barcodes' && (
+              <PrintBarcodesTab
+                catalog={catalog}
+              />
+            )}
+
+            {activeTab === 'settings' && (
+              <SettingsTab
+                isTestMode={isTestMode}
+                onToggleTestMode={handleToggleTestMode}
+                onResetData={handleResetData}
+              />
+            )}
+          </>
         )}
       </main>
 
-      {/* Interactive System Tutorial & Workflow Guide Modal */}
-      <SystemTutorialModal
-        isOpen={isTutorialOpen}
-        onClose={() => setIsTutorialOpen(false)}
+      {/* Return QR & Authorized Return Label Modal */}
+      <ReturnQRModal
+        isOpen={Boolean(activeModalTicket)}
+        onClose={() => setActiveModalTicket(null)}
+        ticket={activeModalTicket}
+        isTestMode={isTestMode}
       />
 
-      {/* Staff Admin PIN Authorization Modal */}
-      <AdminPinModal
-        isOpen={isAdminModalOpen}
-        onClose={() => setIsAdminModalOpen(false)}
-        onSuccess={handleAdminUnlocked}
-        targetViewName={pendingTargetView === 'dashboard' ? 'Returns Management Dashboard' : 'QR Sticker Studio'}
+      {/* Interactive How It Works / User Guide Modal */}
+      <HowItWorksModal
+        isOpen={isHowItWorksOpen}
+        onClose={() => setIsHowItWorksOpen(false)}
       />
 
-      {/* Footer (Hidden during label printing) */}
-      <footer className="border-t border-slate-900 bg-slate-950/90 py-5 text-center text-xs text-slate-500 print:hidden">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-[11px] text-slate-500">
-            Wholesale Return Merchandise Authorization (RMA) System • Authorized Logistics & Warranty
-          </p>
-          
-          <div className="flex items-center space-x-3 text-xs">
-            {isAdmin ? (
-              <>
-                <button
-                  onClick={() => setIsTutorialOpen(true)}
-                  className="text-indigo-400 hover:text-indigo-300 transition-colors font-medium"
-                >
-                  System Guide
-                </button>
-                <span>•</span>
-                <button
-                  onClick={() => handleViewChangeRequest('studio')}
-                  className="hover:text-slate-300 transition-colors"
-                >
-                  Warehouse Studio
-                </button>
-                <span>•</span>
-                <button
-                  onClick={() => handleViewChangeRequest('dashboard')}
-                  className="hover:text-slate-300 transition-colors"
-                >
-                  Supervisor Dashboard
-                </button>
-                <span>•</span>
-                <button
-                  onClick={handleLockAdmin}
-                  className="text-rose-400 hover:text-rose-300 transition-colors"
-                >
-                  Lock Staff
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setPendingTargetView('dashboard');
-                  setIsAdminModalOpen(true);
-                }}
-                className="text-slate-600 hover:text-slate-400 transition-colors text-[11px] flex items-center gap-1 font-mono"
-              >
-                <Lock className="w-3 h-3" />
-                <span>Staff Gate</span>
-              </button>
-            )}
-          </div>
+      {/* Footer */}
+      <footer className="bg-slate-900/60 border-t border-slate-800/80 py-4 px-4 text-center text-xs text-slate-500 no-print">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span>Wholesale RMA Return Merchandise Authorization System • Pingcon & Keysys Enterprise</span>
+          <span className="font-mono text-[11px] text-slate-400">
+            Connected to Supabase ({import.meta.env.VITE_SUPABASE_URL ? 'Active' : 'Offline Mock'})
+          </span>
         </div>
       </footer>
+
     </div>
   );
 }

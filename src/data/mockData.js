@@ -1,0 +1,259 @@
+// Initial Catalog, AE Rosters, and Seed RMA Data
+
+export const INITIAL_PRODUCTS = [
+  // Group 2: Pingcon & Bonita Tissue
+  {
+    id: 'prod-1',
+    barcode: '4806518330012',
+    sku: 'BON-FT-200',
+    name: 'Bonita Soft Facial Tissue 2-Ply 200 pulls',
+    category: 'Tissue Paper',
+    supplier: 'Bonita Mills Inc.',
+    unit_price: 68.50,
+    case_pack: '48 packs / box',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)'
+  },
+  {
+    id: 'prod-2',
+    barcode: '4806518330029',
+    sku: 'BON-KT-2R',
+    name: 'Bonita Kitchen Towel Jumbo Roll 2s',
+    category: 'Kitchen Towels',
+    supplier: 'Bonita Mills Inc.',
+    unit_price: 145.00,
+    case_pack: '24 packs / box',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)'
+  },
+  {
+    id: 'prod-3',
+    barcode: '4806518330036',
+    sku: 'BON-BT-12R',
+    name: 'Bonita Bathroom Tissue 3-Ply 12 Rolls',
+    category: 'Bath Tissue',
+    supplier: 'Bonita Mills Inc.',
+    unit_price: 295.00,
+    case_pack: '8 bundles / bale',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)'
+  },
+  {
+    id: 'prod-4',
+    barcode: '4806518330043',
+    sku: 'PC-JRT-500',
+    name: 'Pingcon Coreless Jumbo Roll Tissue (JRT) 500m',
+    category: 'Commercial Tissue',
+    supplier: 'Pingcon Paper Mills',
+    unit_price: 420.00,
+    case_pack: '12 rolls / carton',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)'
+  },
+  {
+    id: 'prod-5',
+    barcode: '4806518330050',
+    sku: 'PC-MHT-250',
+    name: 'Pingcon Multifold Hand Towel 1-Ply 250s',
+    category: 'Commercial Towels',
+    supplier: 'Pingcon Paper Mills',
+    unit_price: 82.00,
+    case_pack: '16 packs / carton',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)'
+  },
+  {
+    id: 'prod-6',
+    barcode: '4806518330067',
+    sku: 'BON-PKT-10',
+    name: 'Bonita Pocket Travel Tissue 10s x 10 packs',
+    category: 'Pocket Packs',
+    supplier: 'Bonita Mills Inc.',
+    unit_price: 55.00,
+    case_pack: '60 bundles / carton',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)'
+  },
+
+  // Group 1: Keysys & A2Z2Go
+  {
+    id: 'prod-7',
+    barcode: '4809012340011',
+    sku: 'KS-TRP-8080',
+    name: 'Keysys Point of Sale Thermal Receipt Paper 80x80mm',
+    category: 'POS Consumables',
+    supplier: 'Keysys Tech Corp',
+    unit_price: 48.00,
+    case_pack: '50 rolls / box',
+    group: 'Group 1 (KEYSYS & A2Z2GO)'
+  },
+  {
+    id: 'prod-8',
+    barcode: '4809012340028',
+    sku: 'A2Z-SCN-2D',
+    name: 'A2Z2Go Smart Barcode Laser Scanner 2D USB',
+    category: 'POS Hardware',
+    supplier: 'A2Z Innovations Ltd',
+    unit_price: 1850.00,
+    case_pack: '10 units / carton',
+    group: 'Group 1 (KEYSYS & A2Z2GO)'
+  },
+  {
+    id: 'prod-9',
+    barcode: '4809012340035',
+    sku: 'KS-CD-410',
+    name: 'Keysys Heavy Duty Metal Cash Drawer RJ11 24V',
+    category: 'POS Hardware',
+    supplier: 'Keysys Tech Corp',
+    unit_price: 2450.00,
+    case_pack: '4 units / crate',
+    group: 'Group 1 (KEYSYS & A2Z2GO)'
+  },
+  {
+    id: 'prod-10',
+    barcode: '4809012340042',
+    sku: 'A2Z-LBL-100',
+    name: 'A2Z2Go Direct Thermal Barcode Label Rolls 100x150mm',
+    category: 'Barcode Labels',
+    supplier: 'A2Z Innovations Ltd',
+    unit_price: 210.00,
+    case_pack: '20 rolls / box',
+    group: 'Group 1 (KEYSYS & A2Z2GO)'
+  },
+  {
+    id: 'prod-11',
+    barcode: '4809012340059',
+    sku: 'KS-PDA-T1',
+    name: 'Keysys Android Rugged Handheld Terminal PDA w/ Scanner',
+    category: 'Enterprise Handheld',
+    supplier: 'Keysys Tech Corp',
+    unit_price: 8900.00,
+    case_pack: '5 units / case',
+    group: 'Group 1 (KEYSYS & A2Z2GO)'
+  }
+];
+
+export const AE_ROSTERS = {
+  'Group 1 (KEYSYS & A2Z2GO)': {
+    sender: 'finance2@a2z2go.net',
+    to: 'azgodev@gmail.com',
+    baseCC: [
+      'mgan@a2z2go.net',
+      'AZGan@a2z2go.net',
+      'marketing@a2z2go.net',
+      'jaezelle.benito@pingconmarketing.com'
+    ],
+    aes: [
+      { name: 'Carlos Mendoza', email: 'carlos.mendoza@a2z2go.net', supervisor: 'Eric Vance', supervisorEmail: 'eric.vance@a2z2go.net' },
+      { name: 'Patricia Reyes', email: 'patricia.reyes@keysys.com.ph', supervisor: 'Eric Vance', supervisorEmail: 'eric.vance@a2z2go.net' },
+      { name: 'Mark Anthony Lim', email: 'mark.lim@a2z2go.net', supervisor: 'Eric Vance', supervisorEmail: 'eric.vance@a2z2go.net' },
+      { name: 'Michael Santos', email: 'michael.santos@keysys.com.ph', supervisor: 'Denise Sy', supervisorEmail: 'denise.sy@keysys.com.ph' }
+    ]
+  },
+  'Group 2 (PINGCON & BONITA TISSUE)': {
+    sender: 'finance@pingconmarketing.com',
+    to: 'azgodev@gmail.com',
+    baseCC: [
+      'mgan@pingconmarketing.com',
+      'AZGan@pingconmarketing.com',
+      'marketing@pingconmarketing.com',
+      'jaezelle.benito@pingconmarketing.com'
+    ],
+    aes: [
+      { name: 'Jerome Santos', email: 'jerome.santos@pingconmarketing.com', supervisor: 'Jaezelle Benito', supervisorEmail: 'jaezelle.benito@pingconmarketing.com' },
+      { name: 'Grace Tan', email: 'grace.tan@pingconmarketing.com', supervisor: 'Jaezelle Benito', supervisorEmail: 'jaezelle.benito@pingconmarketing.com' },
+      { name: 'Roberto Gomez', email: 'roberto.gomez@bonitatissue.com', supervisor: 'Jaezelle Benito', supervisorEmail: 'jaezelle.benito@pingconmarketing.com' },
+      { name: 'Catherine Lee', email: 'catherine.lee@pingconmarketing.com', supervisor: 'Allan Tan', supervisorEmail: 'allan.tan@pingconmarketing.com' }
+    ]
+  }
+};
+
+export const INITIAL_TICKETS = [
+  {
+    id: 'RMA-2026-0001-3YNZ',
+    created_at: '2026-10-18T09:14:00Z',
+    customer_name: 'Puregold Price Club - San Fernando',
+    store_branch: 'Branch 042 (Pampanga Hub)',
+    invoice_no: 'INV-2026-99381',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)',
+    ae_name: 'Jerome Santos',
+    ae_email: 'jerome.santos@pingconmarketing.com',
+    supervisor_email: 'jaezelle.benito@pingconmarketing.com',
+    product_name: 'Bonita Soft Facial Tissue 2-Ply 200 pulls',
+    sku: 'BON-FT-200',
+    barcode: '4806518330012',
+    supplier: 'Bonita Mills Inc.',
+    quantity: 48,
+    unit_price: 68.50,
+    total_amount: 3288.00,
+    defect_category: 'Damaged in Transit / Crushed Carton',
+    technical_diagnosis: '[AI Inspection Verified] Pallet bottom crush causing packaging seal burst; 48 units crushed with paper fiber exposure. Unfit for retail shelf.',
+    gps_coordinates: '15.0345° N, 120.6841° E (Puregold Hub Dock 3)',
+    photos: ['https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=400&auto=format&fit=crop&q=80'],
+    status: 'Pending Inspection',
+    pull_out_confirmed: true,
+    credit_memo_no: '',
+    credit_amount: 0,
+    credit_issued_by: '',
+    credit_issued_date: null,
+    supplier_po_no: 'PO-RET-2026-081',
+    buffer_days_left: 4,
+    notes: 'Awaiting supplier site pickup for factory repulp credit.'
+  },
+  {
+    id: 'RMA-2026-0002-8PLK',
+    created_at: '2026-10-17T11:30:00Z',
+    customer_name: 'Robinson’s Supermarket - Galleria',
+    store_branch: 'EDSA Ortigas Central',
+    invoice_no: 'INV-2026-98124',
+    group: 'Group 2 (PINGCON & BONITA TISSUE)',
+    ae_name: 'Grace Tan',
+    ae_email: 'grace.tan@pingconmarketing.com',
+    supervisor_email: 'jaezelle.benito@pingconmarketing.com',
+    product_name: 'Pingcon Coreless Jumbo Roll Tissue (JRT) 500m',
+    sku: 'PC-JRT-500',
+    barcode: '4806518330043',
+    supplier: 'Pingcon Paper Mills',
+    quantity: 24,
+    unit_price: 420.00,
+    total_amount: 10080.00,
+    defect_category: 'Factory Short-fill / Core Deformation',
+    technical_diagnosis: 'Roll core diameter out of spec (38mm instead of 45mm standard), cannot mount on commercial stainless dispenser spindles.',
+    gps_coordinates: '14.5901° N, 121.0598° E (Galleria Loading Bay)',
+    photos: ['https://images.unsplash.com/photo-1549465220-1a8b9238cd48?w=400&auto=format&fit=crop&q=80'],
+    status: 'Credit Memo Issued',
+    pull_out_confirmed: true,
+    credit_memo_no: 'CM-2026-0145',
+    credit_amount: 10080.00,
+    credit_issued_by: 'Danilo Alvaro (Finance Lead)',
+    credit_issued_date: '2026-10-18T16:00:00Z',
+    supplier_po_no: 'PO-RET-2026-079',
+    buffer_days_left: 0,
+    notes: 'Credit Memo offset against November Billing.'
+  },
+  {
+    id: 'RMA-2026-0003-4KQW',
+    created_at: '2026-10-19T14:05:00Z',
+    customer_name: 'Wilcon Depot - Balintawak Wholesale',
+    store_branch: 'Branch 008 (Tech & Billing Dept)',
+    invoice_no: 'INV-2026-99540',
+    group: 'Group 1 (KEYSYS & A2Z2GO)',
+    ae_name: 'Carlos Mendoza',
+    ae_email: 'carlos.mendoza@a2z2go.net',
+    supervisor_email: 'eric.vance@a2z2go.net',
+    product_name: 'A2Z2Go Smart Barcode Laser Scanner 2D USB',
+    sku: 'A2Z-SCN-2D',
+    barcode: '4809012340028',
+    supplier: 'A2Z Innovations Ltd',
+    quantity: 5,
+    unit_price: 1850.00,
+    total_amount: 9250.00,
+    defect_category: 'Defective Electronic / Laser Trigger Stuck',
+    technical_diagnosis: '[AI Inspection Verified] Laser trigger microswitch open-circuit; unit powers on with green indicator but fails to trigger beam upon pull.',
+    gps_coordinates: '14.6573° N, 121.0024° E (Balintawak Cashier Hub)',
+    photos: ['https://images.unsplash.com/photo-1616401784845-180882ba9ba8?w=400&auto=format&fit=crop&q=80'],
+    status: 'Buffer Replacement',
+    pull_out_confirmed: true,
+    credit_memo_no: '',
+    credit_amount: 0,
+    credit_issued_by: '',
+    credit_issued_date: null,
+    supplier_po_no: 'PO-BUF-2026-102',
+    buffer_days_left: 6,
+    notes: '5 replacement scanners dispatched from Warehouse Inventory buffer stock to customer.'
+  }
+];
