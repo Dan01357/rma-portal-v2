@@ -3,63 +3,182 @@ import { supabase } from '../supabaseClient';
 const AUTH_STORAGE_KEY = 'rma_portal_admin_session';
 const HR_API_KEY_STORAGE = 'pingcon_hr_api_key';
 
-// Default initial employees for company
+// Default initial company employee directory (Strictly Company Emails)
 const DEFAULT_EMPLOYEES = [
   {
-    name: 'Danilo Alvaro Jr.',
-    email: 'danilo.alvaro@a2z2go.net',
-    role: 'super_admin',
-    is_active: true,
-    department: 'IT / Engineering'
-  },
-  {
-    name: 'Danilo Alvaro (Finance Keysys)',
+    name: 'Danilo Alvaro Jr. (Super Admin)',
     email: 'finance2@keysysincorporated.com',
     role: 'super_admin',
+    is_active: true,
+    department: 'Finance Systems / IT'
+  },
+  {
+    name: 'Alleli F. Almaida',
+    email: 'alleli.almaida@ph.keysys.com',
+    role: 'admin',
+    is_active: true,
+    department: 'Finance'
+  },
+  {
+    name: 'Analiza B. Benosa',
+    email: 'finance@a2z2go.net',
+    role: 'admin',
+    is_active: true,
+    department: 'Finance'
+  },
+  {
+    name: 'Glencel O. Azogue',
+    email: 'accountspayable@keysysincorporated.com',
+    role: 'admin',
+    is_active: true,
+    department: 'Accounts Payable'
+  },
+  {
+    name: 'Jarmen A. Cachero',
+    email: 'finance4@keysysincorporated.com',
+    role: 'admin',
     is_active: true,
     department: 'Finance Systems'
   },
   {
-    name: 'Danilo Alvaro (Personal)',
-    email: 'dan01357@gmail.com',
-    role: 'super_admin',
-    is_active: true,
-    department: 'Engineering'
-  },
-  {
-    name: 'Carlos Mendoza',
-    email: 'carlos.mendoza@a2z2go.net',
+    name: 'Mark John A. Aquino',
+    email: 'mark.aquino@a2z2go.net',
     role: 'admin',
     is_active: true,
-    department: 'Operations'
+    department: 'A2Z2GO Procurement'
   },
   {
-    name: 'Eric Vance',
-    email: 'eric.vance@a2z2go.net',
+    name: 'Ralph Raven A. Alido',
+    email: 'ralph.alido@a2z2go.net',
     role: 'admin',
     is_active: true,
-    department: 'Warehouse Management'
+    department: 'A2Z2GO Operations'
   },
   {
-    name: 'Patricia Reyes',
-    email: 'patricia.reyes@keysys.com.ph',
+    name: 'Mary T. Gan',
+    email: 'mgan@pingconmarketing.com',
+    role: 'admin',
+    is_active: true,
+    department: 'Executive Management'
+  },
+  {
+    name: 'Aila Marie B. Bacsal',
+    email: 'aila.bacsal@ph.keysys.com',
     role: 'inventory_staff',
     is_active: true,
-    department: 'Inventory Control'
+    department: 'Warehouse'
   },
   {
-    name: 'Jerome Santos',
-    email: 'jerome.santos@pingconmarketing.com',
+    name: 'Daniel M. Alcantara',
+    email: 'daniel.alcantara@pingcon.com',
     role: 'inventory_staff',
     is_active: true,
-    department: 'Returns Department'
+    department: 'Pingcon Sales'
   },
   {
-    name: 'Roberto Gomez',
-    email: 'roberto.gomez@bonitatissue.com',
-    role: 'viewer',
-    is_active: false,
-    department: 'Resigned Employee'
+    name: 'Jeffrey U. Amandy',
+    email: 'jeffrey.amandy@ph.keysys.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'Karen Joy R. Amarille',
+    email: 'karen.amarille@ph.keysys.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'Inna V. Amparo',
+    email: 'inna.amparo@ph.keysys.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'Kimberly Joie F. Antazo',
+    email: 'kimeberly.antazo@ph.keysys.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'Michael R. Arcangel',
+    email: 'michael.arcangel@keysysincorporated.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'Gilbert S. Arevalo',
+    email: 'gilbert.arevalo@ph.keysys.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'John Raymond A. Azuela',
+    email: 'john.azuela@ph.keysys.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'James Christian A. Baldosa',
+    email: 'james.baldosa@ph.keysys.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'Marifel M. Balonzo',
+    email: 'marifel.mata@pingcon.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'Luisito Barnuevo',
+    email: 'luisito.barnuevo@ph.keysys.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'Jade Martin Batula',
+    email: 'jade.batula@ph.keysys.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'Bless P. Bautista',
+    email: 'bless.bautista@pingcon.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'Grace C. Cabanela',
+    email: 'grace.cabanela@ph.keysys.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'Mary Jane N. Cerezo',
+    email: 'mary.cerezo@ph.keysys.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
+  },
+  {
+    name: 'Mario U. Cernias',
+    email: 'mario.cernias@ph.keysys.com',
+    role: 'inventory_staff',
+    is_active: true,
+    department: 'Pingcon Operations'
   }
 ];
 
@@ -109,6 +228,7 @@ export const authService = {
 
   /**
    * Sync active employees from Pingcon HR Center API
+   * Strictly extracts COMPANY EMAILS from the HR system/sheet, ignoring personal accounts.
    * Endpoint: https://hr-center-pingcon.laravel.cloud/api/v1/employees
    */
   async syncFromHRCenter(apiKey) {
@@ -118,7 +238,7 @@ export const authService = {
     }
 
     try {
-      const res = await fetch('https://hr-center-pingcon.laravel.cloud/api/v1/employees?per_page=100', {
+      const res = await fetch('https://hr-center-pingcon.laravel.cloud/api/v1/employees?per_page=150', {
         headers: {
           'Authorization': `Bearer ${key.trim()}`,
           'Accept': 'application/json'
@@ -136,15 +256,52 @@ export const authService = {
         return { count: 0, message: 'No employees found in HR Center response.' };
       }
 
-      // Upsert into Supabase admin_users
-      const rows = hrList.map(emp => ({
-        name: emp.full_name || emp.name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || 'Employee',
-        email: (emp.email || emp.company_email || '').toLowerCase().trim(),
-        role: emp.role || 'inventory_staff',
-        is_active: emp.status !== 'resigned' && emp.status !== 'inactive' && emp.is_active !== false,
-        department: emp.department || emp.department_name || 'General'
-      })).filter(r => r.email);
+      // Upsert into Supabase admin_users with COMPANY EMAIL PRIORITY
+      const rows = [];
+      for (const emp of hrList) {
+        // Look for company email field
+        const companyEmail = (
+          emp.company_email ||
+          emp.companyEmail ||
+          emp.company_email_address ||
+          emp.work_email ||
+          emp.official_email ||
+          emp.corporate_email ||
+          ''
+        ).toLowerCase().trim();
 
+        let chosenEmail = companyEmail;
+
+        // Fallback only if no designated company email, and ensure it is NOT a personal email
+        if (!chosenEmail || chosenEmail === 'n/a') {
+          const rawEmail = (emp.email || '').toLowerCase().trim();
+          if (rawEmail && !rawEmail.includes('@gmail.com') && !rawEmail.includes('@yahoo.com') && !rawEmail.includes('@hotmail.com')) {
+            chosenEmail = rawEmail;
+          }
+        }
+
+        // If this is Danilo Alvaro, enforce finance2@keysysincorporated.com as Super Admin
+        const empName = emp.full_name || emp.name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || 'Employee';
+        const isDanilo = empName.toLowerCase().includes('danilo') && empName.toLowerCase().includes('alvaro');
+
+        if (isDanilo) {
+          chosenEmail = 'finance2@keysysincorporated.com';
+        }
+
+        if (!chosenEmail || chosenEmail === 'n/a') {
+          continue; // Skip employees without a valid company email
+        }
+
+        rows.push({
+          name: isDanilo ? 'Danilo Alvaro Jr. (Super Admin)' : empName,
+          email: chosenEmail,
+          role: isDanilo ? 'super_admin' : (emp.role || 'inventory_staff'),
+          is_active: emp.status !== 'resigned' && emp.status !== 'inactive' && emp.is_active !== false,
+          department: emp.department || emp.department_name || (isDanilo ? 'Finance Systems / IT' : 'General')
+        });
+      }
+
+      // Upsert rows into Supabase admin_users
       for (const row of rows) {
         await supabase
           .from('admin_users')
@@ -152,7 +309,10 @@ export const authService = {
       }
 
       this.setHrApiKey(key);
-      return { count: rows.length, message: `Successfully synchronized ${rows.length} employees from HR Center!` };
+      return { 
+        count: rows.length, 
+        message: `Successfully synchronized ${rows.length} company employee accounts with official company emails!` 
+      };
     } catch (err) {
       throw new Error(`Failed to sync from HR Center API: ${err.message}`);
     }
@@ -193,7 +353,7 @@ export const authService = {
   },
 
   /**
-   * Super Admin action: Add new employee
+   * Super Admin action: Add new employee with company email
    */
   async addEmployee({ name, email, role = 'inventory_staff', department = 'General' }) {
     const cleanEmail = email.toLowerCase().trim();
@@ -215,16 +375,16 @@ export const authService = {
 
   /**
    * OTP DISPATCH:
-   * 1. Checks if email belongs to company employee directory
-   * 2. Checks if employee is ACTIVE (blocks resigned employees)
-   * 3. Generates 6-digit OTP
-   * 4. Dispatches from finance2@keysysincorporated.com
+   * 1. Checks if email belongs to authorized company employee directory
+   * 2. Checks if employee is ACTIVE (blocks resigned accounts)
+   * 3. Generates OTP token in database for verification redundancy
+   * 4. Dispatches genuine email via Supabase Auth signInWithOtp (using custom SMTP from finance2@keysysincorporated.com)
    */
   async requestOtp(email) {
     const cleanEmail = (email || '').toLowerCase().trim();
-    if (!cleanEmail) throw new Error('Please enter your email address.');
+    if (!cleanEmail) throw new Error('Please enter your company email address.');
 
-    // 1. Check employee directory
+    // 1. Check employee directory in Supabase
     let employee = null;
     try {
       const { data, error } = await supabase
@@ -237,16 +397,16 @@ export const authService = {
         employee = data[0];
       }
     } catch (e) {
-      console.warn('Supabase employee lookup error:', e);
+      console.warn('Supabase employee lookup notice:', e);
     }
 
-    // Fallback to in-memory defaults if table is empty or offline
+    // Fallback to initial company employees
     if (!employee) {
       employee = DEFAULT_EMPLOYEES.find(e => e.email.toLowerCase() === cleanEmail);
     }
 
     if (!employee) {
-      throw new Error(`Access Blocked: "${cleanEmail}" is not recognized as an authorized company employee.`);
+      throw new Error(`Access Blocked: "${cleanEmail}" is not recognized as an authorized company employee email. Please use your official company email address.`);
     }
 
     // 2. Check if employee is resigned
@@ -254,7 +414,7 @@ export const authService = {
       throw new Error(`Access Blocked: This employee account (${cleanEmail}) is marked as RESIGNED or INACTIVE. Access denied.`);
     }
 
-    // 3. Generate 6-digit OTP code
+    // 3. Generate 6-digit OTP code for local/database fallback
     const otpCode = String(Math.floor(100000 + Math.random() * 900000));
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes
 
@@ -269,7 +429,7 @@ export const authService = {
           is_used: false
         }]);
     } catch (e) {
-      console.warn('OTP token insert error (using session fallback):', e);
+      console.warn('OTP token insert notice:', e);
     }
 
     // Store in session cache
@@ -278,7 +438,24 @@ export const authService = {
       expiresAt: Date.now() + 10 * 60 * 1000
     }));
 
-    console.log(`[OTP DISPATCH] From: finance2@keysysincorporated.com -> To: ${cleanEmail} -> Code: ${otpCode}`);
+    // 4. Trigger Real Supabase Auth Email Dispatch via Custom SMTP
+    let emailDispatched = false;
+    try {
+      const { data, error } = await supabase.auth.signInWithOtp({
+        email: cleanEmail,
+        options: {
+          shouldCreateUser: true
+        }
+      });
+      if (!error) {
+        emailDispatched = true;
+        console.log(`[Supabase Auth] Real email OTP dispatched to ${cleanEmail}`);
+      } else {
+        console.warn('[Supabase Auth] signInWithOtp notice (Custom SMTP may still be pending configuration):', error.message);
+      }
+    } catch (e) {
+      console.warn('[Supabase Auth] Dispatch error:', e);
+    }
 
     return {
       success: true,
@@ -286,13 +463,14 @@ export const authService = {
       sender: 'finance2@keysysincorporated.com',
       employeeName: employee.name,
       role: employee.role,
-      simulatedCode: otpCode, // For testing convenience
-      message: `OTP sent from finance2@keysysincorporated.com to ${cleanEmail}. Valid for 10 minutes.`
+      emailDispatched,
+      message: `OTP sent to ${cleanEmail}. Valid for 10 minutes.`
     };
   },
 
   /**
    * VERIFY OTP & CREATE SESSION
+   * Verifies against Supabase Auth, or database otp_tokens table
    */
   async verifyOtp(email, enteredCode) {
     const cleanEmail = (email || '').toLowerCase().trim();
@@ -300,32 +478,49 @@ export const authService = {
 
     if (!cleanCode) throw new Error('Please enter the 6-digit OTP code.');
 
-    // 1. Check Supabase otp_tokens
     let isValid = false;
-    try {
-      const { data, error } = await supabase
-        .from('otp_tokens')
-        .select('*')
-        .eq('email', cleanEmail)
-        .eq('otp_code', cleanCode)
-        .eq('is_used', false)
-        .gt('expires_at', new Date().toISOString())
-        .order('created_at', { ascending: false })
-        .limit(1);
 
-      if (!error && data && data.length > 0) {
+    // 1. Attempt verification with Supabase Auth OTP
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: cleanEmail,
+        token: cleanCode,
+        type: 'email'
+      });
+      if (!error && data?.session) {
         isValid = true;
-        // Mark as used
-        await supabase
-          .from('otp_tokens')
-          .update({ is_used: true })
-          .eq('id', data[0].id);
       }
     } catch (e) {
-      console.warn('Supabase OTP verify error:', e);
+      console.warn('Supabase Auth verify notice:', e);
     }
 
-    // Fallback to session cache
+    // 2. Fallback: Check Supabase otp_tokens table
+    if (!isValid) {
+      try {
+        const { data, error } = await supabase
+          .from('otp_tokens')
+          .select('*')
+          .eq('email', cleanEmail)
+          .eq('otp_code', cleanCode)
+          .eq('is_used', false)
+          .gt('expires_at', new Date().toISOString())
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (!error && data && data.length > 0) {
+          isValid = true;
+          // Mark as used
+          await supabase
+            .from('otp_tokens')
+            .update({ is_used: true })
+            .eq('id', data[0].id);
+        }
+      } catch (e) {
+        console.warn('Supabase OTP verify error:', e);
+      }
+    }
+
+    // 3. Fallback: Check session cache
     if (!isValid) {
       try {
         const cached = sessionStorage.getItem(`otp_${cleanEmail}`);
@@ -337,15 +532,15 @@ export const authService = {
           }
         }
       } catch (e) {
-        console.warn('Session OTP check error:', e);
+        console.warn('Session OTP check notice:', e);
       }
     }
 
     if (!isValid) {
-      throw new Error('Invalid or expired OTP code. Please check your code or request a new one.');
+      throw new Error('Invalid or expired OTP code. Please check your inbox or request a new code.');
     }
 
-    // 2. Fetch employee details
+    // 4. Fetch employee details from admin_users
     let employee = null;
     try {
       const { data } = await supabase

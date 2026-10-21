@@ -8,7 +8,6 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
   const [otpInput, setOtpInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
-  const [otpDispatchInfo, setOtpDispatchInfo] = useState(null);
 
   if (!isOpen) return null;
 
@@ -22,8 +21,7 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
     setErrorMessage(null);
 
     try {
-      const res = await authService.requestOtp(email);
-      setOtpDispatchInfo(res);
+      await authService.requestOtp(email);
       setStep('otp');
     } catch (err) {
       setErrorMessage(err.message);
@@ -83,7 +81,7 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
           <form onSubmit={handleRequestOtp} className="space-y-4">
             <div>
               <label className="block text-xs font-black uppercase tracking-wider text-slate-500 mb-1.5">
-                Employee Company Email Address
+                Official Company Email Address
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
@@ -93,20 +91,13 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
                   autoFocus
                   value={emailInput}
                   onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder="e.g. danilo.alvaro@a2z2go.net"
+                  placeholder="e.g. finance2@keysysincorporated.com"
                   className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
                 />
               </div>
               <span className="block text-[11px] text-slate-400 mt-1">
-                Must be an active employee in company directory. Resigned accounts are blocked.
+                Must be an active employee in company directory. Personal emails (@gmail) are not accepted.
               </span>
-            </div>
-
-            <div className="p-3 bg-blue-50/60 border border-blue-200 rounded-2xl text-[11px] text-blue-900 space-y-0.5">
-              <span className="font-bold block">📨 OTP Email Dispatch:</span>
-              <p className="text-slate-600">
-                OTP codes are dispatched from <strong className="text-blue-700">finance2@keysysincorporated.com</strong>.
-              </p>
             </div>
 
             <button
@@ -137,22 +128,14 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
         {/* STEP 2: Enter 6-digit OTP */}
         {step === 'otp' && (
           <form onSubmit={handleVerifyOtp} className="space-y-4 animate-in fade-in">
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-900 space-y-1">
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-900 space-y-1">
               <div className="flex items-center gap-1.5 font-bold">
                 <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>Verification code dispatched!</span>
               </div>
               <p className="text-[11px] text-emerald-800">
-                Sent from <strong>finance2@keysysincorporated.com</strong> to <strong>{emailInput}</strong>.
+                Please check your inbox at <strong>{emailInput}</strong> for your 6-digit OTP code.
               </p>
-              {otpDispatchInfo?.simulatedCode && (
-                <div className="mt-1 pt-1 border-t border-emerald-200 flex items-center justify-between text-[11px] font-mono">
-                  <span className="text-emerald-700 font-semibold">Your 6-Digit OTP:</span>
-                  <span className="px-2 py-0.5 bg-emerald-200/80 rounded font-black text-emerald-900 text-sm tracking-wider">
-                    {otpDispatchInfo.simulatedCode}
-                  </span>
-                </div>
-              )}
             </div>
 
             <div>
