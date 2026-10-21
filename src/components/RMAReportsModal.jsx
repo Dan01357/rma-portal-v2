@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, CheckCircle, Clock, Barcode, FileText, Package, MapPin, Image as ImageIcon, ExternalLink } from 'lucide-react';
+import { X, CheckCircle, Clock, Barcode, FileText, Package, MapPin, Image as ImageIcon, ExternalLink, User, Phone, Mail } from 'lucide-react';
 
 export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
   const [selectedPhoto, setSelectedPhoto] = useState(null);
@@ -21,7 +21,7 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
                 Logged RMA Return Reports ({reports.length})
               </h2>
               <p className="text-xs text-slate-500">
-                Returns with proof photos, return reasons, and GPS coordinates.
+                Incoming return reports with proof photos, reporter contact info, and GPS coordinates.
               </p>
             </div>
           </div>
@@ -39,7 +39,7 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
             <Package className="w-10 h-10 text-slate-300 mx-auto" />
             <h3 className="text-sm font-bold text-slate-700">No RMA Reports Yet</h3>
             <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              Scan any item barcode in Reporter Mode and submit to record your first return with proof photos and GPS.
+              Scan any item barcode in Reporter Mode and submit to record your first return with proof photos and contact details.
             </p>
           </div>
         ) : (
@@ -49,11 +49,15 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
                 ? item.photos 
                 : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
 
+              const reporterDisplayName = item.reporter_name || (item.reported_by && !item.reported_by.includes('(') ? item.reported_by : '') || 'Customer / Reporter';
+              const reporterContactInfo = item.reporter_contact || (item.reported_by && item.reported_by.includes('(') ? item.reported_by.replace(/.*\((.*)\).*/, '$1') : '');
+
               return (
                 <div
                   key={item.id || item.rma_number}
-                  className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 text-xs"
+                  className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 text-xs shadow-sm hover:shadow transition-shadow"
                 >
+                  {/* Top Bar: RMA Number & Timestamp */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/60 pb-2">
                     <div className="flex items-center gap-2">
                       <span className="font-mono font-black text-blue-700 text-sm">
@@ -76,6 +80,30 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
                     </div>
                   </div>
 
+                  {/* PROMINENT REPORTER INFO CARD */}
+                  <div className="bg-white p-2.5 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
+                        <User className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block leading-tight">
+                          Reported By
+                        </span>
+                        <span className="font-bold text-slate-900 text-sm">
+                          {reporterDisplayName}
+                        </span>
+                      </div>
+                    </div>
+
+                    {reporterContactInfo && (
+                      <div className="flex items-center gap-1.5 font-mono text-slate-700 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
+                        <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                        <span className="font-semibold">{reporterContactInfo}</span>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Item and Reason Info */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
@@ -89,7 +117,7 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
                       <div>
                         <span className="text-[10px] font-bold uppercase text-slate-400 block">Return Reason</span>
                         <span className="px-2 py-0.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 font-bold inline-block text-[11px]">
-                          {item.reason || 'Damaged in Transit / Crushed'}
+                          {item.reason || 'Damaged Box / Crushed Packaging'}
                         </span>
                       </div>
                       {item.explanation && (
@@ -109,28 +137,27 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
                           href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-blue-600 hover:underline flex items-center gap-1 font-mono"
+                          className="text-blue-600 hover:underline flex items-center gap-1 font-mono font-bold"
                         >
                           <span>GPS: {Number(item.gps_latitude).toFixed(4)}, {Number(item.gps_longitude).toFixed(4)}</span>
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       ) : (
-                        <span>GPS: Not available</span>
+                        <span className="text-slate-400">GPS: Not available (Location blank)</span>
                       )}
-                      {item.location && <span className="text-slate-400">({item.location})</span>}
                     </div>
 
                     {/* Proof Photos */}
                     {photoList.length > 0 && (
                       <div className="flex items-center gap-1.5">
                         <span className="text-slate-400 font-semibold">Proof Photos:</span>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5">
                           {photoList.map((url, idx) => (
                             <button
                               key={idx}
                               type="button"
                               onClick={() => setSelectedPhoto(url)}
-                              className="w-8 h-8 rounded-lg overflow-hidden border border-slate-300 hover:scale-105 transition-transform"
+                              className="w-9 h-9 rounded-xl overflow-hidden border border-slate-300 hover:scale-105 shadow-sm transition-transform"
                             >
                               <img src={url} alt="Proof" className="w-full h-full object-cover" />
                             </button>
