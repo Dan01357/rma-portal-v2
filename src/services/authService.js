@@ -481,18 +481,45 @@ export const authService = {
 
     let isValid = false;
 
-    // 1. Attempt verification with Supabase Auth OTP
+    // 1a. Attempt verification with Supabase Auth OTP (type: 'email')
     try {
       const { data, error } = await supabase.auth.verifyOtp({
         email: cleanEmail,
         token: cleanCode,
         type: 'email'
       });
-      if (!error && data?.session) {
+      if (!error && (data?.session || data?.user)) {
         isValid = true;
       }
     } catch (e) {
       console.warn('Supabase Auth verify notice:', e);
+    }
+
+    // 1b. Attempt verification with Supabase Auth OTP (type: 'signup' for newly registered company accounts)
+    if (!isValid) {
+      try {
+        const { data, error } = await supabase.auth.verifyOtp({
+          email: cleanEmail,
+          token: cleanCode,
+          type: 'signup'
+        });
+        if (!error && (data?.session || data?.user)) {
+          isValid = true;
+        }
+      } catch (e) {}
+    }
+
+    // 1c. Attempt verification with token_hash (if user pastes token from email link)
+    if (!isValid && cleanCode.length > 20) {
+      try {
+        const { data, error } = await supabase.auth.verifyOtp({
+          token_hash: cleanCode,
+          type: 'signup'
+        });
+        if (!error && (data?.session || data?.user)) {
+          isValid = true;
+        }
+      } catch (e) {}
     }
 
     // 2. Fallback: Check Supabase otp_tokens table

@@ -71,7 +71,7 @@ export const rmaApi = {
         connected: poStatus.connected, 
         poApiConnected: poStatus.connected,
         message: poStatus.connected 
-          ? 'Connected to Live Purchase Orders API (5,793 ERPLY items). Supabase in offline mock mode.'
+          ? 'Connected to Live Purchase Orders API. Supabase in offline mock mode.'
           : 'Offline Mock Mode active.'
       };
     }
@@ -82,7 +82,7 @@ export const rmaApi = {
         poApiConnected: poStatus.connected,
         mode: 'live',
         message: poStatus.connected 
-          ? 'Connected to Live Purchase Orders API (5,793 Products) & Supabase Database.'
+          ? 'Connected to Live Purchase Orders API & Supabase Database.'
           : 'Connected to Supabase. Live PO API unreachable.'
       };
     } catch (err) {
@@ -91,7 +91,7 @@ export const rmaApi = {
         poApiConnected: poStatus.connected,
         mode: poStatus.connected ? 'live-po-local-supabase' : 'offline',
         message: poStatus.connected
-          ? 'Connected to Live Purchase Orders API (5,793 Products). Supabase local fallback.'
+          ? 'Connected to Live Purchase Orders API. Supabase local fallback.'
           : `Offline mode active (${err.message || 'Network unreachable'}). Local mock storage active.`
       };
     }
@@ -113,7 +113,7 @@ export const rmaApi = {
 
   /**
    * Fast Barcode / SKU Lookup:
-   * 1. Query Live Laravel Cloud API (5,793 real ERPLY products)
+   * 1. Query Live Wholesale Catalog API
    * 2. If not found, check Supabase products table
    * 3. If not found, check local catalog
    */

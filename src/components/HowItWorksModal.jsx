@@ -102,7 +102,7 @@ export default function HowItWorksModal({ isOpen, onClose }) {
                   </div>
                   <h3 className="font-bold text-slate-900 dark:text-white text-sm">Scan Existing Barcode & File Return</h3>
                   <p className="text-slate-600 dark:text-slate-400 text-xs">
-                    Repackers scan the <strong>existing factory barcode or SKU on the box</strong> via phone camera. The app queries <strong>5,793 live ERPLY items</strong> in real-time. No need to pre-print product QR codes!
+                    Repackers scan the <strong>existing factory barcode or SKU on the box</strong> via phone camera. The app queries <strong>wholesale database items</strong> in real-time. No need to pre-print product QR codes!
                   </p>
                   <ul className="text-xs text-slate-600 dark:text-slate-300 space-y-1 list-disc list-inside">
                     <li><strong>Live SKU Lookup:</strong> Automatically fills official Product Name, Supplier Name, and Contract Price from ERP database.</li>

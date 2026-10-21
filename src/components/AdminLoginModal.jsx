@@ -9,6 +9,17 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
 
+  // Always reset to Step 1 (enter email) whenever modal is opened fresh
+  React.useEffect(() => {
+    if (isOpen) {
+      setStep('email');
+      setEmailInput('');
+      setOtpInput('');
+      setIsLoading(false);
+      setErrorMessage(null);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   // Step 1: Request OTP
@@ -139,18 +150,23 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
 
             <div>
               <label className="block text-xs font-black uppercase tracking-wider text-slate-500 mb-1.5 text-center">
-                Enter Verification Code
+                Enter Verification Code or Token
               </label>
               <input
                 type="text"
                 required
                 autoFocus
-                maxLength="8"
+                maxLength={64}
                 value={otpInput}
-                onChange={(e) => setOtpInput(e.target.value.replace(/[^0-9]/g, ''))}
-                placeholder="••••••••"
-                className="w-full py-3.5 text-center tracking-[0.35em] text-2xl font-black font-mono bg-slate-50 border-2 border-blue-500 rounded-2xl text-slate-900 focus:outline-none focus:bg-white"
+                onChange={(e) => setOtpInput(e.target.value.trim())}
+                placeholder="e.g. 123456"
+                className={`w-full py-3.5 text-center font-black font-mono bg-slate-50 border-2 border-blue-500 rounded-2xl text-slate-900 focus:outline-none focus:bg-white transition-all ${
+                  otpInput.length <= 8 ? 'tracking-[0.35em] text-2xl' : 'text-xs tracking-normal px-3'
+                }`}
               />
+              <span className="block text-[10px] text-slate-400 text-center mt-1">
+                Enter the 6-digit OTP code sent to your email
+              </span>
             </div>
 
             <button

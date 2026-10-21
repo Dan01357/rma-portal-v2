@@ -8,7 +8,37 @@
  */
 
 const BASE_URL = import.meta.env.VITE_PO_API_URL || 'https://purchase-order-db-production-ff1oho.laravel.cloud/api/v1';
-const API_KEY = import.meta.env.VITE_PO_API_KEY || 'pk_live_po_cloud_db_2026_dev_key';
+const getApiKey = () => {
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem('rma_po_api_key');
+    if (stored && stored.trim()) return stored.trim();
+  }
+  return import.meta.env.VITE_PO_API_KEY || 'pk_live_po_cloud_db_2026_dev_key';
+};
+
+let isApiUnauthorized = (() => {
+  try {
+    return sessionStorage.getItem('rma_po_api_disabled') === 'true';
+  } catch (e) {
+    return false;
+  }
+})();
+
+const markUnauthorized = () => {
+  isApiUnauthorized = true;
+  try {
+    sessionStorage.setItem('rma_po_api_disabled', 'true');
+  } catch (e) {}
+};
+
+const clearUnauthorized = () => {
+  isApiUnauthorized = false;
+  try {
+    sessionStorage.removeItem('rma_po_api_disabled');
+  } catch (e) {}
+};
+
+let lastCheckTime = 0;
 
 // Image matching helper for realistic product preview visuals
 const inferProductImage = (name = '') => {
@@ -85,17 +115,44 @@ export const purchaseOrdersApi = {
   /**
    * Healthcheck & table access check
    */
-  async testConnection() {
+  setApiKey(key) {
+    if (typeof window !== 'undefined') {
+      if (key && key.trim()) {
+        localStorage.setItem('rma_po_api_key', key.trim());
+      } else {
+        localStorage.removeItem('rma_po_api_key');
+      }
+    }
+    clearUnauthorized();
+  },
+
+  isUnauthorized() {
+    return isApiUnauthorized;
+  },
+
+  /**
+   * Healthcheck & table access check
+   */
+  async testConnection(force = false) {
+    if (isApiUnauthorized && !force) {
+      return { connected: false, error: 'Coworker API Key is unauthorized (HTTP 401). Update key in Settings.' };
+    }
+
+    const key = getApiKey();
+    lastCheckTime = Date.now();
+
     try {
       const res = await fetch(`${BASE_URL}/tables`, {
         headers: {
-          'X-API-Key': API_KEY,
+          'X-API-Key': key,
           'Accept': 'application/json'
         }
       });
       if (!res.ok) {
+        if (res.status === 401) markUnauthorized();
         return { connected: false, error: `HTTP ${res.status}: ${res.statusText}` };
       }
+      clearUnauthorized();
       const data = await res.json();
       return { 
         connected: true, 
@@ -112,10 +169,11 @@ export const purchaseOrdersApi = {
    * Checks erply_products table (5,793 items)
    */
   async findProductByBarcode(barcodeOrCode) {
-    if (!barcodeOrCode) return null;
+    if (!barcodeOrCode || isApiUnauthorized) return null;
     const clean = String(barcodeOrCode).trim();
     if (!clean) return null;
 
+    const key = getApiKey();
     // Backend SQL is case-sensitive. Try exact code variations:
     const codeCandidates = Array.from(new Set([clean, clean.toUpperCase(), clean.toLowerCase()]));
 
@@ -125,10 +183,15 @@ export const purchaseOrdersApi = {
         const directUrl = `${BASE_URL}/data/erply_products?code=${encodeURIComponent(code)}&columns=id,code,code2,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
         const res = await fetch(directUrl, {
           headers: {
-            'X-API-Key': API_KEY,
+            'X-API-Key': key,
             'Accept': 'application/json'
           }
         });
+
+        if (res.status === 401) {
+          markUnauthorized();
+          return null;
+        }
 
         if (res.ok) {
           const json = await res.json();
@@ -141,10 +204,15 @@ export const purchaseOrdersApi = {
         const code2Url = `${BASE_URL}/data/erply_products?code2=${encodeURIComponent(code)}&columns=id,code,code2,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
         const res2 = await fetch(code2Url, {
           headers: {
-            'X-API-Key': API_KEY,
+            'X-API-Key': key,
             'Accept': 'application/json'
           }
         });
+
+        if (res2.status === 401) {
+          markUnauthorized();
+          return null;
+        }
 
         if (res2.ok) {
           const json2 = await res2.json();
@@ -153,7 +221,7 @@ export const purchaseOrdersApi = {
           }
         }
       } catch (err) {
-        console.warn('[PurchaseOrdersAPI] Live code lookup failed for candidate:', code, err);
+        // Quiet catch
       }
     }
 
@@ -162,12 +230,13 @@ export const purchaseOrdersApi = {
   },
 
   /**
-   * Real-time search across 5,793 live products in erply_products
+   * Real-time search across live products in erply_products
    * Overcomes backend case-sensitivity by testing capitalized and uppercase terms
    */
   async searchProducts(query, limit = 250) {
-    if (!query || query.trim().length === 0) return [];
+    if (!query || query.trim().length === 0 || isApiUnauthorized) return [];
     const trimmed = query.trim();
+    const key = getApiKey();
 
     // Build variations to handle case-sensitive SQL (e.g., 'tissue' -> 'Tissue', 'TISSUE', 'tissue')
     const capitalized = trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
@@ -180,10 +249,15 @@ export const purchaseOrdersApi = {
         const url = `${BASE_URL}/data/erply_products?search=${encodeURIComponent(term)}&per_page=${limit}&columns=id,code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
         const res = await fetch(url, {
           headers: {
-            'X-API-Key': API_KEY,
+            'X-API-Key': key,
             'Accept': 'application/json'
           }
         });
+
+        if (res.status === 401) {
+          markUnauthorized();
+          break; // Stop immediately to avoid 401 spam
+        }
 
         if (res.ok) {
           const json = await res.json();
@@ -195,7 +269,7 @@ export const purchaseOrdersApi = {
           }
         }
       } catch (err) {
-        console.warn('[PurchaseOrdersAPI] Live product search error:', err);
+        // Quiet catch
       }
     }
 

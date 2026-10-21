@@ -30,7 +30,12 @@ import {
   ShieldAlert,
   Package,
   List,
-  LayoutGrid
+  LayoutGrid,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  RotateCcw,
+  Filter
 } from 'lucide-react';
 import { catalogService } from './services/catalogService';
 import { purchaseOrdersApi } from './services/purchaseOrdersApi';
@@ -44,6 +49,7 @@ import EmployeeManagementModal from './components/EmployeeManagementModal';
 import SavedProductsTab from './components/SavedProductsTab';
 import ProductSearchTab from './components/ProductSearchTab';
 import ProductEditModal from './components/ProductEditModal';
+import ImageLightboxModal from './components/ImageLightboxModal';
 
 const DEFECT_REASONS = [
   'Damaged Box / Crushed Packaging',
@@ -161,9 +167,13 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleLogout = () => {
-    authService.logout();
+  const handleLogout = async () => {
+    try {
+      await authService.logout();
+    } catch (e) {}
     setCurrentUser(null);
+    setIsAdminView(false);
+    setIsLoginModalOpen(false);
     navigateTo('/');
     showToast('Logged out of admin dashboard.', 'success');
   };
@@ -199,6 +209,16 @@ export default function App() {
     return localStorage.getItem('rma_admin_reports_view_mode') || 'table';
   });
 
+  // Return Reports Filtering & Sorting State
+  const [reportsSearchQuery, setReportsSearchQuery] = useState('');
+  const [reportsReasonFilter, setReportsReasonFilter] = useState('all');
+  const [reportsStatusFilter, setReportsStatusFilter] = useState('all');
+  const [reportsSortField, setReportsSortField] = useState('id');
+  const [reportsSortDirection, setReportsSortDirection] = useState('desc');
+
+  // Fullscreen Image Lightbox Modal State
+  const [lightboxPhoto, setLightboxPhoto] = useState(null);
+
   const handleSetReportsViewMode = (mode) => {
     setReportsViewMode(mode);
     try {
@@ -206,9 +226,100 @@ export default function App() {
     } catch (e) {}
   };
 
+  const handleReportsSort = (field) => {
+    if (reportsSortField === field) {
+      setReportsSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setReportsSortField(field);
+      setReportsSortDirection('asc');
+    }
+  };
+
+  const resetReportsFilters = () => {
+    setReportsSearchQuery('');
+    setReportsReasonFilter('all');
+    setReportsStatusFilter('all');
+  };
+
+  // Filter and sort return reports
+  const processedReports = React.useMemo(() => {
+    const q = reportsSearchQuery.toLowerCase().trim();
+    let list = recentReportsList.filter(item => {
+      if (q) {
+        const matches = (
+          String(item.id || '').includes(q) ||
+          (item.rma_number || '').toLowerCase().includes(q) ||
+          (item.barcode || '').toLowerCase().includes(q) ||
+          (item.name || '').toLowerCase().includes(q) ||
+          (item.reporter_name || item.reported_by || '').toLowerCase().includes(q) ||
+          (item.reporter_contact || '').toLowerCase().includes(q) ||
+          (item.reason || '').toLowerCase().includes(q)
+        );
+        if (!matches) return false;
+      }
+
+      if (reportsReasonFilter !== 'all') {
+        if ((item.reason || '') !== reportsReasonFilter) return false;
+      }
+
+      if (reportsStatusFilter === 'logged' && item.status === 'pending_admin_details') return false;
+      if (reportsStatusFilter === 'unknown' && item.status !== 'pending_admin_details') return false;
+
+      return true;
+    });
+
+    list.sort((a, b) => {
+      let valA, valB;
+      switch (reportsSortField) {
+        case 'id':
+          valA = Number(a.id) || 0;
+          valB = Number(b.id) || 0;
+          break;
+        case 'rma_number':
+          valA = String(a.rma_number || '').toLowerCase();
+          valB = String(b.rma_number || '').toLowerCase();
+          break;
+        case 'barcode':
+          valA = String(a.barcode || '').toLowerCase();
+          valB = String(b.barcode || '').toLowerCase();
+          break;
+        case 'name':
+          valA = String(a.name || '').toLowerCase();
+          valB = String(b.name || '').toLowerCase();
+          break;
+        case 'reason':
+          valA = String(a.reason || '').toLowerCase();
+          valB = String(b.reason || '').toLowerCase();
+          break;
+        case 'reporter':
+          valA = String(a.reporter_name || a.reported_by || '').toLowerCase();
+          valB = String(b.reporter_name || b.reported_by || '').toLowerCase();
+          break;
+        case 'status':
+          valA = item.status === 'pending_admin_details' ? 0 : 1;
+          valB = item.status === 'pending_admin_details' ? 0 : 1;
+          break;
+        case 'created_at':
+          valA = new Date(a.created_at || 0).getTime();
+          valB = new Date(b.created_at || 0).getTime();
+          break;
+        default:
+          valA = a.id;
+          valB = b.id;
+      }
+
+      if (valA < valB) return reportsSortDirection === 'asc' ? -1 : 1;
+      if (valA > valB) return reportsSortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return list;
+  }, [recentReportsList, reportsSearchQuery, reportsReasonFilter, reportsStatusFilter, reportsSortField, reportsSortDirection]);
+
   // Real-time synchronization & initial load
   useEffect(() => {
     refreshAllData();
+    checkApiConnections();
     captureAccurateGps();
 
     // 1. Cross-tab & local event bus listener
@@ -231,7 +342,31 @@ export default function App() {
       })
       .subscribe();
 
-    // 3. Immediate instant update when returning to tab/window
+    // 3. Supabase Auth listener for email signup & magic link verification
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user?.email) {
+        const cleanEmail = session.user.email.toLowerCase();
+        try {
+          const staff = await authService.getEmployees();
+          const matched = staff.find(e => e.email?.toLowerCase() === cleanEmail);
+          if (matched && matched.is_active !== false) {
+            const user = {
+              name: matched.name,
+              email: matched.email,
+              role: matched.role || 'inventory_staff',
+              department: matched.department || 'Operations'
+            };
+            localStorage.setItem('rma_admin_session_v2', JSON.stringify(user));
+            setCurrentUser(user);
+            setIsAdminView(true);
+            setIsLoginModalOpen(false);
+            showToast(`Welcome ${matched.name}! Authenticated via email confirmation.`, 'success');
+          }
+        } catch (e) {}
+      }
+    });
+
+    // 4. Immediate instant update when returning to tab/window
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         refreshAllData();
@@ -241,7 +376,7 @@ export default function App() {
     window.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', handleFocus);
 
-    // 4. Fast 3.5-second heartbeat polling so background tabs and mobile stay 100% in sync
+    // 5. Fast 3.5-second heartbeat polling so background tabs and mobile stay 100% in sync
     const pollInterval = setInterval(() => {
       refreshAllData();
     }, 3500);
@@ -249,6 +384,7 @@ export default function App() {
     return () => {
       unsubscribeBus();
       supabase.removeChannel(realtimeChannel);
+      authListener?.subscription?.unsubscribe();
       window.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleFocus);
       clearInterval(pollInterval);
@@ -309,19 +445,31 @@ export default function App() {
     );
   };
 
+  const checkApiConnections = async () => {
+    try {
+      const supaRes = await catalogService.testSupabase();
+      if (supaRes) {
+        setSupaStatus({ checking: false, connected: supaRes.connected, rowsFound: supaRes.rowsFound });
+      }
+
+      if (!purchaseOrdersApi.isUnauthorized()) {
+        const poRes = await purchaseOrdersApi.testConnection();
+        if (poRes) {
+          setPoApiStatus({ checking: false, connected: poRes.connected });
+        }
+      } else {
+        setPoApiStatus({ checking: false, connected: false });
+      }
+    } catch (e) {}
+  };
+
   const refreshAllData = async () => {
     try {
       await Promise.allSettled([
         catalogService.getPendingBarcodes().then(pending => setPendingBarcodesList(pending || [])),
         catalogService.getRecentReports(50).then(reports => setRecentReportsList(reports || [])),
         catalogService.getSavedProducts().then(saved => setSavedProductsList(saved || [])),
-        authService.getEmployees().then(staff => setStaffList(staff || [])),
-        catalogService.testSupabase().then(supaRes => {
-          setSupaStatus({ checking: false, connected: supaRes.connected, rowsFound: supaRes.rowsFound });
-        }),
-        purchaseOrdersApi.testConnection().then(poRes => {
-          setPoApiStatus({ checking: false, connected: poRes.connected });
-        })
+        authService.getEmployees().then(staff => setStaffList(staff || []))
       ]);
     } catch (e) {
       console.warn('Sync notice:', e);
@@ -574,9 +722,18 @@ export default function App() {
                   ) : detectedProduct ? (
                     <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center gap-3 animate-in fade-in">
                       {detectedProduct.imageUrl ? (
-                        <div className="w-14 h-14 rounded-xl overflow-hidden border border-emerald-400 bg-white shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setLightboxPhoto({
+                            url: detectedProduct.imageUrl,
+                            title: detectedProduct.name,
+                            subtitle: `SKU: ${detectedProduct.code} • ₱${Number(detectedProduct.priceWithVat || 0).toFixed(2)}`
+                          })}
+                          className="w-14 h-14 rounded-xl overflow-hidden border border-emerald-400 bg-white shrink-0 cursor-zoom-in hover:opacity-85 transition-opacity"
+                          title="Click to zoom recognized product photo"
+                        >
                           <img src={detectedProduct.imageUrl} alt={detectedProduct.name} className="w-full h-full object-cover" />
-                        </div>
+                        </button>
                       ) : (
                         <div className="w-12 h-12 rounded-xl bg-emerald-200/70 text-emerald-800 flex items-center justify-center shrink-0 font-bold">
                           <CheckCircle className="w-6 h-6" />
@@ -616,11 +773,22 @@ export default function App() {
                   <div className="grid grid-cols-3 gap-2">
                     {photoFiles.map((item, idx) => (
                       <div key={idx} className="relative aspect-square rounded-2xl overflow-hidden border-2 border-slate-300 group shadow-sm bg-slate-100">
-                        <img src={item.previewUrl} alt="Preview" className="w-full h-full object-cover" />
                         <button
                           type="button"
-                          onClick={() => removePhoto(idx)}
-                          className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full opacity-80 hover:opacity-100 transition-opacity"
+                          onClick={() => setLightboxPhoto({
+                            url: item.previewUrl,
+                            title: 'Proof Photo',
+                            subtitle: `Photo ${idx + 1} of ${photoFiles.length}`
+                          })}
+                          className="w-full h-full block cursor-zoom-in"
+                          title="Click to preview enlarged photo"
+                        >
+                          <img src={item.previewUrl} alt="Preview" className="w-full h-full object-cover" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); removePhoto(idx); }}
+                          className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full opacity-80 hover:opacity-100 transition-opacity z-10"
                         >
                           <X className="w-3 h-3" />
                         </button>
@@ -900,7 +1068,7 @@ export default function App() {
                 }`}
               >
                 <Search className="w-4 h-4 text-emerald-600" />
-                <span>Search All Catalogs (5,793+ items)</span>
+                <span>Search Product Catalog</span>
               </button>
 
               <button
@@ -1010,30 +1178,202 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Filter / Search & Sort Controls Toolbar */}
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2.5">
+                  <div className="flex flex-col md:flex-row md:items-center gap-2.5">
+                    {/* Search Input */}
+                    <div className="relative flex-1">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                      <input
+                        type="text"
+                        value={reportsSearchQuery}
+                        onChange={(e) => setReportsSearchQuery(e.target.value)}
+                        placeholder="Search by SN (#), RMA #, barcode, item name, reporter, or reason..."
+                        className="w-full pl-10 pr-9 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-600 transition-all"
+                      />
+                      {reportsSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setReportsSearchQuery('')}
+                          className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-100"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Reason Filter Dropdown */}
+                    <select
+                      value={reportsReasonFilter}
+                      onChange={(e) => setReportsReasonFilter(e.target.value)}
+                      className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-600"
+                    >
+                      <option value="all">All Reasons</option>
+                      {DEFECT_REASONS.map(r => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+
+                    {/* Status Filter Dropdown */}
+                    <select
+                      value={reportsStatusFilter}
+                      onChange={(e) => setReportsStatusFilter(e.target.value)}
+                      className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-600"
+                    >
+                      <option value="all">All Status</option>
+                      <option value="logged">Logged / Recognized</option>
+                      <option value="unknown">Unknown Barcode</option>
+                    </select>
+
+                    {/* Reset Filters */}
+                    {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all') && (
+                      <button
+                        type="button"
+                        onClick={resetReportsFilters}
+                        className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Reset</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 px-1 font-medium">
+                    <span>
+                      Showing <strong className="text-slate-900 font-bold">{processedReports.length}</strong> of {recentReportsList.length} reports
+                      {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all') && (
+                        <span className="text-blue-600 font-bold ml-1.5">• Filter active</span>
+                      )}
+                    </span>
+                    <span className="text-slate-400">
+                      Click column headers to sort (<strong className="text-slate-700 capitalize">{reportsSortField}</strong> {reportsSortDirection === 'asc' ? '▲' : '▼'})
+                    </span>
+                  </div>
+                </div>
+
                 {recentReportsList.length === 0 ? (
                   <p className="text-xs text-slate-400 py-8 text-center">No return reports filed yet.</p>
+                ) : processedReports.length === 0 ? (
+                  <div className="text-center py-10 space-y-2 bg-slate-50 rounded-2xl border border-slate-200">
+                    <p className="text-xs font-bold text-slate-700">No return reports match the selected filters.</p>
+                    <button
+                      type="button"
+                      onClick={resetReportsFilters}
+                      className="text-xs font-bold text-blue-600 hover:underline"
+                    >
+                      Clear filters
+                    </button>
+                  </div>
                 ) : reportsViewMode === 'table' ? (
                   /* ============================================================ */
-                  /* ROWS / TABLE VIEW: WITH SN (ID) AS FAR-LEFT COLUMN           */
+                  /* ROWS / TABLE VIEW: WITH SORTABLE COLUMNS & LIGHTBOX PHOTOS   */
                   /* ============================================================ */
                   <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
                     <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse text-xs">
                         <thead>
                           <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-black uppercase tracking-wider text-slate-500">
-                            <th className="py-3 px-3.5 font-black text-slate-900 w-16">SN</th>
-                            <th className="py-3 px-3.5 font-bold">RMA #</th>
-                            <th className="py-3 px-3 w-14 text-center">Photo</th>
-                            <th className="py-3 px-3.5 font-bold">Barcode</th>
-                            <th className="py-3 px-3.5 font-bold">Item Name</th>
-                            <th className="py-3 px-3.5 font-bold">Reason</th>
-                            <th className="py-3 px-3.5 font-bold">Reported By</th>
-                            <th className="py-3 px-3 text-center font-bold">Status</th>
-                            <th className="py-3 px-3.5 text-right font-bold">Date & GPS</th>
+                            <th 
+                              onClick={() => handleReportsSort('id')}
+                              className="py-3 px-3.5 font-black text-slate-900 w-16 cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by Serial Number"
+                            >
+                              <div className="flex items-center">
+                                <span>SN</span>
+                                {reportsSortField === 'id' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
+                            <th 
+                              onClick={() => handleReportsSort('rma_number')}
+                              className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by RMA #"
+                            >
+                              <div className="flex items-center">
+                                <span>RMA #</span>
+                                {reportsSortField === 'rma_number' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
+                            <th className="py-3 px-3 w-14 text-center select-none">Photo</th>
+                            <th 
+                              onClick={() => handleReportsSort('barcode')}
+                              className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by Barcode"
+                            >
+                              <div className="flex items-center">
+                                <span>Barcode</span>
+                                {reportsSortField === 'barcode' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
+                            <th 
+                              onClick={() => handleReportsSort('name')}
+                              className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by Item Name"
+                            >
+                              <div className="flex items-center">
+                                <span>Item Name</span>
+                                {reportsSortField === 'name' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
+                            <th 
+                              onClick={() => handleReportsSort('reason')}
+                              className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by Reason"
+                            >
+                              <div className="flex items-center">
+                                <span>Reason</span>
+                                {reportsSortField === 'reason' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
+                            <th 
+                              onClick={() => handleReportsSort('reporter')}
+                              className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by Reporter"
+                            >
+                              <div className="flex items-center">
+                                <span>Reported By</span>
+                                {reportsSortField === 'reporter' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
+                            <th 
+                              onClick={() => handleReportsSort('status')}
+                              className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by Status"
+                            >
+                              <div className="flex items-center justify-center">
+                                <span>Status</span>
+                                {reportsSortField === 'status' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
+                            <th 
+                              onClick={() => handleReportsSort('created_at')}
+                              className="py-3 px-3.5 text-right font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by Date"
+                            >
+                              <div className="flex items-center justify-end">
+                                <span>Date & GPS</span>
+                                {reportsSortField === 'created_at' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-medium">
-                          {recentReportsList.slice(0, 15).map(item => {
+                          {processedReports.map(item => {
                             const photoList = Array.isArray(item.photos) 
                               ? item.photos 
                               : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
@@ -1052,14 +1392,25 @@ export default function App() {
                                   {item.rma_number}
                                 </td>
 
-                                {/* 3. Photo */}
+                                {/* 3. Photo Thumbnail with Lightbox */}
                                 <td className="py-2.5 px-3 text-center">
                                   {photoList.length > 0 ? (
-                                    <img 
-                                      src={photoList[0]} 
-                                      alt="Proof" 
-                                      className="w-10 h-10 rounded-xl object-cover border border-slate-200 mx-auto" 
-                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => setLightboxPhoto({
+                                        url: photoList[0],
+                                        title: item.name || `Return ${item.rma_number}`,
+                                        subtitle: `RMA #${item.rma_number} • Reported by ${item.reporter_name || item.reported_by || 'Staff'} • ${item.reason || 'Damaged'}`
+                                      })}
+                                      className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
+                                      title="Click to view full-size proof photo"
+                                    >
+                                      <img 
+                                        src={photoList[0]} 
+                                        alt="Proof" 
+                                        className="w-full h-full object-cover" 
+                                      />
+                                    </button>
                                   ) : (
                                     <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto border border-slate-200">
                                       <ImageIcon className="w-4 h-4" />
@@ -1132,65 +1483,82 @@ export default function App() {
                       </table>
                     </div>
                     <div className="p-3 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 font-semibold px-4 flex justify-between">
-                      <span>Showing {Math.min(recentReportsList.length, 15)} of {recentReportsList.length} reports</span>
-                      <span>Realtime synced</span>
+                      <span>Showing {processedReports.length} return reports</span>
+                      <span>Sorted by {reportsSortField} ({reportsSortDirection.toUpperCase()})</span>
                     </div>
                   </div>
                 ) : (
                   /* ============================================================ */
-                  /* GRID / CARDS VIEW (With SN badge displayed on each)          */
+                  /* GRID / CARDS VIEW (With SN badge and clickable photos)       */
                   /* ============================================================ */
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {recentReportsList.slice(0, 10).map(item => (
-                      <div 
-                        key={item.id || item.rma_number}
-                        className="p-4 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-2xl space-y-2 transition-all shadow-sm"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-mono font-black text-xs text-blue-900 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-lg">
-                                SN #{item.id}
-                              </span>
-                              <span className="font-mono font-black text-blue-700 text-sm">
-                                {item.rma_number}
-                              </span>
+                    {processedReports.map(item => {
+                      const photoList = Array.isArray(item.photos) 
+                        ? item.photos 
+                        : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
+
+                      return (
+                        <div 
+                          key={item.id || item.rma_number}
+                          className="p-4 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-2xl space-y-2 transition-all shadow-sm"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="font-mono font-black text-xs text-blue-900 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-lg">
+                                  SN #{item.id}
+                                </span>
+                                <span className="font-mono font-black text-blue-700 text-sm">
+                                  {item.rma_number}
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-slate-900 text-xs sm:text-sm mt-0.5">
+                                {item.name || `Unidentified (${item.barcode})`}
+                              </h4>
                             </div>
-                            <h4 className="font-bold text-slate-900 text-xs sm:text-sm mt-0.5">
-                              {item.name || `Unidentified (${item.barcode})`}
-                            </h4>
-                          </div>
-                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 shrink-0">
-                            {item.reason || 'Damaged'}
-                          </span>
-                        </div>
-
-                        {/* Reporter Details */}
-                        <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 flex items-center justify-between">
-                          <span>Reported by: <strong className="text-slate-800">{item.reporter_name || item.reported_by}</strong></span>
-                          <span className="font-mono text-slate-600">{item.reporter_contact || ''}</span>
-                        </div>
-
-                        {/* Photos preview */}
-                        {item.photos && item.photos.length > 0 && (
-                          <div className="flex items-center gap-2 pt-1">
-                            <span className="text-[10px] text-slate-400 font-semibold">
-                              {item.photos.length} Photo{item.photos.length > 1 ? 's' : ''}:
+                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 shrink-0">
+                              {item.reason || 'Damaged'}
                             </span>
-                            <div className="flex gap-1.5 overflow-x-auto py-0.5">
-                              {item.photos.slice(0, 3).map((url, i) => (
-                                <img 
-                                  key={i} 
-                                  src={url} 
-                                  alt="Proof" 
-                                  className="w-8 h-8 rounded-lg object-cover border border-slate-300 bg-white" 
-                                />
-                              ))}
-                            </div>
                           </div>
-                        )}
-                      </div>
-                    ))}
+
+                          {/* Reporter Details */}
+                          <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 flex items-center justify-between">
+                            <span>Reported by: <strong className="text-slate-800">{item.reporter_name || item.reported_by}</strong></span>
+                            <span className="font-mono text-slate-600">{item.reporter_contact || ''}</span>
+                          </div>
+
+                          {/* Photos preview with click-to-zoom */}
+                          {photoList.length > 0 && (
+                            <div className="flex items-center gap-2 pt-1">
+                              <span className="text-[10px] text-slate-400 font-semibold">
+                                {photoList.length} Photo{photoList.length > 1 ? 's' : ''}:
+                              </span>
+                              <div className="flex gap-1.5 overflow-x-auto py-0.5">
+                                {photoList.map((url, i) => (
+                                  <button
+                                    key={i}
+                                    type="button"
+                                    onClick={() => setLightboxPhoto({
+                                      url,
+                                      title: item.name || `Return ${item.rma_number}`,
+                                      subtitle: `Photo ${i + 1} • RMA #${item.rma_number}`
+                                    })}
+                                    className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 bg-white cursor-zoom-in hover:opacity-85 transition-opacity shrink-0"
+                                    title="Click to zoom proof photo"
+                                  >
+                                    <img 
+                                      src={url} 
+                                      alt="Proof" 
+                                      className="w-full h-full object-cover" 
+                                    />
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1222,6 +1590,7 @@ export default function App() {
 
       {/* Admin Login Modal (OTP Verification Gate) */}
       <AdminLoginModal
+        key={isLoginModalOpen ? 'active-admin-login-modal' : 'inactive-admin-login-modal'}
         isOpen={isLoginModalOpen}
         onClose={() => {
           setIsLoginModalOpen(false);
@@ -1286,6 +1655,15 @@ export default function App() {
           refreshAllData();
           showToast(`Product "${prod.name}" deleted from catalog.`, 'success');
         }}
+      />
+
+      {/* Fullscreen Image Lightbox Modal */}
+      <ImageLightboxModal
+        isOpen={Boolean(lightboxPhoto)}
+        imageUrl={lightboxPhoto?.url}
+        title={lightboxPhoto?.title}
+        subtitle={lightboxPhoto?.subtitle}
+        onClose={() => setLightboxPhoto(null)}
       />
 
       {/* Toast Alert Notification */}

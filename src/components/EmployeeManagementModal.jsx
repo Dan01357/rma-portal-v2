@@ -13,6 +13,9 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
   const [employees, setEmployees] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('name_asc');
   const [hrApiKey, setHrApiKey] = useState(authService.getHrApiKey());
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -107,17 +110,41 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
 
   if (!isOpen) return null;
 
-  // Filter employees by search query
+  // Filter and sort employees
   const q = searchQuery.toLowerCase().trim();
-  const filteredEmployees = employees.filter(emp => {
-    if (!q) return true;
-    return (
-      (emp.name || '').toLowerCase().includes(q) ||
-      (emp.email || '').toLowerCase().includes(q) ||
-      (emp.department || '').toLowerCase().includes(q) ||
-      (emp.role || '').toLowerCase().includes(q)
-    );
-  });
+  const filteredEmployees = employees
+    .filter(emp => {
+      if (q) {
+        const matches = (
+          (emp.name || '').toLowerCase().includes(q) ||
+          (emp.email || '').toLowerCase().includes(q) ||
+          (emp.department || '').toLowerCase().includes(q) ||
+          (emp.role || '').toLowerCase().includes(q)
+        );
+        if (!matches) return false;
+      }
+
+      if (roleFilter !== 'all' && (emp.role || 'inventory_staff') !== roleFilter) {
+        return false;
+      }
+
+      if (statusFilter === 'active' && emp.is_active === false) return false;
+      if (statusFilter === 'resigned' && emp.is_active !== false) return false;
+
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'name_asc') {
+        return (a.name || '').localeCompare(b.name || '');
+      } else if (sortBy === 'name_desc') {
+        return (b.name || '').localeCompare(a.name || '');
+      } else if (sortBy === 'role') {
+        return (a.role || '').localeCompare(b.role || '');
+      } else if (sortBy === 'status') {
+        return (a.is_active === false ? 1 : 0) - (b.is_active === false ? 1 : 0);
+      }
+      return 0;
+    });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
@@ -208,6 +235,60 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
+          </div>
+
+          {/* Quick Filters Strip */}
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 focus:outline-none focus:border-blue-500 shadow-xs"
+            >
+              <option value="all">All Roles</option>
+              <option value="super_admin">👑 Super Admin</option>
+              <option value="admin">🛡️ Admin</option>
+              <option value="inventory_staff">📦 Inventory Staff</option>
+              <option value="viewer">👁️ Viewer</option>
+            </select>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 focus:outline-none focus:border-blue-500 shadow-xs"
+            >
+              <option value="all">All Status</option>
+              <option value="active">Active Only</option>
+              <option value="resigned">Resigned Only</option>
+            </select>
+
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 focus:outline-none focus:border-blue-500 shadow-xs"
+            >
+              <option value="name_asc">Sort: Name (A-Z)</option>
+              <option value="name_desc">Sort: Name (Z-A)</option>
+              <option value="role">Sort: Role</option>
+              <option value="status">Sort: Status</option>
+            </select>
+
+            {(searchQuery.trim() !== '' || roleFilter !== 'all' || statusFilter !== 'all') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setRoleFilter('all');
+                  setStatusFilter('all');
+                }}
+                className="px-2 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-[11px] transition-colors"
+              >
+                Reset
+              </button>
+            )}
+
+            <span className="text-[11px] text-slate-400 font-semibold ml-auto">
+              Showing {filteredEmployees.length} of {employees.length}
+            </span>
           </div>
 
           {/* HR Center API Key Drawer */}

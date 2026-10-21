@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Trash2, Upload, AlertCircle, RefreshCw, CheckCircle, Package, Image as ImageIcon } from 'lucide-react';
+import { X, Save, Trash2, Upload, AlertCircle, RefreshCw, CheckCircle, Package, Image as ImageIcon, ZoomIn } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
+import ImageLightboxModal from './ImageLightboxModal';
 
 export default function ProductEditModal({ isOpen, onClose, product, onSaved, onDeleted, currentUser }) {
   const isEditing = Boolean(product && product.id);
@@ -15,6 +16,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   const [imageUrl, setImageUrl] = useState('');
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
+  const [lightboxPhoto, setLightboxPhoto] = useState(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -210,13 +212,28 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                 {photoPreview ? (
                   <div className="w-20 h-20 rounded-2xl overflow-hidden border-2 border-blue-400 bg-white shadow-sm shrink-0 relative group">
                     <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
-                    <button
-                      type="button"
-                      onClick={() => { setPhotoPreview(null); setPhotoFile(null); setImageUrl(''); }}
-                      className="absolute inset-0 bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
+                    <div className="absolute inset-0 bg-black/45 text-white flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        type="button"
+                        onClick={() => setLightboxPhoto({
+                          url: photoPreview,
+                          title: name || 'Product Reference Photo',
+                          subtitle: barcode ? `Barcode: ${barcode}` : ''
+                        })}
+                        className="p-1.5 rounded-lg bg-black/60 hover:bg-black/90 text-white cursor-zoom-in"
+                        title="Click to zoom image"
+                      >
+                        <ZoomIn className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setPhotoPreview(null); setPhotoFile(null); setImageUrl(''); }}
+                        className="p-1.5 rounded-lg bg-rose-600/80 hover:bg-rose-600 text-white"
+                        title="Remove photo"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="w-20 h-20 rounded-2xl bg-slate-200 text-slate-400 flex items-center justify-center shrink-0 border border-slate-300">
@@ -387,6 +404,15 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         </div>
 
       </div>
+
+      {/* Fullscreen Image Lightbox Modal */}
+      <ImageLightboxModal
+        isOpen={Boolean(lightboxPhoto)}
+        imageUrl={lightboxPhoto?.url}
+        title={lightboxPhoto?.title}
+        subtitle={lightboxPhoto?.subtitle}
+        onClose={() => setLightboxPhoto(null)}
+      />
     </div>
   );
 }

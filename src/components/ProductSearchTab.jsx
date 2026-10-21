@@ -1,13 +1,35 @@
-import React, { useState } from 'react';
-import { Search, Package, RefreshCw, X, Image as ImageIcon, CheckCircle, Plus, ExternalLink, ArrowRight, List, LayoutGrid } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { 
+  Search, 
+  Package, 
+  RefreshCw, 
+  X, 
+  Image as ImageIcon, 
+  CheckCircle, 
+  Plus, 
+  ExternalLink, 
+  ArrowRight, 
+  List, 
+  LayoutGrid,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  RotateCcw
+} from 'lucide-react';
 import { catalogService } from '../services/catalogService';
+import ImageLightboxModal from './ImageLightboxModal';
 
 export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }) {
   const [searchInput, setSearchInput] = useState('');
   const [results, setResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-  const [selectedPhoto, setSelectedPhoto] = useState(null);
+  const [selectedLightbox, setSelectedLightbox] = useState(null);
+  const [sortField, setSortField] = useState('name');
+  const [sortDirection, setSortDirection] = useState('asc');
+  const [supplierFilter, setSupplierFilter] = useState('all');
+  const [sourceFilter, setSourceFilter] = useState('all');
+
   const [viewMode, setViewMode] = useState(() => {
     return localStorage.getItem('rma_search_view_mode') || 'table';
   });
@@ -28,10 +50,10 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
     setHasSearched(true);
 
     try {
-      const items = await catalogService.searchAllProducts(query, 40);
+      const items = await catalogService.searchAllProducts(query, 50);
       setResults(items);
     } catch (err) {
-      console.warn('Multi-search error:', err);
+      console.warn('Multi-search notice:', err);
       setResults([]);
     } finally {
       setIsSearching(false);
@@ -42,9 +64,114 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
     setSearchInput(term);
     setIsSearching(true);
     setHasSearched(true);
-    catalogService.searchAllProducts(term, 40)
-      .then(items => setResults(items))
+    catalogService.searchAllProducts(term, 50)
+      .then(items => setResults(items || []))
+      .catch(() => setResults([]))
       .finally(() => setIsSearching(false));
+  };
+
+  // Derive unique suppliers from search results
+  const uniqueSuppliers = useMemo(() => {
+    const set = new Set();
+    results.forEach(r => {
+      const s = r.supplierName || r.supplier;
+      if (s && s.trim()) set.add(s.trim());
+    });
+    return Array.from(set).sort();
+  }, [results]);
+
+  // Derive unique sources from search results
+  const uniqueSources = useMemo(() => {
+    const set = new Set();
+    results.forEach(r => {
+      if (r.source && r.source.trim()) set.add(r.source.trim());
+    });
+    return Array.from(set).sort();
+  }, [results]);
+
+  // Handle column header sorting
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Filter and sort results
+  const processedResults = useMemo(() => {
+    let list = results.filter(item => {
+      if (supplierFilter !== 'all') {
+        const s = (item.supplierName || item.supplier || '').trim();
+        if (s !== supplierFilter) return false;
+      }
+      if (sourceFilter !== 'all') {
+        if ((item.source || '').trim() !== sourceFilter) return false;
+      }
+      return true;
+    });
+
+    list.sort((a, b) => {
+      let valA, valB;
+      switch (sortField) {
+        case 'id':
+          valA = Number(a.id) || 0;
+          valB = Number(b.id) || 0;
+          break;
+        case 'barcode':
+          valA = String(a.barcode || '').toLowerCase();
+          valB = String(b.barcode || '').toLowerCase();
+          break;
+        case 'code':
+          valA = String(a.code || a.sku || '').toLowerCase();
+          valB = String(b.code || b.sku || '').toLowerCase();
+          break;
+        case 'name':
+          valA = String(a.name || '').toLowerCase();
+          valB = String(b.name || '').toLowerCase();
+          break;
+        case 'price':
+          valA = Number(a.priceWithVat || a.price || 0);
+          valB = Number(b.priceWithVat || b.price || 0);
+          break;
+        case 'supplier':
+          valA = String(a.supplierName || a.supplier || '').toLowerCase();
+          valB = String(b.supplierName || b.supplier || '').toLowerCase();
+          break;
+        case 'source':
+          valA = String(a.source || '').toLowerCase();
+          valB = String(b.source || '').toLowerCase();
+          break;
+        default:
+          valA = a.id;
+          valB = b.id;
+      }
+
+      if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+      if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return list;
+  }, [results, supplierFilter, sourceFilter, sortField, sortDirection]);
+
+  const hasActiveFilters = supplierFilter !== 'all' || sourceFilter !== 'all';
+
+  const resetFilters = () => {
+    setSupplierFilter('all');
+    setSourceFilter('all');
+  };
+
+  const renderSortIndicator = (field) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />;
+    }
+    return sortDirection === 'asc' ? (
+      <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+    ) : (
+      <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+    );
   };
 
   return (
@@ -57,10 +184,10 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
           </div>
           <div>
             <h3 className="text-base font-black text-slate-900 tracking-tight">
-              Universal Catalog & Live PO Search Engine
+              Universal Catalog Search
             </h3>
             <p className="text-xs text-slate-500">
-              Instant multi-item search across your custom Supabase database & coworker's 5,793 live ERPLY items.
+              Instant multi-item search across your verified database & enterprise wholesale catalog.
             </p>
           </div>
         </div>
@@ -113,44 +240,97 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
         </div>
       </div>
 
-      {/* Results Header with View Mode Switcher */}
+      {/* Results Header with View Mode Switcher and Filters */}
       {hasSearched && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-2 text-xs text-slate-600">
-          <div>
-            Found <strong className="text-slate-900 font-bold">{results.length}</strong> products matching "{searchInput}"
-            <span className="text-[11px] text-slate-400 block sm:inline sm:ml-2">
-              (Searched across Supabase DB + 5,793 Coworker items)
-            </span>
+        <div className="bg-white border border-slate-200 rounded-3xl p-3.5 sm:p-4 shadow-sm space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-600">
+            <div>
+              Found <strong className="text-slate-900 font-bold">{processedResults.length}</strong> products matching "{searchInput}"
+              <span className="text-[11px] text-slate-400 block sm:inline sm:ml-2">
+                (Searched across database & product catalog)
+              </span>
+            </div>
+
+            {results.length > 0 && (
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                {/* View switcher */}
+                <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200/80">
+                  <button
+                    type="button"
+                    onClick={() => handleSetViewMode('table')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
+                      viewMode === 'table'
+                        ? 'bg-white text-blue-700 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                    title="Rows / Table View"
+                  >
+                    <List className="w-3.5 h-3.5" />
+                    <span>Rows List</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetViewMode('grid')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
+                      viewMode === 'grid'
+                        ? 'bg-white text-blue-700 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                    title="Grid / Cards View"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span>Grid Cards</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
+          {/* Search Result Filtering Options */}
           {results.length > 0 && (
-            <div className="flex items-center self-end sm:self-auto bg-slate-100 p-1 rounded-2xl border border-slate-200/80">
-              <button
-                type="button"
-                onClick={() => handleSetViewMode('table')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
-                  viewMode === 'table'
-                    ? 'bg-white text-blue-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-                title="Rows / Table View (with SN column)"
-              >
-                <List className="w-3.5 h-3.5" />
-                <span>Rows List</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSetViewMode('grid')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
-                  viewMode === 'grid'
-                    ? 'bg-white text-blue-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-                title="Grid / Cards View"
-              >
-                <LayoutGrid className="w-3.5 h-3.5" />
-                <span>Grid Cards</span>
-              </button>
+            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100 text-xs">
+              <span className="text-[11px] font-bold text-slate-500">Filter results:</span>
+
+              {uniqueSuppliers.length > 1 && (
+                <select
+                  value={supplierFilter}
+                  onChange={(e) => setSupplierFilter(e.target.value)}
+                  className="px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="all">All Suppliers ({uniqueSuppliers.length})</option>
+                  {uniqueSuppliers.map(sup => (
+                    <option key={sup} value={sup}>{sup}</option>
+                  ))}
+                </select>
+              )}
+
+              {uniqueSources.length > 1 && (
+                <select
+                  value={sourceFilter}
+                  onChange={(e) => setSourceFilter(e.target.value)}
+                  className="px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="all">All Sources</option>
+                  {uniqueSources.map(src => (
+                    <option key={src} value={src}>{src}</option>
+                  ))}
+                </select>
+              )}
+
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Reset Filters</span>
+                </button>
+              )}
+
+              <span className="text-[11px] text-slate-400 ml-auto">
+                Click column headers to sort (<strong className="text-slate-700 capitalize">{sortField}</strong> {sortDirection === 'asc' ? '▲' : '▼'})
+              </span>
             </div>
           )}
         </div>
@@ -160,34 +340,110 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
       {isSearching ? (
         <div className="py-16 text-center text-slate-400 space-y-2 bg-white border border-slate-200 rounded-3xl p-6">
           <RefreshCw className="w-6 h-6 mx-auto animate-spin text-blue-600" />
-          <p className="text-xs font-bold text-slate-600">Searching all catalogs...</p>
+          <p className="text-xs font-bold text-slate-600">Searching catalog...</p>
         </div>
-      ) : hasSearched && results.length === 0 ? (
+      ) : hasSearched && processedResults.length === 0 ? (
         <div className="py-14 text-center text-slate-400 space-y-2 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
           <Package className="w-8 h-8 mx-auto text-slate-300" />
-          <p className="text-xs font-bold text-slate-700">No products found matching "{searchInput}"</p>
-          <p className="text-[11px] text-slate-400">Try searching with a shorter term or checking the barcode spelling.</p>
+          <p className="text-xs font-bold text-slate-700">
+            {hasActiveFilters ? 'No products match the selected filters' : `No products found matching "${searchInput}"`}
+          </p>
+          <p className="text-[11px] text-slate-400">
+            {hasActiveFilters ? 'Try resetting your supplier or source filters.' : 'Try searching with a shorter keyword or checking the barcode spelling.'}
+          </p>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="mt-2 text-blue-600 font-bold text-xs hover:underline"
+            >
+              Reset Filters
+            </button>
+          )}
         </div>
-      ) : results.length > 0 && viewMode === 'table' ? (
-        /* TABLE / ROWS VIEW WITH SN COLUMN AT FAR LEFT */
+      ) : processedResults.length > 0 && viewMode === 'table' ? (
+        /* TABLE / ROWS VIEW WITH SORTABLE HEADERS */
         <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-black uppercase tracking-wider text-slate-500">
-                  <th className="py-3.5 px-4 font-black text-slate-900 w-16">SN</th>
-                  <th className="py-3.5 px-3 w-14 text-center">Photo</th>
-                  <th className="py-3.5 px-4 font-bold">Barcode</th>
-                  <th className="py-3.5 px-4 font-bold">SKU / Code</th>
-                  <th className="py-3.5 px-4 font-bold">Product Name</th>
-                  <th className="py-3.5 px-4 text-right font-bold">Price (w/ VAT)</th>
-                  <th className="py-3.5 px-4 font-bold">Supplier</th>
-                  <th className="py-3.5 px-3 text-center font-bold">Source</th>
-                  <th className="py-3.5 px-4 text-right font-bold w-24">Action</th>
+                  <th 
+                    onClick={() => handleSort('id')}
+                    className="py-3.5 px-4 font-black text-slate-900 w-16 cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                    title="Click to sort by Serial Number"
+                  >
+                    <div className="flex items-center">
+                      <span>SN</span>
+                      {renderSortIndicator('id')}
+                    </div>
+                  </th>
+                  <th className="py-3.5 px-3 w-14 text-center select-none">Photo</th>
+                  <th 
+                    onClick={() => handleSort('barcode')}
+                    className="py-3.5 px-4 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                    title="Click to sort by Barcode"
+                  >
+                    <div className="flex items-center">
+                      <span>Barcode</span>
+                      {renderSortIndicator('barcode')}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('code')}
+                    className="py-3.5 px-4 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                    title="Click to sort by SKU / Code"
+                  >
+                    <div className="flex items-center">
+                      <span>SKU / Code</span>
+                      {renderSortIndicator('code')}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('name')}
+                    className="py-3.5 px-4 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                    title="Click to sort by Product Name"
+                  >
+                    <div className="flex items-center">
+                      <span>Product Name</span>
+                      {renderSortIndicator('name')}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('price')}
+                    className="py-3.5 px-4 text-right font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                    title="Click to sort by Price"
+                  >
+                    <div className="flex items-center justify-end">
+                      <span>Price (w/ VAT)</span>
+                      {renderSortIndicator('price')}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('supplier')}
+                    className="py-3.5 px-4 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                    title="Click to sort by Supplier"
+                  >
+                    <div className="flex items-center">
+                      <span>Supplier</span>
+                      {renderSortIndicator('supplier')}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('source')}
+                    className="py-3.5 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                    title="Click to sort by Source"
+                  >
+                    <div className="flex items-center justify-center">
+                      <span>Source</span>
+                      {renderSortIndicator('source')}
+                    </div>
+                  </th>
+                  <th className="py-3.5 px-4 text-right font-bold w-24 select-none">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
-                {results.map((item, idx) => {
+                {processedResults.map((item, idx) => {
                   const isSupabase = item.source?.includes('Supabase');
                   const hasPhoto = Boolean(item.imageUrl);
                   const serialNum = item.id || idx + 1;
@@ -201,14 +457,18 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
                         </span>
                       </td>
 
-                      {/* 2. Photo */}
+                      {/* 2. Photo Thumbnail with Lightbox */}
                       <td className="py-2.5 px-3 text-center">
                         {hasPhoto ? (
                           <button
                             type="button"
-                            onClick={() => setSelectedPhoto(item.imageUrl)}
-                            className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 inline-block hover:opacity-85 transition-opacity"
-                            title="Click to zoom reference photo"
+                            onClick={() => setSelectedLightbox({
+                              url: item.imageUrl,
+                              title: item.name,
+                              subtitle: `Barcode: ${item.barcode} • SN #${serialNum} • ${item.supplierName || 'Wholesale Supplier'}`
+                            })}
+                            className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
+                            title="Click to zoom reference photo in fullscreen"
                           >
                             <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
                           </button>
@@ -250,27 +510,27 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
                         {item.supplierName || 'Savemore'}
                       </td>
 
-                      {/* 8. Source Badge */}
+                      {/* 8. Source */}
                       <td className="py-3 px-3 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                          isSupabase 
-                            ? 'bg-purple-100 text-purple-800 border border-purple-200' 
-                            : 'bg-blue-100 text-blue-800'
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                          isSupabase
+                            ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                            : 'bg-blue-100 text-blue-800 border border-blue-200'
                         }`}>
-                          {isSupabase ? 'Supabase' : 'Coworker'}
+                          {isSupabase ? 'Database' : 'Catalog'}
                         </span>
                       </td>
 
                       {/* 9. Action */}
                       <td className="py-3 px-4 text-right">
-                        {onInspectProduct && (
+                        {onImportToCatalog && !isSupabase && (
                           <button
                             type="button"
-                            onClick={() => onInspectProduct(item)}
-                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold inline-flex items-center gap-1 transition-colors"
+                            onClick={() => onImportToCatalog(item)}
+                            className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg text-xs transition-colors"
+                            title="Add to Verified Saved Products"
                           >
-                            <span>Inspect</span>
-                            <ArrowRight className="w-3 h-3" />
+                            + Save
                           </button>
                         )}
                       </td>
@@ -281,44 +541,47 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
             </table>
           </div>
           <div className="p-3 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 font-semibold px-4 flex justify-between">
-            <span>Showing {results.length} search results</span>
-            <span>Sorted by relevance & SN</span>
+            <span>Showing {processedResults.length} matching products</span>
+            <span>Sorted by {sortField} ({sortDirection.toUpperCase()})</span>
           </div>
         </div>
-      ) : results.length > 0 ? (
-        /* CARDS / GRID VIEW */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {results.map((item, idx) => {
-            const isSupabase = item.source?.includes('Supabase');
+      ) : (
+        /* GRID CARDS VIEW WITH LIGHTBOX */
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+          {processedResults.map((item, idx) => {
             const hasPhoto = Boolean(item.imageUrl);
             const serialNum = item.id || idx + 1;
+            const isSupabase = item.source?.includes('Supabase');
 
             return (
-              <div
+              <div 
                 key={`${item.barcode || item.code}-${idx}`}
-                className="bg-white border border-slate-200 hover:border-blue-300 rounded-3xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-3"
+                className="bg-white border border-slate-200 hover:border-blue-300 rounded-3xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-3 group"
               >
                 <div>
-                  {/* Top: SN Badge + Source Badge */}
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-mono font-black text-xs text-blue-900 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-lg">
                       SN #{serialNum}
                     </span>
                     <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                      isSupabase 
-                        ? 'bg-purple-100 text-purple-800 border border-purple-200' 
-                        : 'bg-blue-100 text-blue-800'
+                      isSupabase
+                        ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                        : 'bg-blue-100 text-blue-800 border border-blue-200'
                     }`}>
-                      {isSupabase ? 'Supabase Custom' : 'Coworker API'}
+                      {isSupabase ? 'Database' : 'Catalog'}
                     </span>
                   </div>
 
-                  {/* Photo & Details */}
                   <div className="flex items-start gap-3">
                     {hasPhoto ? (
                       <div 
-                        onClick={() => setSelectedPhoto(item.imageUrl)}
-                        className="w-16 h-16 rounded-2xl overflow-hidden border border-slate-200 bg-slate-50 shrink-0 cursor-pointer hover:opacity-90 relative"
+                        onClick={() => setSelectedLightbox({
+                          url: item.imageUrl,
+                          title: item.name,
+                          subtitle: `Barcode: ${item.barcode} • SN #${serialNum} • ${item.supplierName || 'Wholesale Supplier'}`
+                        })}
+                        className="w-16 h-16 rounded-2xl overflow-hidden border border-slate-200 bg-slate-50 shrink-0 cursor-zoom-in hover:opacity-90 relative"
+                        title="Click to zoom reference photo in fullscreen"
                       >
                         <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
                       </div>
@@ -334,18 +597,17 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
                           SKU: <span className="text-slate-800">{item.code}</span>
                         </div>
                       )}
-
+                      
                       <h4 className="font-bold text-slate-900 text-xs sm:text-sm line-clamp-2 leading-tight">
                         {item.name}
                       </h4>
-
+                      
                       <div className="text-[11px] font-mono text-slate-500 mt-1 truncate">
                         Barcode: <strong className="text-slate-800">{item.barcode}</strong>
                       </div>
                     </div>
                   </div>
 
-                  {/* Metadata */}
                   <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
                     <div>
                       <span className="text-[10px] text-slate-400 block font-medium">Price (w/ VAT)</span>
@@ -363,44 +625,32 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
                   </div>
                 </div>
 
-                {/* Actions */}
-                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                  <span className="text-[10px] text-slate-400">
-                    Unit: {item.unitName || 'pc'}
-                  </span>
-
-                  {onInspectProduct && (
+                {onImportToCatalog && !isSupabase && (
+                  <div className="pt-2 border-t border-slate-100 flex justify-end">
                     <button
                       type="button"
-                      onClick={() => onInspectProduct(item)}
-                      className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
+                      onClick={() => onImportToCatalog(item)}
+                      className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs flex items-center gap-1 transition-colors"
                     >
-                      <span>View Details</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Save to DB</span>
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
-      ) : null}
-      {selectedPhoto && (
-        <div 
-          onClick={() => setSelectedPhoto(null)} 
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in"
-        >
-          <div className="relative max-w-lg w-full bg-white rounded-3xl overflow-hidden shadow-2xl p-2" onClick={e => e.stopPropagation()}>
-            <img src={selectedPhoto} alt="Product Reference" className="w-full h-auto max-h-[75vh] object-contain rounded-2xl" />
-            <button
-              onClick={() => setSelectedPhoto(null)}
-              className="absolute top-4 right-4 p-2 bg-slate-900/70 hover:bg-slate-900 text-white rounded-full transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
       )}
+
+      {/* Fullscreen Image Lightbox Modal */}
+      <ImageLightboxModal
+        isOpen={Boolean(selectedLightbox)}
+        imageUrl={selectedLightbox?.url}
+        title={selectedLightbox?.title}
+        subtitle={selectedLightbox?.subtitle}
+        onClose={() => setSelectedLightbox(null)}
+      />
     </div>
   );
 }

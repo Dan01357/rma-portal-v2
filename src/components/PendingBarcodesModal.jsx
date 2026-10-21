@@ -1,9 +1,29 @@
-import React, { useState } from 'react';
-import { X, CheckCircle, AlertTriangle, Edit3, Save, RefreshCw, Barcode, Upload, Image as ImageIcon } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { 
+  X, 
+  CheckCircle, 
+  AlertTriangle, 
+  Edit3, 
+  Save, 
+  RefreshCw, 
+  Barcode, 
+  Upload, 
+  Image as ImageIcon,
+  Search,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
+} from 'lucide-react';
 import { catalogService } from '../services/catalogService';
+import ImageLightboxModal from './ImageLightboxModal';
 
 export default function PendingBarcodesModal({ isOpen, onClose, pendingList = [], onUpdated }) {
   const [selectedBarcode, setSelectedBarcode] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortField, setSortField] = useState('id');
+  const [sortDirection, setSortDirection] = useState('desc');
+  const [lightboxPhoto, setLightboxPhoto] = useState(null);
+
   const [formData, setFormData] = useState({
     code: '',
     name: '',
@@ -93,6 +113,40 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     }
   };
 
+  // Filter & sort pending barcodes
+  const processedPendingList = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    let list = pendingList.filter(item => {
+      if (!q) return true;
+      return (
+        String(item.id || '').includes(q) ||
+        (item.barcode || '').toLowerCase().includes(q) ||
+        (item.name || '').toLowerCase().includes(q) ||
+        (item.code || '').toLowerCase().includes(q)
+      );
+    });
+
+    list.sort((a, b) => {
+      let valA, valB;
+      if (sortField === 'id') {
+        valA = Number(a.id) || 0;
+        valB = Number(b.id) || 0;
+      } else if (sortField === 'barcode') {
+        valA = String(a.barcode || '');
+        valB = String(b.barcode || '');
+      } else {
+        valA = new Date(a.created_at || 0).getTime();
+        valB = new Date(b.created_at || 0).getTime();
+      }
+
+      if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+      if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return list;
+  }, [pendingList, searchQuery, sortField, sortDirection]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
       <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto">
@@ -104,11 +158,16 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
               <AlertTriangle className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-900">
-                Pending Unknown Barcodes
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-slate-900">
+                  Pending Unknown Barcodes
+                </h2>
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
+                  {processedPendingList.length} Pending
+                </span>
+              </div>
               <p className="text-xs text-slate-500">
-                Enter product details & upload optional reference photo.
+                Filter, sort, & update product details with clickable reference photos.
               </p>
             </div>
           </div>
@@ -144,12 +203,50 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                 </p>
               </div>
             ) : (
-              <div className="space-y-2">
-                <p className="text-xs font-semibold text-slate-500">
-                  Select a barcode below to update its product details:
-                </p>
-                <div className="space-y-2">
-                  {pendingList.map(item => (
+              <div className="space-y-3">
+                {/* Search & Sort Controls */}
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Filter pending by barcode or SN..."
+                      className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 p-0.5"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (sortField === 'id') {
+                        setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+                      } else {
+                        setSortField('id');
+                        setSortDirection('desc');
+                      }
+                    }}
+                    className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0"
+                    title="Toggle SN sorting"
+                  >
+                    <span className="font-mono text-[11px]">SN</span>
+                    {sortField === 'id' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />)}
+                  </button>
+                </div>
+
+                {/* List Items */}
+                <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+                  {processedPendingList.map(item => (
                     <div 
                       key={item.id || item.barcode}
                       className="p-3.5 bg-slate-50 hover:bg-blue-50/50 border border-slate-200 rounded-2xl flex items-center justify-between gap-3 transition-colors"
@@ -219,7 +316,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                 />
               </div>
 
-              {/* Optional Product Reference Photo */}
+              {/* Optional Product Reference Photo with Lightbox Zoom */}
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
                 <span className="block text-slate-700 font-bold">
                   Reference Product Photo (Optional)
@@ -230,12 +327,24 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
 
                 <div className="flex items-center gap-3">
                   {formData.imageUrl ? (
-                    <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-300 shrink-0">
-                      <img src={formData.imageUrl} alt="Reference" className="w-full h-full object-cover" />
+                    <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-300 shrink-0 group">
+                      <button
+                        type="button"
+                        onClick={() => setLightboxPhoto({
+                          url: formData.imageUrl,
+                          title: formData.name || `Barcode ${selectedBarcode.barcode}`,
+                          subtitle: `Reference Photo for ${selectedBarcode.barcode}`
+                        })}
+                        className="w-full h-full block cursor-zoom-in"
+                        title="Click to zoom reference photo"
+                      >
+                        <img src={formData.imageUrl} alt="Reference" className="w-full h-full object-cover" />
+                      </button>
                       <button
                         type="button"
                         onClick={() => setFormData({ ...formData, imageUrl: '' })}
-                        className="absolute top-0.5 right-0.5 p-0.5 bg-black/70 text-white rounded-full"
+                        className="absolute top-0.5 right-0.5 p-0.5 bg-black/70 text-white rounded-full hover:bg-rose-600 transition-colors"
+                        title="Remove photo"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -246,7 +355,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                     </div>
                   )}
 
-                  <label className="flex-1 py-2 px-3 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl text-center cursor-pointer text-xs font-bold text-slate-700 flex items-center justify-center gap-1.5">
+                  <label className="flex-1 py-2 px-3 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl text-center cursor-pointer text-xs font-bold text-slate-700 flex items-center justify-center gap-1.5 shadow-xs">
                     {isUploadingImage ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5 text-slate-500" />}
                     <span>{isUploadingImage ? 'Uploading...' : 'Upload Reference Photo'}</span>
                     <input
@@ -346,6 +455,15 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
         )}
 
       </div>
+
+      {/* Fullscreen Image Lightbox Modal */}
+      <ImageLightboxModal
+        isOpen={Boolean(lightboxPhoto)}
+        imageUrl={lightboxPhoto?.url}
+        title={lightboxPhoto?.title}
+        subtitle={lightboxPhoto?.subtitle}
+        onClose={() => setLightboxPhoto(null)}
+      />
     </div>
   );
 }
