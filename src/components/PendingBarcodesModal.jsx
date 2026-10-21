@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, CheckCircle, AlertTriangle, Edit3, Save, RefreshCw, Barcode } from 'lucide-react';
+import { X, CheckCircle, AlertTriangle, Edit3, Save, RefreshCw, Barcode, Upload, Image as ImageIcon } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 
 export default function PendingBarcodesModal({ isOpen, onClose, pendingList = [], onUpdated }) {
@@ -11,8 +11,10 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     price: '',
     priceWithVat: '',
     brandName: '',
-    unitName: 'pc'
+    unitName: 'pc',
+    imageUrl: ''
   });
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState(null);
 
@@ -27,9 +29,27 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
       price: item.price ? String(item.price) : '',
       priceWithVat: item.price_with_vat ? String(item.price_with_vat) : '',
       brandName: item.brand_name || '',
-      unitName: item.unit_name || 'pc'
+      unitName: item.unit_name || 'pc',
+      imageUrl: item.image_url || ''
     });
     setStatusMsg(null);
+  };
+
+  const handleImageFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingImage(true);
+    try {
+      const url = await catalogService.uploadPhoto(file);
+      if (url) {
+        setFormData(prev => ({ ...prev, imageUrl: url }));
+      }
+    } catch (err) {
+      console.warn('Image upload error:', err);
+    } finally {
+      setIsUploadingImage(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -52,12 +72,13 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
         price: formData.price,
         priceWithVat: formData.priceWithVat || (Number(formData.price) * 1.12).toFixed(2),
         brandName: formData.brandName,
-        unitName: formData.unitName
+        unitName: formData.unitName,
+        imageUrl: formData.imageUrl
       });
 
       setStatusMsg({ 
         type: 'success', 
-        text: `Barcode ${selectedBarcode.barcode} is now verified! Future scans will automatically recognize it.` 
+        text: `Barcode ${selectedBarcode.barcode} is now verified! Future scans will automatically display "${formData.name}" and its reference photo.` 
       });
 
       setTimeout(() => {
@@ -87,7 +108,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                 Pending Unknown Barcodes
               </h2>
               <p className="text-xs text-slate-500">
-                Scanned by reporters, waiting for admin to enter product details.
+                Enter product details & upload optional reference photo.
               </p>
             </div>
           </div>
@@ -111,7 +132,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
           </div>
         )}
 
-        {/* Content: List of unverified barcodes OR edit form */}
+        {/* List of unverified barcodes OR edit form */}
         {!selectedBarcode ? (
           <div className="space-y-3">
             {pendingList.length === 0 ? (
@@ -119,7 +140,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                 <CheckCircle className="w-10 h-10 text-emerald-500 mx-auto" />
                 <h3 className="text-sm font-bold text-slate-700">All Barcodes Verified</h3>
                 <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                  When a reporter scans an unknown barcode and reports a return, it will appear here so you can add its name, supplier, and price.
+                  When a reporter scans an unrecorded barcode, it will appear here so you can add its name, supplier, price, and reference photo.
                 </p>
               </div>
             ) : (
@@ -186,11 +207,51 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Oreo Biscuit Vanilla Multipack 27.6g x6"
+                  placeholder="e.g. Laptop Lenovo ThinkPad / Oreo Biscuit"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-blue-600"
                 />
+              </div>
+
+              {/* Optional Product Reference Photo */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                <span className="block text-slate-700 font-bold">
+                  Reference Product Photo (Optional)
+                </span>
+                <p className="text-[11px] text-slate-400 font-normal">
+                  If uploaded, this photo will be displayed to reporters whenever they scan this barcode.
+                </p>
+
+                <div className="flex items-center gap-3">
+                  {formData.imageUrl ? (
+                    <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-300 shrink-0">
+                      <img src={formData.imageUrl} alt="Reference" className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, imageUrl: '' })}
+                        className="absolute top-0.5 right-0.5 p-0.5 bg-black/70 text-white rounded-full"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="w-16 h-16 rounded-xl border border-dashed border-slate-300 flex items-center justify-center text-slate-400 bg-white shrink-0">
+                      <ImageIcon className="w-6 h-6" />
+                    </div>
+                  )}
+
+                  <label className="flex-1 py-2 px-3 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl text-center cursor-pointer text-xs font-bold text-slate-700 flex items-center justify-center gap-1.5">
+                    {isUploadingImage ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5 text-slate-500" />}
+                    <span>{isUploadingImage ? 'Uploading...' : 'Upload Reference Photo'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageFile}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -198,7 +259,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                   <label className="block text-slate-600 mb-1">SKU / Item Code</label>
                   <input
                     type="text"
-                    placeholder="e.g. P2678P"
+                    placeholder="e.g. P124124141"
                     value={formData.code}
                     onChange={(e) => setFormData({ ...formData, code: e.target.value })}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-600"
@@ -208,7 +269,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                   <label className="block text-slate-600 mb-1">Supplier Name</label>
                   <input
                     type="text"
-                    placeholder="e.g. Savemore, Mondelez"
+                    placeholder="e.g. Savemore, Acer, Lenovo"
                     value={formData.supplierName}
                     onChange={(e) => setFormData({ ...formData, supplierName: e.target.value })}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-blue-600"
@@ -222,7 +283,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                   <input
                     type="number"
                     step="0.01"
-                    placeholder="67.85"
+                    placeholder="0.00"
                     value={formData.price}
                     onChange={(e) => {
                       const p = e.target.value;
@@ -240,7 +301,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                   <input
                     type="number"
                     step="0.01"
-                    placeholder="75.99"
+                    placeholder="0.00"
                     value={formData.priceWithVat}
                     onChange={(e) => setFormData({ ...formData, priceWithVat: e.target.value })}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-blue-600"
@@ -250,7 +311,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                   <label className="block text-slate-600 mb-1">Unit</label>
                   <input
                     type="text"
-                    placeholder="pc, box, case"
+                    placeholder="pc, box, unit"
                     value={formData.unitName}
                     onChange={(e) => setFormData({ ...formData, unitName: e.target.value })}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-blue-600"

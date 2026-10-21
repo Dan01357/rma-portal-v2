@@ -20,7 +20,11 @@ import {
   ShieldCheck,
   ArrowRight,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  User,
+  Phone,
+  Mail,
+  Lock
 } from 'lucide-react';
 import { catalogService } from './services/catalogService';
 import { purchaseOrdersApi } from './services/purchaseOrdersApi';
@@ -38,27 +42,56 @@ const DEFECT_REASONS = [
 ];
 
 export default function App() {
-  // Navigation: 'reporter' (simple intake) vs 'admin' (review & catalog)
-  const [activePortal, setActivePortal] = useState('reporter');
+  // ROUTE DETECTION: '/' (Reporter Portal) vs '/admin' (Staff Admin Portal)
+  const [isAdminView, setIsAdminView] = useState(() => {
+    const path = window.location.pathname.toLowerCase();
+    const hash = window.location.hash.toLowerCase();
+    return path === '/admin' || path.startsWith('/admin/') || hash === '#/admin' || window.location.search.includes('admin=true');
+  });
+
+  // Listen to browser back/forward or navigation
+  useEffect(() => {
+    const handleLocationChange = () => {
+      const path = window.location.pathname.toLowerCase();
+      const hash = window.location.hash.toLowerCase();
+      setIsAdminView(path === '/admin' || path.startsWith('/admin/') || hash === '#/admin' || window.location.search.includes('admin=true'));
+    };
+
+    window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
+    };
+  }, []);
+
+  const navigateTo = (path) => {
+    window.history.pushState({}, '', path);
+    setIsAdminView(path === '/admin' || path === '#/admin');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   // Database Connection Health States
   const [poApiStatus, setPoApiStatus] = useState({ checking: true, connected: false });
   const [supaStatus, setSupaStatus] = useState({ checking: true, connected: false, rowsFound: 0 });
 
-  // Auto GPS Coordinates State
-  const [gpsLocation, setGpsLocation] = useState({ loading: true, latitude: null, longitude: null, accuracy: null, error: null });
+  // Accurate GPS Coordinates State (Only saved if accuracy <= 150m)
+  const [gpsLocation, setGpsLocation] = useState({ loading: true, latitude: null, longitude: null, accuracy: null, isAccurate: false });
 
   // Reporter Intake Form State
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [detectedProduct, setDetectedProduct] = useState(null);
+  const [isCheckingBarcode, setIsCheckingBarcode] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [selectedReason, setSelectedReason] = useState(DEFECT_REASONS[0]);
   const [explanation, setExplanation] = useState('');
-  const [locationSlot, setLocationSlot] = useState('');
+  const [reporterName, setReporterName] = useState('');
+  const [reporterContact, setReporterContact] = useState('');
   const [photoFiles, setPhotoFiles] = useState([]); // Array of { file, previewUrl }
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccessReport, setSubmitSuccessReport] = useState(null);
 
-  // Admin Lookup & Search State
+  // Admin Lookup State
   const [adminSearchInput, setAdminSearchInput] = useState('');
   const [adminProductResult, setAdminProductResult] = useState(null);
   const [isAdminSearching, setIsAdminSearching] = useState(false);
@@ -73,31 +106,60 @@ export default function App() {
 
   useEffect(() => {
     refreshAllData();
-    captureGps();
+    captureAccurateGps();
   }, []);
 
-  // Automatic GPS Location capture
-  const captureGps = () => {
+  // Check barcode whenever user stops typing to show recognized product name + image
+  useEffect(() => {
+    const clean = barcodeInput.trim();
+    if (!clean) {
+      setDetectedProduct(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsCheckingBarcode(true);
+      try {
+        const found = await catalogService.findProduct(clean);
+        setDetectedProduct(found);
+      } catch (e) {
+        setDetectedProduct(null);
+      } finally {
+        setIsCheckingBarcode(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [barcodeInput]);
+
+  // Accurate GPS Location capture (Filters out desktop IP geolocation with > 150m inaccuracies)
+  const captureAccurateGps = () => {
     if (!navigator.geolocation) {
-      setGpsLocation({ loading: false, error: 'GPS not supported on this browser' });
+      setGpsLocation({ loading: false, latitude: null, longitude: null, accuracy: null, isAccurate: false });
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setGpsLocation({
-          loading: false,
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-          error: null
-        });
+        const acc = pos.coords.accuracy || 9999;
+        // ONLY accept if accuracy is within 150 meters (real hardware GPS on mobile, not fake desktop IP)
+        if (acc <= 150) {
+          setGpsLocation({
+            loading: false,
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy: acc,
+            isAccurate: true
+          });
+        } else {
+          // Desktop Wi-Fi IP geolocation is too inaccurate (e.g. ±1500m) -> DO NOT RECORD FALSE DATA
+          setGpsLocation({ loading: false, latitude: null, longitude: null, accuracy: acc, isAccurate: false });
+        }
       },
-      (err) => {
-        console.warn('GPS capture error:', err.message);
-        setGpsLocation({ loading: false, error: 'GPS permission denied or unavailable' });
+      () => {
+        setGpsLocation({ loading: false, latitude: null, longitude: null, accuracy: null, isAccurate: false });
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
     );
   };
 
@@ -170,6 +232,18 @@ export default function App() {
       showToast('Please scan or enter a barcode first.', 'warning');
       return;
     }
+    if (photoFiles.length === 0) {
+      showToast('Proof photo is required. Please take or upload at least 1 photo.', 'warning');
+      return;
+    }
+    if (!reporterName.trim()) {
+      showToast('Please enter your full name.', 'warning');
+      return;
+    }
+    if (!reporterContact.trim()) {
+      showToast('Please enter your contact number or email address.', 'warning');
+      return;
+    }
 
     setIsSubmitting(true);
     setToastMessage(null);
@@ -182,39 +256,36 @@ export default function App() {
         if (url) uploadedUrls.push(url);
       }
 
-      // 2. Fast background check to see if known in Supabase / Coworker catalog
-      const knownProduct = await catalogService.findProduct(cleanBarcode);
-
-      // 3. Submit report to Supabase
+      // 2. Submit report to Supabase
       const res = await catalogService.submitReport({
         barcode: cleanBarcode,
-        product: knownProduct,
+        product: detectedProduct,
         quantity,
-        location: locationSlot,
+        reporterName,
+        reporterContact,
         reason: selectedReason,
         explanation,
         photos: uploadedUrls,
-        gps: gpsLocation.latitude ? gpsLocation : null,
-        reportedBy: 'Warehouse Staff'
+        gps: gpsLocation.isAccurate ? gpsLocation : null
       });
 
       // Show success screen
       setSubmitSuccessReport({
         rmaNumber: res.rmaNumber,
         barcode: cleanBarcode,
+        productName: detectedProduct?.name || `Barcode ${cleanBarcode}`,
         quantity,
         reason: selectedReason,
-        isKnown: res.isKnown,
         photoCount: uploadedUrls.length,
-        hasGps: Boolean(gpsLocation.latitude)
+        hasGps: gpsLocation.isAccurate
       });
 
       // Reset form
       setBarcodeInput('');
+      setDetectedProduct(null);
       setQuantity(1);
       setSelectedReason(DEFECT_REASONS[0]);
       setExplanation('');
-      setLocationSlot('');
       setPhotoFiles([]);
 
       // Refresh data
@@ -227,7 +298,7 @@ export default function App() {
     }
   };
 
-  // Admin Lookup test handler
+  // Admin Lookup handler
   const handleAdminLookup = async (code) => {
     const q = (code || adminSearchInput).trim();
     if (!q) return;
@@ -253,51 +324,6 @@ export default function App() {
     <div className="min-h-screen bg-slate-100 text-slate-800 font-sans p-3 sm:p-6">
       <div className="max-w-xl mx-auto space-y-4">
 
-        {/* ============================================================== */}
-        {/* PORTAL NAVIGATION TOGGLE BAR                                   */}
-        {/* ============================================================== */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-2 shadow-sm flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl flex-1">
-            <button
-              type="button"
-              onClick={() => setActivePortal('reporter')}
-              className={`flex-1 py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
-                activePortal === 'reporter'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Camera className="w-4 h-4" />
-              <span>📱 Reporter Mode</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActivePortal('admin')}
-              className={`flex-1 py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
-                activePortal === 'admin'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Database className="w-4 h-4" />
-              <span>🏢 Admin / Review</span>
-            </button>
-          </div>
-
-          {/* Quick Pending badge */}
-          {pendingBarcodesList.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setIsPendingModalOpen(true)}
-              className="px-2.5 py-2 bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 rounded-xl text-xs font-bold flex items-center gap-1 shrink-0"
-              title="Barcodes waiting for product details"
-            >
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
-              <span>{pendingBarcodesList.length}</span>
-            </button>
-          )}
-        </div>
-
         {/* TOAST ALERT */}
         {toastMessage && (
           <div className={`p-3.5 rounded-2xl border text-xs sm:text-sm flex items-center gap-2 shadow-sm animate-in fade-in ${
@@ -314,13 +340,26 @@ export default function App() {
           </div>
         )}
 
-        {/* ============================================================== */}
-        {/* VIEW 1: DEDICATED REPORTER MODE (Clean, Fast Mobile Intake)    */}
-        {/* ============================================================== */}
-        {activePortal === 'reporter' && (
+        {/* ================================================================= */}
+        {/* 1. PUBLIC REPORTER PORTAL (Accessible at '/' or default)          */}
+        {/* ================================================================= */}
+        {!isAdminView && (
           <div className="space-y-4 animate-in fade-in duration-200">
             
-            {/* Success Card after submitting */}
+            {/* Header */}
+            <div className="text-center space-y-1">
+              <span className="px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 inline-block">
+                Customer & Warehouse Returns
+              </span>
+              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+                Report Item for Return
+              </h1>
+              <p className="text-xs text-slate-500">
+                Scan code, attach proof photo, and submit return report.
+              </p>
+            </div>
+
+            {/* Success Confirmation Card */}
             {submitSuccessReport ? (
               <div className="bg-white border-2 border-emerald-500 rounded-3xl p-6 shadow-md text-center space-y-4">
                 <div className="w-14 h-14 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto">
@@ -328,14 +367,18 @@ export default function App() {
                 </div>
                 <div>
                   <h2 className="text-xl font-black text-slate-900">
-                    Return Report Recorded!
+                    Return Report Submitted!
                   </h2>
                   <p className="text-xs font-mono font-bold text-blue-600 mt-0.5">
-                    {submitSuccessReport.rmaNumber}
+                    RMA Reference: {submitSuccessReport.rmaNumber}
                   </p>
                 </div>
 
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-left space-y-1 font-mono">
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-left space-y-1.5 font-mono">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Item:</span>
+                    <span className="font-bold text-slate-900 truncate max-w-[200px]">{submitSuccessReport.productName}</span>
+                  </div>
                   <div className="flex justify-between">
                     <span className="text-slate-400">Barcode:</span>
                     <span className="font-bold text-slate-900">{submitSuccessReport.barcode}</span>
@@ -355,7 +398,7 @@ export default function App() {
                   {submitSuccessReport.hasGps && (
                     <div className="flex justify-between">
                       <span className="text-slate-400">GPS:</span>
-                      <span className="font-bold text-slate-900">Captured 📍</span>
+                      <span className="font-bold text-slate-900">Verified 📍</span>
                     </div>
                   )}
                 </div>
@@ -369,33 +412,9 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              /* Main Reporter Form */
+              /* Reporter Form */
               <form onSubmit={handleReportSubmit} className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm space-y-5">
                 
-                {/* Header & Auto-GPS Pill */}
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div>
-                    <h1 className="text-lg font-black text-slate-900">
-                      Report Return Item
-                    </h1>
-                    <p className="text-xs text-slate-400">
-                      Scan code, take photo, and select reason.
-                    </p>
-                  </div>
-
-                  {/* Auto GPS Pill */}
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[10px] font-mono font-bold bg-slate-50 border border-slate-200 text-slate-600">
-                    <MapPin className={`w-3 h-3 ${gpsLocation.latitude ? 'text-emerald-500' : 'text-amber-500'}`} />
-                    {gpsLocation.loading ? (
-                      <span>GPS...</span>
-                    ) : gpsLocation.latitude ? (
-                      <span>GPS Active (±{Math.round(gpsLocation.accuracy || 0)}m)</span>
-                    ) : (
-                      <span className="text-slate-400">No GPS</span>
-                    )}
-                  </div>
-                </div>
-
                 {/* 1. Barcode Scanner Button & Input */}
                 <div className="space-y-2">
                   <label className="block text-xs font-black uppercase tracking-wider text-slate-500">
@@ -420,7 +439,7 @@ export default function App() {
                         required
                         value={barcodeInput}
                         onChange={(e) => setBarcodeInput(e.target.value)}
-                        placeholder="Or type barcode (e.g. 2310943156)..."
+                        placeholder="Or type barcode here..."
                         className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
                       />
                     </div>
@@ -446,25 +465,66 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+
+                  {/* LIVE PRODUCT PREVIEW: Shows Name & Reference Image if already in database! */}
+                  {detectedProduct && (
+                    <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-center gap-3 animate-in fade-in">
+                      {detectedProduct.imageUrl ? (
+                        <div className="w-14 h-14 rounded-xl overflow-hidden border border-emerald-300 bg-white shrink-0">
+                          <img src={detectedProduct.imageUrl} alt={detectedProduct.name} className="w-full h-full object-cover" />
+                        </div>
+                      ) : (
+                        <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                          <CheckCircle className="w-6 h-6" />
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block">
+                          Verified in Database
+                        </span>
+                        <div className="font-bold text-slate-900 text-sm">
+                          {detectedProduct.name}
+                        </div>
+                        {detectedProduct.code && (
+                          <span className="text-[11px] font-mono text-slate-500">
+                            SKU: {detectedProduct.code}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {barcodeInput.trim() && !detectedProduct && !isCheckingBarcode && (
+                    <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 p-2 rounded-xl">
+                      ℹ️ Unrecorded barcode. You can submit now, and office staff will verify product details.
+                    </div>
+                  )}
                 </div>
 
-                {/* 2. Photo Upload Section */}
+                {/* 2. Photo Upload Section (REQUIRED) */}
                 <div className="space-y-2">
-                  <label className="block text-xs font-black uppercase tracking-wider text-slate-500">
-                    2. Proof Photos (Damaged Part / Expiry / Defect)
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-black uppercase tracking-wider text-slate-500">
+                      2. Proof Photos (Required) *
+                    </label>
+                    <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                      At least 1 photo required
+                    </span>
+                  </div>
 
-                  {/* Photo picker zone */}
-                  <label className="border-2 border-dashed border-slate-300 hover:border-blue-500 bg-slate-50 hover:bg-blue-50/40 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors">
+                  <label className={`border-2 border-dashed rounded-2xl p-4 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors ${
+                    photoFiles.length === 0 
+                      ? 'border-rose-300 bg-rose-50/30 hover:border-rose-400' 
+                      : 'border-slate-300 bg-slate-50 hover:border-blue-500'
+                  }`}>
                     <div className="p-2.5 bg-white text-blue-600 rounded-xl shadow-sm border border-slate-200">
                       <Upload className="w-5 h-5" />
                     </div>
                     <div className="text-center">
                       <span className="text-xs font-bold text-slate-700 block">
-                        Take Photo with Camera or Upload
+                        Tap to Take Photo with Camera or Upload
                       </span>
                       <span className="text-[11px] text-slate-400">
-                        Select one or more photos of damage
+                        Shows damaged part, box, or defect (single or multiple)
                       </span>
                     </div>
                     <input
@@ -519,41 +579,66 @@ export default function App() {
                       </button>
                     ))}
                   </div>
-                </div>
 
-                {/* 4. Optional Explanation & Location */}
-                <div className="space-y-3 pt-1">
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">
-                      Explanation / Notes (Optional)
+                    <label className="block text-[11px] font-bold text-slate-500 mt-2 mb-1">
+                      Explanation (Optional)
                     </label>
                     <textarea
                       rows="2"
                       value={explanation}
                       onChange={(e) => setExplanation(e.target.value)}
-                      placeholder="Describe what is wrong (e.g. Crushed corner on bottom pallet, expired last month)..."
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:border-blue-600"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">
-                      Warehouse Location / Rack (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={locationSlot}
-                      onChange={(e) => setLocationSlot(e.target.value)}
-                      placeholder="e.g. Pull-out area A, Rack 3"
+                      placeholder="Optional: Describe what happened..."
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:border-blue-600"
                     />
                   </div>
                 </div>
 
+                {/* 4. Reporter Identity & Contact (REQUIRED) */}
+                <div className="space-y-2.5 pt-2 border-t border-slate-100">
+                  <label className="block text-xs font-black uppercase tracking-wider text-slate-500">
+                    4. Reported By (Contact Info) *
+                  </label>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="relative">
+                      <User className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                      <input
+                        type="text"
+                        required
+                        value={reporterName}
+                        onChange={(e) => setReporterName(e.target.value)}
+                        placeholder="Your Full Name *"
+                        className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600"
+                      />
+                    </div>
+
+                    <div className="relative">
+                      <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                      <input
+                        type="text"
+                        required
+                        value={reporterContact}
+                        onChange={(e) => setReporterContact(e.target.value)}
+                        placeholder="Phone Number or Email *"
+                        className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* GPS Status Indicator (Accurate GPS only) */}
+                {gpsLocation.isAccurate && (
+                  <div className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-mono">
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>GPS Auto-Captured (Accurate to ±{Math.round(gpsLocation.accuracy)}m)</span>
+                  </div>
+                )}
+
                 {/* Submit Button */}
                 <button
                   type="submit"
-                  disabled={isSubmitting || !barcodeInput.trim()}
+                  disabled={isSubmitting || !barcodeInput.trim() || photoFiles.length === 0 || !reporterName.trim() || !reporterContact.trim()}
                   className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-base rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 transition-all"
                 >
                   {isSubmitting ? (
@@ -567,54 +652,76 @@ export default function App() {
               </form>
             )}
 
+            {/* Footer with link to Staff Admin Portal */}
+            <div className="text-center pt-4">
+              <button
+                type="button"
+                onClick={() => navigateTo('/admin')}
+                className="text-xs text-slate-400 hover:text-slate-700 font-semibold flex items-center justify-center gap-1 mx-auto"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>Office Staff / Admin Dashboard</span>
+              </button>
+            </div>
+
           </div>
         )}
 
-        {/* ============================================================== */}
-        {/* VIEW 2: ADMIN & REVIEW PORTAL (Reports, Details & Catalog)      */}
-        {/* ============================================================== */}
-        {activePortal === 'admin' && (
+        {/* ================================================================= */}
+        {/* 2. STAFF ADMIN PORTAL (Accessible at '/admin')                    */}
+        {/* ================================================================= */}
+        {isAdminView && (
           <div className="space-y-4 animate-in fade-in duration-200">
             
-            {/* Database Connections Bar */}
+            {/* Admin Header with Back to Reporter Portal */}
             <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div>
-                  <h2 className="text-base font-black text-slate-900">
-                    Admin / Staff Portal
-                  </h2>
+                  <h1 className="text-lg font-black text-slate-900">
+                    🏢 Admin & Staff Dashboard
+                  </h1>
                   <p className="text-xs text-slate-400">
-                    Review logged returns, verify unknown barcodes & inspect database.
+                    Review incoming return reports & manage unknown barcodes.
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsReportsModalOpen(true)}
-                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 rounded-xl text-xs font-bold flex items-center gap-1.5"
-                  >
-                    <FileText className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Reports ({recentReportsList.length})</span>
-                  </button>
+                <button
+                  type="button"
+                  onClick={() => navigateTo('/')}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5"
+                >
+                  <ArrowRight className="w-3.5 h-3.5 rotate-180" />
+                  <span>Public Reporter Portal</span>
+                </button>
+              </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setIsPendingModalOpen(true)}
-                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 ${
-                      pendingBarcodesList.length > 0 
-                        ? 'bg-amber-100 border-amber-300 text-amber-900' 
-                        : 'bg-slate-50 border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Pending Barcodes ({pendingBarcodesList.length})</span>
-                  </button>
-                </div>
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsReportsModalOpen(true)}
+                  className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>All RMA Reports ({recentReportsList.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsPendingModalOpen(true)}
+                  className={`flex-1 py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 ${
+                    pendingBarcodesList.length > 0 
+                      ? 'bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200' 
+                      : 'bg-slate-50 border-slate-200 text-slate-600'
+                  }`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Pending Barcodes ({pendingBarcodesList.length})</span>
+                </button>
               </div>
 
               {/* Status indicators */}
-              <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="grid grid-cols-2 gap-2 text-xs pt-1">
                 <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
                   <span className="font-bold text-slate-700">Supabase DB</span>
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
@@ -633,7 +740,7 @@ export default function App() {
             {/* Catalog Inspector Search */}
             <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
               <span className="text-xs font-black uppercase tracking-wider text-slate-500 block">
-                Catalog & Barcode Inspector
+                Catalog & Reference Photo Inspector
               </span>
 
               <form 
@@ -660,37 +767,27 @@ export default function App() {
                 </button>
               </form>
 
-              {/* Quick test buttons */}
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {[
-                  { label: '2310943156 (Oreo)', code: '2310943156' },
-                  { label: '4800016551857 (Nissin)', code: '4800016551857' },
-                  { label: 'P2478P (Coworker API)', code: 'P2478P' }
-                ].map(btn => (
-                  <button
-                    key={btn.code}
-                    type="button"
-                    onClick={() => {
-                      setAdminSearchInput(btn.code);
-                      handleAdminLookup(btn.code);
-                    }}
-                    className="px-2.5 py-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 rounded-lg text-[11px] font-mono font-semibold"
-                  >
-                    {btn.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Product Inspector Result */}
+              {/* Product Result with Reference Image */}
               {adminProductResult && (
                 <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-2 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-900 text-sm">
-                      {adminProductResult.name}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
-                      {adminProductResult.source}
-                    </span>
+                  <div className="flex items-center gap-3">
+                    {adminProductResult.imageUrl ? (
+                      <div className="w-16 h-16 rounded-xl overflow-hidden border border-blue-300 bg-white shrink-0">
+                        <img src={adminProductResult.imageUrl} alt={adminProductResult.name} className="w-full h-full object-cover" />
+                      </div>
+                    ) : (
+                      <div className="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+                        <ImageIcon className="w-6 h-6" />
+                      </div>
+                    )}
+                    <div className="flex-1">
+                      <span className="font-bold text-slate-900 text-sm block">
+                        {adminProductResult.name}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
+                        {adminProductResult.source}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-3 gap-2 font-mono text-[11px] pt-1">
@@ -711,11 +808,11 @@ export default function App() {
               )}
             </div>
 
-            {/* Recent Reports List with Photos Preview */}
+            {/* Recent Reports List with Photos Preview & Reporter Info */}
             <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-black uppercase tracking-wider text-slate-500">
-                  Recent Returns Intake Feed ({recentReportsList.length})
+                  Incoming Return Reports ({recentReportsList.length})
                 </span>
                 <button
                   type="button"
@@ -744,7 +841,9 @@ export default function App() {
                           </span>
                         </div>
                         <div className="font-semibold text-slate-900 mt-0.5">{item.name}</div>
-                        <div className="text-[11px] text-slate-400 font-mono">Barcode: {item.barcode} • Qty: {item.quantity}</div>
+                        <div className="text-[11px] text-slate-500">
+                          Reported by: <span className="font-semibold">{item.reporter_name || item.reported_by}</span>
+                        </div>
                       </div>
 
                       {item.gps_latitude && (
@@ -779,14 +878,14 @@ export default function App() {
         }}
       />
 
-      {/* Admin Pending Barcodes Modal */}
+      {/* Admin Pending Barcodes Modal (With Photo Upload) */}
       <PendingBarcodesModal
         isOpen={isPendingModalOpen}
         onClose={() => setIsPendingModalOpen(false)}
         pendingList={pendingBarcodesList}
         onUpdated={() => {
           refreshAllData();
-          showToast('Barcode details updated! System will now recognize this item.', 'success');
+          showToast('Barcode details and reference photo updated!', 'success');
         }}
       />
 

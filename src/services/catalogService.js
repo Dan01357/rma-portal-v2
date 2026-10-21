@@ -3,13 +3,6 @@ import { purchaseOrdersApi } from './purchaseOrdersApi';
 
 /**
  * UNIFIED CATALOG & RMA REPORTING SERVICE
- * 
- * Supports:
- * - Supabase Priority #1 Catalog
- * - Coworker PO API Secondary Fallback
- * - Photo uploads to Supabase Storage ('rma-photos') with Base64 fallback
- * - Auto GPS Coordinates
- * - Defect reasons & explanations
  */
 export const catalogService = {
   /**
@@ -32,8 +25,8 @@ export const catalogService = {
   },
 
   /**
-   * Upload proof photo to Supabase Storage ('rma-photos' bucket)
-   * With automatic Base64 fallback if storage bucket is not configured yet
+   * Upload photo to Supabase Storage ('rma-photos' bucket)
+   * With automatic Base64 fallback if storage bucket is not configured
    */
   async uploadPhoto(file) {
     if (!file) return null;
@@ -50,7 +43,7 @@ export const catalogService = {
         });
 
       if (error) {
-        console.warn('Supabase storage upload notice (using data URL fallback):', error.message);
+        console.warn('Storage upload notice (falling back to data URL):', error.message);
         return await this.fileToBase64(file);
       }
 
@@ -60,7 +53,7 @@ export const catalogService = {
 
       return publicUrlData.publicUrl;
     } catch (err) {
-      console.warn('Storage exception (using data URL fallback):', err.message);
+      console.warn('Storage exception (falling back to data URL):', err.message);
       return await this.fileToBase64(file);
     }
   },
@@ -76,7 +69,7 @@ export const catalogService = {
 
   /**
    * Fast Barcode / SKU Lookup:
-   * PRIORITY 1: Look in our custom Supabase 'products' table
+   * PRIORITY 1: Look in our custom Supabase 'products' table (returns product name and reference image)
    * PRIORITY 2: Look in Coworker's live API (erply_products)
    */
   async findProduct(barcodeOrQuery) {
@@ -123,6 +116,7 @@ export const catalogService = {
           brandName: supaItem.brand_name || null,
           unitName: supaItem.unit_name || 'pc',
           hasSerialNumbers: supaItem.has_serial_numbers || false,
+          imageUrl: supaItem.image_url || null, // Reference photo from admin
           isVerified: supaItem.is_verified !== false,
           source: 'Supabase Database (Yours)'
         };
@@ -146,6 +140,7 @@ export const catalogService = {
           brandName: liveItem.brandName || null,
           unitName: liveItem.unitName || 'pc',
           hasSerialNumbers: liveItem.hasSerialNumbers || false,
+          imageUrl: null,
           isVerified: true,
           source: "Coworker's API (5,793 Items)"
         };
@@ -159,21 +154,32 @@ export const catalogService = {
 
   /**
    * SUBMIT RMA RETURN REPORT
-   * Records return with proof photos, defect reason, explanation, and GPS coordinates
+   * - Photo is REQUIRED (at least 1)
+   * - Reporter Name & Contact are REQUIRED
+   * - Accurate GPS ONLY: Filters out inaccurate desktop IP geolocation (> 150m accuracy is left blank)
    */
   async submitReport({ 
     barcode, 
     product, 
     quantity = 1, 
-    location = '', 
-    reason = 'Damaged in Transit / Crushed',
+    reporterName,
+    reporterContact,
+    reason = 'Damaged Box / Crushed Packaging',
     explanation = '',
     photos = [],
-    gps = null,
-    reportedBy = 'Warehouse Staff' 
+    gps = null 
   }) {
     const cleanBarcode = String(barcode || '').trim();
     if (!cleanBarcode) throw new Error('A barcode is required to report a return.');
+    if (!photos || photos.length === 0) {
+      throw new Error('Proof photo is required. Please attach at least 1 image.');
+    }
+    if (!reporterName || !reporterName.trim()) {
+      throw new Error('Your name is required.');
+    }
+    if (!reporterContact || !reporterContact.trim()) {
+      throw new Error('Your contact info (phone number or email) is required.');
+    }
 
     // Generate readable RMA Number: RMA-YYYYMMDD-XXXX
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -181,6 +187,9 @@ export const catalogService = {
     const rmaNumber = `RMA-${today}-${randomSuffix}`;
 
     const isKnown = Boolean(product && product.isVerified !== false);
+
+    // Filter GPS: Only save if accuracy is <= 150 meters (real hardware GPS, not inaccurate desktop IP geolocation)
+    const isAccurateGps = gps && gps.latitude && gps.accuracy && Number(gps.accuracy) <= 150;
 
     const reportRow = {
       rma_number: rmaNumber,
@@ -193,15 +202,16 @@ export const catalogService = {
       price_with_vat: isKnown ? Number(product.priceWithVat || 0) : 0,
       unit_name: isKnown ? (product.unitName || 'pc') : 'pc',
       status: isKnown ? 'pending' : 'pending_admin_details',
-      location: location || null,
-      reason: reason || 'Damaged in Transit / Crushed',
+      reason: reason || 'Damaged Box / Crushed Packaging',
       explanation: explanation || null,
-      photos: Array.isArray(photos) ? photos : (photos ? [photos] : []),
-      gps_latitude: gps?.latitude ? Number(gps.latitude) : null,
-      gps_longitude: gps?.longitude ? Number(gps.longitude) : null,
-      gps_accuracy: gps?.accuracy ? Number(gps.accuracy) : null,
-      gps_timestamp: gps?.latitude ? new Date().toISOString() : null,
-      reported_by: reportedBy
+      photos: Array.isArray(photos) ? photos : [photos],
+      gps_latitude: isAccurateGps ? Number(gps.latitude) : null,
+      gps_longitude: isAccurateGps ? Number(gps.longitude) : null,
+      gps_accuracy: isAccurateGps ? Number(gps.accuracy) : null,
+      gps_timestamp: isAccurateGps ? new Date().toISOString() : null,
+      reporter_name: reporterName.trim(),
+      reporter_contact: reporterContact.trim(),
+      reported_by: `${reporterName.trim()} (${reporterContact.trim()})`
     };
 
     // 1. Insert into rma_reports
@@ -235,7 +245,7 @@ export const catalogService = {
         ], { onConflict: 'barcode' });
 
       if (prodError) {
-        console.warn('Unknown barcode upsert notice:', prodError.message);
+        console.warn('Unknown barcode catalog upsert notice:', prodError.message);
       }
     }
 
@@ -270,9 +280,9 @@ export const catalogService = {
   },
 
   /**
-   * ADMIN ACTION: Fill in details for an unknown barcode.
+   * ADMIN ACTION: Fill in details for an unknown barcode, including optional product reference image.
    */
-  async updateBarcodeDetails({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName }) {
+  async updateBarcodeDetails({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl }) {
     const cleanBarcode = String(barcode || '').trim();
     if (!cleanBarcode) throw new Error('Barcode is required.');
 
@@ -284,6 +294,7 @@ export const catalogService = {
       price_with_vat: Number(priceWithVat || price || 0),
       brand_name: brandName ? brandName.trim() : null,
       unit_name: unitName ? unitName.trim() : 'pc',
+      image_url: imageUrl ? imageUrl.trim() : null,
       is_verified: true,
       updated_at: new Date().toISOString()
     };
@@ -321,7 +332,7 @@ export const catalogService = {
   /**
    * Get all RMA reports
    */
-  async getRecentReports(limit = 30) {
+  async getRecentReports(limit = 50) {
     try {
       const { data, error } = await supabase
         .from('rma_reports')
