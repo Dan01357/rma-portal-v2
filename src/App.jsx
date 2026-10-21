@@ -27,7 +27,8 @@ import {
   Lock,
   LogOut,
   Users,
-  ShieldAlert
+  ShieldAlert,
+  Package
 } from 'lucide-react';
 import { catalogService } from './services/catalogService';
 import { purchaseOrdersApi } from './services/purchaseOrdersApi';
@@ -38,6 +39,9 @@ import PendingBarcodesModal from './components/PendingBarcodesModal';
 import RMAReportsModal from './components/RMAReportsModal';
 import AdminLoginModal from './components/AdminLoginModal';
 import EmployeeManagementModal from './components/EmployeeManagementModal';
+import SavedProductsTab from './components/SavedProductsTab';
+import ProductSearchTab from './components/ProductSearchTab';
+import ProductEditModal from './components/ProductEditModal';
 
 const DEFECT_REASONS = [
   'Damaged Box / Crushed Packaging',
@@ -60,6 +64,16 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(() => authService.getCurrentUser());
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
+
+  // Admin Dashboard Active Tab: 'products' | 'reports' | 'search'
+  const [adminActiveTab, setAdminActiveTab] = useState('products');
+
+  // Saved Products State
+  const [savedProductsList, setSavedProductsList] = useState([]);
+  const [isSavedProductsLoading, setIsSavedProductsLoading] = useState(false);
+  const [isProductEditOpen, setIsProductEditOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [staffList, setStaffList] = useState([]);
 
   // Listen to browser navigation
   useEffect(() => {
@@ -172,11 +186,6 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccessReport, setSubmitSuccessReport] = useState(null);
 
-  // Admin Lookup State
-  const [adminSearchInput, setAdminSearchInput] = useState('');
-  const [adminProductResult, setAdminProductResult] = useState(null);
-  const [isAdminSearching, setIsAdminSearching] = useState(false);
-
   // Modals & Queues
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isPendingModalOpen, setIsPendingModalOpen] = useState(false);
@@ -185,9 +194,41 @@ export default function App() {
   const [recentReportsList, setRecentReportsList] = useState([]);
   const [toastMessage, setToastMessage] = useState(null);
 
+  // Real-time synchronization & initial load
   useEffect(() => {
     refreshAllData();
     captureAccurateGps();
+
+    // 1. Cross-tab & local event bus listener
+    const unsubscribeBus = catalogService.onDataChange((evt) => {
+      console.log('[Realtime Event Bus] Event:', evt.type);
+      refreshAllData();
+    });
+
+    // 2. Supabase Realtime channel for instant multi-device / database updates
+    const realtimeChannel = supabase
+      .channel('rma_realtime_stream')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rma_reports' }, () => {
+        refreshAllData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
+        refreshAllData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'admin_users' }, () => {
+        refreshAllData();
+      })
+      .subscribe();
+
+    // 3. Gentle 6-second heartbeat polling so background tabs and mobile stay 100% in sync
+    const pollInterval = setInterval(() => {
+      refreshAllData();
+    }, 6000);
+
+    return () => {
+      unsubscribeBus();
+      supabase.removeChannel(realtimeChannel);
+      clearInterval(pollInterval);
+    };
   }, []);
 
   // Check barcode whenever user stops typing to show recognized product name + image
@@ -222,18 +263,18 @@ export default function App() {
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const acc = pos.coords.accuracy || 9999;
-        // ONLY accept if accuracy is within 150 meters (real hardware GPS on mobile, not fake desktop IP)
+        const acc = pos.coords.accuracy;
+        // Real hardware GPS is usually within 10-100 meters
         if (acc <= 150) {
           setGpsLocation({
             loading: false,
             latitude: pos.coords.latitude,
             longitude: pos.coords.longitude,
-            accuracy: acc,
+            accuracy: Math.round(acc),
             isAccurate: true
           });
         } else {
-          // Desktop Wi-Fi IP geolocation is too inaccurate (e.g. ±1500m) -> DO NOT RECORD FALSE DATA
+          // Desktop Wi-Fi IP geolocation is too inaccurate -> DO NOT RECORD FALSE DATA
           setGpsLocation({ loading: false, latitude: null, longitude: null, accuracy: acc, isAccurate: false });
         }
       },
@@ -271,10 +312,26 @@ export default function App() {
 
     // 4. Load recent reports
     try {
-      const reports = await catalogService.getRecentReports(30);
+      const reports = await catalogService.getRecentReports(50);
       setRecentReportsList(reports);
     } catch (e) {
       console.warn('Reports load error:', e);
+    }
+
+    // 5. Load saved products from Supabase
+    try {
+      const saved = await catalogService.getSavedProducts();
+      setSavedProductsList(saved);
+    } catch (e) {
+      console.warn('Saved products load error:', e);
+    }
+
+    // 6. Load staff list
+    try {
+      const staff = await authService.getEmployees();
+      setStaffList(staff);
+    } catch (e) {
+      console.warn('Staff load error:', e);
     }
   };
 
@@ -298,43 +355,44 @@ export default function App() {
 
   const removePhoto = (index) => {
     setPhotoFiles(prev => {
-      const copy = [...prev];
-      URL.revokeObjectURL(copy[index].previewUrl);
-      copy.splice(index, 1);
-      return copy;
+      const updated = [...prev];
+      if (updated[index]?.previewUrl) {
+        URL.revokeObjectURL(updated[index].previewUrl);
+      }
+      updated.splice(index, 1);
+      return updated;
     });
   };
 
-  // SUBMIT RMA RETURN REPORT
-  const handleReportSubmit = async (e) => {
+  // Submit RMA Report Handler
+  const handleSubmitReport = async (e) => {
     e.preventDefault();
     const cleanBarcode = barcodeInput.trim();
     if (!cleanBarcode) {
-      showToast('Please scan or enter a barcode first.', 'warning');
+      showToast('Please scan or enter a product barcode.', 'warning');
       return;
     }
+
     if (photoFiles.length === 0) {
-      showToast('Proof photo is required. Please take or upload at least 1 photo.', 'warning');
+      showToast('Proof photo is required. Please attach at least 1 image.', 'warning');
       return;
     }
-    if (!reporterName.trim()) {
-      showToast('Please enter your full name.', 'warning');
-      return;
-    }
-    if (!reporterContact.trim()) {
-      showToast('Please enter your contact number or email address.', 'warning');
+
+    if (!reporterName.trim() || !reporterContact.trim()) {
+      showToast('Please provide your name and contact information.', 'warning');
       return;
     }
 
     setIsSubmitting(true);
-    setToastMessage(null);
 
     try {
-      // 1. Upload photos to Supabase Storage ('rma-photos')
+      // 1. Upload photos to Supabase Storage
       const uploadedUrls = [];
       for (const item of photoFiles) {
-        const url = await catalogService.uploadPhoto(item.file);
-        if (url) uploadedUrls.push(url);
+        if (item.file) {
+          const url = await catalogService.uploadPhoto(item.file);
+          if (url) uploadedUrls.push(url);
+        }
       }
 
       // 2. Submit report to Supabase
@@ -379,31 +437,10 @@ export default function App() {
     }
   };
 
-  // Admin Lookup handler
-  const handleAdminLookup = async (code) => {
-    const q = (code || adminSearchInput).trim();
-    if (!q) return;
-
-    setIsAdminSearching(true);
-    setAdminProductResult(null);
-
-    try {
-      const found = await catalogService.findProduct(q);
-      if (found) {
-        setAdminProductResult(found);
-      } else {
-        showToast(`Item "${q}" not found in catalog or coworker API.`, 'warning');
-      }
-    } catch (err) {
-      showToast(err.message, 'warning');
-    } finally {
-      setIsAdminSearching(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 font-sans p-3 sm:p-6">
-      <div className="max-w-xl mx-auto space-y-4">
+      {/* Dynamic container width: clean mobile intake for public reporter, spacious SaaS for admin */}
+      <div className={`${isAdminView ? 'max-w-6xl' : 'max-w-xl'} mx-auto space-y-4 transition-all duration-300`}>
 
         {/* TOAST ALERT */}
         {toastMessage && (
@@ -428,85 +465,76 @@ export default function App() {
           <div className="space-y-4 animate-in fade-in duration-200">
             
             {/* Header */}
-            <div className="text-center space-y-1">
-              <span className="px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 inline-block">
+            <div className="text-center space-y-1.5 py-2">
+              <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 inline-block">
                 Customer & Warehouse Returns
               </span>
               <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
                 Report Item for Return
               </h1>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
                 Scan code, attach proof photo, and submit return report.
               </p>
             </div>
 
-            {/* Success Confirmation Card */}
+            {/* Submission Success Screen */}
             {submitSuccessReport ? (
-              <div className="bg-white border-2 border-emerald-500 rounded-3xl p-6 shadow-md text-center space-y-4">
-                <div className="w-14 h-14 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto">
+              <div className="bg-white border border-emerald-200 rounded-3xl p-6 sm:p-8 shadow-sm text-center space-y-4 animate-in zoom-in-95">
+                <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
                   <CheckCircle className="w-8 h-8" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-slate-900">
-                    Return Report Submitted!
-                  </h2>
-                  <p className="text-xs font-mono font-bold text-blue-600 mt-0.5">
-                    RMA Reference: {submitSuccessReport.rmaNumber}
+                  <h2 className="text-xl font-black text-slate-900">Return Report Filed!</h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Your report has been logged and the inventory team has been notified.
                   </p>
                 </div>
 
-                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-left space-y-1.5 font-mono">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Item:</span>
-                    <span className="font-bold text-slate-900 truncate max-w-[200px]">{submitSuccessReport.productName}</span>
+                <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl text-left text-xs space-y-2">
+                  <div className="flex justify-between border-b border-emerald-200/80 pb-1.5">
+                    <span className="text-slate-500">RMA Number:</span>
+                    <strong className="font-mono text-emerald-800 text-sm">{submitSuccessReport.rmaNumber}</strong>
+                  </div>
+                  <div className="flex justify-between border-b border-emerald-200/80 pb-1.5">
+                    <span className="text-slate-500">Barcode:</span>
+                    <strong className="font-mono text-slate-800">{submitSuccessReport.barcode}</strong>
+                  </div>
+                  <div className="flex justify-between border-b border-emerald-200/80 pb-1.5">
+                    <span className="text-slate-500">Item:</span>
+                    <strong className="text-slate-800 text-right">{submitSuccessReport.productName}</strong>
+                  </div>
+                  <div className="flex justify-between border-b border-emerald-200/80 pb-1.5">
+                    <span className="text-slate-500">Reason:</span>
+                    <strong className="text-slate-800">{submitSuccessReport.reason}</strong>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Barcode:</span>
-                    <span className="font-bold text-slate-900">{submitSuccessReport.barcode}</span>
+                    <span className="text-slate-500">Photos Attached:</span>
+                    <strong className="text-emerald-700">{submitSuccessReport.photoCount} Image(s)</strong>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Quantity:</span>
-                    <span className="font-bold text-slate-900">{submitSuccessReport.quantity} pcs</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Reason:</span>
-                    <span className="font-bold text-rose-600">{submitSuccessReport.reason}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Proof Photos:</span>
-                    <span className="font-bold text-emerald-600">{submitSuccessReport.photoCount} attached</span>
-                  </div>
-                  {submitSuccessReport.hasGps && (
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">GPS:</span>
-                      <span className="font-bold text-slate-900">Verified 📍</span>
-                    </div>
-                  )}
                 </div>
 
                 <button
                   type="button"
                   onClick={() => setSubmitSuccessReport(null)}
-                  className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-2xl shadow-md transition-all"
+                  className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-2xl shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2"
                 >
-                  Report Another Item
+                  <Plus className="w-4 h-4" />
+                  <span>Report Another Item</span>
                 </button>
               </div>
             ) : (
-              /* Reporter Form */
-              <form onSubmit={handleReportSubmit} className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm space-y-5">
+              <form onSubmit={handleSubmitReport} className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
                 
-                {/* 1. Barcode Scanner Button & Input */}
+                {/* 1. BARCODE SCAN / INPUT */}
                 <div className="space-y-2">
-                  <label className="block text-xs font-black uppercase tracking-wider text-slate-500">
+                  <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
                     1. Product Barcode / QR Code *
                   </label>
                   
-                  {/* Phone Camera Scanner Launch */}
                   <button
                     type="button"
                     onClick={() => setIsScannerOpen(true)}
-                    className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-extrabold text-sm rounded-2xl flex items-center justify-center gap-2.5 shadow-md shadow-emerald-600/20 transition-all"
+                    className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 transition-all active:scale-[0.99]"
                   >
                     <Camera className="w-5 h-5" />
                     <span>Scan with Phone Camera</span>
@@ -514,145 +542,131 @@ export default function App() {
 
                   <div className="flex items-center gap-2 pt-1">
                     <div className="relative flex-1">
-                      <Barcode className="w-5 h-5 text-slate-400 absolute left-3.5 top-3" />
+                      <Barcode className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                       <input
                         type="text"
                         required
                         value={barcodeInput}
                         onChange={(e) => setBarcodeInput(e.target.value)}
                         placeholder="Or type barcode here..."
-                        className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
+                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-bold font-mono text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
                       />
                     </div>
 
-                    {/* Quantity Selector */}
-                    <div className="flex items-center border border-slate-300 rounded-xl overflow-hidden bg-slate-50 shrink-0">
+                    <div className="flex items-center border border-slate-300 rounded-2xl bg-slate-50 px-2 py-1">
                       <button
                         type="button"
                         onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                        className="px-2.5 py-2.5 hover:bg-slate-200 text-slate-700"
+                        className="p-1 text-slate-500 hover:text-slate-800"
                       >
                         <Minus className="w-3.5 h-3.5" />
                       </button>
-                      <span className="px-2.5 font-mono font-black text-sm text-slate-900">
-                        {quantity}
-                      </span>
+                      <span className="w-6 text-center text-xs font-black text-slate-800">{quantity}</span>
                       <button
                         type="button"
                         onClick={() => setQuantity(quantity + 1)}
-                        className="px-2.5 py-2.5 hover:bg-slate-200 text-slate-700"
+                        className="p-1 text-slate-500 hover:text-slate-800"
                       >
                         <Plus className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
 
-                  {/* LIVE PRODUCT PREVIEW: Shows Name & Reference Image if already in database! */}
-                  {detectedProduct && (
-                    <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-center gap-3 animate-in fade-in">
+                  {/* Recognized Product Banner (Shows name & reference image) */}
+                  {isCheckingBarcode ? (
+                    <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs flex items-center gap-2 text-slate-500">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                      <span>Checking database for recognized item...</span>
+                    </div>
+                  ) : detectedProduct ? (
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center gap-3 animate-in fade-in">
                       {detectedProduct.imageUrl ? (
-                        <div className="w-14 h-14 rounded-xl overflow-hidden border border-emerald-300 bg-white shrink-0">
+                        <div className="w-14 h-14 rounded-xl overflow-hidden border border-emerald-400 bg-white shrink-0">
                           <img src={detectedProduct.imageUrl} alt={detectedProduct.name} className="w-full h-full object-cover" />
                         </div>
                       ) : (
-                        <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                        <div className="w-12 h-12 rounded-xl bg-emerald-200/70 text-emerald-800 flex items-center justify-center shrink-0 font-bold">
                           <CheckCircle className="w-6 h-6" />
                         </div>
                       )}
-                      <div>
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block">
-                          Verified in Database
+                      <div className="flex-1 min-w-0">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-200/60 px-2 py-0.5 rounded-full inline-block mb-0.5">
+                          Recognized Product
                         </span>
-                        <div className="font-bold text-slate-900 text-sm">
+                        <div className="font-bold text-slate-900 text-xs truncate">
                           {detectedProduct.name}
                         </div>
-                        {detectedProduct.code && (
-                          <span className="text-[11px] font-mono text-slate-500">
-                            SKU: {detectedProduct.code}
-                          </span>
-                        )}
+                        <div className="text-[11px] text-slate-500 font-mono">
+                          SKU: {detectedProduct.code} • ₱{Number(detectedProduct.priceWithVat || 0).toFixed(2)}
+                        </div>
                       </div>
                     </div>
-                  )}
-                  {barcodeInput.trim() && !detectedProduct && !isCheckingBarcode && (
-                    <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 p-2 rounded-xl">
-                      ℹ️ Unrecorded barcode. You can submit now, and office staff will verify product details.
+                  ) : barcodeInput.trim() ? (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs flex items-center gap-2 text-amber-800 animate-in fade-in">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>
+                        Barcode not yet registered. You can still submit! Admin staff will be notified to record the item details.
+                      </span>
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
-                {/* 2. Photo Upload Section (REQUIRED) */}
+                {/* 2. PHOTO UPLOADER (REQUIRED) */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-black uppercase tracking-wider text-slate-500">
+                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
                       2. Proof Photos (Required) *
                     </label>
-                    <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
-                      At least 1 photo required
-                    </span>
+                    <span className="text-[10px] font-bold text-rose-500">At least 1 photo required</span>
                   </div>
 
-                  <label className={`border-2 border-dashed rounded-2xl p-4 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors ${
-                    photoFiles.length === 0 
-                      ? 'border-rose-300 bg-rose-50/30 hover:border-rose-400' 
-                      : 'border-slate-300 bg-slate-50 hover:border-blue-500'
-                  }`}>
-                    <div className="p-2.5 bg-white text-blue-600 rounded-xl shadow-sm border border-slate-200">
-                      <Upload className="w-5 h-5" />
-                    </div>
-                    <div className="text-center">
-                      <span className="text-xs font-bold text-slate-700 block">
+                  <div className="grid grid-cols-3 gap-2">
+                    {photoFiles.map((item, idx) => (
+                      <div key={idx} className="relative aspect-square rounded-2xl overflow-hidden border-2 border-slate-300 group shadow-sm bg-slate-100">
+                        <img src={item.previewUrl} alt="Preview" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => removePhoto(idx)}
+                          className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full opacity-80 hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+
+                    <label className="aspect-square border-2 border-dashed border-rose-300 hover:border-blue-500 bg-rose-50/40 hover:bg-blue-50/50 rounded-2xl flex flex-col items-center justify-center p-2 text-center cursor-pointer transition-all">
+                      <Upload className="w-6 h-6 text-rose-500 mb-1" />
+                      <span className="text-[11px] font-extrabold text-slate-700 leading-tight">
                         Tap to Take Photo with Camera or Upload
                       </span>
-                      <span className="text-[11px] text-slate-400">
-                        Shows damaged part, box, or defect (single or multiple)
-                      </span>
-                    </div>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      capture="environment"
-                      onChange={handlePhotoSelect}
-                      className="hidden"
-                    />
-                  </label>
-
-                  {/* Thumbnail Previews */}
-                  {photoFiles.length > 0 && (
-                    <div className="grid grid-cols-3 gap-2 pt-1">
-                      {photoFiles.map((item, idx) => (
-                        <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-300 group">
-                          <img src={item.previewUrl} alt="Proof" className="w-full h-full object-cover" />
-                          <button
-                            type="button"
-                            onClick={() => removePhoto(idx)}
-                            className="absolute top-1 right-1 p-1 bg-black/70 hover:bg-rose-600 text-white rounded-full transition-colors"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                      <span className="text-[9px] text-slate-400 mt-0.5">Shows damaged part, box, or defect (single or multiple)</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        multiple
+                        onChange={handlePhotoSelect}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
                 </div>
 
-                {/* 3. Reason for Return */}
+                {/* 3. REASON FOR RETURN */}
                 <div className="space-y-2">
-                  <label className="block text-xs font-black uppercase tracking-wider text-slate-500">
-                    3. Why Are You Returning This Item? *
+                  <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
+                    3. Why are you returning this item? *
                   </label>
-                  
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {DEFECT_REASONS.map(reason => (
                       <button
                         key={reason}
                         type="button"
                         onClick={() => setSelectedReason(reason)}
-                        className={`p-2.5 rounded-xl border text-left text-xs font-bold transition-all flex items-center justify-between ${
+                        className={`p-2.5 rounded-2xl border text-xs font-bold text-left transition-all flex items-center justify-between ${
                           selectedReason === reason
-                            ? 'bg-rose-50 border-rose-500 text-rose-900 shadow-sm'
-                            : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                            ? 'bg-rose-50 border-rose-400 text-rose-900 shadow-sm'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                         }`}
                       >
                         <span>{reason}</span>
@@ -661,89 +675,72 @@ export default function App() {
                     ))}
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mt-2 mb-1">
-                      Explanation (Optional)
-                    </label>
-                    <textarea
-                      rows="2"
-                      value={explanation}
-                      onChange={(e) => setExplanation(e.target.value)}
-                      placeholder="Optional: Describe what happened..."
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:border-blue-600"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    value={explanation}
+                    onChange={(e) => setExplanation(e.target.value)}
+                    placeholder="Optional details / explanation..."
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-semibold text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
+                  />
                 </div>
 
-                {/* 4. Reporter Identity & Contact (REQUIRED) */}
-                <div className="space-y-2.5 pt-2 border-t border-slate-100">
-                  <label className="block text-xs font-black uppercase tracking-wider text-slate-500">
-                    4. Reported By (Contact Info) *
+                {/* 4. REPORTER CONTACT INFORMATION */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
+                    4. Reporter Information (Required) *
                   </label>
-
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div className="relative">
-                      <User className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                      <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                       <input
                         type="text"
                         required
                         value={reporterName}
                         onChange={(e) => setReporterName(e.target.value)}
                         placeholder="Your Full Name *"
-                        className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600"
+                        className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
                       />
                     </div>
-
                     <div className="relative">
-                      <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                      <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                       <input
                         type="text"
                         required
                         value={reporterContact}
                         onChange={(e) => setReporterContact(e.target.value)}
-                        placeholder="Phone Number or Email *"
-                        className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600"
+                        placeholder="Phone No. or Email *"
+                        className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* GPS Status Indicator (Accurate GPS only) */}
-                {gpsLocation.isAccurate && (
-                  <div className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-mono">
-                    <MapPin className="w-3.5 h-3.5" />
-                    <span>GPS Auto-Captured (Accurate to ±{Math.round(gpsLocation.accuracy)}m)</span>
-                  </div>
-                )}
-
-                {/* Submit Button */}
+                {/* Submit Action Button */}
                 <button
                   type="submit"
-                  disabled={isSubmitting || !barcodeInput.trim() || photoFiles.length === 0 || !reporterName.trim() || !reporterContact.trim()}
-                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-base rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 transition-all"
+                  disabled={isSubmitting || photoFiles.length === 0}
+                  className="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-sm rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-blue-600/30 transition-all active:scale-[0.99]"
                 >
                   {isSubmitting ? (
                     <RefreshCw className="w-5 h-5 animate-spin" />
                   ) : (
                     <Send className="w-5 h-5" />
                   )}
-                  <span>Submit Return Report ({quantity} pcs)</span>
+                  <span>{isSubmitting ? 'Uploading Proof & Saving...' : 'Submit Return Report'}</span>
                 </button>
 
+                {/* Footer Switch to Admin */}
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => navigateTo('/admin')}
+                    className="text-xs font-bold text-slate-400 hover:text-slate-700 underline"
+                  >
+                    Warehouse Staff & Admin Portal Access →
+                  </button>
+                </div>
               </form>
             )}
-
-            {/* Footer with link to Staff Admin Portal */}
-            <div className="text-center pt-4">
-              <button
-                type="button"
-                onClick={() => navigateTo('/admin')}
-                className="text-xs text-slate-400 hover:text-slate-700 font-semibold flex items-center justify-center gap-1 mx-auto"
-              >
-                <Lock className="w-3.5 h-3.5" />
-                <span>Office Staff / Admin Dashboard</span>
-              </button>
-            </div>
 
           </div>
         )}
@@ -752,228 +749,308 @@ export default function App() {
         {/* 2. STAFF ADMIN PORTAL (Accessible at '/admin' with OTP Auth)      */}
         {/* ================================================================= */}
         {isAdminView && currentUser && (
-          <div className="space-y-4 animate-in fade-in duration-200">
+          <div className="space-y-5 animate-in fade-in duration-200">
             
-            {/* Admin Header with Current User Badge & Logout */}
-            <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h1 className="text-lg font-black text-slate-900">
-                      🏢 Staff Admin Portal
-                    </h1>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200">
-                      {currentUser.role === 'super_admin' ? '👑 Super Admin' : currentUser.role}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Signed in as <strong className="text-slate-800">{currentUser.name}</strong> ({currentUser.email})
-                  </p>
+            {/* Production-Level SaaS Header */}
+            <div className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                    <span>🏢 Wholesale RMA Operations</span>
+                  </h1>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Live Auto-Sync
+                  </span>
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200">
+                    {currentUser.role === 'super_admin' ? '👑 Super Admin' : currentUser.role}
+                  </span>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => navigateTo('/')}
-                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5"
-                  >
-                    <ArrowRight className="w-3.5 h-3.5 rotate-180" />
-                    <span>Public Form</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span>Logout</span>
-                  </button>
-                </div>
+                <p className="text-xs text-slate-500">
+                  Logged in as <strong className="text-slate-800">{currentUser.name}</strong> • {currentUser.email}
+                </p>
               </div>
 
-              {/* Action Toolbar */}
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 self-start md:self-auto">
                 <button
                   type="button"
-                  onClick={() => setIsReportsModalOpen(true)}
-                  className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm"
+                  onClick={() => navigateTo('/')}
+                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
                 >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>All RMA Reports ({recentReportsList.length})</span>
+                  <ArrowRight className="w-3.5 h-3.5 rotate-180" />
+                  <span>Public Reporter</span>
                 </button>
 
-                {currentUser.role !== 'viewer' && (
-                  <button
-                    type="button"
-                    onClick={() => setIsPendingModalOpen(true)}
-                    className={`flex-1 py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 ${
-                      pendingBarcodesList.length > 0 
-                        ? 'bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200' 
-                        : 'bg-slate-50 border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Pending Barcodes ({pendingBarcodesList.length})</span>
-                  </button>
-                )}
-
-                {/* SUPER ADMIN ONLY: Employee Access & Role Management */}
-                {currentUser.role === 'super_admin' && (
-                  <button
-                    type="button"
-                    onClick={() => setIsEmployeeModalOpen(true)}
-                    className="py-2 px-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
-                  >
-                    <Users className="w-3.5 h-3.5" />
-                    <span>👥 Employee Access & Roles</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Status indicators */}
-              <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
-                  <span className="font-bold text-slate-700">Supabase DB</span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                    {supaStatus.connected ? 'ONLINE' : 'CHECK'}
-                  </span>
-                </div>
-                <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
-                  <span className="font-bold text-slate-700">Coworker API</span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                    {poApiStatus.connected ? 'ONLINE' : 'OFFLINE'}
-                  </span>
-                </div>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Logout</span>
+                </button>
               </div>
             </div>
 
-            {/* Catalog Inspector Search */}
-            <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
-              <span className="text-xs font-black uppercase tracking-wider text-slate-500 block">
-                Catalog & Reference Photo Inspector
-              </span>
-
-              <form 
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleAdminLookup();
-                }}
-                className="flex gap-2"
+            {/* SaaS KPI Overview Strip */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* Metric 1: Saved Products */}
+              <div 
+                onClick={() => setAdminActiveTab('products')}
+                className={`bg-white border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
+                  adminActiveTab === 'products' ? 'border-indigo-500 ring-2 ring-indigo-100' : 'border-slate-200'
+                }`}
               >
-                <input
-                  type="text"
-                  value={adminSearchInput}
-                  onChange={(e) => setAdminSearchInput(e.target.value)}
-                  placeholder="Enter barcode or SKU to inspect details..."
-                  className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:border-blue-600"
-                />
-                <button
-                  type="submit"
-                  disabled={isAdminSearching}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
-                >
-                  {isAdminSearching ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-                  <span>Inspect</span>
-                </button>
-              </form>
-
-              {/* Product Result with Reference Image */}
-              {adminProductResult && (
-                <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-2 text-xs">
-                  <div className="flex items-center gap-3">
-                    {adminProductResult.imageUrl ? (
-                      <div className="w-16 h-16 rounded-xl overflow-hidden border border-blue-300 bg-white shrink-0">
-                        <img src={adminProductResult.imageUrl} alt={adminProductResult.name} className="w-full h-full object-cover" />
-                      </div>
-                    ) : (
-                      <div className="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
-                        <ImageIcon className="w-6 h-6" />
-                      </div>
-                    )}
-                    <div className="flex-1">
-                      <span className="font-bold text-slate-900 text-sm block">
-                        {adminProductResult.name}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
-                        {adminProductResult.source}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 font-mono text-[11px] pt-1">
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">SKU</span>
-                      <span className="font-bold text-slate-800">{adminProductResult.code}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">Supplier</span>
-                      <span className="font-bold text-slate-800">{adminProductResult.supplierName}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">Price (VAT)</span>
-                      <span className="font-bold text-emerald-600">₱{Number(adminProductResult.priceWithVat).toFixed(2)}</span>
-                    </div>
-                  </div>
+                <div className="flex items-center justify-between text-indigo-600 mb-2">
+                  <Package className="w-5 h-5" />
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">Database</span>
                 </div>
+                <div className="text-2xl sm:text-3xl font-black text-slate-900 font-mono">
+                  {savedProductsList.length}
+                </div>
+                <div className="text-xs font-bold text-slate-700 mt-0.5">Saved Products</div>
+                <div className="text-[11px] text-slate-400">Custom items in catalog</div>
+              </div>
+
+              {/* Metric 2: Return Reports */}
+              <div 
+                onClick={() => setAdminActiveTab('reports')}
+                className={`bg-white border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
+                  adminActiveTab === 'reports' ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'
+                }`}
+              >
+                <div className="flex items-center justify-between text-blue-600 mb-2">
+                  <FileText className="w-5 h-5" />
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">Reports</span>
+                </div>
+                <div className="text-2xl sm:text-3xl font-black text-slate-900 font-mono">
+                  {recentReportsList.length}
+                </div>
+                <div className="text-xs font-bold text-slate-700 mt-0.5">RMA Returns</div>
+                <div className="text-[11px] text-slate-400">Total filed returns</div>
+              </div>
+
+              {/* Metric 3: Pending Barcodes */}
+              <div 
+                onClick={() => setIsPendingModalOpen(true)}
+                className={`bg-white border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
+                  pendingBarcodesList.length > 0 ? 'border-amber-400 bg-amber-50/20' : 'border-slate-200'
+                }`}
+              >
+                <div className="flex items-center justify-between text-amber-600 mb-2">
+                  <AlertTriangle className="w-5 h-5" />
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Action Req.</span>
+                </div>
+                <div className="text-2xl sm:text-3xl font-black text-slate-900 font-mono">
+                  {pendingBarcodesList.length}
+                </div>
+                <div className="text-xs font-bold text-slate-700 mt-0.5">Pending Barcodes</div>
+                <div className="text-[11px] text-slate-400">Awaiting admin verification</div>
+              </div>
+
+              {/* Metric 4: Staff Directory */}
+              <div 
+                onClick={() => {
+                  if (currentUser.role === 'super_admin') setIsEmployeeModalOpen(true);
+                }}
+                className={`bg-white border rounded-3xl p-4 sm:p-5 shadow-sm ${
+                  currentUser.role === 'super_admin' ? 'cursor-pointer hover:shadow-md hover:border-purple-300' : ''
+                } border-slate-200`}
+              >
+                <div className="flex items-center justify-between text-purple-600 mb-2">
+                  <Users className="w-5 h-5" />
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">Team</span>
+                </div>
+                <div className="text-2xl sm:text-3xl font-black text-slate-900 font-mono">
+                  {staffList.length || 25}
+                </div>
+                <div className="text-xs font-bold text-slate-700 mt-0.5">Staff Directory</div>
+                <div className="text-[11px] text-slate-400">Authorized company staff</div>
+              </div>
+            </div>
+
+            {/* Production-Level Tab Segmented Switcher */}
+            <div className="flex flex-wrap items-center gap-2 bg-slate-200/70 p-1.5 rounded-2xl">
+              <button
+                type="button"
+                onClick={() => setAdminActiveTab('products')}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all ${
+                  adminActiveTab === 'products'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Package className="w-4 h-4 text-indigo-600" />
+                <span>Saved Products ({savedProductsList.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAdminActiveTab('reports')}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all ${
+                  adminActiveTab === 'reports'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <FileText className="w-4 h-4 text-blue-600" />
+                <span>Return Reports ({recentReportsList.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAdminActiveTab('search')}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all ${
+                  adminActiveTab === 'search'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Search className="w-4 h-4 text-emerald-600" />
+                <span>Search All Catalogs (5,793+ items)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsPendingModalOpen(true)}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold text-amber-800 hover:bg-amber-100/60 flex items-center gap-1.5 ml-auto transition-colors"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                <span>Pending Queue ({pendingBarcodesList.length})</span>
+              </button>
+
+              {currentUser.role === 'super_admin' && (
+                <button
+                  type="button"
+                  onClick={() => setIsEmployeeModalOpen(true)}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-purple-800 hover:bg-purple-100/60 flex items-center gap-1.5 transition-colors"
+                >
+                  <Users className="w-3.5 h-3.5 text-purple-600" />
+                  <span>Roles & Access</span>
+                </button>
               )}
             </div>
 
-            {/* Recent Reports List with Photos Preview & Reporter Info */}
-            <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-black uppercase tracking-wider text-slate-500">
-                  Incoming Return Reports ({recentReportsList.length})
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setIsReportsModalOpen(true)}
-                  className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1"
-                >
-                  <span>View All</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
+            {/* TAB 1: SAVED PRODUCTS CATALOG DASHBOARD */}
+            {adminActiveTab === 'products' && (
+              <SavedProductsTab
+                products={savedProductsList}
+                isLoading={isSavedProductsLoading}
+                onAddProduct={() => {
+                  setEditingProduct(null);
+                  setIsProductEditOpen(true);
+                }}
+                onEditProduct={(prod) => {
+                  setEditingProduct(prod);
+                  setIsProductEditOpen(true);
+                }}
+                onDeleteProduct={async (prod) => {
+                  try {
+                    await catalogService.deleteProduct(prod.id, prod.barcode);
+                    showToast(`Deleted "${prod.name}" from catalog.`, 'success');
+                    refreshAllData();
+                  } catch (e) {
+                    showToast(e.message, 'warning');
+                  }
+                }}
+                currentUser={currentUser}
+              />
+            )}
 
-              {recentReportsList.length === 0 ? (
-                <p className="text-xs text-slate-400 py-4 text-center">No returns reported yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {recentReportsList.slice(0, 6).map(item => (
-                    <div 
-                      key={item.id || item.rma_number}
-                      className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between gap-3 text-xs"
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-blue-700">{item.rma_number}</span>
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800">
-                            {item.reason}
+            {/* TAB 2: INCOMING RETURN REPORTS */}
+            {adminActiveTab === 'reports' && (
+              <div className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-black text-slate-900 tracking-tight">
+                      Incoming Return Reports
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Recent RMA submissions from warehouse & customer returns.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsReportsModalOpen(true)}
+                    className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs flex items-center gap-1 transition-colors"
+                  >
+                    <span>Open Full Reports Modal</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {recentReportsList.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-8 text-center">No return reports filed yet.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {recentReportsList.slice(0, 10).map(item => (
+                      <div 
+                        key={item.id || item.rma_number}
+                        className="p-4 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-2xl space-y-2 transition-all shadow-sm"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="font-mono font-black text-blue-700 text-sm block">
+                              {item.rma_number}
+                            </span>
+                            <h4 className="font-bold text-slate-900 text-xs sm:text-sm mt-0.5">
+                              {item.name || `Unidentified (${item.barcode})`}
+                            </h4>
+                          </div>
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 shrink-0">
+                            {item.reason || 'Damaged'}
                           </span>
                         </div>
-                        <div className="font-semibold text-slate-900 mt-0.5">{item.name}</div>
-                        <div className="text-[11px] text-slate-500">
-                          Reported by: <span className="font-bold text-slate-700">{item.reporter_name || item.reported_by}</span>
-                          {item.reporter_contact && <span className="font-mono"> • {item.reporter_contact}</span>}
-                        </div>
-                      </div>
 
-                      {item.gps_latitude && (
-                        <a
-                          href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="p-2 bg-white hover:bg-slate-100 rounded-xl border border-slate-200 text-slate-600 shrink-0"
-                          title="Open GPS in Google Maps"
-                        >
-                          <MapPin className="w-4 h-4 text-rose-500" />
-                        </a>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                        {/* Reporter Details */}
+                        <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 flex items-center justify-between">
+                          <span>Reported by: <strong className="text-slate-800">{item.reporter_name || item.reported_by}</strong></span>
+                          <span className="font-mono text-slate-600">{item.reporter_contact || ''}</span>
+                        </div>
+
+                        {/* Photos preview */}
+                        {item.photos && item.photos.length > 0 && (
+                          <div className="flex items-center gap-2 pt-1">
+                            <span className="text-[10px] text-slate-400 font-semibold">
+                              {item.photos.length} Photo{item.photos.length > 1 ? 's' : ''}:
+                            </span>
+                            <div className="flex gap-1.5 overflow-x-auto py-0.5">
+                              {item.photos.slice(0, 3).map((url, i) => (
+                                <img 
+                                  key={i} 
+                                  src={url} 
+                                  alt="Proof" 
+                                  className="w-8 h-8 rounded-lg object-cover border border-slate-300 bg-white" 
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 3: UNIVERSAL PRODUCT SEARCH (Solves "Chocolate" multi-item search) */}
+            {adminActiveTab === 'search' && (
+              <ProductSearchTab
+                onInspectProduct={(prod) => {
+                  setEditingProduct({
+                    name: prod.name,
+                    barcode: prod.barcode,
+                    code: prod.code,
+                    supplier_name: prod.supplierName,
+                    price: prod.price,
+                    price_with_vat: prod.priceWithVat,
+                    unit_name: prod.unitName,
+                    image_url: prod.imageUrl
+                  });
+                  setIsProductEditOpen(true);
+                }}
+              />
+            )}
 
           </div>
         )}
@@ -1027,6 +1104,25 @@ export default function App() {
         isOpen={isReportsModalOpen}
         onClose={() => setIsReportsModalOpen(false)}
         reports={recentReportsList}
+      />
+
+      {/* Product Edit / Add Modal */}
+      <ProductEditModal
+        isOpen={isProductEditOpen}
+        onClose={() => {
+          setIsProductEditOpen(false);
+          setEditingProduct(null);
+        }}
+        product={editingProduct}
+        currentUser={currentUser}
+        onSaved={() => {
+          refreshAllData();
+          showToast('Product saved to catalog!', 'success');
+        }}
+        onDeleted={(prod) => {
+          refreshAllData();
+          showToast(`Product "${prod.name}" deleted from catalog.`, 'success');
+        }}
       />
 
       {/* Toast Alert Notification */}

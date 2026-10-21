@@ -1,10 +1,47 @@
 import { supabase } from '../supabaseClient';
 import { purchaseOrdersApi } from './purchaseOrdersApi';
 
+// Cross-tab broadcast channel for instant multi-device / multi-tab reactivity
+const syncChannel = typeof window !== 'undefined' && window.BroadcastChannel 
+  ? new BroadcastChannel('rma_portal_sync_bus') 
+  : null;
+
 /**
  * UNIFIED CATALOG & RMA REPORTING SERVICE
  */
 export const catalogService = {
+  /**
+   * Broadcast real-time change to all listeners and open tabs
+   */
+  notifyChange(type = 'data-updated', payload = {}) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type, payload } }));
+      try {
+        syncChannel?.postMessage({ type, payload, timestamp: Date.now() });
+      } catch (e) {
+        // BroadcastChannel notice
+      }
+    }
+  },
+
+  /**
+   * Subscribe to real-time events across windows / tabs
+   */
+  onDataChange(callback) {
+    if (typeof window === 'undefined') return () => {};
+
+    const handleCustom = (e) => callback(e.detail);
+    const handleBroadcast = (e) => callback(e.data);
+
+    window.addEventListener('rma-data-changed', handleCustom);
+    syncChannel?.addEventListener('message', handleBroadcast);
+
+    return () => {
+      window.removeEventListener('rma-data-changed', handleCustom);
+      syncChannel?.removeEventListener('message', handleBroadcast);
+    };
+  },
+
   /**
    * Test connection to Supabase database
    */
@@ -88,7 +125,9 @@ export const catalogService = {
         .limit(1);
 
       if (!errBarcode && byBarcode && byBarcode.length > 0) {
-        supaItem = byBarcode[0];
+        if (!byBarcode[0].name?.startsWith('[DELETED]')) {
+          supaItem = byBarcode[0];
+        }
       }
 
       // 1b. Exact SKU/Code match if not found by barcode
@@ -100,7 +139,9 @@ export const catalogService = {
           .limit(1);
 
         if (!errCode && byCode && byCode.length > 0) {
-          supaItem = byCode[0];
+          if (!byCode[0].name?.startsWith('[DELETED]')) {
+            supaItem = byCode[0];
+          }
         }
       }
 
@@ -153,6 +194,209 @@ export const catalogService = {
   },
 
   /**
+   * COMPREHENSIVE MULTI-PRODUCT SEARCH:
+   * Searches BOTH:
+   * 1. Supabase 'products' table (Priority 1)
+   * 2. Coworker's live API (5,793 items - Priority 2)
+   * Returns ALL matching products (e.g. all 660 chocolates, Oreo, etc.) up to limit.
+   */
+  async searchAllProducts(query, limit = 40) {
+    const clean = String(query || '').trim();
+    if (!clean) return [];
+
+    const results = [];
+    const seenKeys = new Set();
+
+    // 1. Search Supabase products table
+    try {
+      const { data: supaItems, error } = await supabase
+        .from('products')
+        .select('*')
+        .or(`name.ilike.%${clean}%,barcode.ilike.%${clean}%,code.ilike.%${clean}%`)
+        .order('is_verified', { ascending: false })
+        .limit(limit);
+
+      if (!error && supaItems && Array.isArray(supaItems)) {
+        for (const item of supaItems) {
+          if (item.name?.startsWith('[DELETED]')) continue;
+          const key = String(item.barcode || item.code || item.id).trim().toLowerCase();
+          seenKeys.add(key);
+
+          results.push({
+            id: item.id,
+            barcode: item.barcode,
+            code: item.code || item.barcode,
+            name: item.name,
+            price: Number(item.price || 0),
+            priceWithVat: Number(item.price_with_vat || item.price || 0),
+            supplierName: item.supplier_name || 'Savemore',
+            brandName: item.brand_name || null,
+            unitName: item.unit_name || 'pc',
+            hasSerialNumbers: item.has_serial_numbers || false,
+            imageUrl: item.image_url || null,
+            isVerified: item.is_verified !== false,
+            source: 'Supabase Database (Custom)'
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Supabase product search warning:', e);
+    }
+
+    // 2. Search Coworker's live API (5,793 items)
+    try {
+      const liveItems = await purchaseOrdersApi.searchProducts(clean, limit);
+      if (liveItems && Array.isArray(liveItems)) {
+        for (const live of liveItems) {
+          const key = String(live.code2 || live.barcode || live.code || live.sku).trim().toLowerCase();
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            results.push({
+              id: live.id,
+              barcode: live.code2 || live.barcode || live.code,
+              code: live.code || live.sku,
+              name: live.name,
+              price: Number(live.price || live.unit_price || 0),
+              priceWithVat: Number(live.priceWithVat || live.unit_price || 0),
+              supplierName: live.supplierName || live.supplier || 'Savemore',
+              brandName: live.brandName || null,
+              unitName: live.unitName || 'pc',
+              hasSerialNumbers: live.hasSerialNumbers || false,
+              imageUrl: null,
+              isVerified: true,
+              source: "Coworker's Catalog (5,793 Items)"
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Coworker product search error:', e);
+    }
+
+    return results;
+  },
+
+  /**
+   * FETCH ALL VERIFIED SAVED PRODUCTS FROM SUPABASE DATABASE
+   */
+  async getSavedProducts() {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('is_verified', true)
+        .not('name', 'like', '[DELETED]%')
+        .order('updated_at', { ascending: false });
+
+      if (error) {
+        console.warn('Error fetching saved products from Supabase:', error.message);
+        return [];
+      }
+      return data || [];
+    } catch (e) {
+      console.warn('Saved products fetch exception:', e);
+      return [];
+    }
+  },
+
+  /**
+   * ADMIN ACTION: Add a brand new product to the saved catalog
+   */
+  async createProduct({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl }) {
+    const cleanBarcode = String(barcode || '').trim();
+    if (!cleanBarcode) throw new Error('Product Barcode is required.');
+    if (!name || !name.trim()) throw new Error('Product Name is required.');
+
+    const newProd = {
+      barcode: cleanBarcode,
+      code: code ? code.trim() : null,
+      name: name.trim(),
+      supplier_name: supplierName ? supplierName.trim() : 'Savemore',
+      price: Number(price || 0),
+      price_with_vat: Number(priceWithVat || price || 0),
+      brand_name: brandName ? brandName.trim() : null,
+      unit_name: unitName ? unitName.trim() : 'pc',
+      image_url: imageUrl ? imageUrl.trim() : null,
+      is_verified: true,
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabase
+      .from('products')
+      .upsert([newProd], { onConflict: 'barcode' })
+      .select()
+      .single();
+
+    if (error) throw new Error(`Failed to save product: ${error.message}`);
+
+    this.notifyChange('product-created', { barcode: cleanBarcode, product: data });
+    return { success: true, product: data };
+  },
+
+  /**
+   * ADMIN ACTION: Edit an existing product record
+   */
+  async updateProduct(id, { barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl }) {
+    if (!id && !barcode) throw new Error('Product identifier required for update.');
+
+    const updates = {
+      name: name ? name.trim() : undefined,
+      code: code !== undefined ? (code ? code.trim() : null) : undefined,
+      supplier_name: supplierName ? supplierName.trim() : undefined,
+      price: price !== undefined ? Number(price || 0) : undefined,
+      price_with_vat: priceWithVat !== undefined ? Number(priceWithVat || price || 0) : undefined,
+      brand_name: brandName !== undefined ? (brandName ? brandName.trim() : null) : undefined,
+      unit_name: unitName ? unitName.trim() : undefined,
+      image_url: imageUrl !== undefined ? (imageUrl ? imageUrl.trim() : null) : undefined,
+      is_verified: true,
+      updated_at: new Date().toISOString()
+    };
+
+    // Remove undefined values
+    Object.keys(updates).forEach(key => updates[key] === undefined && delete updates[key]);
+
+    let query = supabase.from('products').update(updates);
+    if (id) query = query.eq('id', id);
+    else query = query.eq('barcode', barcode);
+
+    const { data, error } = await query.select();
+
+    if (error) throw new Error(`Failed to update product: ${error.message}`);
+
+    this.notifyChange('product-updated', { id, barcode, updates });
+    return { success: true, product: data?.[0] };
+  },
+
+  /**
+   * ADMIN ACTION: Delete a product record from database
+   */
+  async deleteProduct(id, barcode) {
+    if (!id && !barcode) throw new Error('Product identifier required for deletion.');
+
+    let query = supabase.from('products').delete();
+    if (id) query = query.eq('id', id);
+    else query = query.eq('barcode', barcode);
+
+    const { error } = await query;
+
+    // Fallback if DELETE policy is restricted: soft-delete
+    if (error) {
+      console.warn('Hard delete restricted, executing soft-delete:', error.message);
+      let softQuery = supabase.from('products').update({
+        is_verified: false,
+        name: `[DELETED] ${id || barcode}`,
+        updated_at: new Date().toISOString()
+      });
+      if (id) softQuery = softQuery.eq('id', id);
+      else softQuery = softQuery.eq('barcode', barcode);
+      await softQuery;
+    }
+
+    this.notifyChange('product-deleted', { id, barcode });
+    return { success: true };
+  },
+
+  /**
    * SUBMIT RMA RETURN REPORT
    * - Photo is REQUIRED (at least 1)
    * - Reporter Name & Contact are REQUIRED
@@ -188,7 +432,7 @@ export const catalogService = {
 
     const isKnown = Boolean(product && product.isVerified !== false);
 
-    // Filter GPS: Only save if accuracy is <= 150 meters (real hardware GPS, not inaccurate desktop IP geolocation)
+    // Filter GPS: Only save if accuracy is <= 150 meters
     const isAccurateGps = gps && gps.latitude && gps.accuracy && Number(gps.accuracy) <= 150;
 
     const reportRow = {
@@ -249,11 +493,15 @@ export const catalogService = {
       }
     }
 
+    // Trigger instant real-time notification
+    this.notifyChange('report-submitted', { report: insertedReport || reportRow });
+
     return {
       success: true,
       rmaNumber,
       isKnown,
-      status: reportRow.status
+      status: reportRow.status,
+      report: insertedReport || reportRow
     };
   },
 
@@ -266,6 +514,7 @@ export const catalogService = {
         .from('products')
         .select('*')
         .eq('is_verified', false)
+        .not('name', 'like', '[DELETED]%')
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -325,6 +574,8 @@ export const catalogService = {
     } catch (e) {
       console.warn('Failed to backfill rma_reports:', e.message);
     }
+
+    this.notifyChange('barcode-verified', { barcode: cleanBarcode, updates });
 
     return { success: true };
   },
