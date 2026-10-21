@@ -157,11 +157,16 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                       <div className="flex items-center gap-3">
                         <Barcode className="w-6 h-6 text-slate-400 shrink-0" />
                         <div>
-                          <span className="font-mono text-sm font-bold text-blue-700">
-                            {item.barcode}
-                          </span>
-                          <span className="block text-[11px] text-slate-400">
-                            Scanned {new Date(item.created_at).toLocaleString()}
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-black text-xs text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-lg">
+                              SN #{item.id}
+                            </span>
+                            <span className="font-mono text-sm font-bold text-blue-700">
+                              {item.barcode}
+                            </span>
+                          </div>
+                          <span className="block text-[11px] text-slate-400 mt-0.5">
+                            Reported {new Date(item.created_at).toLocaleString()}
                           </span>
                         </div>
                       </div>

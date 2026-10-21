@@ -157,12 +157,7 @@ export const purchaseOrdersApi = {
       }
     }
 
-    // 2. Search fallback: try search variations (e.g. P2478P, Tissue, Chocolate)
-    const searchResults = await this.searchProducts(clean, 1);
-    if (searchResults && searchResults.length > 0) {
-      return searchResults[0];
-    }
-
+    // If not found by direct code or code2 equality, it is NOT in coworker's database.
     return null;
   },
 

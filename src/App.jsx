@@ -28,7 +28,9 @@ import {
   LogOut,
   Users,
   ShieldAlert,
-  Package
+  Package,
+  List,
+  LayoutGrid
 } from 'lucide-react';
 import { catalogService } from './services/catalogService';
 import { purchaseOrdersApi } from './services/purchaseOrdersApi';
@@ -193,6 +195,16 @@ export default function App() {
   const [pendingBarcodesList, setPendingBarcodesList] = useState([]);
   const [recentReportsList, setRecentReportsList] = useState([]);
   const [toastMessage, setToastMessage] = useState(null);
+  const [reportsViewMode, setReportsViewMode] = useState(() => {
+    return localStorage.getItem('rma_admin_reports_view_mode') || 'table';
+  });
+
+  const handleSetReportsViewMode = (mode) => {
+    setReportsViewMode(mode);
+    try {
+      localStorage.setItem('rma_admin_reports_view_mode', mode);
+    } catch (e) {}
+  };
 
   // Real-time synchronization & initial load
   useEffect(() => {
@@ -219,14 +231,26 @@ export default function App() {
       })
       .subscribe();
 
-    // 3. Gentle 6-second heartbeat polling so background tabs and mobile stay 100% in sync
+    // 3. Immediate instant update when returning to tab/window
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refreshAllData();
+      }
+    };
+    const handleFocus = () => refreshAllData();
+    window.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+
+    // 4. Fast 3.5-second heartbeat polling so background tabs and mobile stay 100% in sync
     const pollInterval = setInterval(() => {
       refreshAllData();
-    }, 6000);
+    }, 3500);
 
     return () => {
       unsubscribeBus();
       supabase.removeChannel(realtimeChannel);
+      window.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
       clearInterval(pollInterval);
     };
   }, []);
@@ -286,52 +310,21 @@ export default function App() {
   };
 
   const refreshAllData = async () => {
-    // 1. Check Coworker API
     try {
-      const poRes = await purchaseOrdersApi.testConnection();
-      setPoApiStatus({ checking: false, connected: poRes.connected });
-    } catch {
-      setPoApiStatus({ checking: false, connected: false });
-    }
-
-    // 2. Check Supabase
-    try {
-      const supaRes = await catalogService.testSupabase();
-      setSupaStatus({ checking: false, connected: supaRes.connected, rowsFound: supaRes.rowsFound });
-    } catch {
-      setSupaStatus({ checking: false, connected: false, rowsFound: 0 });
-    }
-
-    // 3. Load pending barcodes
-    try {
-      const pending = await catalogService.getPendingBarcodes();
-      setPendingBarcodesList(pending);
+      await Promise.allSettled([
+        catalogService.getPendingBarcodes().then(pending => setPendingBarcodesList(pending || [])),
+        catalogService.getRecentReports(50).then(reports => setRecentReportsList(reports || [])),
+        catalogService.getSavedProducts().then(saved => setSavedProductsList(saved || [])),
+        authService.getEmployees().then(staff => setStaffList(staff || [])),
+        catalogService.testSupabase().then(supaRes => {
+          setSupaStatus({ checking: false, connected: supaRes.connected, rowsFound: supaRes.rowsFound });
+        }),
+        purchaseOrdersApi.testConnection().then(poRes => {
+          setPoApiStatus({ checking: false, connected: poRes.connected });
+        })
+      ]);
     } catch (e) {
-      console.warn('Pending load error:', e);
-    }
-
-    // 4. Load recent reports
-    try {
-      const reports = await catalogService.getRecentReports(50);
-      setRecentReportsList(reports);
-    } catch (e) {
-      console.warn('Reports load error:', e);
-    }
-
-    // 5. Load saved products from Supabase
-    try {
-      const saved = await catalogService.getSavedProducts();
-      setSavedProductsList(saved);
-    } catch (e) {
-      console.warn('Saved products load error:', e);
-    }
-
-    // 6. Load staff list
-    try {
-      const staff = await authService.getEmployees();
-      setStaffList(staff);
-    } catch (e) {
-      console.warn('Staff load error:', e);
+      console.warn('Sync notice:', e);
     }
   };
 
@@ -960,28 +953,193 @@ export default function App() {
             {/* TAB 2: INCOMING RETURN REPORTS */}
             {adminActiveTab === 'reports' && (
               <div className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-base font-black text-slate-900 tracking-tight">
-                      Incoming Return Reports
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-black text-slate-900 tracking-tight">
+                        Incoming Return Reports
+                      </h3>
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-blue-100 text-blue-800">
+                        {recentReportsList.length} Total
+                      </span>
+                    </div>
                     <p className="text-xs text-slate-500">
                       Recent RMA submissions from warehouse & customer returns.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsReportsModalOpen(true)}
-                    className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs flex items-center gap-1 transition-colors"
-                  >
-                    <span>Open Full Reports Modal</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
+
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                    {/* View Switcher: Rows vs Cards */}
+                    <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200/80">
+                      <button
+                        type="button"
+                        onClick={() => handleSetReportsViewMode('table')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
+                          reportsViewMode === 'table'
+                            ? 'bg-white text-blue-700 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                        title="Rows / Table View (with SN column)"
+                      >
+                        <List className="w-3.5 h-3.5" />
+                        <span>Rows List</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSetReportsViewMode('grid')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
+                          reportsViewMode === 'grid'
+                            ? 'bg-white text-blue-700 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                        title="Grid / Cards View"
+                      >
+                        <LayoutGrid className="w-3.5 h-3.5" />
+                        <span>Cards</span>
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsReportsModalOpen(true)}
+                      className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs flex items-center gap-1 transition-colors shrink-0"
+                    >
+                      <span>Full Audit Log</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 {recentReportsList.length === 0 ? (
                   <p className="text-xs text-slate-400 py-8 text-center">No return reports filed yet.</p>
+                ) : reportsViewMode === 'table' ? (
+                  /* ============================================================ */
+                  /* ROWS / TABLE VIEW: WITH SN (ID) AS FAR-LEFT COLUMN           */
+                  /* ============================================================ */
+                  <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-black uppercase tracking-wider text-slate-500">
+                            <th className="py-3 px-3.5 font-black text-slate-900 w-16">SN</th>
+                            <th className="py-3 px-3.5 font-bold">RMA #</th>
+                            <th className="py-3 px-3 w-14 text-center">Photo</th>
+                            <th className="py-3 px-3.5 font-bold">Barcode</th>
+                            <th className="py-3 px-3.5 font-bold">Item Name</th>
+                            <th className="py-3 px-3.5 font-bold">Reason</th>
+                            <th className="py-3 px-3.5 font-bold">Reported By</th>
+                            <th className="py-3 px-3 text-center font-bold">Status</th>
+                            <th className="py-3 px-3.5 text-right font-bold">Date & GPS</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium">
+                          {recentReportsList.slice(0, 15).map(item => {
+                            const photoList = Array.isArray(item.photos) 
+                              ? item.photos 
+                              : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
+
+                            return (
+                              <tr key={item.id || item.rma_number} className="hover:bg-blue-50/30 transition-colors">
+                                {/* 1. SN COLUMN AT FAR LEFT */}
+                                <td className="py-3 px-3.5 font-mono">
+                                  <span className="font-black text-blue-900 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-lg text-xs">
+                                    #{item.id}
+                                  </span>
+                                </td>
+
+                                {/* 2. RMA # */}
+                                <td className="py-3 px-3.5 font-mono font-bold text-blue-700">
+                                  {item.rma_number}
+                                </td>
+
+                                {/* 3. Photo */}
+                                <td className="py-2.5 px-3 text-center">
+                                  {photoList.length > 0 ? (
+                                    <img 
+                                      src={photoList[0]} 
+                                      alt="Proof" 
+                                      className="w-10 h-10 rounded-xl object-cover border border-slate-200 mx-auto" 
+                                    />
+                                  ) : (
+                                    <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto border border-slate-200">
+                                      <ImageIcon className="w-4 h-4" />
+                                    </div>
+                                  )}
+                                </td>
+
+                                {/* 4. Barcode */}
+                                <td className="py-3 px-3.5 font-mono">
+                                  <div className="font-bold text-slate-800">{item.barcode}</div>
+                                  {item.code && <div className="text-[10px] text-slate-400">{item.code}</div>}
+                                </td>
+
+                                {/* 5. Item Name */}
+                                <td className="py-3 px-3.5 font-bold text-slate-900 max-w-[200px] truncate" title={item.name}>
+                                  {item.name || `Unidentified (${item.barcode})`}
+                                </td>
+
+                                {/* 6. Reason */}
+                                <td className="py-3 px-3.5">
+                                  <span className="px-2 py-0.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 font-bold text-[10px] inline-block">
+                                    {item.reason || 'Damaged'}
+                                  </span>
+                                </td>
+
+                                {/* 7. Reported By */}
+                                <td className="py-3 px-3.5">
+                                  <div className="font-bold text-slate-900 text-[11px]">
+                                    {item.reporter_name || item.reported_by || 'Reporter'}
+                                  </div>
+                                  {item.reporter_contact && (
+                                    <div className="font-mono text-slate-500 text-[10px]">
+                                      {item.reporter_contact}
+                                    </div>
+                                  )}
+                                </td>
+
+                                {/* 8. Status */}
+                                <td className="py-3 px-3 text-center">
+                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                                    item.status === 'pending_admin_details'
+                                      ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                      : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  }`}>
+                                    {item.status === 'pending_admin_details' ? 'Unknown' : 'Logged'}
+                                  </span>
+                                </td>
+
+                                {/* 9. Date & GPS */}
+                                <td className="py-3 px-3.5 text-right font-mono text-[11px] text-slate-500">
+                                  <div>{new Date(item.created_at).toLocaleDateString()}</div>
+                                  {item.gps_latitude && item.gps_longitude ? (
+                                    <a
+                                      href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-blue-600 hover:underline inline-flex items-center gap-0.5 text-[10px] font-bold"
+                                    >
+                                      <MapPin className="w-3 h-3 text-rose-500" />
+                                      <span>Map</span>
+                                    </a>
+                                  ) : (
+                                    <span className="text-slate-300 text-[10px]">No GPS</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="p-3 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 font-semibold px-4 flex justify-between">
+                      <span>Showing {Math.min(recentReportsList.length, 15)} of {recentReportsList.length} reports</span>
+                      <span>Realtime synced</span>
+                    </div>
+                  </div>
                 ) : (
+                  /* ============================================================ */
+                  /* GRID / CARDS VIEW (With SN badge displayed on each)          */
+                  /* ============================================================ */
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {recentReportsList.slice(0, 10).map(item => (
                       <div 
@@ -990,9 +1148,14 @@ export default function App() {
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                            <span className="font-mono font-black text-blue-700 text-sm block">
-                              {item.rma_number}
-                            </span>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-mono font-black text-xs text-blue-900 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-lg">
+                                SN #{item.id}
+                              </span>
+                              <span className="font-mono font-black text-blue-700 text-sm">
+                                {item.rma_number}
+                              </span>
+                            </div>
                             <h4 className="font-bold text-slate-900 text-xs sm:text-sm mt-0.5">
                               {item.name || `Unidentified (${item.barcode})`}
                             </h4>

@@ -510,7 +510,8 @@ export const catalogService = {
    */
   async getPendingBarcodes() {
     try {
-      const { data, error } = await supabase
+      // 1. Fetch unverified items from products table
+      const { data: unverifiedProds, error } = await supabase
         .from('products')
         .select('*')
         .eq('is_verified', false)
@@ -518,10 +519,52 @@ export const catalogService = {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.warn('Error fetching pending barcodes:', error.message);
-        return [];
+        console.warn('Error fetching unverified products:', error.message);
       }
-      return data || [];
+
+      const pendingMap = new Map();
+      (unverifiedProds || []).forEach(p => {
+        if (p.barcode) {
+          pendingMap.set(p.barcode, {
+            ...p,
+            id: p.id,
+            barcode: p.barcode,
+            name: p.name,
+            code: p.code,
+            supplier_name: p.supplier_name,
+            price: p.price,
+            price_with_vat: p.price_with_vat,
+            created_at: p.created_at
+          });
+        }
+      });
+
+      // 2. Cross-check rma_reports for any pending_admin_details to ensure nothing is missed
+      const { data: pendingReports, error: rError } = await supabase
+        .from('rma_reports')
+        .select('*')
+        .eq('status', 'pending_admin_details')
+        .order('created_at', { ascending: false });
+
+      if (!rError && pendingReports) {
+        pendingReports.forEach(r => {
+          if (r.barcode && !pendingMap.has(r.barcode)) {
+            pendingMap.set(r.barcode, {
+              id: r.id,
+              barcode: r.barcode,
+              code: r.code || null,
+              name: r.name || `Unidentified Item (${r.barcode})`,
+              supplier_name: r.supplier_name || 'Pending Assignment',
+              price: r.price || 0,
+              price_with_vat: r.price_with_vat || 0,
+              is_verified: false,
+              created_at: r.created_at
+            });
+          }
+        });
+      }
+
+      return Array.from(pendingMap.values());
     } catch (e) {
       console.warn('Error fetching pending barcodes:', e.message);
       return [];
@@ -548,13 +591,25 @@ export const catalogService = {
       updated_at: new Date().toISOString()
     };
 
-    // 1. Update product catalog
-    const { error: prodErr } = await supabase
-      .from('products')
-      .update(updates)
-      .eq('barcode', cleanBarcode);
+    // 1. Upsert or update product catalog
+    try {
+      const { error: prodErr } = await supabase
+        .from('products')
+        .upsert({
+          barcode: cleanBarcode,
+          ...updates
+        }, { onConflict: 'barcode' });
 
-    if (prodErr) throw new Error(`Failed to update product in database: ${prodErr.message}`);
+      if (prodErr) {
+        // Fallback to update if upsert had a constraint mismatch
+        await supabase
+          .from('products')
+          .update(updates)
+          .eq('barcode', cleanBarcode);
+      }
+    } catch (err) {
+      console.warn('Product catalog update notice:', err.message);
+    }
 
     // 2. Update all pending RMA reports that referenced this barcode
     try {
