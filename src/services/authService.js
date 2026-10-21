@@ -477,7 +477,7 @@ export const authService = {
     const cleanEmail = (email || '').toLowerCase().trim();
     const cleanCode = (enteredCode || '').trim();
 
-    if (!cleanCode) throw new Error('Please enter the 6-digit OTP code.');
+    if (!cleanCode) throw new Error('Please enter the OTP verification code.');
 
     let isValid = false;
 

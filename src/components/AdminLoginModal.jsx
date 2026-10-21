@@ -133,23 +133,23 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
                 <span>Verification code dispatched!</span>
               </div>
               <p className="text-[11px] text-emerald-800">
-                Please check your inbox at <strong>{emailInput}</strong> for your 6-digit OTP code.
+                Please check your inbox at <strong>{emailInput}</strong> for your OTP access code.
               </p>
             </div>
 
             <div>
               <label className="block text-xs font-black uppercase tracking-wider text-slate-500 mb-1.5 text-center">
-                Enter 6-Digit Verification Code
+                Enter Verification Code
               </label>
               <input
                 type="text"
                 required
                 autoFocus
-                maxLength="6"
+                maxLength="8"
                 value={otpInput}
                 onChange={(e) => setOtpInput(e.target.value.replace(/[^0-9]/g, ''))}
-                placeholder="000000"
-                className="w-full py-3.5 text-center tracking-[0.5em] text-2xl font-black font-mono bg-slate-50 border-2 border-blue-500 rounded-2xl text-slate-900 focus:outline-none focus:bg-white"
+                placeholder="••••••••"
+                className="w-full py-3.5 text-center tracking-[0.35em] text-2xl font-black font-mono bg-slate-50 border-2 border-blue-500 rounded-2xl text-slate-900 focus:outline-none focus:bg-white"
               />
             </div>
 
