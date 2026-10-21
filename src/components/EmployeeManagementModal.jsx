@@ -400,7 +400,7 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
             {searchQuery && <span className="text-blue-600 ml-1 font-semibold">(filtered)</span>}
           </div>
           <div className="text-[10px] font-semibold text-slate-500">
-            Sender & Super Admin: <span className="text-slate-800 font-mono">finance2@keysysincorporated.com</span>
+            Official Company Staff Directory
           </div>
         </div>
 

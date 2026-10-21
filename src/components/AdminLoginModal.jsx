@@ -91,7 +91,6 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
                   autoFocus
                   value={emailInput}
                   onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder="e.g. finance2@keysysincorporated.com"
                   className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
                 />
               </div>

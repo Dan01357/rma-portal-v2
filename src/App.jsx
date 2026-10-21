@@ -32,6 +32,7 @@ import {
 import { catalogService } from './services/catalogService';
 import { purchaseOrdersApi } from './services/purchaseOrdersApi';
 import { authService } from './services/authService';
+import { supabase } from './supabaseClient';
 import ScannerModal from './components/ScannerModal';
 import PendingBarcodesModal from './components/PendingBarcodesModal';
 import RMAReportsModal from './components/RMAReportsModal';
@@ -88,6 +89,51 @@ export default function App() {
       setIsLoginModalOpen(true);
     }
   }, [isAdminView, currentUser]);
+
+  // Handle Supabase Auth magic link redirect or session
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.email) {
+          const email = session.user.email.toLowerCase().trim();
+          const employees = await authService.getEmployees();
+          const emp = employees.find(e => e.email.toLowerCase() === email) || {
+            name: email.split('@')[0],
+            email: email,
+            role: email === 'finance2@keysysincorporated.com' ? 'super_admin' : 'inventory_staff',
+            is_active: true
+          };
+
+          if (emp.is_active === false) {
+            authService.logout();
+            setCurrentUser(null);
+            return;
+          }
+
+          const sessionUser = {
+            id: emp.id || 1,
+            name: emp.name,
+            email: emp.email,
+            role: emp.role || 'inventory_staff',
+            department: emp.department || 'General',
+            loggedInAt: new Date().toISOString()
+          };
+
+          localStorage.setItem('rma_portal_admin_session', JSON.stringify(sessionUser));
+          setCurrentUser(sessionUser);
+          setIsLoginModalOpen(false);
+
+          if (window.location.hash.includes('access_token')) {
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+        }
+      } catch (err) {
+        console.warn('Supabase session check notice:', err);
+      }
+    };
+    checkSession();
+  }, []);
 
   const navigateTo = (path) => {
     window.history.pushState({}, '', path);
@@ -982,6 +1028,20 @@ export default function App() {
         onClose={() => setIsReportsModalOpen(false)}
         reports={recentReportsList}
       />
+
+      {/* Toast Alert Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-3">
+          <div className={`px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2 ${
+            toastMessage.type === 'error'
+              ? 'bg-rose-50 border-rose-300 text-rose-800'
+              : 'bg-slate-900 border-slate-700 text-white'
+          }`}>
+            <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{toastMessage.text}</span>
+          </div>
+        </div>
+      )}
 
     </div>
   );

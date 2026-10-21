@@ -444,7 +444,8 @@ export const authService = {
       const { data, error } = await supabase.auth.signInWithOtp({
         email: cleanEmail,
         options: {
-          shouldCreateUser: true
+          shouldCreateUser: true,
+          emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/admin` : undefined
         }
       });
       if (!error) {
