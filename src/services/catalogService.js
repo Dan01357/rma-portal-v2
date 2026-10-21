@@ -4,12 +4,14 @@ import { purchaseOrdersApi } from './purchaseOrdersApi';
 /**
  * UNIFIED CATALOG & RMA REPORTING SERVICE
  * 
- * 1. Checks Your Supabase Database ('products' table)
- * 2. Checks Coworker's Live Purchase Orders API (5,793 items)
- * 3. Handles Unknown Barcodes:
- *    - Allows reporting even if barcode does not exist
- *    - Records unknown barcode in Supabase with is_verified = false
- *    - Provides admin update function so once verified, next scan recognizes it!
+ * PRIORITY RULES:
+ * 1. Supabase 'products' table is ALWAYS PRIORITY #1.
+ * 2. Coworker's Live API (5,793 items) is SECONDARY FALLBACK ONLY.
+ * 3. If item is not in either, it is an UNKNOWN BARCODE.
+ *    - Reporter can report return anyway.
+ *    - Return is inserted into 'rma_reports' (status: pending_admin_details).
+ *    - Barcode is inserted into 'products' (is_verified: false).
+ *    - Admin updates it -> system immediately recognizes it next time!
  */
 export const catalogService = {
   /**
@@ -19,13 +21,13 @@ export const catalogService = {
     try {
       const { data, error } = await supabase
         .from('products')
-        .select('id')
-        .limit(1);
+        .select('id, barcode, name')
+        .limit(5);
 
       if (error) {
         return { connected: false, error: error.message };
       }
-      return { connected: true };
+      return { connected: true, rowsFound: data ? data.length : 0 };
     } catch (err) {
       return { connected: false, error: err.message };
     }
@@ -33,43 +35,69 @@ export const catalogService = {
 
   /**
    * Fast Barcode / SKU Lookup:
-   * Tier 1: Look in our custom Supabase 'products' table
-   * Tier 2: Look in Coworker's live API (erply_products)
+   * PRIORITY 1: Look in our custom Supabase 'products' table
+   * PRIORITY 2: Look in Coworker's live API (erply_products)
    */
   async findProduct(barcodeOrQuery) {
     const clean = String(barcodeOrQuery || '').trim();
     if (!clean) return null;
 
-    // 1. Check our own Supabase database first
+    // ==============================================================
+    // 1. SUPABASE LOOKUP (PRIORITY #1)
+    // ==============================================================
     try {
-      const { data: supaProducts, error } = await supabase
+      let supaItem = null;
+
+      // 1a. Direct exact barcode match
+      const { data: byBarcode, error: errBarcode } = await supabase
         .from('products')
         .select('*')
-        .or(`barcode.eq.${clean},code.ilike.${clean}`)
+        .eq('barcode', clean)
         .limit(1);
 
-      if (!error && supaProducts && supaProducts.length > 0) {
-        const item = supaProducts[0];
+      if (errBarcode) {
+        console.warn('Supabase barcode lookup error:', errBarcode.message);
+      } else if (byBarcode && byBarcode.length > 0) {
+        supaItem = byBarcode[0];
+      }
+
+      // 1b. Exact SKU/Code match if not found by barcode
+      if (!supaItem) {
+        const { data: byCode, error: errCode } = await supabase
+          .from('products')
+          .select('*')
+          .ilike('code', clean)
+          .limit(1);
+
+        if (!errCode && byCode && byCode.length > 0) {
+          supaItem = byCode[0];
+        }
+      }
+
+      // If found in Supabase -> RETURN IMMEDIATELY (Do NOT call Coworker API!)
+      if (supaItem) {
         return {
-          id: item.id,
-          barcode: item.barcode,
-          code: item.code || item.barcode,
-          name: item.name,
-          price: Number(item.price || 0),
-          priceWithVat: Number(item.price_with_vat || item.price || 0),
-          supplierName: item.supplier_name || 'Savemore',
-          brandName: item.brand_name || null,
-          unitName: item.unit_name || 'pc',
-          hasSerialNumbers: item.has_serial_numbers || false,
-          isVerified: item.is_verified !== false,
+          id: supaItem.id,
+          barcode: supaItem.barcode,
+          code: supaItem.code || supaItem.barcode,
+          name: supaItem.name,
+          price: Number(supaItem.price || 0),
+          priceWithVat: Number(supaItem.price_with_vat || supaItem.price || 0),
+          supplierName: supaItem.supplier_name || 'Savemore',
+          brandName: supaItem.brand_name || null,
+          unitName: supaItem.unit_name || 'pc',
+          hasSerialNumbers: supaItem.has_serial_numbers || false,
+          isVerified: supaItem.is_verified !== false,
           source: 'Supabase Database (Yours)'
         };
       }
     } catch (e) {
-      console.warn('Supabase lookup check warning:', e.message);
+      console.warn('Supabase lookup exception:', e.message);
     }
 
-    // 2. Check Coworker's Live Purchase Orders API
+    // ==============================================================
+    // 2. COWORKER'S LIVE API (SECONDARY FALLBACK ONLY)
+    // ==============================================================
     try {
       const liveItem = await purchaseOrdersApi.findProductByBarcode(clean);
       if (liveItem) {
@@ -92,7 +120,7 @@ export const catalogService = {
       console.warn('Coworker API lookup warning:', e.message);
     }
 
-    // 3. Fallback: search coworker's API by keyword
+    // 2b. Secondary search in Coworker API by product name / keyword
     try {
       const searchResults = await purchaseOrdersApi.searchProducts(clean, 5);
       if (searchResults && searchResults.length > 0) {
@@ -113,17 +141,18 @@ export const catalogService = {
         };
       }
     } catch (e) {
-      console.warn('Coworker API search fallback error:', e.message);
+      console.warn('Coworker API search fallback warning:', e.message);
     }
 
+    // 3. Not found in either database
     return null;
   },
 
   /**
    * SUBMIT RMA RETURN REPORT
-   * Works for both:
-   * A) Known item (records return immediately)
-   * B) Unknown item (records return + logs barcode into Supabase for admin review)
+   * - Saves to public.rma_reports table
+   * - If unknown item, logs barcode into public.products with is_verified = false
+   * - Throws explicit errors if Supabase RLS blocks the write!
    */
   async submitReport({ barcode, product, quantity = 1, location = '', notes = '', reportedBy = 'Warehouse Staff' }) {
     const cleanBarcode = String(barcode || '').trim();
@@ -153,50 +182,38 @@ export const catalogService = {
     };
 
     // 1. Insert into rma_reports
-    let reportSaved = false;
-    try {
-      const { data, error } = await supabase
-        .from('rma_reports')
-        .insert([reportRow])
-        .select()
-        .single();
+    const { data: insertedReport, error: reportError } = await supabase
+      .from('rma_reports')
+      .insert([reportRow])
+      .select()
+      .single();
 
-      if (!error) {
-        reportSaved = true;
-      } else {
-        console.warn('Failed to insert rma_report to Supabase:', error.message);
-      }
-    } catch (e) {
-      console.warn('rma_reports insert exception:', e.message);
+    if (reportError) {
+      console.error('Failed to insert rma_report to Supabase:', reportError);
+      throw new Error(`Database error saving return report: ${reportError.message} (Please ensure RLS policy is applied in Supabase)`);
     }
 
     // 2. If item is unknown, insert/upsert into Supabase products table as is_verified = false
-    let barcodeLogged = false;
     if (!isKnown) {
-      try {
-        const { error: prodError } = await supabase
-          .from('products')
-          .upsert([
-            {
-              barcode: cleanBarcode,
-              code: null,
-              name: `Unidentified Item (${cleanBarcode})`,
-              supplier_name: 'Pending Assignment',
-              price: 0,
-              price_with_vat: 0,
-              unit_name: 'pc',
-              is_verified: false,
-              updated_at: new Date().toISOString()
-            }
-          ], { onConflict: 'barcode' });
+      const { error: prodError } = await supabase
+        .from('products')
+        .upsert([
+          {
+            barcode: cleanBarcode,
+            code: null,
+            name: `Unidentified Item (${cleanBarcode})`,
+            supplier_name: 'Pending Assignment',
+            price: 0,
+            price_with_vat: 0,
+            unit_name: 'pc',
+            is_verified: false,
+            updated_at: new Date().toISOString()
+          }
+        ], { onConflict: 'barcode' });
 
-        if (!prodError) {
-          barcodeLogged = true;
-        } else {
-          console.warn('Failed to log unknown barcode into products:', prodError.message);
-        }
-      } catch (e) {
-        console.warn('Unknown barcode upsert exception:', e.message);
+      if (prodError) {
+        console.error('Failed to log unknown barcode into products:', prodError);
+        throw new Error(`Report saved, but could not register barcode into catalog: ${prodError.message}`);
       }
     }
 
@@ -204,8 +221,6 @@ export const catalogService = {
       success: true,
       rmaNumber,
       isKnown,
-      reportSaved,
-      barcodeLogged,
       status: reportRow.status
     };
   },
@@ -221,7 +236,10 @@ export const catalogService = {
         .eq('is_verified', false)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.warn('Error fetching pending barcodes:', error.message);
+        return [];
+      }
       return data || [];
     } catch (e) {
       console.warn('Error fetching pending barcodes:', e.message);
@@ -255,7 +273,7 @@ export const catalogService = {
       .update(updates)
       .eq('barcode', cleanBarcode);
 
-    if (prodErr) throw prodErr;
+    if (prodErr) throw new Error(`Failed to update product in database: ${prodErr.message}`);
 
     // 2. Update all pending RMA reports that referenced this barcode
     try {
@@ -280,7 +298,7 @@ export const catalogService = {
   },
 
   /**
-   * Get all RMA reports
+   * Get all RMA reports from public.rma_reports
    */
   async getRecentReports(limit = 20) {
     try {
@@ -290,7 +308,10 @@ export const catalogService = {
         .order('created_at', { ascending: false })
         .limit(limit);
 
-      if (error) throw error;
+      if (error) {
+        console.warn('Error fetching reports from Supabase:', error.message);
+        return [];
+      }
       return data || [];
     } catch (e) {
       console.warn('Error fetching reports:', e.message);
