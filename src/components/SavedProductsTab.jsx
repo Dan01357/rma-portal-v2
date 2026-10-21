@@ -21,6 +21,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import ImageLightboxModal from './ImageLightboxModal';
+import TablePagination from './TablePagination';
 
 export default function SavedProductsTab({ 
   products = [], 
@@ -37,6 +38,8 @@ export default function SavedProductsTab({
   const [sortDirection, setSortDirection] = useState('desc');
   const [selectedLightbox, setSelectedLightbox] = useState(null);
   const [copiedBarcode, setCopiedBarcode] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   
   // File Explorer view type toggle: default to 'table' (rows list) as requested
   const [viewMode, setViewMode] = useState(() => {
@@ -78,6 +81,7 @@ export default function SavedProductsTab({
       setSortField(field);
       setSortDirection('asc');
     }
+    setCurrentPage(1);
   };
 
   // Filter and sort products
@@ -155,12 +159,19 @@ export default function SavedProductsTab({
     return list;
   }, [products, filterQuery, filterSupplier, filterStatus, sortField, sortDirection]);
 
+  // Paginated slice
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return processedProducts.slice(start, start + pageSize);
+  }, [processedProducts, currentPage, pageSize]);
+
   const hasActiveFilters = filterQuery || filterSupplier !== 'all' || filterStatus !== 'all';
 
   const resetFilters = () => {
     setFilterQuery('');
     setFilterSupplier('all');
     setFilterStatus('all');
+    setCurrentPage(1);
   };
 
   const renderSortIndicator = (field) => {
@@ -250,14 +261,20 @@ export default function SavedProductsTab({
             <input
               type="text"
               value={filterQuery}
-              onChange={(e) => setFilterQuery(e.target.value)}
+              onChange={(e) => {
+                setFilterQuery(e.target.value);
+                setCurrentPage(1);
+              }}
               placeholder="Search by SN (#), product name, barcode, SKU, or supplier..."
               className="w-full pl-10 pr-9 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all"
             />
             {filterQuery && (
               <button
                 type="button"
-                onClick={() => setFilterQuery('')}
+                onClick={() => {
+                  setFilterQuery('');
+                  setCurrentPage(1);
+                }}
                 className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200"
               >
                 <X className="w-3.5 h-3.5" />
@@ -269,7 +286,10 @@ export default function SavedProductsTab({
           <div className="flex items-center gap-2 shrink-0">
             <select
               value={filterSupplier}
-              onChange={(e) => setFilterSupplier(e.target.value)}
+              onChange={(e) => {
+                setFilterSupplier(e.target.value);
+                setCurrentPage(1);
+              }}
               className="px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-bold text-slate-700 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all"
             >
               <option value="all">All Suppliers ({uniqueSuppliers.length})</option>
@@ -281,7 +301,10 @@ export default function SavedProductsTab({
             {/* Status Dropdown Filter */}
             <select
               value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
+              onChange={(e) => {
+                setFilterStatus(e.target.value);
+                setCurrentPage(1);
+              }}
               className="px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-bold text-slate-700 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all"
             >
               <option value="all">All Status</option>
@@ -436,7 +459,7 @@ export default function SavedProductsTab({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {processedProducts.map((product) => {
+                {paginatedProducts.map((product) => {
                   const hasPhoto = Boolean(product.image_url || product.imageUrl);
                   const photoSrc = product.image_url || product.imageUrl;
                   const isCopied = copiedBarcode === product.barcode;
@@ -566,17 +589,23 @@ export default function SavedProductsTab({
               </tbody>
             </table>
           </div>
-          <div className="p-3 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 font-semibold px-4 flex justify-between">
-            <span>Showing {processedProducts.length} verified products</span>
-            <span>Sorted by {sortField} ({sortDirection.toUpperCase()})</span>
-          </div>
+          <TablePagination
+            currentPage={currentPage}
+            totalItems={processedProducts.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[10, 25, 50, 100]}
+            itemLabel="verified products"
+          />
         </div>
       ) : (
         /* ============================================================ */
         /* VIEW 2: FILE EXPLORER STYLE GRID CARDS VIEW                  */
         /* ============================================================ */
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {processedProducts.map((product) => {
+        <div className="space-y-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {paginatedProducts.map((product) => {
             const hasPhoto = Boolean(product.image_url || product.imageUrl);
             const photoSrc = product.image_url || product.imageUrl;
 
@@ -682,6 +711,18 @@ export default function SavedProductsTab({
             );
           })}
         </div>
+
+        {/* Grid View Pagination */}
+        <TablePagination
+          currentPage={currentPage}
+          totalItems={processedProducts.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          pageSizeOptions={[10, 25, 50, 100]}
+          itemLabel="verified products"
+        />
+      </div>
       )}
 
       {/* Fullscreen Image Lightbox Modal */}

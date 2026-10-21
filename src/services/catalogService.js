@@ -1,5 +1,4 @@
 import { supabase } from '../supabaseClient';
-import { purchaseOrdersApi } from './purchaseOrdersApi';
 import { INITIAL_PRODUCTS } from '../data/mockData';
 
 // Cross-tab broadcast channel for instant multi-device / multi-tab reactivity
@@ -167,33 +166,7 @@ export const catalogService = {
       console.warn('Supabase lookup exception:', e.message);
     }
 
-      // 2. COWORKER'S LIVE API (SECONDARY FALLBACK ONLY)
-    if (!purchaseOrdersApi.isUnauthorized()) {
-      try {
-        const liveItem = await purchaseOrdersApi.findProductByBarcode(clean);
-        if (liveItem) {
-          return {
-            id: liveItem.id,
-            barcode: liveItem.code2 || liveItem.barcode || clean,
-            code: liveItem.code || liveItem.sku,
-            name: liveItem.name,
-            price: Number(liveItem.price || liveItem.unit_price || 0),
-            priceWithVat: Number(liveItem.priceWithVat || liveItem.unit_price || 0),
-            supplierName: liveItem.supplierName || liveItem.supplier || 'Savemore',
-            brandName: liveItem.brandName || null,
-            unitName: liveItem.unitName || 'pc',
-            hasSerialNumbers: liveItem.hasSerialNumbers || false,
-            imageUrl: liveItem.image_url || null,
-            isVerified: true,
-            source: 'Enterprise Live Catalog'
-          };
-        }
-      } catch (e) {
-        // Quiet catch
-      }
-    }
-
-    // 3. Wholesale Verified Catalog Fallback (Group 1 & 2 Products)
+    // 2. Wholesale Verified Catalog Fallback (Group 1 & 2 Products)
     const mockItem = INITIAL_PRODUCTS.find(p => 
       p.barcode === clean || 
       (p.sku && p.sku.toLowerCase() === clean.toLowerCase())
@@ -270,39 +243,7 @@ export const catalogService = {
       console.warn('Supabase product search warning:', e);
     }
 
-    // 2. Search Coworker's live API (if authorized)
-    if (!purchaseOrdersApi.isUnauthorized()) {
-      try {
-        const liveItems = await purchaseOrdersApi.searchProducts(clean, limit);
-        if (liveItems && Array.isArray(liveItems)) {
-          for (const live of liveItems) {
-            const key = String(live.code2 || live.barcode || live.code || live.sku).trim().toLowerCase();
-            if (!seenKeys.has(key)) {
-              seenKeys.add(key);
-              results.push({
-                id: live.id,
-                barcode: live.code2 || live.barcode || live.code,
-                code: live.code || live.sku,
-                name: live.name,
-                price: Number(live.price || live.unit_price || 0),
-                priceWithVat: Number(live.priceWithVat || live.unit_price || 0),
-                supplierName: live.supplierName || live.supplier || 'Savemore',
-                brandName: live.brandName || null,
-                unitName: live.unitName || 'pc',
-                hasSerialNumbers: live.hasSerialNumbers || false,
-                imageUrl: live.image_url || null,
-                isVerified: true,
-                source: 'Enterprise Live Catalog'
-              });
-            }
-          }
-        }
-      } catch (e) {
-        // Quiet catch
-      }
-    }
-
-    // 3. Wholesale Verified Catalog Fallback (INITIAL_PRODUCTS)
+    // 2. Wholesale Verified Catalog Fallback (INITIAL_PRODUCTS)
     for (const mock of INITIAL_PRODUCTS) {
       const matchText = `${mock.name} ${mock.brand || ''} ${mock.category || ''} ${mock.sku || ''} ${mock.barcode || ''}`.toLowerCase();
       if (matchText.includes(cleanLower)) {

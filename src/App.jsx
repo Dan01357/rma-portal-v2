@@ -38,7 +38,7 @@ import {
   Filter
 } from 'lucide-react';
 import { catalogService } from './services/catalogService';
-import { purchaseOrdersApi } from './services/purchaseOrdersApi';
+import TablePagination from './components/TablePagination';
 import { authService } from './services/authService';
 import { supabase } from './supabaseClient';
 import ScannerModal from './components/ScannerModal';
@@ -178,8 +178,7 @@ export default function App() {
     showToast('Logged out of admin dashboard.', 'success');
   };
 
-  // Database Connection Health States
-  const [poApiStatus, setPoApiStatus] = useState({ checking: true, connected: false });
+  // Database Connection Health State
   const [supaStatus, setSupaStatus] = useState({ checking: true, connected: false, rowsFound: 0 });
 
   // Accurate GPS Coordinates State (Only saved if accuracy <= 150m)
@@ -209,12 +208,14 @@ export default function App() {
     return localStorage.getItem('rma_admin_reports_view_mode') || 'table';
   });
 
-  // Return Reports Filtering & Sorting State
+  // Return Reports Filtering, Sorting & Pagination State
   const [reportsSearchQuery, setReportsSearchQuery] = useState('');
   const [reportsReasonFilter, setReportsReasonFilter] = useState('all');
   const [reportsStatusFilter, setReportsStatusFilter] = useState('all');
   const [reportsSortField, setReportsSortField] = useState('id');
   const [reportsSortDirection, setReportsSortDirection] = useState('desc');
+  const [reportsCurrentPage, setReportsCurrentPage] = useState(1);
+  const [reportsPageSize, setReportsPageSize] = useState(10);
 
   // Fullscreen Image Lightbox Modal State
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
@@ -227,6 +228,7 @@ export default function App() {
   };
 
   const handleReportsSort = (field) => {
+    setReportsCurrentPage(1);
     if (reportsSortField === field) {
       setReportsSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
     } else {
@@ -239,6 +241,7 @@ export default function App() {
     setReportsSearchQuery('');
     setReportsReasonFilter('all');
     setReportsStatusFilter('all');
+    setReportsCurrentPage(1);
   };
 
   // Filter and sort return reports
@@ -315,6 +318,12 @@ export default function App() {
 
     return list;
   }, [recentReportsList, reportsSearchQuery, reportsReasonFilter, reportsStatusFilter, reportsSortField, reportsSortDirection]);
+
+  // Paginated Return Reports Slice
+  const paginatedReports = React.useMemo(() => {
+    const start = (reportsCurrentPage - 1) * reportsPageSize;
+    return processedReports.slice(start, start + reportsPageSize);
+  }, [processedReports, reportsCurrentPage, reportsPageSize]);
 
   // Real-time synchronization & initial load
   useEffect(() => {
@@ -450,15 +459,6 @@ export default function App() {
       const supaRes = await catalogService.testSupabase();
       if (supaRes) {
         setSupaStatus({ checking: false, connected: supaRes.connected, rowsFound: supaRes.rowsFound });
-      }
-
-      if (!purchaseOrdersApi.isUnauthorized()) {
-        const poRes = await purchaseOrdersApi.testConnection();
-        if (poRes) {
-          setPoApiStatus({ checking: false, connected: poRes.connected });
-        }
-      } else {
-        setPoApiStatus({ checking: false, connected: false });
       }
     } catch (e) {}
   };
@@ -1187,14 +1187,20 @@ export default function App() {
                       <input
                         type="text"
                         value={reportsSearchQuery}
-                        onChange={(e) => setReportsSearchQuery(e.target.value)}
+                        onChange={(e) => {
+                          setReportsSearchQuery(e.target.value);
+                          setReportsCurrentPage(1);
+                        }}
                         placeholder="Search by SN (#), RMA #, barcode, item name, reporter, or reason..."
                         className="w-full pl-10 pr-9 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-600 transition-all"
                       />
                       {reportsSearchQuery && (
                         <button
                           type="button"
-                          onClick={() => setReportsSearchQuery('')}
+                          onClick={() => {
+                            setReportsSearchQuery('');
+                            setReportsCurrentPage(1);
+                          }}
                           className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-100"
                         >
                           <X className="w-3.5 h-3.5" />
@@ -1205,7 +1211,10 @@ export default function App() {
                     {/* Reason Filter Dropdown */}
                     <select
                       value={reportsReasonFilter}
-                      onChange={(e) => setReportsReasonFilter(e.target.value)}
+                      onChange={(e) => {
+                        setReportsReasonFilter(e.target.value);
+                        setReportsCurrentPage(1);
+                      }}
                       className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-600"
                     >
                       <option value="all">All Reasons</option>
@@ -1217,7 +1226,10 @@ export default function App() {
                     {/* Status Filter Dropdown */}
                     <select
                       value={reportsStatusFilter}
-                      onChange={(e) => setReportsStatusFilter(e.target.value)}
+                      onChange={(e) => {
+                        setReportsStatusFilter(e.target.value);
+                        setReportsCurrentPage(1);
+                      }}
                       className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-600"
                     >
                       <option value="all">All Status</option>
@@ -1373,7 +1385,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-medium">
-                          {processedReports.map(item => {
+                          {paginatedReports.map(item => {
                             const photoList = Array.isArray(item.photos) 
                               ? item.photos 
                               : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
@@ -1482,83 +1494,101 @@ export default function App() {
                         </tbody>
                       </table>
                     </div>
-                    <div className="p-3 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 font-semibold px-4 flex justify-between">
-                      <span>Showing {processedReports.length} return reports</span>
-                      <span>Sorted by {reportsSortField} ({reportsSortDirection.toUpperCase()})</span>
-                    </div>
+                    <TablePagination
+                      currentPage={reportsCurrentPage}
+                      pageSize={reportsPageSize}
+                      totalItems={processedReports.length}
+                      onPageChange={setReportsCurrentPage}
+                      onPageSizeChange={(newSize) => {
+                        setReportsPageSize(newSize);
+                        setReportsCurrentPage(1);
+                      }}
+                    />
                   </div>
                 ) : (
                   /* ============================================================ */
                   /* GRID / CARDS VIEW (With SN badge and clickable photos)       */
                   /* ============================================================ */
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {processedReports.map(item => {
-                      const photoList = Array.isArray(item.photos) 
-                        ? item.photos 
-                        : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {paginatedReports.map(item => {
+                        const photoList = Array.isArray(item.photos) 
+                          ? item.photos 
+                          : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
 
-                      return (
-                        <div 
-                          key={item.id || item.rma_number}
-                          className="p-4 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-2xl space-y-2 transition-all shadow-sm"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="font-mono font-black text-xs text-blue-900 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-lg">
-                                  SN #{item.id}
-                                </span>
-                                <span className="font-mono font-black text-blue-700 text-sm">
-                                  {item.rma_number}
-                                </span>
+                        return (
+                          <div 
+                            key={item.id || item.rma_number}
+                            className="p-4 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-2xl space-y-2 transition-all shadow-sm"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="font-mono font-black text-xs text-blue-900 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-lg">
+                                    SN #{item.id}
+                                  </span>
+                                  <span className="font-mono font-black text-blue-700 text-sm">
+                                    {item.rma_number}
+                                  </span>
+                                </div>
+                                <h4 className="font-bold text-slate-900 text-xs sm:text-sm mt-0.5">
+                                  {item.name || `Unidentified (${item.barcode})`}
+                                </h4>
                               </div>
-                              <h4 className="font-bold text-slate-900 text-xs sm:text-sm mt-0.5">
-                                {item.name || `Unidentified (${item.barcode})`}
-                              </h4>
-                            </div>
-                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 shrink-0">
-                              {item.reason || 'Damaged'}
-                            </span>
-                          </div>
-
-                          {/* Reporter Details */}
-                          <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 flex items-center justify-between">
-                            <span>Reported by: <strong className="text-slate-800">{item.reporter_name || item.reported_by}</strong></span>
-                            <span className="font-mono text-slate-600">{item.reporter_contact || ''}</span>
-                          </div>
-
-                          {/* Photos preview with click-to-zoom */}
-                          {photoList.length > 0 && (
-                            <div className="flex items-center gap-2 pt-1">
-                              <span className="text-[10px] text-slate-400 font-semibold">
-                                {photoList.length} Photo{photoList.length > 1 ? 's' : ''}:
+                              <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 shrink-0">
+                                {item.reason || 'Damaged'}
                               </span>
-                              <div className="flex gap-1.5 overflow-x-auto py-0.5">
-                                {photoList.map((url, i) => (
-                                  <button
-                                    key={i}
-                                    type="button"
-                                    onClick={() => setLightboxPhoto({
-                                      url,
-                                      title: item.name || `Return ${item.rma_number}`,
-                                      subtitle: `Photo ${i + 1} • RMA #${item.rma_number}`
-                                    })}
-                                    className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 bg-white cursor-zoom-in hover:opacity-85 transition-opacity shrink-0"
-                                    title="Click to zoom proof photo"
-                                  >
-                                    <img 
-                                      src={url} 
-                                      alt="Proof" 
-                                      className="w-full h-full object-cover" 
-                                    />
-                                  </button>
-                                ))}
-                              </div>
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
+
+                            {/* Reporter Details */}
+                            <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 flex items-center justify-between">
+                              <span>Reported by: <strong className="text-slate-800">{item.reporter_name || item.reported_by}</strong></span>
+                              <span className="font-mono text-slate-600">{item.reporter_contact || ''}</span>
+                            </div>
+
+                            {/* Photos preview with click-to-zoom */}
+                            {photoList.length > 0 && (
+                              <div className="flex items-center gap-2 pt-1">
+                                <span className="text-[10px] text-slate-400 font-semibold">
+                                  {photoList.length} Photo{photoList.length > 1 ? 's' : ''}:
+                                </span>
+                                <div className="flex gap-1.5 overflow-x-auto py-0.5">
+                                  {photoList.map((url, i) => (
+                                    <button
+                                      key={i}
+                                      type="button"
+                                      onClick={() => setLightboxPhoto({
+                                        url,
+                                        title: item.name || `Return ${item.rma_number}`,
+                                        subtitle: `Photo ${i + 1} • RMA #${item.rma_number}`
+                                      })}
+                                      className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 bg-white cursor-zoom-in hover:opacity-85 transition-opacity shrink-0"
+                                      title="Click to zoom proof photo"
+                                    >
+                                      <img 
+                                        src={url} 
+                                        alt="Proof" 
+                                        className="w-full h-full object-cover" 
+                                      />
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <TablePagination
+                      currentPage={reportsCurrentPage}
+                      pageSize={reportsPageSize}
+                      totalItems={processedReports.length}
+                      onPageChange={setReportsCurrentPage}
+                      onPageSizeChange={(newSize) => {
+                        setReportsPageSize(newSize);
+                        setReportsCurrentPage(1);
+                      }}
+                    />
                   </div>
                 )}
               </div>

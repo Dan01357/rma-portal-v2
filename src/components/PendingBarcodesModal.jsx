@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 import ImageLightboxModal from './ImageLightboxModal';
+import TablePagination from './TablePagination';
 
 export default function PendingBarcodesModal({ isOpen, onClose, pendingList = [], onUpdated }) {
   const [selectedBarcode, setSelectedBarcode] = useState(null);
@@ -23,6 +24,8 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
   const [sortField, setSortField] = useState('id');
   const [sortDirection, setSortDirection] = useState('desc');
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const [formData, setFormData] = useState({
     code: '',
@@ -37,8 +40,6 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState(null);
-
-  if (!isOpen) return null;
 
   const handleSelect = (item) => {
     setSelectedBarcode(item);
@@ -147,9 +148,19 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     return list;
   }, [pendingList, searchQuery, sortField, sortDirection]);
 
+  // Paginated slice
+  const paginatedList = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return processedPendingList.slice(start, start + pageSize);
+  }, [processedPendingList, currentPage, pageSize]);
+
+  // IMPORTANT: All hooks (useMemo, useState, etc.) are declared above!
+  // Early return is strictly placed AFTER hooks to prevent React error #310
+  if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
         
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-4">
@@ -167,7 +178,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                 </span>
               </div>
               <p className="text-xs text-slate-500">
-                Filter, sort, & update product details with clickable reference photos.
+                Filter, sort, paginate & update product details with clickable reference photos.
               </p>
             </div>
           </div>
@@ -211,14 +222,20 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                     <input
                       type="text"
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setCurrentPage(1);
+                      }}
                       placeholder="Filter pending by barcode or SN..."
                       className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500"
                     />
                     {searchQuery && (
                       <button
                         type="button"
-                        onClick={() => setSearchQuery('')}
+                        onClick={() => {
+                          setSearchQuery('');
+                          setCurrentPage(1);
+                        }}
                         className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 p-0.5"
                       >
                         <X className="w-3.5 h-3.5" />
@@ -235,6 +252,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                         setSortField('id');
                         setSortDirection('desc');
                       }
+                      setCurrentPage(1);
                     }}
                     className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0"
                     title="Toggle SN sorting"
@@ -245,40 +263,57 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                 </div>
 
                 {/* List Items */}
-                <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-                  {processedPendingList.map(item => (
-                    <div 
-                      key={item.id || item.barcode}
-                      className="p-3.5 bg-slate-50 hover:bg-blue-50/50 border border-slate-200 rounded-2xl flex items-center justify-between gap-3 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Barcode className="w-6 h-6 text-slate-400 shrink-0" />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono font-black text-xs text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-lg">
-                              SN #{item.id}
-                            </span>
-                            <span className="font-mono text-sm font-bold text-blue-700">
-                              {item.barcode}
+                <div className="space-y-2 max-h-[45vh] overflow-y-auto">
+                  {paginatedList.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-slate-400 font-semibold">
+                      No pending barcodes match "{searchQuery}"
+                    </div>
+                  ) : (
+                    paginatedList.map(item => (
+                      <div 
+                        key={item.id || item.barcode}
+                        className="p-3 bg-slate-50 hover:bg-blue-50/50 border border-slate-200 rounded-2xl flex items-center justify-between gap-3 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <Barcode className="w-6 h-6 text-slate-400 shrink-0" />
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-black text-xs text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-lg">
+                                SN #{item.id}
+                              </span>
+                              <span className="font-mono text-sm font-bold text-blue-700">
+                                {item.barcode}
+                              </span>
+                            </div>
+                            <span className="block text-[11px] text-slate-400 mt-0.5">
+                              Reported {new Date(item.created_at).toLocaleString()}
                             </span>
                           </div>
-                          <span className="block text-[11px] text-slate-400 mt-0.5">
-                            Reported {new Date(item.created_at).toLocaleString()}
-                          </span>
                         </div>
-                      </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleSelect(item)}
-                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        <span>Enter Details</span>
-                      </button>
-                    </div>
-                  ))}
+                        <button
+                          type="button"
+                          onClick={() => handleSelect(item)}
+                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Enter Details</span>
+                        </button>
+                      </div>
+                    ))
+                  )}
                 </div>
+
+                {/* Table Pagination */}
+                <TablePagination
+                  currentPage={currentPage}
+                  totalItems={processedPendingList.length}
+                  pageSize={pageSize}
+                  onPageChange={setCurrentPage}
+                  onPageSizeChange={setPageSize}
+                  pageSizeOptions={[5, 10, 25, 50]}
+                  itemLabel="barcodes"
+                />
               </div>
             )}
           </div>

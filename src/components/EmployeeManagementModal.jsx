@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, CheckCircle, AlertTriangle, UserCheck, UserX, Shield, RefreshCw, Plus, Users, Key, Search, Mail, Building2 } from 'lucide-react';
 import { authService } from '../services/authService';
+import TablePagination from './TablePagination';
 
 const ROLES = [
   { id: 'super_admin', label: '👑 Super Admin', desc: 'Full permissions (manage roles, catalog, verify barcodes, view reports)' },
@@ -16,6 +17,8 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
   const [roleFilter, setRoleFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortBy, setSortBy] = useState('name_asc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [hrApiKey, setHrApiKey] = useState(authService.getHrApiKey());
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -108,43 +111,52 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
     }
   };
 
+  // Filter and sort employees memo
+  const filteredEmployees = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    return employees
+      .filter(emp => {
+        if (q) {
+          const matches = (
+            (emp.name || '').toLowerCase().includes(q) ||
+            (emp.email || '').toLowerCase().includes(q) ||
+            (emp.department || '').toLowerCase().includes(q) ||
+            (emp.role || '').toLowerCase().includes(q)
+          );
+          if (!matches) return false;
+        }
+
+        if (roleFilter !== 'all' && (emp.role || 'inventory_staff') !== roleFilter) {
+          return false;
+        }
+
+        if (statusFilter === 'active' && emp.is_active === false) return false;
+        if (statusFilter === 'resigned' && emp.is_active !== false) return false;
+
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'name_asc') {
+          return (a.name || '').localeCompare(b.name || '');
+        } else if (sortBy === 'name_desc') {
+          return (b.name || '').localeCompare(a.name || '');
+        } else if (sortBy === 'role') {
+          return (a.role || '').localeCompare(b.role || '');
+        } else if (sortBy === 'status') {
+          return (a.is_active === false ? 1 : 0) - (b.is_active === false ? 1 : 0);
+        }
+        return 0;
+      });
+  }, [employees, searchQuery, roleFilter, statusFilter, sortBy]);
+
+  // Paginated slice
+  const paginatedEmployees = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredEmployees.slice(start, start + pageSize);
+  }, [filteredEmployees, currentPage, pageSize]);
+
+  // All hooks declared above. Early return only right before JSX render!
   if (!isOpen) return null;
-
-  // Filter and sort employees
-  const q = searchQuery.toLowerCase().trim();
-  const filteredEmployees = employees
-    .filter(emp => {
-      if (q) {
-        const matches = (
-          (emp.name || '').toLowerCase().includes(q) ||
-          (emp.email || '').toLowerCase().includes(q) ||
-          (emp.department || '').toLowerCase().includes(q) ||
-          (emp.role || '').toLowerCase().includes(q)
-        );
-        if (!matches) return false;
-      }
-
-      if (roleFilter !== 'all' && (emp.role || 'inventory_staff') !== roleFilter) {
-        return false;
-      }
-
-      if (statusFilter === 'active' && emp.is_active === false) return false;
-      if (statusFilter === 'resigned' && emp.is_active !== false) return false;
-
-      return true;
-    })
-    .sort((a, b) => {
-      if (sortBy === 'name_asc') {
-        return (a.name || '').localeCompare(b.name || '');
-      } else if (sortBy === 'name_desc') {
-        return (b.name || '').localeCompare(a.name || '');
-      } else if (sortBy === 'role') {
-        return (a.role || '').localeCompare(b.role || '');
-      } else if (sortBy === 'status') {
-        return (a.is_active === false ? 1 : 0) - (b.is_active === false ? 1 : 0);
-      }
-      return 0;
-    });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
@@ -222,13 +234,19 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
               placeholder="Search by employee name, company email (@keysys, @pingcon, @a2z2go), or department..."
               className="w-full pl-10 pr-9 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 shadow-sm transition-all"
             />
             {searchQuery && (
               <button
-                onClick={() => setSearchQuery('')}
+                onClick={() => {
+                  setSearchQuery('');
+                  setCurrentPage(1);
+                }}
                 className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-100"
                 title="Clear search"
               >
@@ -241,7 +259,10 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <select
               value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
+              onChange={(e) => {
+                setRoleFilter(e.target.value);
+                setCurrentPage(1);
+              }}
               className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 focus:outline-none focus:border-blue-500 shadow-xs"
             >
               <option value="all">All Roles</option>
@@ -253,7 +274,10 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
 
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setCurrentPage(1);
+              }}
               className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 focus:outline-none focus:border-blue-500 shadow-xs"
             >
               <option value="all">All Status</option>
@@ -263,7 +287,10 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
 
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
+              onChange={(e) => {
+                setSortBy(e.target.value);
+                setCurrentPage(1);
+              }}
               className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 focus:outline-none focus:border-blue-500 shadow-xs"
             >
               <option value="name_asc">Sort: Name (A-Z)</option>
@@ -279,6 +306,7 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
                   setSearchQuery('');
                   setRoleFilter('all');
                   setStatusFilter('all');
+                  setCurrentPage(1);
                 }}
                 className="px-2 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-[11px] transition-colors"
               >
@@ -393,7 +421,7 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
               <p className="text-[11px] text-slate-400">Try searching with a different name or company email address.</p>
             </div>
           ) : (
-            filteredEmployees.map(emp => (
+            paginatedEmployees.map(emp => (
               <div
                 key={emp.email}
                 className={`p-3 sm:p-3.5 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
@@ -474,15 +502,18 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
           )}
         </div>
 
-        {/* Pinned Footer with employee statistics */}
-        <div className="px-5 sm:px-6 py-2.5 bg-slate-50 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 shrink-0">
-          <div>
-            Showing <strong className="text-slate-800">{filteredEmployees.length}</strong> of {employees.length} employees
-            {searchQuery && <span className="text-blue-600 ml-1 font-semibold">(filtered)</span>}
-          </div>
-          <div className="text-[10px] font-semibold text-slate-500">
-            Official Company Staff Directory
-          </div>
+        {/* Pinned Footer with pagination */}
+        <div className="bg-slate-50 border-t border-slate-200/80 shrink-0">
+          <TablePagination
+            currentPage={currentPage}
+            pageSize={pageSize}
+            totalItems={filteredEmployees.length}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={(newSize) => {
+              setPageSize(newSize);
+              setCurrentPage(1);
+            }}
+          />
         </div>
 
       </div>

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 import ImageLightboxModal from './ImageLightboxModal';
+import TablePagination from './TablePagination';
 
 export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }) {
   const [searchInput, setSearchInput] = useState('');
@@ -29,6 +30,8 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
   const [sortDirection, setSortDirection] = useState('asc');
   const [supplierFilter, setSupplierFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const [viewMode, setViewMode] = useState(() => {
     return localStorage.getItem('rma_search_view_mode') || 'table';
@@ -48,6 +51,7 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
 
     setIsSearching(true);
     setHasSearched(true);
+    setCurrentPage(1);
 
     try {
       const items = await catalogService.searchAllProducts(query, 50);
@@ -58,16 +62,6 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
     } finally {
       setIsSearching(false);
     }
-  };
-
-  const handleQuickSearch = (term) => {
-    setSearchInput(term);
-    setIsSearching(true);
-    setHasSearched(true);
-    catalogService.searchAllProducts(term, 50)
-      .then(items => setResults(items || []))
-      .catch(() => setResults([]))
-      .finally(() => setIsSearching(false));
   };
 
   // Derive unique suppliers from search results
@@ -91,6 +85,7 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
 
   // Handle column header sorting
   const handleSort = (field) => {
+    setCurrentPage(1);
     if (sortField === field) {
       setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
     } else {
@@ -156,11 +151,18 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
     return list;
   }, [results, supplierFilter, sourceFilter, sortField, sortDirection]);
 
+  // Paginated slice
+  const paginatedResults = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return processedResults.slice(start, start + pageSize);
+  }, [processedResults, currentPage, pageSize]);
+
   const hasActiveFilters = supplierFilter !== 'all' || sourceFilter !== 'all';
 
   const resetFilters = () => {
     setSupplierFilter('all');
     setSourceFilter('all');
+    setCurrentPage(1);
   };
 
   const renderSortIndicator = (field) => {
@@ -223,21 +225,6 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
             <span>Search Catalog</span>
           </button>
         </form>
-
-        {/* Quick Suggestion Pills */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
-          <span className="text-[11px] text-slate-400 font-semibold mr-1">Quick searches:</span>
-          {['Chocolate', 'Oreo', 'Yakisoba', 'Coffee', 'Juice', 'Milk'].map(term => (
-            <button
-              key={term}
-              type="button"
-              onClick={() => handleQuickSearch(term)}
-              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[11px] font-bold transition-colors"
-            >
-              {term}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* Results Header with View Mode Switcher and Filters */}
@@ -294,7 +281,10 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
               {uniqueSuppliers.length > 1 && (
                 <select
                   value={supplierFilter}
-                  onChange={(e) => setSupplierFilter(e.target.value)}
+                  onChange={(e) => {
+                    setSupplierFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   className="px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500"
                 >
                   <option value="all">All Suppliers ({uniqueSuppliers.length})</option>
@@ -307,7 +297,10 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
               {uniqueSources.length > 1 && (
                 <select
                   value={sourceFilter}
-                  onChange={(e) => setSourceFilter(e.target.value)}
+                  onChange={(e) => {
+                    setSourceFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   className="px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500"
                 >
                   <option value="all">All Sources</option>
@@ -443,10 +436,10 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
-                {processedResults.map((item, idx) => {
+                {paginatedResults.map((item, idx) => {
                   const isSupabase = item.source?.includes('Supabase');
                   const hasPhoto = Boolean(item.imageUrl);
-                  const serialNum = item.id || idx + 1;
+                  const serialNum = item.id || ((currentPage - 1) * pageSize + idx + 1);
 
                   return (
                     <tr key={`${item.barcode || item.code}-${idx}`} className="hover:bg-blue-50/30 transition-colors">
@@ -540,106 +533,124 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
               </tbody>
             </table>
           </div>
-          <div className="p-3 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 font-semibold px-4 flex justify-between">
-            <span>Showing {processedResults.length} matching products</span>
-            <span>Sorted by {sortField} ({sortDirection.toUpperCase()})</span>
-          </div>
+          <TablePagination
+            currentPage={currentPage}
+            pageSize={pageSize}
+            totalItems={processedResults.length}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={(newSize) => {
+              setPageSize(newSize);
+              setCurrentPage(1);
+            }}
+          />
         </div>
       ) : (
         /* GRID CARDS VIEW WITH LIGHTBOX */
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {processedResults.map((item, idx) => {
-            const hasPhoto = Boolean(item.imageUrl);
-            const serialNum = item.id || idx + 1;
-            const isSupabase = item.source?.includes('Supabase');
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {paginatedResults.map((item, idx) => {
+              const hasPhoto = Boolean(item.imageUrl);
+              const serialNum = item.id || ((currentPage - 1) * pageSize + idx + 1);
+              const isSupabase = item.source?.includes('Supabase');
 
-            return (
-              <div 
-                key={`${item.barcode || item.code}-${idx}`}
-                className="bg-white border border-slate-200 hover:border-blue-300 rounded-3xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-3 group"
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-mono font-black text-xs text-blue-900 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-lg">
-                      SN #{serialNum}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                      isSupabase
-                        ? 'bg-purple-100 text-purple-800 border border-purple-200'
-                        : 'bg-blue-100 text-blue-800 border border-blue-200'
-                    }`}>
-                      {isSupabase ? 'Database' : 'Catalog'}
-                    </span>
-                  </div>
+              return (
+                <div 
+                  key={`${item.barcode || item.code}-${idx}`}
+                  className="bg-white border border-slate-200 hover:border-blue-300 rounded-3xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-3 group"
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-mono font-black text-xs text-blue-900 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-lg">
+                        SN #{serialNum}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                        isSupabase
+                          ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                          : 'bg-blue-100 text-blue-800 border border-blue-200'
+                      }`}>
+                        {isSupabase ? 'Database' : 'Catalog'}
+                      </span>
+                    </div>
 
-                  <div className="flex items-start gap-3">
-                    {hasPhoto ? (
-                      <div 
-                        onClick={() => setSelectedLightbox({
-                          url: item.imageUrl,
-                          title: item.name,
-                          subtitle: `Barcode: ${item.barcode} • SN #${serialNum} • ${item.supplierName || 'Wholesale Supplier'}`
-                        })}
-                        className="w-16 h-16 rounded-2xl overflow-hidden border border-slate-200 bg-slate-50 shrink-0 cursor-zoom-in hover:opacity-90 relative"
-                        title="Click to zoom reference photo in fullscreen"
-                      >
-                        <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
-                      </div>
-                    ) : (
-                      <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-400 flex items-center justify-center shrink-0 border border-blue-100">
-                        <ImageIcon className="w-6 h-6" />
-                      </div>
-                    )}
-
-                    <div className="min-w-0 flex-1">
-                      {item.code && (
-                        <div className="text-[10px] font-mono text-slate-500 font-bold truncate mb-0.5">
-                          SKU: <span className="text-slate-800">{item.code}</span>
+                    <div className="flex items-start gap-3">
+                      {hasPhoto ? (
+                        <div 
+                          onClick={() => setSelectedLightbox({
+                            url: item.imageUrl,
+                            title: item.name,
+                            subtitle: `Barcode: ${item.barcode} • SN #${serialNum} • ${item.supplierName || 'Wholesale Supplier'}`
+                          })}
+                          className="w-16 h-16 rounded-2xl overflow-hidden border border-slate-200 bg-slate-50 shrink-0 cursor-zoom-in hover:opacity-90 relative"
+                          title="Click to zoom reference photo in fullscreen"
+                        >
+                          <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                        </div>
+                      ) : (
+                        <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-400 flex items-center justify-center shrink-0 border border-blue-100">
+                          <ImageIcon className="w-6 h-6" />
                         </div>
                       )}
-                      
-                      <h4 className="font-bold text-slate-900 text-xs sm:text-sm line-clamp-2 leading-tight">
-                        {item.name}
-                      </h4>
-                      
-                      <div className="text-[11px] font-mono text-slate-500 mt-1 truncate">
-                        Barcode: <strong className="text-slate-800">{item.barcode}</strong>
+
+                      <div className="min-w-0 flex-1">
+                        {item.code && (
+                          <div className="text-[10px] font-mono text-slate-500 font-bold truncate mb-0.5">
+                            SKU: <span className="text-slate-800">{item.code}</span>
+                          </div>
+                        )}
+                        
+                        <h4 className="font-bold text-slate-900 text-xs sm:text-sm line-clamp-2 leading-tight">
+                          {item.name}
+                        </h4>
+                        
+                        <div className="text-[11px] font-mono text-slate-500 mt-1 truncate">
+                          Barcode: <strong className="text-slate-800">{item.barcode}</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-medium">Price (w/ VAT)</span>
+                        <span className="font-black text-emerald-600 font-mono text-sm">
+                          ₱{Number(item.priceWithVat || item.price || 0).toFixed(2)}
+                        </span>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="text-[10px] text-slate-400 block font-medium">Supplier</span>
+                        <span className="font-bold text-slate-700 truncate max-w-[120px] block">
+                          {item.supplierName || 'Savemore'}
+                        </span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="text-[10px] text-slate-400 block font-medium">Price (w/ VAT)</span>
-                      <span className="font-black text-emerald-600 font-mono text-sm">
-                        ₱{Number(item.priceWithVat || item.price || 0).toFixed(2)}
-                      </span>
+                  {onImportToCatalog && !isSupabase && (
+                    <div className="pt-2 border-t border-slate-100 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => onImportToCatalog(item)}
+                        className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs flex items-center gap-1 transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Save to DB</span>
+                      </button>
                     </div>
-
-                    <div className="text-right">
-                      <span className="text-[10px] text-slate-400 block font-medium">Supplier</span>
-                      <span className="font-bold text-slate-700 truncate max-w-[120px] block">
-                        {item.supplierName || 'Savemore'}
-                      </span>
-                    </div>
-                  </div>
+                  )}
                 </div>
-
-                {onImportToCatalog && !isSupabase && (
-                  <div className="pt-2 border-t border-slate-100 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => onImportToCatalog(item)}
-                      className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs flex items-center gap-1 transition-colors"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Save to DB</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
+          <TablePagination
+            currentPage={currentPage}
+            pageSize={pageSize}
+            totalItems={processedResults.length}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={(newSize) => {
+              setPageSize(newSize);
+              setCurrentPage(1);
+            }}
+          />
         </div>
       )}
 

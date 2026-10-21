@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 import { INITIAL_PRODUCTS, INITIAL_TICKETS } from './data/mockData';
-import { purchaseOrdersApi } from './services/purchaseOrdersApi';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://lschluviltzsknptwgrz.supabase.co';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_Jrv9ZNgGXJ4PZoNWCJSHxQ_7hZtQqd3';
@@ -60,39 +59,29 @@ export const saveLocalTickets = (tickets) => {
   }
 };
 
-// Unified Data Access Layer (Purchase Orders API + Supabase + Local Mock Fallback)
+// Unified Data Access Layer (Supabase + Local Fallback)
 
 export const rmaApi = {
   async testConnection() {
-    const poStatus = await purchaseOrdersApi.testConnection();
-
     if (!isSupabaseConfigured) {
       return { 
-        connected: poStatus.connected, 
-        poApiConnected: poStatus.connected,
-        message: poStatus.connected 
-          ? 'Connected to Live Purchase Orders API. Supabase in offline mock mode.'
-          : 'Offline Mock Mode active.'
+        connected: false, 
+        message: 'Offline Mock Mode active.'
       };
     }
     try {
       const { data, error } = await supabase.from('products').select('count', { count: 'exact', head: true });
+      if (error) throw error;
       return {
         connected: true,
-        poApiConnected: poStatus.connected,
         mode: 'live',
-        message: poStatus.connected 
-          ? 'Connected to Live Purchase Orders API & Supabase Database.'
-          : 'Connected to Supabase. Live PO API unreachable.'
+        message: 'Connected to Supabase Database.'
       };
     } catch (err) {
       return {
-        connected: poStatus.connected,
-        poApiConnected: poStatus.connected,
-        mode: poStatus.connected ? 'live-po-local-supabase' : 'offline',
-        message: poStatus.connected
-          ? 'Connected to Live Purchase Orders API. Supabase local fallback.'
-          : `Offline mode active (${err.message || 'Network unreachable'}). Local mock storage active.`
+        connected: false,
+        mode: 'offline',
+        message: `Supabase unreachable (${err.message || 'Network notice'}). Local storage active.`
       };
     }
   },
@@ -113,25 +102,14 @@ export const rmaApi = {
 
   /**
    * Fast Barcode / SKU Lookup:
-   * 1. Query Live Wholesale Catalog API
-   * 2. If not found, check Supabase products table
-   * 3. If not found, check local catalog
+   * 1. Check Supabase products table
+   * 2. If not found, check local verified catalog
    */
   async findProductByBarcode(barcode) {
     const cleanBarcode = String(barcode).trim();
     if (!cleanBarcode) return null;
 
-    // 1. Live ERPLY / Purchase Orders API lookup
-    try {
-      const liveProduct = await purchaseOrdersApi.findProductByBarcode(cleanBarcode);
-      if (liveProduct) {
-        return liveProduct;
-      }
-    } catch (e) {
-      console.warn('Live API lookup failed, checking secondary sources:', e);
-    }
-
-    // 2. Supabase lookup
+    // 1. Supabase lookup
     if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
@@ -148,20 +126,43 @@ export const rmaApi = {
       }
     }
 
-    // 3. Local catalog fallback
+    // 2. Local catalog fallback
     const localProds = getLocalProducts();
     return localProds.find(p => 
       String(p.barcode).trim().toLowerCase() === cleanBarcode.toLowerCase() ||
-      String(p.sku).trim().toLowerCase() === cleanBarcode.toLowerCase()
+      String(p.sku || p.code || '').trim().toLowerCase() === cleanBarcode.toLowerCase()
     ) || null;
   },
 
   async searchLiveProducts(query, limit = 15) {
-    return purchaseOrdersApi.searchProducts(query, limit);
+    if (!query) return [];
+    if (isSupabaseConfigured) {
+      try {
+        const { data, error } = await supabase
+          .from('products')
+          .select('*')
+          .or(`name.ilike.%${query}%,barcode.ilike.%${query}%`)
+          .limit(limit);
+        if (!error && data) return data;
+      } catch (e) {}
+    }
+    return getLocalProducts().filter(p => 
+      (p.name && p.name.toLowerCase().includes(query.toLowerCase())) ||
+      (p.barcode && p.barcode.includes(query))
+    ).slice(0, limit);
   },
 
   async getLiveSuppliers(limit = 100) {
-    return purchaseOrdersApi.getSuppliers(limit);
+    if (isSupabaseConfigured) {
+      try {
+        const { data, error } = await supabase.from('products').select('supplier_name').limit(limit);
+        if (!error && data) {
+          const list = Array.from(new Set(data.map(d => d.supplier_name).filter(Boolean)));
+          return list.map((name, i) => ({ id: i + 1, name }));
+        }
+      } catch (e) {}
+    }
+    return [{ id: 1, name: 'Savemore' }];
   },
 
   async getTickets() {
