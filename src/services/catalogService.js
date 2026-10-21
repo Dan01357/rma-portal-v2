@@ -4,14 +4,12 @@ import { purchaseOrdersApi } from './purchaseOrdersApi';
 /**
  * UNIFIED CATALOG & RMA REPORTING SERVICE
  * 
- * PRIORITY RULES:
- * 1. Supabase 'products' table is ALWAYS PRIORITY #1.
- * 2. Coworker's Live API (5,793 items) is SECONDARY FALLBACK ONLY.
- * 3. If item is not in either, it is an UNKNOWN BARCODE.
- *    - Reporter can report return anyway.
- *    - Return is inserted into 'rma_reports' (status: pending_admin_details).
- *    - Barcode is inserted into 'products' (is_verified: false).
- *    - Admin updates it -> system immediately recognizes it next time!
+ * Supports:
+ * - Supabase Priority #1 Catalog
+ * - Coworker PO API Secondary Fallback
+ * - Photo uploads to Supabase Storage ('rma-photos') with Base64 fallback
+ * - Auto GPS Coordinates
+ * - Defect reasons & explanations
  */
 export const catalogService = {
   /**
@@ -34,6 +32,49 @@ export const catalogService = {
   },
 
   /**
+   * Upload proof photo to Supabase Storage ('rma-photos' bucket)
+   * With automatic Base64 fallback if storage bucket is not configured yet
+   */
+  async uploadPhoto(file) {
+    if (!file) return null;
+    try {
+      const cleanName = file.name ? file.name.replace(/[^a-zA-Z0-9._-]/g, '_') : 'photo.jpg';
+      const filePath = `reports/${Date.now()}-${Math.floor(Math.random() * 1000)}_${cleanName}`;
+      
+      const { data, error } = await supabase.storage
+        .from('rma-photos')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true,
+          contentType: file.type || 'image/jpeg'
+        });
+
+      if (error) {
+        console.warn('Supabase storage upload notice (using data URL fallback):', error.message);
+        return await this.fileToBase64(file);
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from('rma-photos')
+        .getPublicUrl(filePath);
+
+      return publicUrlData.publicUrl;
+    } catch (err) {
+      console.warn('Storage exception (using data URL fallback):', err.message);
+      return await this.fileToBase64(file);
+    }
+  },
+
+  fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = error => reject(error);
+      reader.readAsDataURL(file);
+    });
+  },
+
+  /**
    * Fast Barcode / SKU Lookup:
    * PRIORITY 1: Look in our custom Supabase 'products' table
    * PRIORITY 2: Look in Coworker's live API (erply_products)
@@ -42,9 +83,7 @@ export const catalogService = {
     const clean = String(barcodeOrQuery || '').trim();
     if (!clean) return null;
 
-    // ==============================================================
     // 1. SUPABASE LOOKUP (PRIORITY #1)
-    // ==============================================================
     try {
       let supaItem = null;
 
@@ -55,9 +94,7 @@ export const catalogService = {
         .eq('barcode', clean)
         .limit(1);
 
-      if (errBarcode) {
-        console.warn('Supabase barcode lookup error:', errBarcode.message);
-      } else if (byBarcode && byBarcode.length > 0) {
+      if (!errBarcode && byBarcode && byBarcode.length > 0) {
         supaItem = byBarcode[0];
       }
 
@@ -74,7 +111,6 @@ export const catalogService = {
         }
       }
 
-      // If found in Supabase -> RETURN IMMEDIATELY (Do NOT call Coworker API!)
       if (supaItem) {
         return {
           id: supaItem.id,
@@ -95,9 +131,7 @@ export const catalogService = {
       console.warn('Supabase lookup exception:', e.message);
     }
 
-    // ==============================================================
     // 2. COWORKER'S LIVE API (SECONDARY FALLBACK ONLY)
-    // ==============================================================
     try {
       const liveItem = await purchaseOrdersApi.findProductByBarcode(clean);
       if (liveItem) {
@@ -120,41 +154,24 @@ export const catalogService = {
       console.warn('Coworker API lookup warning:', e.message);
     }
 
-    // 2b. Secondary search in Coworker API by product name / keyword
-    try {
-      const searchResults = await purchaseOrdersApi.searchProducts(clean, 5);
-      if (searchResults && searchResults.length > 0) {
-        const first = searchResults[0];
-        return {
-          id: first.id,
-          barcode: first.barcode || clean,
-          code: first.sku || first.code,
-          name: first.name,
-          price: Number(first.unit_price || 0),
-          priceWithVat: Number(first.unit_price || 0),
-          supplierName: first.supplier || 'Savemore',
-          brandName: null,
-          unitName: 'pc',
-          hasSerialNumbers: false,
-          isVerified: true,
-          source: "Coworker's API (Search Match)"
-        };
-      }
-    } catch (e) {
-      console.warn('Coworker API search fallback warning:', e.message);
-    }
-
-    // 3. Not found in either database
     return null;
   },
 
   /**
    * SUBMIT RMA RETURN REPORT
-   * - Saves to public.rma_reports table
-   * - If unknown item, logs barcode into public.products with is_verified = false
-   * - Throws explicit errors if Supabase RLS blocks the write!
+   * Records return with proof photos, defect reason, explanation, and GPS coordinates
    */
-  async submitReport({ barcode, product, quantity = 1, location = '', notes = '', reportedBy = 'Warehouse Staff' }) {
+  async submitReport({ 
+    barcode, 
+    product, 
+    quantity = 1, 
+    location = '', 
+    reason = 'Damaged in Transit / Crushed',
+    explanation = '',
+    photos = [],
+    gps = null,
+    reportedBy = 'Warehouse Staff' 
+  }) {
     const cleanBarcode = String(barcode || '').trim();
     if (!cleanBarcode) throw new Error('A barcode is required to report a return.');
 
@@ -177,8 +194,14 @@ export const catalogService = {
       unit_name: isKnown ? (product.unitName || 'pc') : 'pc',
       status: isKnown ? 'pending' : 'pending_admin_details',
       location: location || null,
-      reported_by: reportedBy,
-      notes: notes || null
+      reason: reason || 'Damaged in Transit / Crushed',
+      explanation: explanation || null,
+      photos: Array.isArray(photos) ? photos : (photos ? [photos] : []),
+      gps_latitude: gps?.latitude ? Number(gps.latitude) : null,
+      gps_longitude: gps?.longitude ? Number(gps.longitude) : null,
+      gps_accuracy: gps?.accuracy ? Number(gps.accuracy) : null,
+      gps_timestamp: gps?.latitude ? new Date().toISOString() : null,
+      reported_by: reportedBy
     };
 
     // 1. Insert into rma_reports
@@ -190,7 +213,7 @@ export const catalogService = {
 
     if (reportError) {
       console.error('Failed to insert rma_report to Supabase:', reportError);
-      throw new Error(`Database error saving return report: ${reportError.message} (Please ensure RLS policy is applied in Supabase)`);
+      throw new Error(`Database error saving return report: ${reportError.message}`);
     }
 
     // 2. If item is unknown, insert/upsert into Supabase products table as is_verified = false
@@ -212,8 +235,7 @@ export const catalogService = {
         ], { onConflict: 'barcode' });
 
       if (prodError) {
-        console.error('Failed to log unknown barcode into products:', prodError);
-        throw new Error(`Report saved, but could not register barcode into catalog: ${prodError.message}`);
+        console.warn('Unknown barcode upsert notice:', prodError.message);
       }
     }
 
@@ -249,7 +271,6 @@ export const catalogService = {
 
   /**
    * ADMIN ACTION: Fill in details for an unknown barcode.
-   * Once saved, this item is permanently recognized!
    */
   async updateBarcodeDetails({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName }) {
     const cleanBarcode = String(barcode || '').trim();
@@ -298,9 +319,9 @@ export const catalogService = {
   },
 
   /**
-   * Get all RMA reports from public.rma_reports
+   * Get all RMA reports
    */
-  async getRecentReports(limit = 20) {
+  async getRecentReports(limit = 30) {
     try {
       const { data, error } = await supabase
         .from('rma_reports')

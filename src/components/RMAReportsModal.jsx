@@ -1,12 +1,14 @@
-import React from 'react';
-import { X, CheckCircle, Clock, Barcode, FileText, Package } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, CheckCircle, Clock, Barcode, FileText, Package, MapPin, Image as ImageIcon, ExternalLink } from 'lucide-react';
 
 export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
+  const [selectedPhoto, setSelectedPhoto] = useState(null);
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-3xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto">
         
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-4">
@@ -16,10 +18,10 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
             </div>
             <div>
               <h2 className="text-lg font-bold text-slate-900">
-                Logged RMA Return Reports
+                Logged RMA Return Reports ({reports.length})
               </h2>
               <p className="text-xs text-slate-500">
-                Recorded returns from mobile scans and manual entries.
+                Returns with proof photos, return reasons, and GPS coordinates.
               </p>
             </div>
           </div>
@@ -37,58 +39,133 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
             <Package className="w-10 h-10 text-slate-300 mx-auto" />
             <h3 className="text-sm font-bold text-slate-700">No RMA Reports Yet</h3>
             <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              Scan any item barcode and click "Report Item for Return" to create your first report.
+              Scan any item barcode in Reporter Mode and submit to record your first return with proof photos and GPS.
             </p>
           </div>
         ) : (
-          <div className="space-y-2.5">
-            {reports.map((item) => (
-              <div
-                key={item.id || item.rma_number}
-                className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-black text-blue-700 text-sm">
-                      {item.rma_number}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                      item.status === 'pending_admin_details'
-                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                        : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                    }`}>
-                      {item.status === 'pending_admin_details' ? 'Unknown Item - Pending Details' : 'Recorded Return'}
-                    </span>
-                  </div>
-                  <div className="font-semibold text-slate-800 text-sm">
-                    {item.name}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-500 text-[11px] font-mono">
-                    <span>Barcode: {item.barcode}</span>
-                    {item.code && <span>SKU: {item.code}</span>}
-                    {item.supplier_name && <span>Supplier: {item.supplier_name}</span>}
-                  </div>
-                </div>
+          <div className="space-y-3">
+            {reports.map((item) => {
+              const photoList = Array.isArray(item.photos) 
+                ? item.photos 
+                : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
 
-                <div className="flex items-center sm:flex-col sm:items-end justify-between border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-200">
-                  <div className="font-mono font-bold text-slate-900 text-sm">
-                    Qty: {item.quantity} {item.unit_name || 'pc'}
-                  </div>
-                  {item.price_with_vat > 0 && (
-                    <div className="font-mono text-emerald-600 font-bold text-xs">
-                      ₱{(Number(item.price_with_vat) * Number(item.quantity)).toFixed(2)}
+              return (
+                <div
+                  key={item.id || item.rma_number}
+                  className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 text-xs"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/60 pb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-black text-blue-700 text-sm">
+                        {item.rma_number}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        item.status === 'pending_admin_details'
+                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                          : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                      }`}>
+                        {item.status === 'pending_admin_details' ? 'Unknown Barcode' : 'Recorded Return'}
+                      </span>
                     </div>
-                  )}
-                  <span className="text-[10px] text-slate-400">
-                    {new Date(item.created_at).toLocaleDateString()}
-                  </span>
+
+                    <div className="flex items-center gap-3 text-slate-500 font-mono text-[11px]">
+                      <span className="font-bold text-slate-800 text-sm">
+                        Qty: {item.quantity} {item.unit_name || 'pc'}
+                      </span>
+                      <span>{new Date(item.created_at).toLocaleString()}</span>
+                    </div>
+                  </div>
+
+                  {/* Item and Reason Info */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase text-slate-400 block">Item / Barcode</span>
+                      <span className="font-bold text-slate-900 block text-sm">{item.name}</span>
+                      <span className="font-mono text-slate-500 text-[11px]">Barcode: {item.barcode}</span>
+                      {item.code && <span className="font-mono text-blue-600 text-[11px] block">SKU: {item.code}</span>}
+                    </div>
+
+                    <div className="space-y-1">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">Return Reason</span>
+                        <span className="px-2 py-0.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 font-bold inline-block text-[11px]">
+                          {item.reason || 'Damaged in Transit / Crushed'}
+                        </span>
+                      </div>
+                      {item.explanation && (
+                        <p className="text-slate-600 italic bg-white p-2 rounded-xl border border-slate-200 text-[11px]">
+                          "{item.explanation}"
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* GPS & Location */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/60 text-[11px]">
+                    <div className="flex items-center gap-1.5 text-slate-600">
+                      <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                      {item.gps_latitude && item.gps_longitude ? (
+                        <a
+                          href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-600 hover:underline flex items-center gap-1 font-mono"
+                        >
+                          <span>GPS: {Number(item.gps_latitude).toFixed(4)}, {Number(item.gps_longitude).toFixed(4)}</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      ) : (
+                        <span>GPS: Not available</span>
+                      )}
+                      {item.location && <span className="text-slate-400">({item.location})</span>}
+                    </div>
+
+                    {/* Proof Photos */}
+                    {photoList.length > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-400 font-semibold">Proof Photos:</span>
+                        <div className="flex items-center gap-1">
+                          {photoList.map((url, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setSelectedPhoto(url)}
+                              className="w-8 h-8 rounded-lg overflow-hidden border border-slate-300 hover:scale-105 transition-transform"
+                            >
+                              <img src={url} alt="Proof" className="w-full h-full object-cover" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
       </div>
+
+      {/* Fullscreen Photo Zoom Modal */}
+      {selectedPhoto && (
+        <div 
+          onClick={() => setSelectedPhoto(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in"
+        >
+          <div className="relative max-w-2xl max-h-[85vh]">
+            <img src={selectedPhoto} alt="Full Proof" className="max-w-full max-h-[80vh] rounded-2xl shadow-2xl object-contain" />
+            <button
+              onClick={() => setSelectedPhoto(null)}
+              className="absolute -top-3 -right-3 p-2 bg-white text-slate-900 rounded-full shadow-lg hover:bg-slate-100"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
