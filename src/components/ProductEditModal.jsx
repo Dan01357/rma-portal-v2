@@ -409,6 +409,8 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
       <ImageLightboxModal
         isOpen={Boolean(lightboxPhoto)}
         imageUrl={lightboxPhoto?.url}
+        images={lightboxPhoto?.images || (lightboxPhoto?.url ? [lightboxPhoto.url] : [])}
+        initialIndex={0}
         title={lightboxPhoto?.title}
         subtitle={lightboxPhoto?.subtitle}
         onClose={() => setLightboxPhoto(null)}

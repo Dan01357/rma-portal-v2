@@ -18,7 +18,7 @@ import { catalogService } from '../services/catalogService';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 
-export default function PendingBarcodesModal({ isOpen, onClose, pendingList = [], onUpdated }) {
+export default function PendingBarcodesModal({ isOpen, onClose, pendingList = [], onUpdated, currentUser }) {
   const [selectedBarcode, setSelectedBarcode] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState('id');
@@ -26,6 +26,8 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+
+  const canVerify = currentUser?.role !== 'viewer';
 
   const [formData, setFormData] = useState({
     code: '',
@@ -291,14 +293,20 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                           </div>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => handleSelect(item)}
-                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          <span>Enter Details</span>
-                        </button>
+                        {canVerify ? (
+                          <button
+                            type="button"
+                            onClick={() => handleSelect(item)}
+                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>Enter Details</span>
+                          </button>
+                        ) : (
+                          <span className="px-3 py-1.5 bg-slate-100 text-slate-400 text-xs font-bold rounded-xl">
+                            Read-Only
+                          </span>
+                        )}
                       </div>
                     ))
                   )}
@@ -495,6 +503,8 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
       <ImageLightboxModal
         isOpen={Boolean(lightboxPhoto)}
         imageUrl={lightboxPhoto?.url}
+        images={lightboxPhoto?.images || (lightboxPhoto?.url ? [lightboxPhoto.url] : [])}
+        initialIndex={lightboxPhoto?.initialIndex || 0}
         title={lightboxPhoto?.title}
         subtitle={lightboxPhoto?.subtitle}
         onClose={() => setLightboxPhoto(null)}

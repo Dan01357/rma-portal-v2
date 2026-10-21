@@ -35,7 +35,10 @@ import {
   ArrowUp,
   ArrowDown,
   RotateCcw,
-  Filter
+  Filter,
+  Trash2,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { catalogService } from './services/catalogService';
 import TablePagination from './components/TablePagination';
@@ -47,7 +50,6 @@ import RMAReportsModal from './components/RMAReportsModal';
 import AdminLoginModal from './components/AdminLoginModal';
 import EmployeeManagementModal from './components/EmployeeManagementModal';
 import SavedProductsTab from './components/SavedProductsTab';
-import ProductSearchTab from './components/ProductSearchTab';
 import ProductEditModal from './components/ProductEditModal';
 import ImageLightboxModal from './components/ImageLightboxModal';
 
@@ -178,6 +180,56 @@ export default function App() {
     showToast('Logged out of admin dashboard.', 'success');
   };
 
+  // Dark / Light Theme State (Persisted in localStorage)
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rma_theme');
+      if (saved) return saved === 'dark';
+      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch (e) {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (isDarkMode) {
+        document.documentElement.classList.add('dark');
+        localStorage.setItem('rma_theme', 'dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+        localStorage.setItem('rma_theme', 'light');
+      }
+    } catch (e) {}
+  }, [isDarkMode]);
+
+  const toggleTheme = () => setIsDarkMode(prev => !prev);
+
+  // Role Permissions
+  const canManageRoles = currentUser?.role === 'super_admin';
+  const canEditProducts = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
+  const canDeleteProducts = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
+  const canDeleteReports = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
+  const canVerifyBarcodes = currentUser?.role !== 'viewer';
+
+  // Delete RMA Return Report Handler
+  const handleDeleteReport = async (id, rmaNumber) => {
+    if (!canDeleteReports) {
+      showToast('You do not have permission to delete RMA reports.', 'error');
+      return;
+    }
+    const confirmed = window.confirm(`Are you sure you want to permanently delete RMA #${rmaNumber}? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      await catalogService.deleteReport(id, rmaNumber);
+      showToast(`Deleted return report RMA #${rmaNumber}.`, 'success');
+      refreshAllData();
+    } catch (e) {
+      showToast(e.message || 'Failed to delete report', 'error');
+    }
+  };
+
   // Database Connection Health State
   const [supaStatus, setSupaStatus] = useState({ checking: true, connected: false, rowsFound: 0 });
 
@@ -299,8 +351,8 @@ export default function App() {
           valB = String(b.reporter_name || b.reported_by || '').toLowerCase();
           break;
         case 'status':
-          valA = item.status === 'pending_admin_details' ? 0 : 1;
-          valB = item.status === 'pending_admin_details' ? 0 : 1;
+          valA = a.status === 'pending_admin_details' ? 0 : 1;
+          valB = b.status === 'pending_admin_details' ? 0 : 1;
           break;
         case 'created_at':
           valA = new Date(a.created_at || 0).getTime();
@@ -579,7 +631,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-800 font-sans p-3 sm:p-6">
+    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 transition-colors duration-200">
       {/* Dynamic container width: clean mobile intake for public reporter, spacious SaaS for admin */}
       <div className={`${isAdminView ? 'max-w-6xl' : 'max-w-xl'} mx-auto space-y-4 transition-all duration-300`}>
 
@@ -587,13 +639,13 @@ export default function App() {
         {toastMessage && (
           <div className={`p-3.5 rounded-2xl border text-xs sm:text-sm flex items-center gap-2 shadow-sm animate-in fade-in ${
             toastMessage.type === 'success' 
-              ? 'bg-emerald-50 border-emerald-300 text-emerald-800' 
-              : 'bg-rose-50 border-rose-300 text-rose-800'
+              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200' 
+              : 'bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200'
           }`}>
             {toastMessage.type === 'success' ? (
-              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
             ) : (
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
             )}
             <span className="font-semibold">{toastMessage.text}</span>
           </div>
@@ -605,15 +657,27 @@ export default function App() {
         {!isAdminView && (
           <div className="space-y-4 animate-in fade-in duration-200">
             
-            {/* Header */}
-            <div className="text-center space-y-1.5 py-2">
-              <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 inline-block">
+            {/* Header with Theme Toggle */}
+            <div className="relative text-center space-y-1.5 py-2">
+              <div className="absolute right-0 top-0">
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  className="p-2.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white shadow-xs transition-colors"
+                  title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                  aria-label="Toggle Theme"
+                >
+                  {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
+                </button>
+              </div>
+
+              <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 inline-block">
                 Customer & Warehouse Returns
               </span>
-              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
                 Report Item for Return
               </h1>
-              <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
                 Scan code, attach proof photo, and submit return report.
               </p>
             </div>
@@ -664,11 +728,11 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <form onSubmit={handleSubmitReport} className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
+              <form onSubmit={handleSubmitReport} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
                 
                 {/* 1. BARCODE SCAN / INPUT */}
                 <div className="space-y-2">
-                  <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
+                  <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
                     1. Product Barcode / QR Code *
                   </label>
                   
@@ -690,23 +754,23 @@ export default function App() {
                         value={barcodeInput}
                         onChange={(e) => setBarcodeInput(e.target.value)}
                         placeholder="Or type barcode here..."
-                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-bold font-mono text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
+                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold font-mono text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                       />
                     </div>
 
-                    <div className="flex items-center border border-slate-300 rounded-2xl bg-slate-50 px-2 py-1">
+                    <div className="flex items-center border border-slate-300 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-800 px-2 py-1">
                       <button
                         type="button"
                         onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                        className="p-1 text-slate-500 hover:text-slate-800"
+                        className="p-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
                       >
                         <Minus className="w-3.5 h-3.5" />
                       </button>
-                      <span className="w-6 text-center text-xs font-black text-slate-800">{quantity}</span>
+                      <span className="w-6 text-center text-xs font-black text-slate-800 dark:text-slate-200">{quantity}</span>
                       <button
                         type="button"
                         onClick={() => setQuantity(quantity + 1)}
-                        className="p-1 text-slate-500 hover:text-slate-800"
+                        className="p-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
                       >
                         <Plus className="w-3.5 h-3.5" />
                       </button>
@@ -715,16 +779,18 @@ export default function App() {
 
                   {/* Recognized Product Banner (Shows name & reference image) */}
                   {isCheckingBarcode ? (
-                    <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs flex items-center gap-2 text-slate-500">
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs flex items-center gap-2 text-slate-500 dark:text-slate-400">
                       <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
                       <span>Checking database for recognized item...</span>
                     </div>
                   ) : detectedProduct ? (
-                    <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center gap-3 animate-in fade-in">
+                    <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 rounded-2xl flex items-center gap-3 animate-in fade-in">
                       {detectedProduct.imageUrl ? (
                         <button
                           type="button"
                           onClick={() => setLightboxPhoto({
+                            images: [detectedProduct.imageUrl],
+                            initialIndex: 0,
                             url: detectedProduct.imageUrl,
                             title: detectedProduct.name,
                             subtitle: `SKU: ${detectedProduct.code} • ₱${Number(detectedProduct.priceWithVat || 0).toFixed(2)}`
@@ -735,25 +801,25 @@ export default function App() {
                           <img src={detectedProduct.imageUrl} alt={detectedProduct.name} className="w-full h-full object-cover" />
                         </button>
                       ) : (
-                        <div className="w-12 h-12 rounded-xl bg-emerald-200/70 text-emerald-800 flex items-center justify-center shrink-0 font-bold">
+                        <div className="w-12 h-12 rounded-xl bg-emerald-200/70 dark:bg-emerald-800 text-emerald-800 dark:text-emerald-200 flex items-center justify-center shrink-0 font-bold">
                           <CheckCircle className="w-6 h-6" />
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-200/60 px-2 py-0.5 rounded-full inline-block mb-0.5">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/60 px-2 py-0.5 rounded-full inline-block mb-0.5">
                           Recognized Product
                         </span>
-                        <div className="font-bold text-slate-900 text-xs truncate">
+                        <div className="font-bold text-slate-900 dark:text-white text-xs truncate">
                           {detectedProduct.name}
                         </div>
-                        <div className="text-[11px] text-slate-500 font-mono">
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
                           SKU: {detectedProduct.code} • ₱{Number(detectedProduct.priceWithVat || 0).toFixed(2)}
                         </div>
                       </div>
                     </div>
                   ) : barcodeInput.trim() ? (
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs flex items-center gap-2 text-amber-800 animate-in fade-in">
-                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <div className="p-3 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-2xl text-xs flex items-center gap-2 text-amber-800 dark:text-amber-200 animate-in fade-in">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                       <span>
                         Barcode not yet registered. You can still submit! Admin staff will be notified to record the item details.
                       </span>
@@ -764,7 +830,7 @@ export default function App() {
                 {/* 2. PHOTO UPLOADER (REQUIRED) */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
+                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
                       2. Proof Photos (Required) *
                     </label>
                     <span className="text-[10px] font-bold text-rose-500">At least 1 photo required</span>
@@ -772,10 +838,12 @@ export default function App() {
 
                   <div className="grid grid-cols-3 gap-2">
                     {photoFiles.map((item, idx) => (
-                      <div key={idx} className="relative aspect-square rounded-2xl overflow-hidden border-2 border-slate-300 group shadow-sm bg-slate-100">
+                      <div key={idx} className="relative aspect-square rounded-2xl overflow-hidden border-2 border-slate-300 dark:border-slate-700 group shadow-sm bg-slate-100 dark:bg-slate-800">
                         <button
                           type="button"
                           onClick={() => setLightboxPhoto({
+                            images: photoFiles.map(p => p.previewUrl),
+                            initialIndex: idx,
                             url: item.previewUrl,
                             title: 'Proof Photo',
                             subtitle: `Photo ${idx + 1} of ${photoFiles.length}`
@@ -795,12 +863,12 @@ export default function App() {
                       </div>
                     ))}
 
-                    <label className="aspect-square border-2 border-dashed border-rose-300 hover:border-blue-500 bg-rose-50/40 hover:bg-blue-50/50 rounded-2xl flex flex-col items-center justify-center p-2 text-center cursor-pointer transition-all">
+                    <label className="aspect-square border-2 border-dashed border-rose-300 dark:border-rose-800/80 hover:border-blue-500 dark:hover:border-blue-400 bg-rose-50/40 dark:bg-rose-950/20 hover:bg-blue-50/50 dark:hover:bg-blue-950/30 rounded-2xl flex flex-col items-center justify-center p-2 text-center cursor-pointer transition-all">
                       <Upload className="w-6 h-6 text-rose-500 mb-1" />
-                      <span className="text-[11px] font-extrabold text-slate-700 leading-tight">
+                      <span className="text-[11px] font-extrabold text-slate-700 dark:text-slate-200 leading-tight">
                         Tap to Take Photo with Camera or Upload
                       </span>
-                      <span className="text-[9px] text-slate-400 mt-0.5">Shows damaged part, box, or defect (single or multiple)</span>
+                      <span className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">Shows damaged part, box, or defect (single or multiple)</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -815,7 +883,7 @@ export default function App() {
 
                 {/* 3. REASON FOR RETURN */}
                 <div className="space-y-2">
-                  <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
+                  <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
                     3. Why are you returning this item? *
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -826,8 +894,8 @@ export default function App() {
                         onClick={() => setSelectedReason(reason)}
                         className={`p-2.5 rounded-2xl border text-xs font-bold text-left transition-all flex items-center justify-between ${
                           selectedReason === reason
-                            ? 'bg-rose-50 border-rose-400 text-rose-900 shadow-sm'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                            ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-400 dark:border-rose-700 text-rose-900 dark:text-rose-200 shadow-sm'
+                            : 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
                         }`}
                       >
                         <span>{reason}</span>
@@ -841,13 +909,13 @@ export default function App() {
                     value={explanation}
                     onChange={(e) => setExplanation(e.target.value)}
                     placeholder="Optional details / explanation..."
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-semibold text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                   />
                 </div>
 
                 {/* 4. REPORTER CONTACT INFORMATION */}
                 <div className="space-y-2">
-                  <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
+                  <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
                     4. Reporter Information (Required) *
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -859,7 +927,7 @@ export default function App() {
                         value={reporterName}
                         onChange={(e) => setReporterName(e.target.value)}
                         placeholder="Your Full Name *"
-                        className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
+                        className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                       />
                     </div>
                     <div className="relative">
@@ -870,7 +938,7 @@ export default function App() {
                         value={reporterContact}
                         onChange={(e) => setReporterContact(e.target.value)}
                         placeholder="Phone No. or Email *"
-                        className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
+                        className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                       />
                     </div>
                   </div>
@@ -895,7 +963,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => navigateTo('/admin')}
-                    className="text-xs font-bold text-slate-400 hover:text-slate-700 underline"
+                    className="text-xs font-bold text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 underline"
                   >
                     Warehouse Staff & Admin Portal Access →
                   </button>
@@ -913,30 +981,40 @@ export default function App() {
           <div className="space-y-5 animate-in fade-in duration-200">
             
             {/* Production-Level SaaS Header */}
-            <div className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2.5">
-                  <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                  <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
                     <span>🏢 Wholesale RMA Operations</span>
                   </h1>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                     Live Auto-Sync
                   </span>
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200">
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
                     {currentUser.role === 'super_admin' ? '👑 Super Admin' : currentUser.role}
                   </span>
                 </div>
-                <p className="text-xs text-slate-500">
-                  Logged in as <strong className="text-slate-800">{currentUser.name}</strong> • {currentUser.email}
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Logged in as <strong className="text-slate-800 dark:text-slate-200">{currentUser.name}</strong> • {currentUser.email}
                 </p>
               </div>
 
               <div className="flex items-center gap-2 self-start md:self-auto">
                 <button
                   type="button"
+                  onClick={toggleTheme}
+                  className="p-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center transition-colors shadow-sm"
+                  title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                  aria-label="Toggle Theme"
+                >
+                  {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => navigateTo('/')}
-                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
                 >
                   <ArrowRight className="w-3.5 h-3.5 rotate-180" />
                   <span>Public Reporter</span>
@@ -945,7 +1023,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+                  className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                   <span>Logout</span>
@@ -958,55 +1036,55 @@ export default function App() {
               {/* Metric 1: Saved Products */}
               <div 
                 onClick={() => setAdminActiveTab('products')}
-                className={`bg-white border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
-                  adminActiveTab === 'products' ? 'border-indigo-500 ring-2 ring-indigo-100' : 'border-slate-200'
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
+                  adminActiveTab === 'products' ? 'border-indigo-500 ring-2 ring-indigo-100 dark:ring-indigo-900/40' : 'border-slate-200 dark:border-slate-800'
                 }`}
               >
-                <div className="flex items-center justify-between text-indigo-600 mb-2">
+                <div className="flex items-center justify-between text-indigo-600 dark:text-indigo-400 mb-2">
                   <Package className="w-5 h-5" />
-                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">Database</span>
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">Database</span>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-slate-900 font-mono">
+                <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
                   {savedProductsList.length}
                 </div>
-                <div className="text-xs font-bold text-slate-700 mt-0.5">Saved Products</div>
-                <div className="text-[11px] text-slate-400">Custom items in catalog</div>
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Saved Products</div>
+                <div className="text-[11px] text-slate-400 dark:text-slate-500">Custom items in catalog</div>
               </div>
 
               {/* Metric 2: Return Reports */}
               <div 
                 onClick={() => setAdminActiveTab('reports')}
-                className={`bg-white border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
-                  adminActiveTab === 'reports' ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
+                  adminActiveTab === 'reports' ? 'border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900/40' : 'border-slate-200 dark:border-slate-800'
                 }`}
               >
-                <div className="flex items-center justify-between text-blue-600 mb-2">
+                <div className="flex items-center justify-between text-blue-600 dark:text-blue-400 mb-2">
                   <FileText className="w-5 h-5" />
-                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">Reports</span>
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">Reports</span>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-slate-900 font-mono">
+                <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
                   {recentReportsList.length}
                 </div>
-                <div className="text-xs font-bold text-slate-700 mt-0.5">RMA Returns</div>
-                <div className="text-[11px] text-slate-400">Total filed returns</div>
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">RMA Returns</div>
+                <div className="text-[11px] text-slate-400 dark:text-slate-500">Total filed returns</div>
               </div>
 
               {/* Metric 3: Pending Barcodes */}
               <div 
                 onClick={() => setIsPendingModalOpen(true)}
-                className={`bg-white border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
-                  pendingBarcodesList.length > 0 ? 'border-amber-400 bg-amber-50/20' : 'border-slate-200'
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
+                  pendingBarcodesList.length > 0 ? 'border-amber-400 bg-amber-50/20 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-800'
                 }`}
               >
-                <div className="flex items-center justify-between text-amber-600 mb-2">
+                <div className="flex items-center justify-between text-amber-600 dark:text-amber-400 mb-2">
                   <AlertTriangle className="w-5 h-5" />
-                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Action Req.</span>
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">Action Req.</span>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-slate-900 font-mono">
+                <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
                   {pendingBarcodesList.length}
                 </div>
-                <div className="text-xs font-bold text-slate-700 mt-0.5">Pending Barcodes</div>
-                <div className="text-[11px] text-slate-400">Awaiting admin verification</div>
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Pending Barcodes</div>
+                <div className="text-[11px] text-slate-400 dark:text-slate-500">Awaiting admin verification</div>
               </div>
 
               {/* Metric 4: Staff Directory */}
@@ -1014,34 +1092,34 @@ export default function App() {
                 onClick={() => {
                   if (currentUser.role === 'super_admin') setIsEmployeeModalOpen(true);
                 }}
-                className={`bg-white border rounded-3xl p-4 sm:p-5 shadow-sm ${
-                  currentUser.role === 'super_admin' ? 'cursor-pointer hover:shadow-md hover:border-purple-300' : ''
-                } border-slate-200`}
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-4 sm:p-5 shadow-sm ${
+                  currentUser.role === 'super_admin' ? 'cursor-pointer hover:shadow-md hover:border-purple-300 dark:hover:border-purple-700' : ''
+                } border-slate-200 dark:border-slate-800`}
               >
-                <div className="flex items-center justify-between text-purple-600 mb-2">
+                <div className="flex items-center justify-between text-purple-600 dark:text-purple-400 mb-2">
                   <Users className="w-5 h-5" />
-                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">Team</span>
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300">Team</span>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-slate-900 font-mono">
+                <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
                   {staffList.length || 25}
                 </div>
-                <div className="text-xs font-bold text-slate-700 mt-0.5">Staff Directory</div>
-                <div className="text-[11px] text-slate-400">Authorized company staff</div>
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Staff Directory</div>
+                <div className="text-[11px] text-slate-400 dark:text-slate-500">Authorized company staff</div>
               </div>
             </div>
 
             {/* Production-Level Tab Segmented Switcher */}
-            <div className="flex flex-wrap items-center gap-2 bg-slate-200/70 p-1.5 rounded-2xl">
+            <div className="flex flex-wrap items-center gap-2 bg-slate-200/70 dark:bg-slate-800/80 p-1.5 rounded-2xl">
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('products')}
                 className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all ${
                   adminActiveTab === 'products'
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <Package className="w-4 h-4 text-indigo-600" />
+                <Package className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                 <span>Saved Products ({savedProductsList.length})</span>
               </button>
 
@@ -1050,33 +1128,20 @@ export default function App() {
                 onClick={() => setAdminActiveTab('reports')}
                 className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all ${
                   adminActiveTab === 'reports'
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <FileText className="w-4 h-4 text-blue-600" />
+                <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                 <span>Return Reports ({recentReportsList.length})</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => setAdminActiveTab('search')}
-                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all ${
-                  adminActiveTab === 'search'
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Search className="w-4 h-4 text-emerald-600" />
-                <span>Search Product Catalog</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={() => setIsPendingModalOpen(true)}
-                className="px-3.5 py-2 rounded-xl text-xs font-bold text-amber-800 hover:bg-amber-100/60 flex items-center gap-1.5 ml-auto transition-colors"
+                className="px-3.5 py-2 rounded-xl text-xs font-bold text-amber-800 dark:text-amber-400 hover:bg-amber-100/60 dark:hover:bg-amber-950/40 flex items-center gap-1.5 ml-auto transition-colors"
               >
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                 <span>Pending Queue ({pendingBarcodesList.length})</span>
               </button>
 
@@ -1084,9 +1149,9 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsEmployeeModalOpen(true)}
-                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-purple-800 hover:bg-purple-100/60 flex items-center gap-1.5 transition-colors"
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-purple-800 dark:text-purple-400 hover:bg-purple-100/60 dark:hover:bg-purple-950/40 flex items-center gap-1.5 transition-colors"
                 >
-                  <Users className="w-3.5 h-3.5 text-purple-600" />
+                  <Users className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
                   <span>Roles & Access</span>
                 </button>
               )}
@@ -1382,25 +1447,30 @@ export default function App() {
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
                             </th>
+                            {canDeleteReports && (
+                              <th className="py-3 px-3.5 text-center font-bold select-none text-slate-500 dark:text-slate-400 w-16">
+                                Action
+                              </th>
+                            )}
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100 font-medium">
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
                           {paginatedReports.map(item => {
                             const photoList = Array.isArray(item.photos) 
                               ? item.photos 
                               : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
 
                             return (
-                              <tr key={item.id || item.rma_number} className="hover:bg-blue-50/30 transition-colors">
+                              <tr key={item.id || item.rma_number} className="hover:bg-blue-50/30 dark:hover:bg-slate-800/50 transition-colors">
                                 {/* 1. SN COLUMN AT FAR LEFT */}
                                 <td className="py-3 px-3.5 font-mono">
-                                  <span className="font-black text-blue-900 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-lg text-xs">
+                                  <span className="font-black text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg text-xs">
                                     #{item.id}
                                   </span>
                                 </td>
 
                                 {/* 2. RMA # */}
-                                <td className="py-3 px-3.5 font-mono font-bold text-blue-700">
+                                <td className="py-3 px-3.5 font-mono font-bold text-blue-700 dark:text-blue-400">
                                   {item.rma_number}
                                 </td>
 
@@ -1410,11 +1480,13 @@ export default function App() {
                                     <button
                                       type="button"
                                       onClick={() => setLightboxPhoto({
+                                        images: photoList,
+                                        initialIndex: 0,
                                         url: photoList[0],
                                         title: item.name || `Return ${item.rma_number}`,
                                         subtitle: `RMA #${item.rma_number} • Reported by ${item.reporter_name || item.reported_by || 'Staff'} • ${item.reason || 'Damaged'}`
                                       })}
-                                      className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
+                                      className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
                                       title="Click to view full-size proof photo"
                                     >
                                       <img 
@@ -1424,7 +1496,7 @@ export default function App() {
                                       />
                                     </button>
                                   ) : (
-                                    <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto border border-slate-200">
+                                    <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
                                       <ImageIcon className="w-4 h-4" />
                                     </div>
                                   )}
@@ -1432,29 +1504,29 @@ export default function App() {
 
                                 {/* 4. Barcode */}
                                 <td className="py-3 px-3.5 font-mono">
-                                  <div className="font-bold text-slate-800">{item.barcode}</div>
-                                  {item.code && <div className="text-[10px] text-slate-400">{item.code}</div>}
+                                  <div className="font-bold text-slate-800 dark:text-slate-200">{item.barcode}</div>
+                                  {item.code && <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.code}</div>}
                                 </td>
 
                                 {/* 5. Item Name */}
-                                <td className="py-3 px-3.5 font-bold text-slate-900 max-w-[200px] truncate" title={item.name}>
+                                <td className="py-3 px-3.5 font-bold text-slate-900 dark:text-white max-w-[200px] truncate" title={item.name}>
                                   {item.name || `Unidentified (${item.barcode})`}
                                 </td>
 
                                 {/* 6. Reason */}
                                 <td className="py-3 px-3.5">
-                                  <span className="px-2 py-0.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 font-bold text-[10px] inline-block">
+                                  <span className="px-2 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[10px] inline-block">
                                     {item.reason || 'Damaged'}
                                   </span>
                                 </td>
 
                                 {/* 7. Reported By */}
                                 <td className="py-3 px-3.5">
-                                  <div className="font-bold text-slate-900 text-[11px]">
+                                  <div className="font-bold text-slate-900 dark:text-slate-200 text-[11px]">
                                     {item.reporter_name || item.reported_by || 'Reporter'}
                                   </div>
                                   {item.reporter_contact && (
-                                    <div className="font-mono text-slate-500 text-[10px]">
+                                    <div className="font-mono text-slate-500 dark:text-slate-400 text-[10px]">
                                       {item.reporter_contact}
                                     </div>
                                   )}
@@ -1464,30 +1536,44 @@ export default function App() {
                                 <td className="py-3 px-3 text-center">
                                   <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
                                     item.status === 'pending_admin_details'
-                                      ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                      : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                      ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                                      : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                                   }`}>
                                     {item.status === 'pending_admin_details' ? 'Unknown' : 'Logged'}
                                   </span>
                                 </td>
 
                                 {/* 9. Date & GPS */}
-                                <td className="py-3 px-3.5 text-right font-mono text-[11px] text-slate-500">
+                                <td className="py-3 px-3.5 text-right font-mono text-[11px] text-slate-500 dark:text-slate-400">
                                   <div>{new Date(item.created_at).toLocaleDateString()}</div>
                                   {item.gps_latitude && item.gps_longitude ? (
                                     <a
                                       href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}
                                       target="_blank"
                                       rel="noreferrer"
-                                      className="text-blue-600 hover:underline inline-flex items-center gap-0.5 text-[10px] font-bold"
+                                      className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 text-[10px] font-bold"
                                     >
                                       <MapPin className="w-3 h-3 text-rose-500" />
                                       <span>Map</span>
                                     </a>
                                   ) : (
-                                    <span className="text-slate-300 text-[10px]">No GPS</span>
+                                    <span className="text-slate-300 dark:text-slate-600 text-[10px]">No GPS</span>
                                   )}
                                 </td>
+
+                                {/* 10. Action: Delete RMA */}
+                                {canDeleteReports && (
+                                  <td className="py-2.5 px-3.5 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteReport(item.id, item.rma_number)}
+                                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors"
+                                      title={`Delete RMA #${item.rma_number}`}
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </td>
+                                )}
                               </tr>
                             );
                           })}
@@ -1519,37 +1605,49 @@ export default function App() {
                         return (
                           <div 
                             key={item.id || item.rma_number}
-                            className="p-4 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-2xl space-y-2 transition-all shadow-sm"
+                            className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-2xl space-y-2 transition-all shadow-sm"
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div>
                                 <div className="flex items-center gap-2 mb-1">
-                                  <span className="font-mono font-black text-xs text-blue-900 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-lg">
+                                  <span className="font-mono font-black text-xs text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg">
                                     SN #{item.id}
                                   </span>
-                                  <span className="font-mono font-black text-blue-700 text-sm">
+                                  <span className="font-mono font-black text-blue-700 dark:text-blue-400 text-sm">
                                     {item.rma_number}
                                   </span>
                                 </div>
-                                <h4 className="font-bold text-slate-900 text-xs sm:text-sm mt-0.5">
+                                <h4 className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm mt-0.5">
                                   {item.name || `Unidentified (${item.barcode})`}
                                 </h4>
                               </div>
-                              <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 shrink-0">
-                                {item.reason || 'Damaged'}
-                              </span>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300">
+                                  {item.reason || 'Damaged'}
+                                </span>
+                                {canDeleteReports && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteReport(item.id, item.rma_number)}
+                                    className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 dark:hover:bg-rose-900/50 rounded-xl transition-colors"
+                                    title={`Delete RMA #${item.rma_number}`}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
                             {/* Reporter Details */}
-                            <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 flex items-center justify-between">
-                              <span>Reported by: <strong className="text-slate-800">{item.reporter_name || item.reported_by}</strong></span>
-                              <span className="font-mono text-slate-600">{item.reporter_contact || ''}</span>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
+                              <span>Reported by: <strong className="text-slate-800 dark:text-slate-200">{item.reporter_name || item.reported_by}</strong></span>
+                              <span className="font-mono text-slate-600 dark:text-slate-400">{item.reporter_contact || ''}</span>
                             </div>
 
-                            {/* Photos preview with click-to-zoom */}
+                            {/* Photos preview with click-to-zoom multi-image */}
                             {photoList.length > 0 && (
                               <div className="flex items-center gap-2 pt-1">
-                                <span className="text-[10px] text-slate-400 font-semibold">
+                                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold">
                                   {photoList.length} Photo{photoList.length > 1 ? 's' : ''}:
                                 </span>
                                 <div className="flex gap-1.5 overflow-x-auto py-0.5">
@@ -1558,11 +1656,13 @@ export default function App() {
                                       key={i}
                                       type="button"
                                       onClick={() => setLightboxPhoto({
+                                        images: photoList,
+                                        initialIndex: i,
                                         url,
                                         title: item.name || `Return ${item.rma_number}`,
-                                        subtitle: `Photo ${i + 1} • RMA #${item.rma_number}`
+                                        subtitle: `Photo ${i + 1} of ${photoList.length} • RMA #${item.rma_number}`
                                       })}
-                                      className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 bg-white cursor-zoom-in hover:opacity-85 transition-opacity shrink-0"
+                                      className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 cursor-zoom-in hover:opacity-85 transition-opacity shrink-0"
                                       title="Click to zoom proof photo"
                                     >
                                       <img 
@@ -1592,25 +1692,6 @@ export default function App() {
                   </div>
                 )}
               </div>
-            )}
-
-            {/* TAB 3: UNIVERSAL PRODUCT SEARCH (Solves "Chocolate" multi-item search) */}
-            {adminActiveTab === 'search' && (
-              <ProductSearchTab
-                onInspectProduct={(prod) => {
-                  setEditingProduct({
-                    name: prod.name,
-                    barcode: prod.barcode,
-                    code: prod.code,
-                    supplier_name: prod.supplierName,
-                    price: prod.price,
-                    price_with_vat: prod.priceWithVat,
-                    unit_name: prod.unitName,
-                    image_url: prod.imageUrl
-                  });
-                  setIsProductEditOpen(true);
-                }}
-              />
             )}
 
           </div>
@@ -1655,6 +1736,7 @@ export default function App() {
         isOpen={isPendingModalOpen}
         onClose={() => setIsPendingModalOpen(false)}
         pendingList={pendingBarcodesList}
+        currentUser={currentUser}
         onUpdated={() => {
           refreshAllData();
           showToast('Barcode details and reference photo updated!', 'success');
@@ -1666,6 +1748,8 @@ export default function App() {
         isOpen={isReportsModalOpen}
         onClose={() => setIsReportsModalOpen(false)}
         reports={recentReportsList}
+        currentUser={currentUser}
+        onDeleteReport={handleDeleteReport}
       />
 
       {/* Product Edit / Add Modal */}
@@ -1691,6 +1775,8 @@ export default function App() {
       <ImageLightboxModal
         isOpen={Boolean(lightboxPhoto)}
         imageUrl={lightboxPhoto?.url}
+        images={lightboxPhoto?.images || (lightboxPhoto?.url ? [lightboxPhoto.url] : [])}
+        initialIndex={lightboxPhoto?.initialIndex || 0}
         title={lightboxPhoto?.title}
         subtitle={lightboxPhoto?.subtitle}
         onClose={() => setLightboxPhoto(null)}

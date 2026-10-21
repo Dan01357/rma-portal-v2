@@ -651,5 +651,27 @@ export const catalogService = {
       console.warn('Error fetching reports:', e.message);
       return [];
     }
+  },
+
+  /**
+   * Delete an RMA report
+   */
+  async deleteReport(id, rmaNumber) {
+    if (!id && !rmaNumber) return false;
+    try {
+      let query = supabase.from('rma_reports').delete();
+      if (id) {
+        query = query.eq('id', id);
+      } else {
+        query = query.eq('rma_number', rmaNumber);
+      }
+      const { error } = await query;
+      if (error) throw error;
+      this.notifyChange('report-deleted', { id, rmaNumber });
+      return true;
+    } catch (e) {
+      console.error('Delete RMA report error:', e);
+      throw e;
+    }
   }
 };

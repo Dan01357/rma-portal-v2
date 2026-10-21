@@ -19,16 +19,25 @@ import {
   RotateCcw,
   ArrowUpDown,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  Trash2
 } from 'lucide-react';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 
-export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
+export default function RMAReportsModal({ 
+  isOpen, 
+  onClose, 
+  reports = [], 
+  currentUser, 
+  onDeleteReport 
+}) {
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
   const [viewMode, setViewMode] = useState(() => {
     return localStorage.getItem('rma_reports_modal_view_mode') || 'table';
   });
+
+  const canDeleteReports = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
 
   // Filtering & Sorting State
   const [searchQuery, setSearchQuery] = useState('');
@@ -397,6 +406,11 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
                         {renderSortIndicator('created_at')}
                       </div>
                     </th>
+                    {canDeleteReports && (
+                      <th className="py-3 px-3.5 text-center font-bold select-none text-slate-500 w-16">
+                        Action
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
@@ -428,6 +442,8 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
                             <button
                               type="button"
                               onClick={() => setLightboxPhoto({
+                                images: photoList,
+                                initialIndex: 0,
                                 url: photoList[0],
                                 title: item.name || `Return ${item.rma_number}`,
                                 subtitle: `RMA #${item.rma_number} • Reported by ${reporterName} • ${item.reason || 'Damaged'}`
@@ -502,6 +518,20 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
                             <span className="text-slate-300 text-[10px]">No GPS</span>
                           )}
                         </td>
+
+                        {/* 10. Action: Delete RMA */}
+                        {canDeleteReports && (
+                          <td className="py-2.5 px-3.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => onDeleteReport && onDeleteReport(item.id, item.rma_number)}
+                              className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors"
+                              title={`Delete RMA #${item.rma_number}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -557,9 +587,21 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
                         </div>
                       </div>
 
-                      <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 shrink-0">
-                        {item.reason || 'Damaged'}
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 shrink-0">
+                          {item.reason || 'Damaged'}
+                        </span>
+                        {canDeleteReports && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteReport && onDeleteReport(item.id, item.rma_number)}
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 rounded-xl transition-colors"
+                            title={`Delete RMA #${item.rma_number}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Reporter and Date */}
@@ -601,9 +643,11 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
                                 key={idx}
                                 type="button"
                                 onClick={() => setLightboxPhoto({
+                                  images: photoList,
+                                  initialIndex: idx,
                                   url,
                                   title: item.name || `Return ${item.rma_number}`,
-                                  subtitle: `Photo ${idx + 1} • RMA #${item.rma_number} • Reported by ${reporterName}`
+                                  subtitle: `Photo ${idx + 1} of ${photoList.length} • RMA #${item.rma_number} • Reported by ${reporterName}`
                                 })}
                                 className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 hover:scale-105 shadow-xs transition-transform cursor-zoom-in"
                                 title="Click to zoom proof photo"
@@ -640,6 +684,8 @@ export default function RMAReportsModal({ isOpen, onClose, reports = [] }) {
       <ImageLightboxModal
         isOpen={Boolean(lightboxPhoto)}
         imageUrl={lightboxPhoto?.url}
+        images={lightboxPhoto?.images || (lightboxPhoto?.url ? [lightboxPhoto.url] : [])}
+        initialIndex={lightboxPhoto?.initialIndex || 0}
         title={lightboxPhoto?.title}
         subtitle={lightboxPhoto?.subtitle}
         onClose={() => setLightboxPhoto(null)}

@@ -729,6 +729,8 @@ export default function SavedProductsTab({
       <ImageLightboxModal
         isOpen={Boolean(selectedLightbox)}
         imageUrl={selectedLightbox?.url}
+        images={selectedLightbox?.images || (selectedLightbox?.url ? [selectedLightbox.url] : [])}
+        initialIndex={0}
         title={selectedLightbox?.title}
         subtitle={selectedLightbox?.subtitle}
         onClose={() => setSelectedLightbox(null)}
