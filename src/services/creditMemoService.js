@@ -183,9 +183,8 @@ export const creditMemoService = {
       amount: grossAmount,
       pull_out_ref: pullOutRef,
       pull_out_date: pullOutDate,
-      credit_amount: creditAmount,
-      credit_issued_by: memoData.credit_issued_by || 'Finance Officer',
-      credit_issued_by_email: memoData.credit_issued_by_email || '',
+      credit_issued_by: memoData.credit_issued_by || 'Analiza B. Benoza (Finance Head)',
+      credit_issued_by_email: memoData.credit_issued_by_email || 'finance@a2z2go.net',
       credit_issued_at: new Date().toISOString(),
       notes: memoData.notes ? memoData.notes.trim() : '',
       status: 'issued'

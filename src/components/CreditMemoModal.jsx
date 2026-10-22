@@ -234,8 +234,8 @@ export default function CreditMemoModal({
         pull_out_ref: pullOutRef.trim() || 'Warehouse Pull-Out',
         pull_out_date: pullOutDate,
         credit_amount: Number(finalCredit.toFixed(2)),
-        credit_issued_by: currentUser?.name || 'Danilo Alvaro Jr. (Super Admin)',
-        credit_issued_by_email: currentUser?.email || 'finance2@keysysincorporated.com',
+        credit_issued_by: 'Analiza B. Benoza (Finance Head)',
+        credit_issued_by_email: 'finance@a2z2go.net',
         notes: notes.trim()
       };
 
@@ -532,10 +532,10 @@ export default function CreditMemoModal({
                 </div>
                 <div className="min-w-0">
                   <div className="font-bold text-slate-900 dark:text-white truncate">
-                    Credit Issued By: <strong className="text-purple-700 dark:text-purple-300">{currentUser?.name || 'Danilo Alvaro Jr. (Super Admin)'}</strong>
+                    Authorized Finance Head: <strong className="text-purple-700 dark:text-purple-300">Analiza B. Benoza</strong>
                   </div>
                   <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    {currentUser?.email || 'finance2@keysysincorporated.com'} • {currentUser?.role || 'Super Admin'}
+                    finance@a2z2go.net • Finance Head
                   </div>
                 </div>
               </div>

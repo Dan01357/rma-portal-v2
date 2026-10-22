@@ -12,7 +12,16 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
   if (memosToRender.length === 0) return null;
 
   const handlePrint = () => {
+    const originalTitle = document.title;
+    if (memosToRender.length === 1 && memosToRender[0]?.credit_memo_number) {
+      document.title = `Credit-Memo-${memosToRender[0].credit_memo_number}`;
+    } else if (memosToRender.length > 1) {
+      document.title = `Batch-Credit-Memos-${memosToRender.length}-Vouchers`;
+    }
     window.print();
+    setTimeout(() => {
+      document.title = originalTitle;
+    }, 1200);
   };
 
   const isBulk = memosToRender.length > 1;
@@ -231,10 +240,12 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
               <div className="pt-6 sm:pt-7 border-t border-slate-200 grid grid-cols-3 gap-3 text-center text-xs">
                 <div className="space-y-1">
                   <div className="border-b border-slate-400 pb-1 font-bold text-slate-900 text-xs">
-                    {memo.credit_issued_by || 'Danilo Alvaro Jr. (Super Admin)'}
+                    {memo.credit_issued_by && !memo.credit_issued_by.includes('Danilo')
+                      ? memo.credit_issued_by
+                      : 'Analiza B. Benoza'}
                   </div>
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">
-                    Issued By (Finance)
+                    Finance Head
                   </span>
                   <span className="text-[10px] text-slate-500 font-mono block">
                     {memo.credit_issued_at ? new Date(memo.credit_issued_at).toLocaleString() : ''}

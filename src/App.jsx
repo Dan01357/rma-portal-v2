@@ -431,6 +431,38 @@ export default function App() {
     setIsCreditMemoModalOpen(true);
   };
 
+  // Edit item from Return Reports to save into Products catalog
+  const handleEditProductFromReport = (report) => {
+    if (!report) return;
+    const existing = savedProductsList.find(p => p.barcode === report.barcode);
+    if (existing) {
+      setEditingProduct(existing);
+    } else {
+      const photoList = Array.isArray(report.photos) 
+        ? report.photos 
+        : (typeof report.photos === 'string' ? JSON.parse(report.photos || '[]') : []);
+
+      const cleanName = report.name && !report.name.toLowerCase().includes('unidentified') 
+        ? report.name 
+        : '';
+
+      setEditingProduct({
+        name: cleanName,
+        barcode: report.barcode || '',
+        code: report.code || report.sku || '',
+        supplier_name: report.supplier_name || 'Savemore',
+        price: report.price || 0,
+        price_with_vat: report.price_with_vat || report.price || 0,
+        unit_name: report.unit_name || 'pc',
+        image_url: photoList[0] || report.photo_url || report.image_url || '',
+        ae_name: report.ae_name || '',
+        ae_email: report.ae_email || '',
+        company: 'Wholesale Distribution'
+      });
+    }
+    setIsProductEditOpen(true);
+  };
+
   const handleViewCreditMemoVoucher = (memoOrMemos) => {
     if (Array.isArray(memoOrMemos)) {
       setVoucherModalMemos(memoOrMemos);
@@ -2076,9 +2108,19 @@ export default function App() {
                                   )}
                                 </td>
 
-                                {/* 10. Actions: Credit Memo & Delete */}
+                                {/* 10. Actions: Edit Item / Save Product, Credit Memo & Delete */}
                                 <td className="py-2.5 px-3.5 text-center">
                                   <div className="flex items-center justify-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleEditProductFromReport(item)}
+                                      className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                      title={`Edit item details and save "${item.name || item.barcode}" to Products catalog`}
+                                    >
+                                      <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                                      <span>Edit Item</span>
+                                    </button>
+
                                     {(() => {
                                       const existingMemo = creditMemosList.find(m => m.rma_number === item.rma_number || m.report_id === item.id);
                                       if (existingMemo) {
@@ -2222,6 +2264,15 @@ export default function App() {
                                 </h4>
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditProductFromReport(item)}
+                                  className="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                  title="Edit item details and save to catalog"
+                                >
+                                  <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                                  <span>Edit Item</span>
+                                </button>
                                 {(() => {
                                   const existingMemo = creditMemosList.find(m => m.rma_number === item.rma_number || m.report_id === item.id);
                                   if (existingMemo) {
@@ -2446,6 +2497,7 @@ export default function App() {
         onDeleteReport={requestDeleteReport}
         onBulkDeleteReport={requestBulkDeleteReports}
         creditMemosList={creditMemosList}
+        onEditProductFromReport={handleEditProductFromReport}
         onOpenCreditMemo={(rep) => {
           setIsReportsModalOpen(false);
           handleOpenCreditMemoForReport(rep);
@@ -2465,9 +2517,30 @@ export default function App() {
         }}
         product={editingProduct}
         currentUser={currentUser}
-        onSaved={() => {
+        onSaved={async (prod) => {
+          // If this product matches any return report, synchronize rma_reports in Supabase
+          if (prod?.barcode) {
+            try {
+              await supabase
+                .from('rma_reports')
+                .update({
+                  name: prod.name,
+                  code: prod.code,
+                  price: prod.price,
+                  price_with_vat: prod.price_with_vat,
+                  supplier_name: prod.supplier_name,
+                  unit_name: prod.unit_name,
+                  ae_name: prod.ae_name,
+                  ae_email: prod.ae_email,
+                  status: 'logged'
+                })
+                .eq('barcode', prod.barcode);
+            } catch (e) {
+              console.warn('Sync rma_reports from product save notice:', e);
+            }
+          }
           refreshAllData();
-          showToast('Product saved to catalog!', 'success');
+          showToast(`Product "${prod.name}" saved to catalog and linked reports updated!`, 'success');
         }}
         onDeleted={(prod) => {
           refreshAllData();
