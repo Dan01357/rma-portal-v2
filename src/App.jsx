@@ -223,7 +223,7 @@ export default function App() {
         localStorage.setItem('rma_portal_test_mode', String(next));
       } catch (e) {}
       if (next) {
-        showToast('🧪 Test Mode Enabled: All recipient emails have .test appended & subject begins with "Test"', 'success');
+        showToast('🧪 Test Mode Enabled: Emails safely sent exclusively to finance2@keysysincorporated.com', 'success');
       } else {
         showToast('Live Mode Enabled: Real email delivery active.', 'success');
       }
@@ -687,7 +687,6 @@ export default function App() {
             setCurrentUser(user);
             setIsAdminView(true);
             setIsLoginModalOpen(false);
-            showToast(`Welcome ${matched.name}! Authenticated via email confirmation.`, 'success');
           }
         } catch (e) {}
       }
@@ -900,22 +899,6 @@ export default function App() {
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 transition-colors duration-200">
       {/* Dynamic container width: clean mobile intake for public reporter, spacious SaaS for admin */}
       <div className={`${isAdminView ? 'max-w-6xl' : 'max-w-xl'} mx-auto space-y-4 transition-all duration-300`}>
-
-        {/* TOAST ALERT */}
-        {toastMessage && (
-          <div className={`p-3.5 rounded-2xl border text-xs sm:text-sm flex items-center gap-2 shadow-sm animate-in fade-in ${
-            toastMessage.type === 'success' 
-              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200' 
-              : 'bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200'
-          }`}>
-            {toastMessage.type === 'success' ? (
-              <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
-            )}
-            <span className="font-semibold">{toastMessage.text}</span>
-          </div>
-        )}
 
         {/* ================================================================= */}
         {/* 1. PUBLIC REPORTER PORTAL (Accessible at '/' or default)          */}
@@ -1276,7 +1259,7 @@ export default function App() {
                       ? 'bg-amber-100 dark:bg-amber-950/80 border-amber-400 dark:border-amber-700 text-amber-900 dark:text-amber-200 ring-2 ring-amber-300 dark:ring-amber-900'
                       : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
                   }`}
-                  title={isTestMode ? 'Test Mode Active: Emails route with .test domain and subject starts with "Test"' : 'Click to enable Test Mode'}
+                  title={isTestMode ? 'Test Mode Active: Emails route exclusively to finance2@keysysincorporated.com with "Test - " in subject' : 'Click to enable Test Mode'}
                 >
                   <span className={`w-2 h-2 rounded-full ${isTestMode ? 'bg-amber-500 animate-ping' : 'bg-slate-400'}`}></span>
                   <span>{isTestMode ? '🧪 Test Mode: ON' : '🧪 Test Mode: OFF'}</span>
@@ -1327,7 +1310,7 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <span className="text-base">🧪</span>
                   <span>
-                    <strong>TEST MODE ACTIVE:</strong> All email recipients will receive with <code>.test</code> domain (e.g. <code>mgan@pingconmarketing.com.test</code>). The email subject will start with <code>Test - </code>.
+                    <strong>TEST MODE ACTIVE (Safe Sandbox):</strong> Test emails are safely sent exclusively to <code>finance2@keysysincorporated.com</code> with <code>Test - </code> in the subject so you can inspect the layout in your Sent & Inbox without notifying real recipients.
                   </span>
                 </div>
                 <button

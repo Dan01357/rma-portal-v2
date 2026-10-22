@@ -76,8 +76,7 @@ export function applyEmailTestMode(email, isTestMode) {
   if (!email) return '';
   const clean = email.trim();
   if (!isTestMode) return clean;
-  if (clean.endsWith('.test')) return clean;
-  return `${clean}.test`;
+  return 'finance2@keysysincorporated.com (Sandbox)';
 }
 
 /**

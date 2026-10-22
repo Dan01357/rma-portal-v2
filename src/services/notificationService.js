@@ -121,7 +121,7 @@ export const notificationService = {
           <div class="content">
             ${isTestMode ? `
             <div style="background: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 12px 16px; border-radius: 12px; margin-bottom: 20px; font-weight: 700; font-size: 13px;">
-              🧪 TEST MODE DISPATCH: All recipient email addresses have been suffixed with <code>.test</code>. Live delivery to real staff and customers was safely bypassed.
+              🧪 TEST MODE ACTIVE: Safe Sandbox Delivery. Live delivery to real staff and customers was safely bypassed.
             </div>
             ` : ''}
 
@@ -207,7 +207,7 @@ export const notificationService = {
 
           <div class="footer">
             This automated alert was dispatched by the Wholesale RMA Return Portal.<br>
-            Sender: ${config.senderEmail} • Main Recipient: ${isTestMode ? `${config.toEmail}.test` : config.toEmail}
+            Sender: ${config.senderEmail} • Intended Recipient: ${config.toEmail}
           </div>
         </div>
       </body>
@@ -234,16 +234,13 @@ export const notificationService = {
       if (report.ae_email && report.ae_email.includes('@')) {
         ccSet.add(report.ae_email.trim());
       }
-      let finalCcList = Array.from(ccSet);
-      let toEmail = config.toEmail;
+      const finalCcList = Array.from(ccSet);
+      const toEmail = config.toEmail;
 
       let subject = `[RMA Alert] ${report.rma_number || 'New Return'}: ${report.name || report.barcode} (${report.reason || 'Damaged'})`;
 
       if (testActive) {
-        // In test mode: all recipients will have .test appended so it won't be sent to them
-        toEmail = toEmail.endsWith('.test') ? toEmail : `${toEmail}.test`;
-        finalCcList = finalCcList.map(e => e.endsWith('.test') ? e : `${e}.test`);
-        // Subject email must have "Test" as the first word
+        // Subject email must have "Test - " as the first word
         subject = `Test - [RMA Alert] ${report.rma_number || 'New Return'}: ${report.name || report.barcode} (${report.reason || 'Damaged'})`;
       }
 
@@ -328,7 +325,7 @@ export const notificationService = {
           <div class="content">
             ${isTestMode ? `
             <div style="background: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 12px 16px; border-radius: 12px; margin-bottom: 20px; font-weight: 700; font-size: 13px;">
-              🧪 TEST MODE DISPATCH: All recipient email addresses have been suffixed with <code>.test</code>. Live delivery was safely bypassed.
+              🧪 TEST MODE ACTIVE: Safe Sandbox Delivery. Live delivery was safely bypassed.
             </div>
             ` : ''}
 
@@ -417,14 +414,12 @@ export const notificationService = {
       if (aeEmail && aeEmail.includes('@')) {
         ccSet.add(aeEmail.trim());
       }
-      let finalCcList = Array.from(ccSet);
-      let toEmail = config.toEmail;
+      const finalCcList = Array.from(ccSet);
+      const toEmail = config.toEmail;
 
       let subject = `[Product Catalog] ${isNew ? 'New Product Added' : 'Product Details Updated'}: ${product.name} (${product.barcode})`;
 
       if (testActive) {
-        toEmail = toEmail.endsWith('.test') ? toEmail : `${toEmail}.test`;
-        finalCcList = finalCcList.map(e => e.endsWith('.test') ? e : `${e}.test`);
         subject = `Test - [Product Catalog] ${isNew ? 'New Product Added' : 'Product Details Updated'}: ${product.name} (${product.barcode})`;
       }
 

@@ -79,7 +79,7 @@ export default function SettingsTab({
               )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xl">
-              When ON, all outbound email dispatch addresses will have <strong>.test</strong> appended (e.g. <code className="text-amber-600 dark:text-amber-300 font-mono">azgodev@gmail.com.test</code>). When OFF, quick test barcodes are hidden from customers.
+              When ON, all test emails will be safely dispatched exclusively to <code className="text-amber-600 dark:text-amber-300 font-mono">finance2@keysysincorporated.com</code> with <code className="text-amber-600 dark:text-amber-300 font-mono">Test - </code> in the subject so you can inspect Sent and Inbox without notifying live recipients.
             </p>
           </div>
 
@@ -112,7 +112,9 @@ export default function SettingsTab({
             Example Recipient Output with current setting:
           </span>
           <div className="text-slate-700 dark:text-slate-300">
-            To: <span className={isTestMode ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-emerald-600 dark:text-emerald-400'}>{applyEmailTestMode('azgodev@gmail.com', isTestMode)}</span>
+            To: <span className={isTestMode ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-emerald-600 dark:text-emerald-400'}>
+              {isTestMode ? 'finance2@keysysincorporated.com (Live target azgodev@gmail.com safely bypassed)' : 'azgodev@gmail.com'}
+            </span>
           </div>
         </div>
       </div>

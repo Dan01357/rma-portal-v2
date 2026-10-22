@@ -163,7 +163,7 @@ export default function ReturnQRModal({ isOpen, onClose, ticket, isTestMode }) {
                 </span>
                 {isTestMode && (
                   <span className="px-2 py-0.5 text-[10px] font-bold uppercase rounded bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30">
-                    TEST MODE (.test appended)
+                    TEST MODE (Safe Sandbox)
                   </span>
                 )}
               </div>
