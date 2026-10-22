@@ -478,6 +478,34 @@ export const catalogService = {
   },
 
   /**
+   * ADMIN ACTION: Permanently delete multiple products from catalog in bulk
+   */
+  async deleteMultipleProducts(productsList) {
+    if (!Array.isArray(productsList) || productsList.length === 0) return { success: true, count: 0 };
+    
+    const ids = productsList.map(p => p.id).filter(id => id !== undefined && id !== null);
+    const barcodes = productsList.map(p => p.barcode).filter(Boolean);
+
+    let deleteError = null;
+    if (ids.length > 0) {
+      const { error } = await supabase.from('products').delete().in('id', ids);
+      if (error) deleteError = error;
+    }
+    if (barcodes.length > 0) {
+      const { error } = await supabase.from('products').delete().in('barcode', barcodes);
+      if (error && !deleteError) deleteError = error;
+    }
+
+    if (deleteError) {
+      console.error('Error in deleteMultipleProducts:', deleteError);
+      throw new Error(`Database error deleting products: ${deleteError.message}`);
+    }
+
+    this.notifyChange('products-bulk-deleted', { count: productsList.length });
+    return { success: true, count: productsList.length };
+  },
+
+  /**
    * SUBMIT RMA RETURN REPORT
    * - Photo is REQUIRED (at least 1)
    * - Reporter Name & Contact are REQUIRED
@@ -837,5 +865,42 @@ export const catalogService = {
       console.error('Delete RMA report error:', e);
       throw e;
     }
+  },
+
+  /**
+   * ADMIN ACTION: Permanently delete multiple RMA reports in bulk
+   */
+  async deleteMultipleReports(reportsList) {
+    if (!Array.isArray(reportsList) || reportsList.length === 0) return { success: true, count: 0 };
+    
+    const ids = reportsList.map(r => r.id).filter(id => id !== undefined && id !== null);
+    const rmaNumbers = reportsList.map(r => r.rma_number).filter(Boolean);
+
+    try {
+      let deleteError = null;
+      if (ids.length > 0) {
+        const { error } = await supabase.from('rma_reports').delete().in('id', ids);
+        if (error) deleteError = error;
+      }
+      if (rmaNumbers.length > 0) {
+        const { error } = await supabase.from('rma_reports').delete().in('rma_number', rmaNumbers);
+        if (error && !deleteError) deleteError = error;
+      }
+
+      // Soft delete fallback if hard delete blocked by RLS
+      if (deleteError) {
+        console.warn('Hard delete blocked or failed, executing soft-delete fallback in bulk:', deleteError.message);
+        if (ids.length > 0) {
+          await supabase.from('rma_reports').update({ status: 'deleted' }).in('id', ids);
+        }
+      }
+
+      this.notifyChange('reports-bulk-deleted', { count: reportsList.length });
+      return { success: true, count: reportsList.length };
+    } catch (e) {
+      console.error('Bulk delete RMA reports error:', e);
+      throw e;
+    }
   }
 };
+

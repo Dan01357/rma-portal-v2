@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 import { authService } from '../services/authService';
+import { notificationService } from '../services/notificationService';
 import ImageLightboxModal from './ImageLightboxModal';
 
 export default function ProductEditModal({ isOpen, onClose, product, onSaved, onDeleted, currentUser }) {
@@ -214,6 +215,18 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         await catalogService.updateProduct(product.id, payload);
       } else {
         await catalogService.createProduct(payload);
+      }
+
+      // Dispatch automated email notification to Customer AE & Company Recipients
+      try {
+        const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
+        notificationService.sendProductUpdateNotification({
+          product: { ...payload, id: product?.id },
+          isNew: !isEditing,
+          editorName: currentUser?.name || 'Admin'
+        }, isTestActive).catch(e => console.warn('Product notification notice:', e));
+      } catch (e) {
+        console.warn('Non-blocking product notification notice:', e);
       }
 
       if (onSaved) onSaved();
@@ -482,49 +495,6 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
               )}
             </div>
 
-            {/* COMPANY SENDER ROUTING CATEGORY */}
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-2">
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                Company Sender & Email Routing
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setCompany('Pingcon / Bonita')}
-                  className={`p-2.5 rounded-xl border text-left transition-all ${
-                    company === 'Pingcon / Bonita'
-                      ? 'bg-blue-50 dark:bg-blue-950/80 border-blue-600 text-blue-950 dark:text-blue-200 font-black shadow-xs'
-                      : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 font-semibold hover:border-slate-300'
-                  }`}
-                >
-                  <div className="text-xs font-bold flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Pingcon / Bonita</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-0.5 font-mono truncate">
-                    finance2@keysysincorporated.com
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setCompany('A2Z2GO / Keysys')}
-                  className={`p-2.5 rounded-xl border text-left transition-all ${
-                    company === 'A2Z2GO / Keysys'
-                      ? 'bg-indigo-50 dark:bg-indigo-950/80 border-indigo-600 text-indigo-950 dark:text-indigo-200 font-black shadow-xs'
-                      : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 font-semibold hover:border-slate-300'
-                  }`}
-                >
-                  <div className="text-xs font-bold flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>A2Z2GO / Keysys</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-0.5 font-mono truncate">
-                    finance2@keysysincorporated.com
-                  </div>
-                </button>
-              </div>
-            </div>
 
             {/* Price & Price with VAT */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

@@ -29,6 +29,7 @@ export default function SavedProductsTab({
   onAddProduct, 
   onEditProduct, 
   onDeleteProduct,
+  onBulkDeleteProduct,
   currentUser 
 }) {
   const [filterQuery, setFilterQuery] = useState('');
@@ -40,6 +41,7 @@ export default function SavedProductsTab({
   const [copiedBarcode, setCopiedBarcode] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [selectedProductIds, setSelectedProductIds] = useState(new Set());
   
   // File Explorer view type toggle: default to 'table' (rows list) as requested
   const [viewMode, setViewMode] = useState(() => {
@@ -172,7 +174,49 @@ export default function SavedProductsTab({
     setFilterSupplier('all');
     setFilterStatus('all');
     setCurrentPage(1);
+    setSelectedProductIds(new Set());
   };
+
+  // Bulk Selection Helpers
+  const isAllPageSelected = useMemo(() => {
+    if (paginatedProducts.length === 0) return false;
+    return paginatedProducts.every(p => selectedProductIds.has(p.id || p.barcode));
+  }, [paginatedProducts, selectedProductIds]);
+
+  const toggleSelectProduct = (id) => {
+    setSelectedProductIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllPage = () => {
+    setSelectedProductIds(prev => {
+      const next = new Set(prev);
+      if (isAllPageSelected) {
+        paginatedProducts.forEach(p => next.delete(p.id || p.barcode));
+      } else {
+        paginatedProducts.forEach(p => next.add(p.id || p.barcode));
+      }
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => {
+    const next = new Set();
+    processedProducts.forEach(p => next.add(p.id || p.barcode));
+    setSelectedProductIds(next);
+  };
+
+  const clearSelection = () => {
+    setSelectedProductIds(new Set());
+  };
+
+  const selectedProductsList = useMemo(() => {
+    return products.filter(p => selectedProductIds.has(p.id || p.barcode));
+  }, [products, selectedProductIds]);
 
   const renderSortIndicator = (field) => {
     if (sortField !== field) {
@@ -384,6 +428,16 @@ export default function SavedProductsTab({
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-50/90 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 select-none">
+                  {/* Select All Checkbox Header */}
+                  <th className="py-3.5 px-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllPageSelected}
+                      onChange={toggleSelectAllPage}
+                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-600 cursor-pointer"
+                      title={isAllPageSelected ? "Deselect all on this page" : "Select all on this page"}
+                    />
+                  </th>
                   <th 
                     onClick={() => handleSort('id')}
                     className="py-3.5 px-4 font-black text-slate-900 dark:text-white w-16 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors group"
@@ -466,12 +520,27 @@ export default function SavedProductsTab({
                   const hasPhoto = Boolean(product.image_url || product.imageUrl);
                   const photoSrc = product.image_url || product.imageUrl;
                   const isCopied = copiedBarcode === product.barcode;
+                  const isSelected = selectedProductIds.has(product.id || product.barcode);
 
                   return (
                     <tr 
                       key={product.id || product.barcode} 
-                      className="hover:bg-indigo-50/30 dark:hover:bg-slate-700/40 transition-colors group"
+                      className={`transition-colors group ${
+                        isSelected 
+                          ? 'bg-indigo-50/80 dark:bg-indigo-950/50' 
+                          : 'hover:bg-indigo-50/30 dark:hover:bg-slate-700/40'
+                      }`}
                     >
+                      {/* Individual Row Checkbox */}
+                      <td className="py-3 px-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelectProduct(product.id || product.barcode)}
+                          className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-600 cursor-pointer"
+                        />
+                      </td>
+
                       {/* 1. SN (SERIAL NUMBER / DATABASE ID) COLUMN - AT FAR LEFT */}
                       <td className="py-3 px-4 font-mono">
                         <span className="font-black text-indigo-900 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/90 dark:border-indigo-800 px-2 py-0.5 rounded-lg text-xs tracking-tight shadow-xs">
@@ -606,6 +675,50 @@ export default function SavedProductsTab({
               </tbody>
             </table>
           </div>
+
+          {/* Floating Bulk Action Bar for Table */}
+          {selectedProductIds.size > 0 && (
+            <div className="p-3 sm:px-4 bg-slate-900/95 dark:bg-slate-950/95 text-white border-t border-slate-700 flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
+              <div className="flex items-center gap-2.5">
+                <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">
+                  {selectedProductIds.size}
+                </span>
+                <span className="text-xs font-bold text-slate-200">
+                  {selectedProductIds.size} product{selectedProductIds.size > 1 ? 's' : ''} selected
+                </span>
+                {selectedProductIds.size < processedProducts.length && (
+                  <button
+                    type="button"
+                    onClick={selectAllFiltered}
+                    className="text-xs text-indigo-300 hover:text-white underline font-semibold ml-1 cursor-pointer"
+                  >
+                    Select all {processedProducts.length} filtered
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                >
+                  Deselect
+                </button>
+                {canDelete && (
+                  <button
+                    type="button"
+                    onClick={() => onBulkDeleteProduct && onBulkDeleteProduct(selectedProductsList)}
+                    className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Selected ({selectedProductIds.size})</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           <TablePagination
             currentPage={currentPage}
             totalItems={processedProducts.length}
@@ -625,18 +738,31 @@ export default function SavedProductsTab({
             {paginatedProducts.map((product) => {
             const hasPhoto = Boolean(product.image_url || product.imageUrl);
             const photoSrc = product.image_url || product.imageUrl;
+            const isSelected = selectedProductIds.has(product.id || product.barcode);
 
             return (
               <div 
                 key={product.id || product.barcode}
-                className="bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-500 rounded-3xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-3 group"
+                className={`border rounded-3xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-3 group ${
+                  isSelected
+                    ? 'bg-indigo-50/90 dark:bg-indigo-950/60 border-indigo-500'
+                    : 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-500'
+                }`}
               >
                 <div>
-                  {/* Top: SN Badge + Verified Badge */}
+                  {/* Top: Checkbox + SN Badge + Verified Badge */}
                   <div className="flex items-center justify-between mb-2">
-                    <span className="font-mono font-black text-xs text-indigo-900 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 border border-indigo-200/80 dark:border-indigo-800 px-2 py-0.5 rounded-lg">
-                      SN #{product.id}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelectProduct(product.id || product.barcode)}
+                        className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-600 cursor-pointer"
+                      />
+                      <span className="font-mono font-black text-xs text-indigo-900 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 border border-indigo-200/80 dark:border-indigo-800 px-2 py-0.5 rounded-lg">
+                        SN #{product.id}
+                      </span>
+                    </div>
                     <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                       VERIFIED
                     </span>
@@ -736,6 +862,49 @@ export default function SavedProductsTab({
             );
           })}
         </div>
+
+        {/* Floating Bulk Action Bar for Grid Cards */}
+        {selectedProductIds.size > 0 && (
+          <div className="p-3 sm:px-4 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-2xl border border-slate-700 flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
+            <div className="flex items-center gap-2.5">
+              <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">
+                {selectedProductIds.size}
+              </span>
+              <span className="text-xs font-bold text-slate-200">
+                {selectedProductIds.size} product{selectedProductIds.size > 1 ? 's' : ''} selected
+              </span>
+              {selectedProductIds.size < processedProducts.length && (
+                <button
+                  type="button"
+                  onClick={selectAllFiltered}
+                  className="text-xs text-indigo-300 hover:text-white underline font-semibold ml-1 cursor-pointer"
+                >
+                  Select all {processedProducts.length} filtered
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              >
+                Deselect
+              </button>
+              {canDelete && (
+                <button
+                  type="button"
+                  onClick={() => onBulkDeleteProduct && onBulkDeleteProduct(selectedProductsList)}
+                  className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Selected ({selectedProductIds.size})</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Grid View Pagination */}
         <TablePagination

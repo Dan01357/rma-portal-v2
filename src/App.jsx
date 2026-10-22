@@ -342,6 +342,40 @@ export default function App() {
     });
   };
 
+  const requestBulkDeleteProducts = (productsList) => {
+    if (!canDeleteProducts) {
+      showToast('You do not have permission to delete catalog products.', 'error');
+      return;
+    }
+    if (!productsList || productsList.length === 0) return;
+
+    setDeleteModalState({
+      type: 'bulk_products',
+      items: productsList,
+      title: `Delete ${productsList.length} Selected Products?`,
+      itemName: `${productsList.length} Products will be permanently removed from catalog`,
+      itemType: 'products',
+      itemDetails: productsList.slice(0, 3).map(p => p.name || p.barcode).join(', ') + (productsList.length > 3 ? '...' : '')
+    });
+  };
+
+  const requestBulkDeleteReports = (reportsList) => {
+    if (!canDeleteReports) {
+      showToast('You do not have permission to delete RMA reports.', 'error');
+      return;
+    }
+    if (!reportsList || reportsList.length === 0) return;
+
+    setDeleteModalState({
+      type: 'bulk_reports',
+      items: reportsList,
+      title: `Delete ${reportsList.length} Selected Return Reports?`,
+      itemName: `${reportsList.length} Return reports will be permanently removed`,
+      itemType: 'reports',
+      itemDetails: reportsList.slice(0, 3).map(r => r.rma_number || `#${r.id}`).join(', ') + (reportsList.length > 3 ? '...' : '')
+    });
+  };
+
   const handleConfirmDelete = async () => {
     if (!deleteModalState) return;
     setIsDeleteModalLoading(true);
@@ -363,6 +397,22 @@ export default function App() {
         await catalogService.deleteReport(id, rmaNumber);
         setRecentReportsList(prev => prev.filter(r => (id ? r.id !== id : r.rma_number !== rmaNumber)));
         showToast(`Deleted return report RMA #${rmaNumber}.`, 'success');
+        refreshAllData();
+      } else if (deleteModalState.type === 'bulk_products') {
+        const items = deleteModalState.items || [];
+        await catalogService.deleteMultipleProducts(items);
+        const deletedIds = new Set(items.map(p => p.id));
+        const deletedBarcodes = new Set(items.map(p => p.barcode));
+        setSavedProductsList(prev => prev.filter(p => !deletedIds.has(p.id) && !deletedBarcodes.has(p.barcode)));
+        showToast(`Successfully deleted ${items.length} products from catalog.`, 'success');
+        refreshAllData();
+      } else if (deleteModalState.type === 'bulk_reports') {
+        const items = deleteModalState.items || [];
+        await catalogService.deleteMultipleReports(items);
+        const deletedIds = new Set(items.map(r => r.id));
+        const deletedRmas = new Set(items.map(r => r.rma_number));
+        setRecentReportsList(prev => prev.filter(r => !deletedIds.has(r.id) && !deletedRmas.has(r.rma_number)));
+        showToast(`Successfully deleted ${items.length} return reports.`, 'success');
         refreshAllData();
       }
       setDeleteModalState(null);
@@ -412,6 +462,7 @@ export default function App() {
   const [reportsSortDirection, setReportsSortDirection] = useState('desc');
   const [reportsCurrentPage, setReportsCurrentPage] = useState(1);
   const [reportsPageSize, setReportsPageSize] = useState(10);
+  const [selectedReportIds, setSelectedReportIds] = useState(new Set());
 
   // Fullscreen Image Lightbox Modal State
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
@@ -438,7 +489,49 @@ export default function App() {
     setReportsReasonFilter('all');
     setReportsStatusFilter('all');
     setReportsCurrentPage(1);
+    setSelectedReportIds(new Set());
   };
+
+  // Bulk Selection Helpers for Reports
+  const isAllReportsPageSelected = React.useMemo(() => {
+    if (paginatedReports.length === 0) return false;
+    return paginatedReports.every(r => selectedReportIds.has(r.id || r.rma_number));
+  }, [paginatedReports, selectedReportIds]);
+
+  const toggleSelectReport = (id) => {
+    setSelectedReportIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllReportsPage = () => {
+    setSelectedReportIds(prev => {
+      const next = new Set(prev);
+      if (isAllReportsPageSelected) {
+        paginatedReports.forEach(r => next.delete(r.id || r.rma_number));
+      } else {
+        paginatedReports.forEach(r => next.add(r.id || r.rma_number));
+      }
+      return next;
+    });
+  };
+
+  const selectAllFilteredReports = () => {
+    const next = new Set();
+    processedReports.forEach(r => next.add(r.id || r.rma_number));
+    setSelectedReportIds(next);
+  };
+
+  const clearReportsSelection = () => {
+    setSelectedReportIds(new Set());
+  };
+
+  const selectedReportsList = React.useMemo(() => {
+    return recentReportsList.filter(r => selectedReportIds.has(r.id || r.rma_number));
+  }, [recentReportsList, selectedReportIds]);
 
   // Filter and sort return reports
   const processedReports = React.useMemo(() => {
@@ -1387,6 +1480,7 @@ export default function App() {
                   setIsProductEditOpen(true);
                 }}
                 onDeleteProduct={requestDeleteProduct}
+                onBulkDeleteProduct={requestBulkDeleteProducts}
                 currentUser={currentUser}
               />
             )}
@@ -1558,6 +1652,16 @@ export default function App() {
                       <table className="w-full text-left border-collapse text-xs">
                         <thead>
                           <tr className="bg-slate-50/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                            {/* Select All Checkbox Header */}
+                            <th className="py-3 px-3 w-10 text-center">
+                              <input
+                                type="checkbox"
+                                checked={isAllReportsPageSelected}
+                                onChange={toggleSelectAllReportsPage}
+                                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 cursor-pointer"
+                                title={isAllReportsPageSelected ? "Deselect all on this page" : "Select all on this page"}
+                              />
+                            </th>
                             <th 
                               onClick={() => handleReportsSort('id')}
                               className="py-3 px-3.5 font-black text-slate-900 dark:text-white w-16 cursor-pointer select-none hover:text-blue-600 dark:hover:text-blue-400 transition-colors group"
@@ -1667,9 +1771,27 @@ export default function App() {
                             const photoList = Array.isArray(item.photos) 
                               ? item.photos 
                               : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
+                            const isSelected = selectedReportIds.has(item.id || item.rma_number);
 
                             return (
-                              <tr key={item.id || item.rma_number} className="hover:bg-blue-50/30 dark:hover:bg-slate-800/50 transition-colors">
+                              <tr 
+                                key={item.id || item.rma_number} 
+                                className={`transition-colors ${
+                                  isSelected 
+                                    ? 'bg-blue-50/80 dark:bg-blue-950/50' 
+                                    : 'hover:bg-blue-50/30 dark:hover:bg-slate-800/50'
+                                }`}
+                              >
+                                {/* Row Selection Checkbox */}
+                                <td className="py-3 px-3 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleSelectReport(item.id || item.rma_number)}
+                                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 cursor-pointer"
+                                  />
+                                </td>
+
                                 {/* 1. SN COLUMN AT FAR LEFT */}
                                 <td className="py-3 px-3.5 font-mono">
                                   <span className="font-black text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg text-xs">
@@ -1788,6 +1910,50 @@ export default function App() {
                         </tbody>
                       </table>
                     </div>
+
+                    {/* Floating Bulk Action Bar for Return Reports Table */}
+                    {selectedReportIds.size > 0 && (
+                      <div className="p-3 sm:px-4 bg-slate-900/95 dark:bg-slate-950/95 text-white border-t border-slate-700 flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
+                        <div className="flex items-center gap-2.5">
+                          <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black">
+                            {selectedReportIds.size}
+                          </span>
+                          <span className="text-xs font-bold text-slate-200">
+                            {selectedReportIds.size} report{selectedReportIds.size > 1 ? 's' : ''} selected
+                          </span>
+                          {selectedReportIds.size < processedReports.length && (
+                            <button
+                              type="button"
+                              onClick={selectAllFilteredReports}
+                              className="text-xs text-blue-300 hover:text-white underline font-semibold ml-1 cursor-pointer"
+                            >
+                              Select all {processedReports.length} filtered
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={clearReportsSelection}
+                            className="px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                          >
+                            Deselect
+                          </button>
+                          {canDeleteReports && (
+                            <button
+                              type="button"
+                              onClick={() => requestBulkDeleteReports(selectedReportsList)}
+                              className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Delete Selected ({selectedReportIds.size})</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     <TablePagination
                       currentPage={reportsCurrentPage}
                       pageSize={reportsPageSize}
@@ -1809,15 +1975,26 @@ export default function App() {
                         const photoList = Array.isArray(item.photos) 
                           ? item.photos 
                           : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
+                        const isSelected = selectedReportIds.has(item.id || item.rma_number);
 
                         return (
                           <div 
                             key={item.id || item.rma_number}
-                            className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-2xl space-y-2 transition-all shadow-sm"
+                            className={`p-4 border rounded-2xl space-y-2 transition-all shadow-sm ${
+                              isSelected
+                                ? 'bg-blue-50/90 dark:bg-blue-950/60 border-blue-500'
+                                : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                            }`}
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div>
                                 <div className="flex items-center gap-2 mb-1">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleSelectReport(item.id || item.rma_number)}
+                                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 cursor-pointer"
+                                  />
                                   <span className="font-mono font-black text-xs text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg">
                                     SN #{item.id}
                                   </span>
@@ -1887,6 +2064,50 @@ export default function App() {
                         );
                       })}
                     </div>
+
+                    {/* Floating Bulk Action Bar for Grid Cards */}
+                    {selectedReportIds.size > 0 && (
+                      <div className="p-3 sm:px-4 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-2xl border border-slate-700 flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
+                        <div className="flex items-center gap-2.5">
+                          <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black">
+                            {selectedReportIds.size}
+                          </span>
+                          <span className="text-xs font-bold text-slate-200">
+                            {selectedReportIds.size} report{selectedReportIds.size > 1 ? 's' : ''} selected
+                          </span>
+                          {selectedReportIds.size < processedReports.length && (
+                            <button
+                              type="button"
+                              onClick={selectAllFilteredReports}
+                              className="text-xs text-blue-300 hover:text-white underline font-semibold ml-1 cursor-pointer"
+                            >
+                              Select all {processedReports.length} filtered
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={clearReportsSelection}
+                            className="px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                          >
+                            Deselect
+                          </button>
+                          {canDeleteReports && (
+                            <button
+                              type="button"
+                              onClick={() => requestBulkDeleteReports(selectedReportsList)}
+                              className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Delete Selected ({selectedReportIds.size})</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     <TablePagination
                       currentPage={reportsCurrentPage}
                       pageSize={reportsPageSize}
@@ -1958,6 +2179,7 @@ export default function App() {
         reports={recentReportsList}
         currentUser={currentUser}
         onDeleteReport={requestDeleteReport}
+        onBulkDeleteReport={requestBulkDeleteReports}
       />
 
       {/* Product Edit / Add Modal */}

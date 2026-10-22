@@ -30,7 +30,8 @@ export default function RMAReportsModal({
   onClose, 
   reports = [], 
   currentUser, 
-  onDeleteReport 
+  onDeleteReport,
+  onBulkDeleteReport 
 }) {
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
   const [viewMode, setViewMode] = useState(() => {
@@ -47,6 +48,7 @@ export default function RMAReportsModal({
   const [sortDirection, setSortDirection] = useState('desc');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [selectedReportIds, setSelectedReportIds] = useState(new Set());
 
   const handleSetViewMode = (mode) => {
     setViewMode(mode);
@@ -70,7 +72,49 @@ export default function RMAReportsModal({
     setReasonFilter('all');
     setStatusFilter('all');
     setCurrentPage(1);
+    setSelectedReportIds(new Set());
   };
+
+  // Bulk Selection Helpers
+  const isAllPageSelected = useMemo(() => {
+    if (paginatedReports.length === 0) return false;
+    return paginatedReports.every(r => selectedReportIds.has(r.id || r.rma_number));
+  }, [paginatedReports, selectedReportIds]);
+
+  const toggleSelectReport = (id) => {
+    setSelectedReportIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllPage = () => {
+    setSelectedReportIds(prev => {
+      const next = new Set(prev);
+      if (isAllPageSelected) {
+        paginatedReports.forEach(r => next.delete(r.id || r.rma_number));
+      } else {
+        paginatedReports.forEach(r => next.add(r.id || r.rma_number));
+      }
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => {
+    const next = new Set();
+    processedReports.forEach(r => next.add(r.id || r.rma_number));
+    setSelectedReportIds(next);
+  };
+
+  const clearSelection = () => {
+    setSelectedReportIds(new Set());
+  };
+
+  const selectedReportsList = useMemo(() => {
+    return reports.filter(r => selectedReportIds.has(r.id || r.rma_number));
+  }, [reports, selectedReportIds]);
 
   // Distinct reasons present in reports
   const distinctReasons = useMemo(() => {
@@ -333,6 +377,16 @@ export default function RMAReportsModal({
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-50/90 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 select-none">
+                    {/* Select All Checkbox Header */}
+                    <th className="py-3 px-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={isAllPageSelected}
+                        onChange={toggleSelectAllPage}
+                        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 cursor-pointer"
+                        title={isAllPageSelected ? "Deselect all on this page" : "Select all on this page"}
+                      />
+                    </th>
                     <th 
                       onClick={() => handleSort('id')}
                       className="py-3 px-3.5 font-black text-slate-900 dark:text-white w-16 cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
@@ -421,9 +475,27 @@ export default function RMAReportsModal({
 
                     const reporterName = item.reporter_name || (item.reported_by && !item.reported_by.includes('(') ? item.reported_by : '') || 'Reporter';
                     const reporterContact = item.reporter_contact || (item.reported_by && item.reported_by.includes('(') ? item.reported_by.replace(/.*\((.*)\).*/, '$1') : '');
+                    const isSelected = selectedReportIds.has(item.id || item.rma_number);
 
                     return (
-                      <tr key={item.id || item.rma_number} className="hover:bg-blue-50/30 dark:hover:bg-slate-700/40 transition-colors">
+                      <tr 
+                        key={item.id || item.rma_number} 
+                        className={`transition-colors ${
+                          isSelected 
+                            ? 'bg-blue-50/80 dark:bg-blue-950/50' 
+                            : 'hover:bg-blue-50/30 dark:hover:bg-slate-700/40'
+                        }`}
+                      >
+                        {/* Row Selection Checkbox */}
+                        <td className="py-3 px-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectReport(item.id || item.rma_number)}
+                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 cursor-pointer"
+                          />
+                        </td>
+
                         {/* 1. SN COLUMN AT FAR LEFT */}
                         <td className="py-3 px-3.5 font-mono">
                           <span className="font-black text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg text-xs">
@@ -539,6 +611,49 @@ export default function RMAReportsModal({
               </table>
             </div>
 
+            {/* Floating Bulk Action Bar for Table */}
+            {selectedReportIds.size > 0 && (
+              <div className="p-3 sm:px-4 bg-slate-900/95 dark:bg-slate-950/95 text-white border-t border-slate-700 flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black">
+                    {selectedReportIds.size}
+                  </span>
+                  <span className="text-xs font-bold text-slate-200">
+                    {selectedReportIds.size} report{selectedReportIds.size > 1 ? 's' : ''} selected
+                  </span>
+                  {selectedReportIds.size < processedReports.length && (
+                    <button
+                      type="button"
+                      onClick={selectAllFiltered}
+                      className="text-xs text-blue-300 hover:text-white underline font-semibold ml-1 cursor-pointer"
+                    >
+                      Select all {processedReports.length} filtered
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    className="px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                  >
+                    Deselect
+                  </button>
+                  {canDeleteReports && (
+                    <button
+                      type="button"
+                      onClick={() => onBulkDeleteReport && onBulkDeleteReport(selectedReportsList)}
+                      className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Selected ({selectedReportIds.size})</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Table Pagination */}
             <TablePagination
               currentPage={currentPage}
@@ -563,15 +678,26 @@ export default function RMAReportsModal({
 
                 const reporterName = item.reporter_name || (item.reported_by && !item.reported_by.includes('(') ? item.reported_by : '') || 'Reporter';
                 const reporterContact = item.reporter_contact || (item.reported_by && item.reported_by.includes('(') ? item.reported_by.replace(/.*\((.*)\).*/, '$1') : '');
+                const isSelected = selectedReportIds.has(item.id || item.rma_number);
 
                 return (
                   <div 
                     key={item.id || item.rma_number}
-                    className="p-4 bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100/70 dark:hover:bg-slate-700/60 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-2xl space-y-3 transition-all shadow-xs"
+                    className={`p-4 border rounded-2xl space-y-3 transition-all shadow-xs ${
+                      isSelected
+                        ? 'bg-blue-50/90 dark:bg-blue-950/60 border-blue-500'
+                        : 'bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100/70 dark:hover:bg-slate-700/60 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-1">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectReport(item.id || item.rma_number)}
+                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 cursor-pointer"
+                          />
                           <span className="font-mono font-black text-xs text-blue-900 dark:text-blue-300 bg-blue-100/80 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 px-2 py-0.5 rounded-lg">
                             SN #{item.id}
                           </span>
@@ -664,6 +790,49 @@ export default function RMAReportsModal({
                 );
               })}
             </div>
+
+            {/* Floating Bulk Action Bar for Grid Cards */}
+            {selectedReportIds.size > 0 && (
+              <div className="p-3 sm:px-4 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-2xl border border-slate-700 flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black">
+                    {selectedReportIds.size}
+                  </span>
+                  <span className="text-xs font-bold text-slate-200">
+                    {selectedReportIds.size} report{selectedReportIds.size > 1 ? 's' : ''} selected
+                  </span>
+                  {selectedReportIds.size < processedReports.length && (
+                    <button
+                      type="button"
+                      onClick={selectAllFiltered}
+                      className="text-xs text-blue-300 hover:text-white underline font-semibold ml-1 cursor-pointer"
+                    >
+                      Select all {processedReports.length} filtered
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    className="px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                  >
+                    Deselect
+                  </button>
+                  {canDeleteReports && (
+                    <button
+                      type="button"
+                      onClick={() => onBulkDeleteReport && onBulkDeleteReport(selectedReportsList)}
+                      className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Selected ({selectedReportIds.size})</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Grid Pagination */}
             <TablePagination

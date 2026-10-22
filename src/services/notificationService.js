@@ -281,5 +281,184 @@ export const notificationService = {
       console.warn('Non-blocking error dispatching RMA email notification:', err.message);
       return { success: false, error: err.message };
     }
+  },
+
+  /**
+   * Build clean, modern HTML email notification for product catalog update
+   */
+  generateProductEmailHtml(product, config, isNew, editorName, isTestMode = false) {
+    const title = isNew ? 'New Catalog Product Added' : 'Product Details Updated';
+    const badgeText = isNew ? 'NEW PRODUCT' : 'CATALOG UPDATE';
+    const hasPhoto = Boolean(product.imageUrl || product.image_url);
+    const photoSrc = product.imageUrl || product.image_url;
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b; }
+          .container { max-width: 620px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+          .header { background: #0f172a; padding: 24px 28px; color: #ffffff; }
+          .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; background: #3b82f6; color: #ffffff; margin-bottom: 8px; }
+          .title { margin: 0; font-size: 20px; font-weight: 800; line-height: 1.3; }
+          .content { padding: 28px; }
+          .card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+          .grid { display: table; width: 100%; border-collapse: collapse; }
+          .row { display: table-row; }
+          .col-label { display: table-cell; width: 35%; padding: 6px 0; font-size: 12px; color: #64748b; font-weight: 600; }
+          .col-val { display: table-cell; padding: 6px 0; font-size: 13px; color: #0f172a; font-weight: 700; }
+          .section-title { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; margin: 20px 0 10px; border-bottom: 2px solid #f1f5f9; padding-bottom: 6px; }
+          .ae-box { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; border-radius: 10px; padding: 12px 16px; margin: 12px 0; font-size: 13px; }
+          .photo-box { text-align: center; margin: 16px 0; }
+          .photo-box img { max-width: 240px; max-height: 240px; object-fit: contain; border-radius: 12px; border: 1px solid #cbd5e1; }
+          .btn { display: inline-block; padding: 10px 20px; background: #2563eb; color: #ffffff !important; text-decoration: none; border-radius: 10px; font-size: 13px; font-weight: 800; margin-top: 14px; }
+          .footer { background: #f1f5f9; padding: 16px 28px; font-size: 11px; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <span class="badge">${isTestMode ? `[TEST] ${badgeText}` : badgeText}</span>
+            <h1 class="title">${isTestMode ? 'Test - ' : ''}${title}: ${product.name}</h1>
+            <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Verified Catalog Master Record Update</div>
+          </div>
+          
+          <div class="content">
+            ${isTestMode ? `
+            <div style="background: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 12px 16px; border-radius: 12px; margin-bottom: 20px; font-weight: 700; font-size: 13px;">
+              🧪 TEST MODE DISPATCH: All recipient email addresses have been suffixed with <code>.test</code>. Live delivery was safely bypassed.
+            </div>
+            ` : ''}
+
+            <div class="section-title">Product Information</div>
+            <div class="card">
+              <div class="grid">
+                <div class="row">
+                  <div class="col-label">Product Name:</div>
+                  <div class="col-val">${product.name}</div>
+                </div>
+                <div class="row">
+                  <div class="col-label">Barcode / QR:</div>
+                  <div class="col-val" style="font-family: monospace;">${product.barcode}</div>
+                </div>
+                ${product.code ? `
+                <div class="row">
+                  <div class="col-label">SKU / Item Code:</div>
+                  <div class="col-val" style="font-family: monospace;">${product.code}</div>
+                </div>` : ''}
+                <div class="row">
+                  <div class="col-label">Net Price:</div>
+                  <div class="col-val">₱${Number(product.price || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+                </div>
+                <div class="row">
+                  <div class="col-label">Price w/ VAT:</div>
+                  <div class="col-val" style="color: #059669;">₱${Number(product.priceWithVat || product.price_with_vat || product.price || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+                </div>
+                <div class="row">
+                  <div class="col-label">Supplier:</div>
+                  <div class="col-val">${product.supplierName || product.supplier_name || 'Savemore'}</div>
+                </div>
+                <div class="row">
+                  <div class="col-label">Unit:</div>
+                  <div class="col-val">${product.unitName || product.unit_name || 'pc'}</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="section-title">Assigned Customer Account Executive (AE)</div>
+            <div class="ae-box">
+              <strong>${product.aeName || product.ae_name || 'Unassigned'}</strong>
+              ${(product.aeEmail || product.ae_email) ? `<br><a href="mailto:${product.aeEmail || product.ae_email}" style="color: #2563eb; font-family: monospace; font-size: 12px;">${product.aeEmail || product.ae_email}</a>` : '<br><span style="color: #dc2626; font-size: 12px;">(No AE email assigned)</span>'}
+            </div>
+
+            ${hasPhoto ? `
+            <div class="section-title">Reference Product Photo</div>
+            <div class="photo-box">
+              <img src="${photoSrc}" alt="${product.name}" />
+            </div>` : ''}
+
+            <div style="font-size: 12px; color: #64748b; margin-top: 16px;">
+              Modified by: <strong>${editorName || 'Admin'}</strong> on ${new Date().toLocaleString()}
+            </div>
+
+            <div style="text-align: center; margin-top: 24px;">
+              <a href="https://rma-portal-v2.vercel.app/admin" class="btn">View in RMA Admin Portal →</a>
+            </div>
+          </div>
+
+          <div class="footer">
+            Sender: ${config.senderEmail} • Dispatched by Wholesale RMA Portal
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  },
+
+  /**
+   * Dispatch email notification after a product is edited, created, or verified
+   */
+  async sendProductUpdateNotification({ product, isNew = false, editorName = 'Admin' }, isTestMode = false) {
+    if (!product) return { success: false, error: 'No product data' };
+
+    const testActive = Boolean(
+      isTestMode || 
+      (typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true')
+    );
+
+    try {
+      const config = this.resolveCompanyConfig(product);
+
+      // Assemble CC list: base company recipients + Customer AE email
+      const ccSet = new Set(config.baseCcList);
+      const aeEmail = product.aeEmail || product.ae_email;
+      if (aeEmail && aeEmail.includes('@')) {
+        ccSet.add(aeEmail.trim());
+      }
+      let finalCcList = Array.from(ccSet);
+      let toEmail = config.toEmail;
+
+      let subject = `[Product Catalog] ${isNew ? 'New Product Added' : 'Product Details Updated'}: ${product.name} (${product.barcode})`;
+
+      if (testActive) {
+        toEmail = toEmail.endsWith('.test') ? toEmail : `${toEmail}.test`;
+        finalCcList = finalCcList.map(e => e.endsWith('.test') ? e : `${e}.test`);
+        subject = `Test - [Product Catalog] ${isNew ? 'New Product Added' : 'Product Details Updated'}: ${product.name} (${product.barcode})`;
+      }
+
+      const htmlBody = this.generateProductEmailHtml(product, config, isNew, editorName, testActive);
+
+      console.log(`[Product Update Email] (TestMode: ${testActive}) Dispatching from "${config.senderEmail}" to "${toEmail}", CC: [${finalCcList.join(', ')}]`);
+
+      const res = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: config.senderEmail,
+          fromName: testActive ? `[TEST] ${config.senderName}` : config.senderName,
+          to: toEmail,
+          cc: finalCcList,
+          subject,
+          html: htmlBody,
+          isTestMode: testActive,
+          text: `${testActive ? 'Test - ' : ''}Product ${isNew ? 'Added' : 'Updated'}: ${product.name} (${product.barcode}). SKU: ${product.code || 'N/A'}. AE: ${product.aeName || product.ae_name || 'N/A'}`
+        })
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.warn('send-email response was not ok:', res.status, errorText);
+        return { success: false, error: errorText };
+      }
+
+      const result = await res.json();
+      return result;
+    } catch (err) {
+      console.warn('Non-blocking error dispatching product email notification:', err.message);
+      return { success: false, error: err.message };
+    }
   }
 };
+
