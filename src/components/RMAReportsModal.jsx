@@ -75,46 +75,6 @@ export default function RMAReportsModal({
     setSelectedReportIds(new Set());
   };
 
-  // Bulk Selection Helpers
-  const isAllPageSelected = useMemo(() => {
-    if (paginatedReports.length === 0) return false;
-    return paginatedReports.every(r => selectedReportIds.has(r.id || r.rma_number));
-  }, [paginatedReports, selectedReportIds]);
-
-  const toggleSelectReport = (id) => {
-    setSelectedReportIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleSelectAllPage = () => {
-    setSelectedReportIds(prev => {
-      const next = new Set(prev);
-      if (isAllPageSelected) {
-        paginatedReports.forEach(r => next.delete(r.id || r.rma_number));
-      } else {
-        paginatedReports.forEach(r => next.add(r.id || r.rma_number));
-      }
-      return next;
-    });
-  };
-
-  const selectAllFiltered = () => {
-    const next = new Set();
-    processedReports.forEach(r => next.add(r.id || r.rma_number));
-    setSelectedReportIds(next);
-  };
-
-  const clearSelection = () => {
-    setSelectedReportIds(new Set());
-  };
-
-  const selectedReportsList = useMemo(() => {
-    return reports.filter(r => selectedReportIds.has(r.id || r.rma_number));
-  }, [reports, selectedReportIds]);
 
   // Distinct reasons present in reports
   const distinctReasons = useMemo(() => {
@@ -205,6 +165,47 @@ export default function RMAReportsModal({
     const start = (currentPage - 1) * pageSize;
     return processedReports.slice(start, start + pageSize);
   }, [processedReports, currentPage, pageSize]);
+
+  // Bulk Selection Helpers (Strictly defined AFTER paginatedReports)
+  const isAllPageSelected = useMemo(() => {
+    if (paginatedReports.length === 0) return false;
+    return paginatedReports.every(r => selectedReportIds.has(r.id || r.rma_number));
+  }, [paginatedReports, selectedReportIds]);
+
+  const toggleSelectReport = (id) => {
+    setSelectedReportIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllPage = () => {
+    setSelectedReportIds(prev => {
+      const next = new Set(prev);
+      if (isAllPageSelected) {
+        paginatedReports.forEach(r => next.delete(r.id || r.rma_number));
+      } else {
+        paginatedReports.forEach(r => next.add(r.id || r.rma_number));
+      }
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => {
+    const next = new Set();
+    processedReports.forEach(r => next.add(r.id || r.rma_number));
+    setSelectedReportIds(next);
+  };
+
+  const clearSelection = () => {
+    setSelectedReportIds(new Set());
+  };
+
+  const selectedReportsList = useMemo(() => {
+    return reports.filter(r => selectedReportIds.has(r.id || r.rma_number));
+  }, [reports, selectedReportIds]);
 
   const renderSortIndicator = (field) => {
     if (sortField !== field) {

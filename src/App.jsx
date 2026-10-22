@@ -492,47 +492,6 @@ export default function App() {
     setSelectedReportIds(new Set());
   };
 
-  // Bulk Selection Helpers for Reports
-  const isAllReportsPageSelected = React.useMemo(() => {
-    if (paginatedReports.length === 0) return false;
-    return paginatedReports.every(r => selectedReportIds.has(r.id || r.rma_number));
-  }, [paginatedReports, selectedReportIds]);
-
-  const toggleSelectReport = (id) => {
-    setSelectedReportIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleSelectAllReportsPage = () => {
-    setSelectedReportIds(prev => {
-      const next = new Set(prev);
-      if (isAllReportsPageSelected) {
-        paginatedReports.forEach(r => next.delete(r.id || r.rma_number));
-      } else {
-        paginatedReports.forEach(r => next.add(r.id || r.rma_number));
-      }
-      return next;
-    });
-  };
-
-  const selectAllFilteredReports = () => {
-    const next = new Set();
-    processedReports.forEach(r => next.add(r.id || r.rma_number));
-    setSelectedReportIds(next);
-  };
-
-  const clearReportsSelection = () => {
-    setSelectedReportIds(new Set());
-  };
-
-  const selectedReportsList = React.useMemo(() => {
-    return recentReportsList.filter(r => selectedReportIds.has(r.id || r.rma_number));
-  }, [recentReportsList, selectedReportIds]);
-
   // Filter and sort return reports
   const processedReports = React.useMemo(() => {
     const q = reportsSearchQuery.toLowerCase().trim();
@@ -613,6 +572,47 @@ export default function App() {
     const start = (reportsCurrentPage - 1) * reportsPageSize;
     return processedReports.slice(start, start + reportsPageSize);
   }, [processedReports, reportsCurrentPage, reportsPageSize]);
+
+  // Bulk Selection Helpers for Reports (Strictly defined AFTER paginatedReports)
+  const isAllReportsPageSelected = React.useMemo(() => {
+    if (paginatedReports.length === 0) return false;
+    return paginatedReports.every(r => selectedReportIds.has(r.id || r.rma_number));
+  }, [paginatedReports, selectedReportIds]);
+
+  const toggleSelectReport = (id) => {
+    setSelectedReportIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllReportsPage = () => {
+    setSelectedReportIds(prev => {
+      const next = new Set(prev);
+      if (isAllReportsPageSelected) {
+        paginatedReports.forEach(r => next.delete(r.id || r.rma_number));
+      } else {
+        paginatedReports.forEach(r => next.add(r.id || r.rma_number));
+      }
+      return next;
+    });
+  };
+
+  const selectAllFilteredReports = () => {
+    const next = new Set();
+    processedReports.forEach(r => next.add(r.id || r.rma_number));
+    setSelectedReportIds(next);
+  };
+
+  const clearReportsSelection = () => {
+    setSelectedReportIds(new Set());
+  };
+
+  const selectedReportsList = React.useMemo(() => {
+    return recentReportsList.filter(r => selectedReportIds.has(r.id || r.rma_number));
+  }, [recentReportsList, selectedReportIds]);
 
   // Real-time synchronization & initial load
   useEffect(() => {
