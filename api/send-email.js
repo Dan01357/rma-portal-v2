@@ -1,5 +1,13 @@
 import nodemailer from 'nodemailer';
 
+function getDiagnosticHelp(errMsg, user, pass) {
+  const str = String(errMsg || '');
+  if (str.includes('535') || str.includes('BadCredentials') || str.includes('Username and Password not accepted')) {
+    return `Google SMTP rejected login for "${user}". Your App Password has ${pass.length} characters (Google App Passwords are 16 letters). If you see 535 Bad Credentials, please verify: (1) Ensure 2-Step Verification is enabled in your Google Account for ${user}, (2) Ensure the App Password was generated under ${user} (Google Account > Security > 2-Step Verification > App passwords), and (3) In Vercel Environment Variables, check GMAIL_APP_PASSWORD and make sure all 16 characters were pasted accurately.`;
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
   // CORS configuration
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -14,10 +22,6 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
-  }
-
   try {
     let payload = req.body;
     if (typeof payload === 'string') {
@@ -25,6 +29,71 @@ export default async function handler(req, res) {
         payload = JSON.parse(payload);
       } catch (e) {
         // use as-is
+      }
+    }
+
+    const smtpUser = String(process.env.SMTP_USER || process.env.GMAIL_USER || 'finance2@keysysincorporated.com').trim();
+    const rawPass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD || '';
+    
+    // CRITICAL: Google displays app passwords with spaces like "abcd efgh ijkl mnop".
+    // We strip all spaces/whitespace to ensure pure 16-character authentication with Google SMTP.
+    const cleanPass = String(rawPass).replace(/\s+/g, '').trim();
+
+    if (!cleanPass) {
+      console.warn('SMTP credentials (GMAIL_APP_PASSWORD) not configured in Vercel environment variables yet.');
+      return res.status(200).json({
+        success: false,
+        notConfigured: true,
+        user: smtpUser,
+        message: 'SMTP credentials (GMAIL_APP_PASSWORD) not configured in Vercel environment variables. Email notifications will be logged in console.'
+      });
+    }
+
+    const isGmail = !process.env.SMTP_HOST || process.env.SMTP_HOST.includes('gmail.com');
+    const transporter = nodemailer.createTransport(
+      isGmail
+        ? {
+            service: 'gmail',
+            auth: {
+              user: smtpUser,
+              pass: cleanPass
+            }
+          }
+        : {
+            host: process.env.SMTP_HOST,
+            port: Number(process.env.SMTP_PORT || 465),
+            secure: Number(process.env.SMTP_PORT || 465) === 465,
+            auth: {
+              user: smtpUser,
+              pass: cleanPass
+            }
+          }
+    );
+
+    // Diagnostic/Testing Connection Ping
+    if (req.method === 'GET' || payload?.action === 'test-connection') {
+      try {
+        console.log(`[SMTP Diagnostic Ping] Testing credentials for user: ${smtpUser} (password length: ${cleanPass.length}, had spaces originally: ${rawPass.includes(' ')})`);
+        await transporter.verify();
+        return res.status(200).json({
+          success: true,
+          verified: true,
+          user: smtpUser,
+          passLength: cleanPass.length,
+          hadSpaces: rawPass.includes(' '),
+          message: `Google SMTP connection & authentication successfully verified for ${smtpUser}!`
+        });
+      } catch (verifyErr) {
+        console.error('SMTP Verify failed:', verifyErr);
+        return res.status(200).json({
+          success: false,
+          verified: false,
+          user: smtpUser,
+          passLength: cleanPass.length,
+          hadSpaces: rawPass.includes(' '),
+          error: verifyErr.message,
+          diagnostic: getDiagnosticHelp(verifyErr.message, smtpUser, cleanPass)
+        });
       }
     }
 
@@ -38,29 +107,6 @@ export default async function handler(req, res) {
       text,
       isTestMode = false
     } = payload || {};
-
-    const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER || 'finance2@keysysincorporated.com';
-    const smtpPass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD;
-
-    if (!smtpPass) {
-      console.warn('SMTP credentials (GMAIL_APP_PASSWORD) not configured in Vercel environment variables yet.');
-      return res.status(200).json({
-        success: false,
-        notConfigured: true,
-        message: 'SMTP credentials (GMAIL_APP_PASSWORD) not configured in Vercel environment variables. Email was logged in console.'
-      });
-    }
-
-    const smtpPort = Number(process.env.SMTP_PORT || 465);
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: smtpPort,
-      secure: smtpPort === 465, // true for 465, false for 587
-      auth: {
-        user: smtpUser,
-        pass: smtpPass
-      }
-    });
 
     const senderEmail = from || smtpUser;
     const formattedFrom = fromName ? `"${fromName}" <${senderEmail}>` : senderEmail;
@@ -126,10 +172,16 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('Error in send-email API handler:', error);
-    return res.status(500).json({
+    const smtpUser = String(process.env.SMTP_USER || process.env.GMAIL_USER || 'finance2@keysysincorporated.com').trim();
+    const rawPass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD || '';
+    const cleanPass = String(rawPass).replace(/\s+/g, '').trim();
+
+    return res.status(200).json({
       success: false,
-      error: error.message
+      error: error.message,
+      diagnostic: getDiagnosticHelp(error.message, smtpUser, cleanPass),
+      user: smtpUser,
+      passLength: cleanPass.length
     });
   }
 }
-

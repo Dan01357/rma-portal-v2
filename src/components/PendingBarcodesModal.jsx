@@ -22,6 +22,7 @@ import { authService } from '../services/authService';
 import { notificationService } from '../services/notificationService';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
+import SupplierInput from './SupplierInput';
 
 export default function PendingBarcodesModal({ isOpen, onClose, pendingList = [], onUpdated, currentUser }) {
   const [selectedBarcode, setSelectedBarcode] = useState(null);
@@ -636,12 +637,11 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                 </div>
                 <div>
                   <label className="block text-slate-600 dark:text-slate-400 mb-1">Supplier Name</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Savemore, Acer, Lenovo"
+                  <SupplierInput
+                    placeholder="e.g. Savemore, Walter Mart, Mondelez"
                     value={formData.supplierName}
-                    onChange={(e) => setFormData({ ...formData, supplierName: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
+                    onChange={(val) => setFormData({ ...formData, supplierName: val })}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 text-xs sm:text-sm"
                   />
                 </div>
               </div>

@@ -454,6 +454,25 @@ export const notificationService = {
       console.warn('Non-blocking error dispatching product email notification:', err.message);
       return { success: false, error: err.message };
     }
+  },
+
+  /**
+   * Diagnostic: Test Google SMTP connection and authentication credentials
+   */
+  async testSmtpConnection() {
+    try {
+      const res = await fetch('/api/send-email?action=test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'test-connection' })
+      });
+      if (!res.ok) {
+        return { success: false, error: `HTTP ${res.status}: ${await res.text()}` };
+      }
+      return await res.json();
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   }
 };
 

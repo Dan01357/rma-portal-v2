@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { rmaApi } from '../supabaseClient';
 import { applyEmailTestMode } from '../utils/rmaHelpers';
+import { notificationService } from '../services/notificationService';
 
 export default function SettingsTab({ 
   isTestMode, 
@@ -23,6 +24,16 @@ export default function SettingsTab({
     checked: false,
     connected: false,
     message: ''
+  });
+
+  const [smtpStatus, setSmtpStatus] = useState({
+    loading: false,
+    checked: false,
+    success: false,
+    message: '',
+    diagnostic: '',
+    passLength: null,
+    hadSpaces: false
   });
 
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://lschluviltzsknptwgrz.supabase.co';
@@ -40,6 +51,20 @@ export default function SettingsTab({
       checked: true,
       connected: result.connected,
       message: result.message
+    });
+  };
+
+  const handleTestSmtp = async () => {
+    setSmtpStatus({ loading: true, checked: false, success: false, message: 'Authenticating with Google SMTP...', diagnostic: '', passLength: null, hadSpaces: false });
+    const res = await notificationService.testSmtpConnection();
+    setSmtpStatus({
+      loading: false,
+      checked: true,
+      success: Boolean(res.success || res.verified),
+      message: res.message || res.error || 'Connection failed',
+      diagnostic: res.diagnostic || '',
+      passLength: res.passLength || null,
+      hadSpaces: Boolean(res.hadSpaces)
     });
   };
 
@@ -171,6 +196,76 @@ export default function SettingsTab({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Google SMTP Email Dispatch Service Card */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="flex items-center space-x-2.5">
+            <Mail className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Google SMTP Notification Service</h2>
+              <span className="text-xs text-slate-500 dark:text-slate-400">Automated intake & catalog updates dispatcher</span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleTestSmtp}
+            disabled={smtpStatus.loading}
+            className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/70 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold rounded-xl border border-indigo-200 dark:border-indigo-800 flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${smtpStatus.loading ? 'animate-spin' : ''}`} />
+            <span>{smtpStatus.loading ? 'Authenticating...' : 'Test SMTP Credentials'}</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
+          <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
+            <span className="text-slate-400 text-[10px] block font-sans font-semibold">SENDER ACCOUNT (GMAIL_USER)</span>
+            <span className="text-slate-800 dark:text-slate-200 truncate block mt-0.5 font-bold">finance2@keysysincorporated.com</span>
+          </div>
+
+          <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
+            <span className="text-slate-400 text-[10px] block font-sans font-semibold">GMAIL APP PASSWORD STATUS</span>
+            <span className="text-slate-800 dark:text-slate-200 truncate block mt-0.5 font-bold">
+              {smtpStatus.checked ? (smtpStatus.success ? '✓ 16-character key authenticated' : `Detected: ${smtpStatus.passLength || 0} chars`) : 'Configured in Vercel'}
+            </span>
+          </div>
+        </div>
+
+        {/* SMTP Status Result Banner */}
+        {smtpStatus.checked && (
+          <div className={`p-4 rounded-2xl border space-y-2 text-xs animate-in fade-in ${
+            smtpStatus.success
+              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-300'
+              : 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-500/40 text-rose-800 dark:text-rose-300'
+          }`}>
+            <div className="flex items-center space-x-2.5">
+              {smtpStatus.success ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
+              )}
+              <div className="font-bold text-sm">
+                {smtpStatus.success ? 'Google SMTP Verified & Operational' : 'SMTP Authentication Error (Bad Credentials)'}
+              </div>
+            </div>
+            <div className="text-[11px] leading-relaxed font-mono">
+              {smtpStatus.message}
+            </div>
+            {smtpStatus.diagnostic && (
+              <div className="mt-2 p-2.5 bg-rose-100/80 dark:bg-rose-900/40 rounded-xl text-[11px] font-sans text-rose-900 dark:text-rose-200 border border-rose-200 dark:border-rose-800/60">
+                <strong>💡 Troubleshooting Guide:</strong> {smtpStatus.diagnostic}
+              </div>
+            )}
+            {smtpStatus.hadSpaces && (
+              <div className="text-[11px] text-amber-700 dark:text-amber-300 font-sans font-semibold">
+                ℹ️ Note: Your App Password in Vercel contained spaces. The system has automatically stripped them for pure 16-character authentication.
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Local Data Reset */}

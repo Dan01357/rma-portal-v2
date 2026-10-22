@@ -19,6 +19,7 @@ import { catalogService } from '../services/catalogService';
 import { authService } from '../services/authService';
 import { notificationService } from '../services/notificationService';
 import ImageLightboxModal from './ImageLightboxModal';
+import SupplierInput from './SupplierInput';
 
 export default function ProductEditModal({ isOpen, onClose, product, onSaved, onDeleted, currentUser }) {
   const isEditing = Boolean(product && product.id);
@@ -545,10 +546,9 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Supplier Name
               </label>
-              <input
-                type="text"
+              <SupplierInput
                 value={supplierName}
-                onChange={(e) => setSupplierName(e.target.value)}
+                onChange={(val) => setSupplierName(val)}
                 placeholder="e.g. Savemore / Mondelez / Bonita"
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
               />

@@ -901,6 +901,61 @@ export const catalogService = {
       console.error('Bulk delete RMA reports error:', e);
       throw e;
     }
+  },
+
+  /**
+   * Get unique list of verified and recorded suppliers across catalog and returns
+   */
+  async getUniqueSuppliers() {
+    const defaultSuppliers = [
+      'Savemore',
+      'Walter Mart',
+      'SM Supermarket',
+      'Puregold',
+      'Robinsons Supermarket',
+      'Mondelez',
+      'Universal Robina Corporation (URC)',
+      'Bonita',
+      'Keysys',
+      'A2Z2GO',
+      'Pingcon Marketing'
+    ];
+
+    const supplierSet = new Set(defaultSuppliers);
+
+    try {
+      // 1. Fetch from Supabase products
+      const { data: prodData } = await supabase
+        .from('products')
+        .select('supplier_name')
+        .limit(200);
+
+      if (prodData && Array.isArray(prodData)) {
+        prodData.forEach(p => {
+          if (p.supplier_name && p.supplier_name.trim() && p.supplier_name !== 'Pending Assignment') {
+            supplierSet.add(p.supplier_name.trim());
+          }
+        });
+      }
+
+      // 2. Fetch from Supabase rma_reports
+      const { data: reportData } = await supabase
+        .from('rma_reports')
+        .select('supplier_name')
+        .limit(200);
+
+      if (reportData && Array.isArray(reportData)) {
+        reportData.forEach(r => {
+          if (r.supplier_name && r.supplier_name.trim() && r.supplier_name !== 'Pending Assignment') {
+            supplierSet.add(r.supplier_name.trim());
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('Notice loading unique suppliers:', e);
+    }
+
+    return Array.from(supplierSet).sort((a, b) => a.localeCompare(b));
   }
 };
 
