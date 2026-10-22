@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   X, 
   Receipt, 
@@ -10,6 +10,8 @@ import {
   AlertCircle, 
   RefreshCw, 
   Printer, 
+  Plus,
+  Minus,
   FileText, 
   Building2,
   Percent
@@ -28,13 +30,16 @@ export default function CreditMemoModal({
 }) {
   const isEditing = Boolean(creditMemo && creditMemo.credit_memo_number);
 
+  const prevIsOpenRef = useRef(false);
+  const currentEditingRef = useRef(null);
+
   const [selectedReportId, setSelectedReportId] = useState('');
   const [quantity, setQuantity] = useState(1);
-  const [unitPrice, setUnitPrice] = useState(0);
-  const [amount, setAmount] = useState(0);
+  const [unitPrice, setUnitPrice] = useState('0.00');
+  const [amount, setAmount] = useState('0.00');
   const [pullOutRef, setPullOutRef] = useState('');
   const [pullOutDate, setPullOutDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [creditAmount, setCreditAmount] = useState(0);
+  const [creditAmount, setCreditAmount] = useState('0.00');
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
@@ -51,70 +56,135 @@ export default function CreditMemoModal({
     return null;
   }, [report, selectedReportId, reportsList, isEditing]);
 
-  // Sync state when modal opens
+  // Sync state ONLY when modal opens or target memo explicitly switches (Prevents 3.5s background polling resets!)
   useEffect(() => {
-    if (isOpen) {
+    const isOpening = isOpen && !prevIsOpenRef.current;
+    const memoChanged = isEditing && creditMemo?.credit_memo_number !== currentEditingRef.current;
+
+    if (isOpening || memoChanged) {
+      prevIsOpenRef.current = isOpen;
+      currentEditingRef.current = creditMemo?.credit_memo_number || null;
       setErrorMessage(null);
       setIsLoading(false);
 
       if (isEditing && creditMemo) {
         setQuantity(creditMemo.quantity || 1);
-        setUnitPrice(creditMemo.unit_price || 0);
-        setAmount(creditMemo.amount || 0);
+        setUnitPrice(Number(creditMemo.unit_price || 0).toFixed(2));
+        setAmount(Number(creditMemo.amount || 0).toFixed(2));
         setPullOutRef(creditMemo.pull_out_ref || '');
         setPullOutDate(creditMemo.pull_out_date || new Date().toISOString().split('T')[0]);
-        setCreditAmount(creditMemo.credit_amount || 0);
+        setCreditAmount(Number(creditMemo.credit_amount || creditMemo.amount || 0).toFixed(2));
         setNotes(creditMemo.notes || '');
       } else {
         const rep = activeReport;
         if (rep) {
           const qty = Number(rep.quantity) || 1;
-          const price = Number(rep.price_with_vat || rep.price || 0);
-          const gross = qty * price;
+          const price = Number((Number(rep.price_with_vat || rep.price || 0)).toFixed(2));
+          const gross = Number((qty * price).toFixed(2));
           setQuantity(qty);
-          setUnitPrice(price);
-          setAmount(gross);
-          setCreditAmount(gross);
+          setUnitPrice(price.toFixed(2));
+          setAmount(gross.toFixed(2));
+          setCreditAmount(gross.toFixed(2));
           setPullOutRef(`POR #${rep.rma_number?.split('-')?.[2] || '001'} - ${rep.supplier_name || 'Warehouse'}`);
           setPullOutDate(new Date().toISOString().split('T')[0]);
           setNotes('');
         }
       }
+    } else if (!isOpen) {
+      prevIsOpenRef.current = false;
+      currentEditingRef.current = null;
     }
-  }, [isOpen, report, creditMemo, isEditing, activeReport]);
+  }, [isOpen, creditMemo, isEditing, activeReport]);
 
-  // Auto-calculate Gross Amount when quantity or unitPrice changes
-  const handleQuantityChange = (val) => {
-    const q = Math.max(1, parseInt(val, 10) || 1);
-    setQuantity(q);
-    const newGross = q * Number(unitPrice || 0);
-    setAmount(newGross);
-    // If creditAmount equaled previous amount, keep it in sync
-    setCreditAmount(newGross);
+  const updateCalculations = (newQty, newPrice) => {
+    const q = Number(newQty) || 0;
+    const p = parseFloat(newPrice) || 0;
+    const gross = Number((q * p).toFixed(2));
+    setAmount(gross.toFixed(2));
+    setCreditAmount(gross.toFixed(2));
   };
 
+  // Quantity handlers (smooth typing, backspace deletes properly, stepper buttons)
+  const handleQuantityChange = (val) => {
+    if (val === '') {
+      setQuantity('');
+      return;
+    }
+    const parsed = parseInt(val, 10);
+    if (!isNaN(parsed) && parsed >= 0) {
+      setQuantity(parsed);
+      updateCalculations(parsed, unitPrice);
+    }
+  };
+
+  const handleQuantityBlur = () => {
+    const q = Math.max(1, parseInt(quantity, 10) || 1);
+    setQuantity(q);
+    updateCalculations(q, unitPrice);
+  };
+
+  const stepQuantity = (delta) => {
+    const current = parseInt(quantity, 10) || 1;
+    const next = Math.max(1, current + delta);
+    setQuantity(next);
+    updateCalculations(next, unitPrice);
+  };
+
+  // Price handlers with strict 2-decimal limit
   const handleUnitPriceChange = (val) => {
-    const p = parseFloat(val) || 0;
-    setUnitPrice(p);
-    const newGross = Number(quantity || 1) * p;
-    setAmount(newGross);
-    setCreditAmount(newGross);
+    if (val === '' || /^\d*\.?\d{0,2}$/.test(val)) {
+      setUnitPrice(val);
+      const num = parseFloat(val) || 0;
+      updateCalculations(quantity, num);
+    }
+  };
+
+  const handleUnitPriceBlur = () => {
+    const p = Number((parseFloat(unitPrice) || 0).toFixed(2));
+    setUnitPrice(p.toFixed(2));
+    updateCalculations(quantity, p);
+  };
+
+  const handleAmountChange = (val) => {
+    if (val === '' || /^\d*\.?\d{0,2}$/.test(val)) {
+      setAmount(val);
+      setCreditAmount(val);
+    }
+  };
+
+  const handleAmountBlur = () => {
+    const a = Number((parseFloat(amount) || 0).toFixed(2));
+    setAmount(a.toFixed(2));
+    setCreditAmount(a.toFixed(2));
+  };
+
+  const handleCreditAmountChange = (val) => {
+    if (val === '' || /^\d*\.?\d{0,2}$/.test(val)) {
+      setCreditAmount(val);
+    }
+  };
+
+  const handleCreditAmountBlur = () => {
+    const ca = Number((parseFloat(creditAmount) || 0).toFixed(2));
+    setCreditAmount(ca.toFixed(2));
   };
 
   const applyCreditPercentage = (pct) => {
-    const gross = Number(amount || 0);
-    const val = (gross * pct).toFixed(2);
-    setCreditAmount(parseFloat(val));
+    const gross = parseFloat(amount) || 0;
+    const val = Number((gross * pct).toFixed(2));
+    setCreditAmount(val.toFixed(2));
   };
 
   const handleSubmit = async (e, thenPrint = false) => {
     e.preventDefault();
-    if (!quantity || quantity <= 0) {
+    const finalQty = parseInt(quantity, 10) || 1;
+    if (finalQty <= 0) {
       setErrorMessage('Quantity must be at least 1 unit.');
       return;
     }
-    if (creditAmount === '' || isNaN(Number(creditAmount)) || Number(creditAmount) < 0) {
-      setErrorMessage('Please enter a valid Credit Amount.');
+    const finalCredit = parseFloat(creditAmount);
+    if (isNaN(finalCredit) || finalCredit < 0) {
+      setErrorMessage('Please enter a valid Credit Amount (up to 2 decimals).');
       return;
     }
 
@@ -131,16 +201,16 @@ export default function CreditMemoModal({
         product_name: target?.name || target?.product_name,
         sku: target?.code || target?.sku,
         supplier_name: target?.supplier_name || 'Savemore',
-        company: target?.company || 'Pingcon / Bonita',
+        company: 'Wholesale Distribution',
         customer_ae_name: target?.ae_name || target?.customer_ae_name || 'N/A',
         customer_ae_email: target?.ae_email || target?.customer_ae_email || '',
-        quantity: Number(quantity),
+        quantity: finalQty,
         unit_name: target?.unit_name || 'pc',
-        unit_price: Number(unitPrice),
-        amount: Number(amount),
+        unit_price: Number(Number(unitPrice || 0).toFixed(2)),
+        amount: Number(Number(amount || 0).toFixed(2)),
         pull_out_ref: pullOutRef.trim() || 'Warehouse Pull-Out',
         pull_out_date: pullOutDate,
-        credit_amount: Number(creditAmount),
+        credit_amount: Number(finalCredit.toFixed(2)),
         credit_issued_by: currentUser?.name || 'Danilo Alvaro Jr. (Super Admin)',
         credit_issued_by_email: currentUser?.email || 'finance2@keysysincorporated.com',
         notes: notes.trim()
@@ -173,6 +243,7 @@ export default function CreditMemoModal({
 
   const targetReport = activeReport || creditMemo || report || {};
   const currentAeName = targetReport.ae_name || targetReport.customer_ae_name || 'Unassigned';
+
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in">
@@ -272,18 +343,37 @@ export default function CreditMemoModal({
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Quantity *
                 </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={quantity}
-                    onChange={(e) => handleQuantityChange(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-black font-mono text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800"
-                  />
-                  <span className="absolute right-3 top-2 text-[11px] font-bold text-slate-400">
-                    {targetReport.unit_name || 'pc'}
-                  </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => stepQuantity(-1)}
+                    className="w-8 h-9 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 transition-colors cursor-pointer"
+                    title="Decrease Quantity"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+
+                  <div className="relative flex-1">
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={quantity}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => handleQuantityChange(e.target.value)}
+                      onBlur={handleQuantityBlur}
+                      className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-black font-mono text-center text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => stepQuantity(1)}
+                    className="w-8 h-9 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 transition-colors cursor-pointer"
+                    title="Increase Quantity"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
 
@@ -292,10 +382,12 @@ export default function CreditMemoModal({
                   Unit Price (₱ w/ VAT)
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={unitPrice}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => handleUnitPriceChange(e.target.value)}
+                  onBlur={handleUnitPriceBlur}
                   placeholder="0.00"
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800"
                 />
@@ -306,14 +398,12 @@ export default function CreditMemoModal({
                   Gross Amount (₱)
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={amount}
-                  onChange={(e) => {
-                    const a = parseFloat(e.target.value) || 0;
-                    setAmount(a);
-                    setCreditAmount(a);
-                  }}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => handleAmountChange(e.target.value)}
+                  onBlur={handleAmountBlur}
                   className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold font-mono text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600"
                 />
               </div>
@@ -387,11 +477,13 @@ export default function CreditMemoModal({
                   ₱
                 </span>
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   required
                   value={creditAmount}
-                  onChange={(e) => setCreditAmount(e.target.value)}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => handleCreditAmountChange(e.target.value)}
+                  onBlur={handleCreditAmountBlur}
                   placeholder="0.00"
                   className="w-full pl-8 pr-4 py-2.5 bg-white dark:bg-slate-900 border-2 border-emerald-400 dark:border-emerald-600 rounded-xl text-base font-black font-mono text-emerald-900 dark:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                 />

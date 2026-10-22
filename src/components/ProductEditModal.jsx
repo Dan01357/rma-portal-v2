@@ -93,18 +93,8 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
           setSelectedAe(null);
         }
 
-        // Company detection
-        if (product.company) {
-          setCompany(product.company);
-        } else {
-          const sup = String(product.supplier_name || product.supplierName || '').toLowerCase();
-          const prodName = String(product.name || '').toLowerCase();
-          if (sup.includes('a2z') || sup.includes('keysys') || prodName.includes('a2z') || prodName.includes('keysys')) {
-            setCompany('A2Z2GO / Keysys');
-          } else {
-            setCompany('Pingcon / Bonita');
-          }
-        }
+        // Default unified company
+        setCompany('Wholesale Distribution');
       } else {
         // Reset for new product
         setName('');
@@ -117,7 +107,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         setImageUrl('');
         setPhotoPreview(null);
         setSelectedAe(null);
-        setCompany('Pingcon / Bonita');
+        setCompany('Wholesale Distribution');
       }
       setPhotoFile(null);
       setAeSearch('');
@@ -153,10 +143,33 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   };
 
   const handlePriceChange = (val) => {
-    setPrice(val);
-    const num = parseFloat(val);
-    if (!isNaN(num)) {
-      setPriceWithVat((num * 1.12).toFixed(2));
+    if (val === '' || /^\d*\.?\d{0,2}$/.test(val)) {
+      setPrice(val);
+      const num = parseFloat(val);
+      if (!isNaN(num)) {
+        setPriceWithVat((num * 1.12).toFixed(2));
+      }
+    }
+  };
+
+  const handlePriceBlur = () => {
+    if (price !== '') {
+      const p = Number((parseFloat(price) || 0).toFixed(2));
+      setPrice(p.toFixed(2));
+      setPriceWithVat((p * 1.12).toFixed(2));
+    }
+  };
+
+  const handlePriceWithVatChange = (val) => {
+    if (val === '' || /^\d*\.?\d{0,2}$/.test(val)) {
+      setPriceWithVat(val);
+    }
+  };
+
+  const handlePriceWithVatBlur = () => {
+    if (priceWithVat !== '') {
+      const p = Number((parseFloat(priceWithVat) || 0).toFixed(2));
+      setPriceWithVat(p.toFixed(2));
     }
   };
 
@@ -226,8 +239,8 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         code: code.trim() || null,
         name: name.trim(),
         supplierName: supplierName.trim() || 'Savemore',
-        price: parseFloat(price) || 0,
-        priceWithVat: parseFloat(priceWithVat) || parseFloat(price) || 0,
+        price: Number((parseFloat(price) || 0).toFixed(2)),
+        priceWithVat: Number((parseFloat(priceWithVat) || parseFloat(price) || 0).toFixed(2)),
         unitName: unitName.trim() || 'pc',
         imageUrl: finalImageUrl || null,
         aeName: selectedAe.name,
@@ -522,10 +535,12 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                   Net Price (₱)
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={price}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => handlePriceChange(e.target.value)}
+                  onBlur={handlePriceBlur}
                   placeholder="0.00"
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                 />
@@ -536,10 +551,12 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                   Price w/ VAT (₱)
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={priceWithVat}
-                  onChange={(e) => setPriceWithVat(e.target.value)}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => handlePriceWithVatChange(e.target.value)}
+                  onBlur={handlePriceWithVatBlur}
                   placeholder="0.00"
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-emerald-700 dark:text-emerald-400 focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                 />

@@ -107,6 +107,7 @@ export default function App() {
   const [selectedCreditMemoReport, setSelectedCreditMemoReport] = useState(null);
   const [editingCreditMemo, setEditingCreditMemo] = useState(null);
   const [voucherModalMemo, setVoucherModalMemo] = useState(null);
+  const [voucherModalMemos, setVoucherModalMemos] = useState([]);
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
 
   // Listen to browser navigation
@@ -430,8 +431,14 @@ export default function App() {
     setIsCreditMemoModalOpen(true);
   };
 
-  const handleViewCreditMemoVoucher = (memo) => {
-    setVoucherModalMemo(memo);
+  const handleViewCreditMemoVoucher = (memoOrMemos) => {
+    if (Array.isArray(memoOrMemos)) {
+      setVoucherModalMemos(memoOrMemos);
+      setVoucherModalMemo(memoOrMemos[0] || null);
+    } else {
+      setVoucherModalMemo(memoOrMemos);
+      setVoucherModalMemos(memoOrMemos ? [memoOrMemos] : []);
+    }
     setIsVoucherModalOpen(true);
   };
 
@@ -447,6 +454,23 @@ export default function App() {
       itemName: `${memo.credit_memo_number} (₱${Number(memo.credit_amount || 0).toLocaleString()})`,
       itemType: 'credit memo',
       itemDetails: `RMA: ${memo.rma_number || 'N/A'} • Product: ${memo.product_name || 'N/A'}`
+    });
+  };
+
+  const requestBulkDeleteCreditMemos = (memos) => {
+    if (!canDeleteReports) {
+      showToast('You do not have permission to void credit memos.', 'error');
+      return;
+    }
+    if (!memos || memos.length === 0) return;
+
+    setDeleteModalState({
+      type: 'bulk_credit_memos',
+      items: memos,
+      title: `Void & Delete ${memos.length} Selected Credit Memos?`,
+      itemName: `${memos.length} Credit Memos will be permanently voided from database`,
+      itemType: 'credit memos',
+      itemDetails: memos.slice(0, 3).map(m => m.credit_memo_number).join(', ') + (memos.length > 3 ? '...' : '')
     });
   };
 
@@ -493,6 +517,14 @@ export default function App() {
         await creditMemoService.deleteCreditMemo(memo.credit_memo_number, memo.report_id);
         setCreditMemosList(prev => prev.filter(m => m.credit_memo_number !== memo.credit_memo_number));
         showToast(`Credit Memo ${memo.credit_memo_number} voided and removed.`, 'success');
+        refreshAllData();
+      } else if (deleteModalState.type === 'bulk_credit_memos') {
+        const items = deleteModalState.items || [];
+        const memoNumbers = items.map(m => m.credit_memo_number);
+        await creditMemoService.deleteMultipleCreditMemos(memoNumbers);
+        const numSet = new Set(memoNumbers);
+        setCreditMemosList(prev => prev.filter(m => !numSet.has(m.credit_memo_number)));
+        showToast(`Successfully voided and deleted ${items.length} credit memos from database.`, 'success');
         refreshAllData();
       }
       setDeleteModalState(null);
@@ -2342,7 +2374,9 @@ export default function App() {
                 onOpenCreateModal={handleOpenCreateCreditMemo}
                 onEditCreditMemo={handleEditCreditMemo}
                 onViewVoucher={handleViewCreditMemoVoucher}
+                onPrintBulk={handleViewCreditMemoVoucher}
                 onRequestDeleteCreditMemo={requestDeleteCreditMemo}
+                onRequestBulkDeleteCreditMemo={requestBulkDeleteCreditMemos}
               />
             )}
 
@@ -2469,8 +2503,10 @@ export default function App() {
         onClose={() => {
           setIsVoucherModalOpen(false);
           setVoucherModalMemo(null);
+          setVoucherModalMemos([]);
         }}
         creditMemo={voucherModalMemo}
+        creditMemos={voucherModalMemos}
       />
 
       {/* Fullscreen Image Lightbox Modal */}

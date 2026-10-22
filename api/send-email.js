@@ -105,7 +105,8 @@ export default async function handler(req, res) {
       subject,
       html,
       text,
-      isTestMode = false
+      isTestMode = false,
+      attachments = []
     } = payload || {};
 
     const senderEmail = from || smtpUser;
@@ -158,7 +159,8 @@ export default async function handler(req, res) {
       cc: finalCc,
       subject: finalSubject,
       text: finalText,
-      html: finalHtml
+      html: finalHtml,
+      attachments: Array.isArray(attachments) ? attachments : []
     };
 
     const info = await transporter.sendMail(mailOptions);

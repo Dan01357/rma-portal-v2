@@ -12,12 +12,14 @@ import {
   ArrowUp, 
   ArrowDown, 
   Download, 
-  FileText, 
   RotateCcw,
   Building2,
   Calendar,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Database,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import TablePagination from './TablePagination';
 
@@ -26,16 +28,18 @@ export default function CreditMemosTab({
   onOpenCreateModal,
   onEditCreditMemo,
   onViewVoucher,
+  onPrintBulk,
   onRequestDeleteCreditMemo,
+  onRequestBulkDeleteCreditMemo,
   recentReportsList = [],
   currentUser
 }) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [companyFilter, setCompanyFilter] = useState('all');
   const [sortField, setSortField] = useState('credit_issued_at');
   const [sortDirection, setSortDirection] = useState('desc');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [selectedMemoNumbers, setSelectedMemoNumbers] = useState(new Set());
 
   // Financial summary metrics
   const metrics = useMemo(() => {
@@ -57,7 +61,7 @@ export default function CreditMemosTab({
     };
   }, [creditMemosList]);
 
-  // Filter & sort
+  // Filter & sort (Divisions removed completely)
   const processedMemos = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     let list = creditMemosList.filter(item => {
@@ -73,13 +77,6 @@ export default function CreditMemosTab({
         );
         if (!matches) return false;
       }
-
-      if (companyFilter !== 'all') {
-        const comp = String(item.company || '').toLowerCase();
-        if (companyFilter === 'pingcon' && !comp.includes('pingcon')) return false;
-        if (companyFilter === 'keysys' && !comp.includes('keysys') && !comp.includes('a2z')) return false;
-      }
-
       return true;
     });
 
@@ -115,13 +112,67 @@ export default function CreditMemosTab({
     });
 
     return list;
-  }, [creditMemosList, searchQuery, companyFilter, sortField, sortDirection]);
+  }, [creditMemosList, searchQuery, sortField, sortDirection]);
 
   // Paginated slice
   const paginatedMemos = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
     return processedMemos.slice(start, start + pageSize);
   }, [processedMemos, currentPage, pageSize]);
+
+  // Selection handlers
+  const isAllPageSelected = paginatedMemos.length > 0 && paginatedMemos.every(m => selectedMemoNumbers.has(m.credit_memo_number));
+  const isSomeSelected = selectedMemoNumbers.size > 0;
+
+  const toggleSelect = (cmNum) => {
+    setSelectedMemoNumbers(prev => {
+      const next = new Set(prev);
+      if (next.has(cmNum)) {
+        next.delete(cmNum);
+      } else {
+        next.add(cmNum);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (isAllPageSelected) {
+      setSelectedMemoNumbers(prev => {
+        const next = new Set(prev);
+        paginatedMemos.forEach(m => next.delete(m.credit_memo_number));
+        return next;
+      });
+    } else {
+      setSelectedMemoNumbers(prev => {
+        const next = new Set(prev);
+        paginatedMemos.forEach(m => next.add(m.credit_memo_number));
+        return next;
+      });
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedMemoNumbers(new Set());
+  };
+
+  const handleBulkPrint = () => {
+    const selected = creditMemosList.filter(m => selectedMemoNumbers.has(m.credit_memo_number));
+    if (selected.length === 0) return;
+    if (onPrintBulk) {
+      onPrintBulk(selected);
+    } else if (onViewVoucher) {
+      onViewVoucher(selected);
+    }
+  };
+
+  const handleBulkDelete = () => {
+    const selected = creditMemosList.filter(m => selectedMemoNumbers.has(m.credit_memo_number));
+    if (selected.length === 0) return;
+    if (onRequestBulkDeleteCreditMemo) {
+      onRequestBulkDeleteCreditMemo(selected);
+    }
+  };
 
   const handleSort = (field) => {
     setCurrentPage(1);
@@ -133,6 +184,7 @@ export default function CreditMemosTab({
     }
   };
 
+  // Fixed CSV Export with Blob and UTF-8 BOM so Excel opens all data cleanly
   const handleExportCsv = () => {
     if (!processedMemos.length) return;
     const headers = [
@@ -142,11 +194,11 @@ export default function CreditMemosTab({
       'Product Name',
       'Quantity',
       'Unit',
-      'Unit Price',
-      'Gross Amount',
+      'Unit Price (PHP)',
+      'Gross Amount (PHP)',
       'Pull Out Ref',
       'Pull Out Date',
-      'Credit Amount',
+      'Credit Amount (PHP)',
       'Credit Issued By',
       'Issued At',
       'Supplier',
@@ -160,25 +212,27 @@ export default function CreditMemosTab({
       `"${(m.product_name || '').replace(/"/g, '""')}"`,
       m.quantity || 1,
       `"${m.unit_name || 'pc'}"`,
-      m.unit_price || 0,
-      m.amount || 0,
+      (Number(m.unit_price) || 0).toFixed(2),
+      (Number(m.amount) || 0).toFixed(2),
       `"${(m.pull_out_ref || '').replace(/"/g, '""')}"`,
       `"${m.pull_out_date || ''}"`,
-      m.credit_amount || 0,
+      (Number(m.credit_amount) || Number(m.amount) || 0).toFixed(2),
       `"${(m.credit_issued_by || '').replace(/"/g, '""')}"`,
       `"${m.credit_issued_at ? new Date(m.credit_issued_at).toLocaleString() : ''}"`,
       `"${(m.supplier_name || '').replace(/"/g, '""')}"`,
       `"${(m.customer_ae_name || '').replace(/"/g, '""')}"`
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
+    link.href = url;
     link.setAttribute('download', `Finance_Credit_Memos_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -268,6 +322,7 @@ export default function CreditMemosTab({
                 type="button"
                 onClick={handleExportCsv}
                 className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                title="Export all credit memos to Excel CSV"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Export CSV</span>
@@ -285,9 +340,9 @@ export default function CreditMemosTab({
           </div>
         </div>
 
-        {/* Search & Filter Toolbar */}
+        {/* Search Toolbar (Divisions dropdown completely removed) */}
         <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-3.5 space-y-2.5">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+          <div className="flex items-center gap-2.5">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
               <input
@@ -313,19 +368,6 @@ export default function CreditMemosTab({
                 </button>
               )}
             </div>
-
-            <select
-              value={companyFilter}
-              onChange={(e) => {
-                setCompanyFilter(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-emerald-600 cursor-pointer"
-            >
-              <option value="all">All Divisions</option>
-              <option value="pingcon">Pingcon / Bonita</option>
-              <option value="keysys">A2Z2GO / Keysys</option>
-            </select>
           </div>
 
           <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
@@ -337,6 +379,50 @@ export default function CreditMemosTab({
             </span>
           </div>
         </div>
+
+        {/* Floating Bulk Action Bar (When items are selected) */}
+        {isSomeSelected && (
+          <div className="p-3 bg-emerald-50 dark:bg-emerald-950/70 border-2 border-emerald-300 dark:border-emerald-800 rounded-2xl flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-xs font-black text-emerald-950 dark:text-emerald-200">
+                {selectedMemoNumbers.size} Credit Memo{selectedMemoNumbers.size > 1 ? 's' : ''} Selected
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleBulkPrint}
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                title="Print all selected credit memos sequentially"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Print Selected ({selectedMemoNumbers.size})</span>
+              </button>
+
+              {onRequestBulkDeleteCreditMemo && (
+                <button
+                  type="button"
+                  onClick={handleBulkDelete}
+                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  title="Void and delete all selected credit memos"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Selected ({selectedMemoNumbers.size})</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="px-2.5 py-1.5 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white text-xs font-bold transition-colors cursor-pointer"
+              >
+                Clear Selection
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Table Records */}
         {creditMemosList.length === 0 ? (
@@ -369,9 +455,21 @@ export default function CreditMemosTab({
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-50/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    
+                    {/* Header Select All Checkbox */}
+                    <th className="py-3 px-3 text-center w-10">
+                      <input
+                        type="checkbox"
+                        checked={isAllPageSelected}
+                        onChange={toggleSelectAll}
+                        title="Select All on this page"
+                        className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                      />
+                    </th>
+
                     <th 
                       onClick={() => handleSort('credit_memo_number')}
-                      className="py-3 px-3.5 font-black text-slate-900 dark:text-white cursor-pointer select-none hover:text-emerald-600 transition-colors"
+                      className="py-3 px-3 font-black text-slate-900 dark:text-white cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
                       <div className="flex items-center gap-1">
                         <span>CM #</span>
@@ -416,115 +514,134 @@ export default function CreditMemosTab({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                  {paginatedMemos.map(memo => (
-                    <tr 
-                      key={memo.credit_memo_number}
-                      className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors"
-                    >
-                      {/* CM # */}
-                      <td className="py-3 px-3.5">
-                        <button
-                          type="button"
-                          onClick={() => onViewVoucher(memo)}
-                          className="font-mono font-black text-xs text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
-                          title="Click to view official printable voucher"
-                        >
-                          <Receipt className="w-3.5 h-3.5 shrink-0" />
-                          <span>{memo.credit_memo_number}</span>
-                        </button>
-                        <div className="text-[10px] text-slate-400 dark:text-slate-500 font-sans">
-                          {memo.credit_issued_at ? new Date(memo.credit_issued_at).toLocaleDateString() : ''}
-                        </div>
-                      </td>
+                  {paginatedMemos.map(memo => {
+                    const isSelected = selectedMemoNumbers.has(memo.credit_memo_number);
+                    return (
+                      <tr 
+                        key={memo.credit_memo_number}
+                        className={`transition-colors ${isSelected ? 'bg-emerald-50/50 dark:bg-emerald-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/50'}`}
+                      >
+                        {/* Checkbox */}
+                        <td className="py-3 px-3 text-center w-10">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelect(memo.credit_memo_number)}
+                            className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                          />
+                        </td>
 
-                      {/* RMA # */}
-                      <td className="py-3 px-3.5 font-mono font-bold text-blue-700 dark:text-blue-400 text-xs">
-                        {memo.rma_number || 'N/A'}
-                        <div className="text-[10px] text-slate-400 font-sans">
-                          Supplier: {memo.supplier_name || 'Savemore'}
-                        </div>
-                      </td>
-
-                      {/* Product Name & Barcode */}
-                      <td className="py-3 px-3.5 max-w-[200px]">
-                        <div className="font-bold text-slate-900 dark:text-white truncate" title={memo.product_name}>
-                          {memo.product_name}
-                        </div>
-                        <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                          {memo.barcode} {memo.sku ? `• SKU: ${memo.sku}` : ''}
-                        </div>
-                      </td>
-
-                      {/* Quantity */}
-                      <td className="py-3 px-3 text-center font-bold font-mono text-slate-900 dark:text-white">
-                        {memo.quantity} {memo.unit_name || 'pc'}
-                      </td>
-
-                      {/* Gross Amount */}
-                      <td className="py-3 px-3 text-right font-mono text-slate-600 dark:text-slate-400">
-                        ₱{Number(memo.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                      </td>
-
-                      {/* Pull Out Reference */}
-                      <td className="py-3 px-3.5 max-w-[180px]">
-                        <div className="font-bold text-slate-800 dark:text-slate-200 truncate" title={memo.pull_out_ref}>
-                          {memo.pull_out_ref || 'Warehouse Pull-Out'}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-mono">
-                          Date: {memo.pull_out_date || 'N/A'}
-                        </div>
-                      </td>
-
-                      {/* Credit Amount (₱) */}
-                      <td className="py-3 px-3.5 text-right font-black font-mono text-emerald-700 dark:text-emerald-400 text-sm">
-                        ₱{Number(memo.credit_amount || memo.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                      </td>
-
-                      {/* Credit Issued By */}
-                      <td className="py-3 px-3.5">
-                        <div className="font-bold text-slate-900 dark:text-white text-xs truncate max-w-[140px]" title={memo.credit_issued_by}>
-                          {memo.credit_issued_by || 'Finance'}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-mono truncate max-w-[140px]">
-                          {memo.credit_issued_by_email || ''}
-                        </div>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="py-3 px-3 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
+                        {/* CM # */}
+                        <td className="py-3 px-3">
                           <button
                             type="button"
                             onClick={() => onViewVoucher(memo)}
-                            className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                            title="Print Official Credit Voucher"
+                            className="font-mono font-black text-xs text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
+                            title="Click to view official printable voucher"
                           >
-                            <Printer className="w-4 h-4" />
+                            <Receipt className="w-3.5 h-3.5 shrink-0" />
+                            <span>{memo.credit_memo_number}</span>
                           </button>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-sans">
+                              {memo.credit_issued_at ? new Date(memo.credit_issued_at).toLocaleDateString() : ''}
+                            </span>
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.2 rounded-full" title="Stored in Supabase database">
+                              <Database className="w-2.5 h-2.5" />
+                              <span>DB</span>
+                            </span>
+                          </div>
+                        </td>
 
-                          <button
-                            type="button"
-                            onClick={() => onEditCreditMemo(memo)}
-                            className="p-1.5 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                            title="Edit Credit Memo"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
+                        {/* RMA # */}
+                        <td className="py-3 px-3.5 font-mono font-bold text-blue-700 dark:text-blue-400 text-xs">
+                          {memo.rma_number || 'N/A'}
+                          <div className="text-[10px] text-slate-400 font-sans">
+                            Supplier: {memo.supplier_name || 'Savemore'}
+                          </div>
+                        </td>
 
-                          {onRequestDeleteCreditMemo && (
+                        {/* Product Name & Barcode */}
+                        <td className="py-3 px-3.5 max-w-[200px]">
+                          <div className="font-bold text-slate-900 dark:text-white truncate" title={memo.product_name}>
+                            {memo.product_name}
+                          </div>
+                          <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                            {memo.barcode} {memo.sku ? `• SKU: ${memo.sku}` : ''}
+                          </div>
+                        </td>
+
+                        {/* Quantity */}
+                        <td className="py-3 px-3 text-center font-bold font-mono text-slate-900 dark:text-white">
+                          {memo.quantity} {memo.unit_name || 'pc'}
+                        </td>
+
+                        {/* Gross Amount (Strict 2 Decimals) */}
+                        <td className="py-3 px-3 text-right font-mono text-slate-600 dark:text-slate-400">
+                          ₱{Number(memo.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+
+                        {/* Pull Out Reference */}
+                        <td className="py-3 px-3.5 max-w-[180px]">
+                          <div className="font-bold text-slate-800 dark:text-slate-200 truncate" title={memo.pull_out_ref}>
+                            {memo.pull_out_ref || 'Warehouse Pull-Out'}
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-mono">
+                            Date: {memo.pull_out_date || 'N/A'}
+                          </div>
+                        </td>
+
+                        {/* Credit Amount (₱) (Strict 2 Decimals) */}
+                        <td className="py-3 px-3.5 text-right font-black font-mono text-emerald-700 dark:text-emerald-400 text-sm">
+                          ₱{Number(memo.credit_amount || memo.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+
+                        {/* Credit Issued By */}
+                        <td className="py-3 px-3.5">
+                          <div className="font-bold text-slate-900 dark:text-white text-xs truncate max-w-[140px]" title={memo.credit_issued_by}>
+                            {memo.credit_issued_by || 'Finance'}
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-mono truncate max-w-[140px]">
+                            {memo.credit_issued_by_email || ''}
+                          </div>
+                        </td>
+
+                        {/* Actions */}
+                        <td className="py-3 px-3 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
                             <button
                               type="button"
-                              onClick={() => onRequestDeleteCreditMemo(memo)}
-                              className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                              title="Void / Delete Credit Memo"
+                              onClick={() => onViewVoucher(memo)}
+                              className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                              title="Print Official Credit Voucher"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Printer className="w-4 h-4" />
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+
+                            <button
+                              type="button"
+                              onClick={() => onEditCreditMemo(memo)}
+                              className="p-1.5 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Credit Memo"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+
+                            {onRequestDeleteCreditMemo && (
+                              <button
+                                type="button"
+                                onClick={() => onRequestDeleteCreditMemo(memo)}
+                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                                title="Void / Delete Credit Memo"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -547,3 +664,4 @@ export default function CreditMemosTab({
     </div>
   );
 }
+

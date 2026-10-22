@@ -15,47 +15,13 @@
 
 export const notificationService = {
   /**
-   * Determine company division from product / report details
+   * Determine company configuration (Divisions removed - unified corporate setup)
    */
   resolveCompanyConfig(report) {
-    const rawCompany = String(report.company || '').toLowerCase();
-    const rawSupplier = String(report.supplier_name || report.supplierName || '').toLowerCase();
-    const rawName = String(report.name || '').toLowerCase();
-    const rawBrand = String(report.brand_name || report.brand || '').toLowerCase();
-
-    const isA2ZOrKeysys = (
-      rawCompany.includes('a2z') || 
-      rawCompany.includes('keysys') ||
-      rawSupplier.includes('a2z') || 
-      rawSupplier.includes('keysys') ||
-      rawBrand.includes('keysys') ||
-      rawName.includes('a2z') ||
-      rawName.includes('keysys')
-    );
-
-    // The sender email is strictly finance2@keysysincorporated.com for both divisions
-    const UNIFIED_SENDER_EMAIL = 'finance2@keysysincorporated.com';
-
-    if (isA2ZOrKeysys) {
-      return {
-        companyName: 'A2Z2GO / Keysys',
-        senderEmail: UNIFIED_SENDER_EMAIL,
-        senderName: 'Keysys / A2Z2GO Finance (RMA Portal)',
-        toEmail: 'azgodev@gmail.com',
-        baseCcList: [
-          'mgan@a2z2go.net',
-          'marketing@a2z2go.net',
-          'azgan@a2z2go.net',
-          'jaezelle.benito@pingconmarketing.com'
-        ]
-      };
-    }
-
-    // Default: Pingcon / Bonita
     return {
-      companyName: 'Pingcon / Bonita',
-      senderEmail: UNIFIED_SENDER_EMAIL,
-      senderName: 'Pingcon Finance (RMA Portal)',
+      companyName: 'Wholesale RMA Returns',
+      senderEmail: 'finance2@keysysincorporated.com',
+      senderName: 'Wholesale RMA Finance Portal',
       toEmail: 'azgodev@gmail.com',
       baseCcList: [
         'mgan@pingconmarketing.com',
@@ -102,11 +68,6 @@ export const notificationService = {
           .col-val { display: table-cell; padding: 6px 0; font-size: 13px; color: #0f172a; font-weight: 700; }
           .section-title { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; margin: 20px 0 10px; border-bottom: 2px solid #f1f5f9; padding-bottom: 6px; }
           .reason-box { background: #fff1f2; border: 1px solid #fecdd3; color: #be123c; border-radius: 10px; padding: 12px 16px; margin: 12px 0; font-size: 13px; font-weight: 700; }
-          .ae-box { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; border-radius: 10px; padding: 12px 16px; margin: 12px 0; font-size: 13px; }
-          .photo-grid { margin-top: 10px; }
-          .photo-thumb { display: inline-block; width: 90px; height: 90px; border-radius: 10px; overflow: hidden; border: 1px solid #cbd5e1; margin-right: 8px; margin-bottom: 8px; vertical-align: top; }
-          .photo-thumb img { width: 100%; height: 100%; object-fit: cover; }
-          .btn { display: inline-block; padding: 10px 20px; background: #2563eb; color: #ffffff !important; text-decoration: none; border-radius: 10px; font-size: 13px; font-weight: 800; margin-top: 14px; }
           .footer { background: #f1f5f9; padding: 16px 28px; font-size: 11px; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; }
         </style>
       </head>
@@ -190,10 +151,17 @@ export const notificationService = {
 
             ${photos.length > 0 ? `
             <div class="section-title">Proof Photos (${photos.length})</div>
-            <div class="photo-grid">
+            <div style="margin-top: 14px;">
               ${photos.map((p, idx) => `
-                <div class="photo-thumb">
-                  <a href="${p}" target="_blank"><img src="${p}" alt="Proof ${idx + 1}" /></a>
+                <div style="margin-bottom: 18px; text-align: center;">
+                  <img 
+                    src="${p}" 
+                    alt="Proof Photo ${idx + 1}" 
+                    style="max-width: 100%; max-height: 420px; width: auto; height: auto; border-radius: 12px; border: 1px solid #cbd5e1; display: inline-block; box-shadow: 0 4px 10px rgba(0,0,0,0.06);" 
+                  />
+                  <div style="font-size: 11px; color: #64748b; margin-top: 6px; font-weight: 700;">
+                    Photo ${idx + 1} of ${photos.length}
+                  </div>
                 </div>
               `).join('')}
             </div>` : ''}
@@ -240,7 +208,17 @@ export const notificationService = {
 
       const htmlBody = this.generateEmailHtml(report, config, testActive);
 
-      console.log(`[RMA Email Dispatch] (TestMode: ${testActive}) Sending from "${config.senderEmail}" to "${toEmail}", CC: [${finalCcList.join(', ')}]`);
+      const photos = Array.isArray(report.photos) 
+        ? report.photos 
+        : (typeof report.photos === 'string' ? JSON.parse(report.photos || '[]') : []);
+
+      // Attach proof images so Gmail provides built-in native in-page lightbox viewer
+      const attachments = photos.map((p, idx) => ({
+        filename: `proof_photo_${idx + 1}.jpg`,
+        path: p
+      }));
+
+      console.log(`[RMA Email Dispatch] (TestMode: ${testActive}) Sending from "${config.senderEmail}" to "${toEmail}", CC: [${finalCcList.join(', ')}] with ${attachments.length} attachments`);
 
       const res = await fetch('/api/send-email', {
         method: 'POST',
@@ -255,6 +233,7 @@ export const notificationService = {
           subject,
           html: htmlBody,
           isTestMode: testActive,
+          attachments,
           text: `${testActive ? 'Test - ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}`
         })
       });
