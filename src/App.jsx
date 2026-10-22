@@ -222,11 +222,14 @@ export default function App() {
     if (!confirmed) return;
 
     try {
+      // Optimistically remove from UI immediately
+      setRecentReportsList(prev => prev.filter(r => (id ? r.id !== id : r.rma_number !== rmaNumber)));
       await catalogService.deleteReport(id, rmaNumber);
       showToast(`Deleted return report RMA #${rmaNumber}.`, 'success');
       refreshAllData();
     } catch (e) {
       showToast(e.message || 'Failed to delete report', 'error');
+      refreshAllData();
     }
   };
 
@@ -1185,32 +1188,32 @@ export default function App() {
 
             {/* TAB 2: INCOMING RETURN REPORTS */}
             {adminActiveTab === 'reports' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="text-base font-black text-slate-900 tracking-tight">
+                      <h3 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
                         Incoming Return Reports
                       </h3>
-                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-blue-100 text-blue-800">
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
                         {recentReportsList.length} Total
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
                       Recent RMA submissions from warehouse & customer returns.
                     </p>
                   </div>
 
                   <div className="flex items-center gap-2 self-end sm:self-auto">
                     {/* View Switcher: Rows vs Cards */}
-                    <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200/80">
+                    <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200/80 dark:border-slate-700">
                       <button
                         type="button"
                         onClick={() => handleSetReportsViewMode('table')}
                         className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
                           reportsViewMode === 'table'
-                            ? 'bg-white text-blue-700 shadow-sm'
-                            : 'text-slate-500 hover:text-slate-800'
+                            ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
+                            : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                         }`}
                         title="Rows / Table View (with SN column)"
                       >
@@ -1222,8 +1225,8 @@ export default function App() {
                         onClick={() => handleSetReportsViewMode('grid')}
                         className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
                           reportsViewMode === 'grid'
-                            ? 'bg-white text-blue-700 shadow-sm'
-                            : 'text-slate-500 hover:text-slate-800'
+                            ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
+                            : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                         }`}
                         title="Grid / Cards View"
                       >
@@ -1235,7 +1238,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setIsReportsModalOpen(true)}
-                      className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs flex items-center gap-1 transition-colors shrink-0"
+                      className="px-3.5 py-2 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold rounded-xl text-xs flex items-center gap-1 transition-colors shrink-0"
                     >
                       <span>Full Audit Log</span>
                       <ChevronRight className="w-3.5 h-3.5" />
@@ -1244,7 +1247,7 @@ export default function App() {
                 </div>
 
                 {/* Filter / Search & Sort Controls Toolbar */}
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2.5">
+                <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-3.5 space-y-2.5">
                   <div className="flex flex-col md:flex-row md:items-center gap-2.5">
                     {/* Search Input */}
                     <div className="relative flex-1">
@@ -1257,7 +1260,7 @@ export default function App() {
                           setReportsCurrentPage(1);
                         }}
                         placeholder="Search by SN (#), RMA #, barcode, item name, reporter, or reason..."
-                        className="w-full pl-10 pr-9 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-600 transition-all"
+                        className="w-full pl-10 pr-9 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600 transition-all"
                       />
                       {reportsSearchQuery && (
                         <button
@@ -1266,7 +1269,7 @@ export default function App() {
                             setReportsSearchQuery('');
                             setReportsCurrentPage(1);
                           }}
-                          className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-100"
+                          className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
@@ -1280,7 +1283,7 @@ export default function App() {
                         setReportsReasonFilter(e.target.value);
                         setReportsCurrentPage(1);
                       }}
-                      className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-600"
+                      className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer"
                     >
                       <option value="all">All Reasons</option>
                       {DEFECT_REASONS.map(r => (
@@ -1295,7 +1298,7 @@ export default function App() {
                         setReportsStatusFilter(e.target.value);
                         setReportsCurrentPage(1);
                       }}
-                      className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-600"
+                      className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer"
                     >
                       <option value="all">All Status</option>
                       <option value="logged">Logged / Recognized</option>
@@ -1307,7 +1310,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={resetReportsFilters}
-                        className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0"
+                        className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         <span>Reset</span>
@@ -1315,15 +1318,15 @@ export default function App() {
                     )}
                   </div>
 
-                  <div className="flex items-center justify-between text-[11px] text-slate-500 px-1 font-medium">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
                     <span>
-                      Showing <strong className="text-slate-900 font-bold">{processedReports.length}</strong> of {recentReportsList.length} reports
+                      Showing <strong className="text-slate-900 dark:text-white font-bold">{processedReports.length}</strong> of {recentReportsList.length} reports
                       {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all') && (
-                        <span className="text-blue-600 font-bold ml-1.5">• Filter active</span>
+                        <span className="text-blue-600 dark:text-blue-400 font-bold ml-1.5">• Filter active</span>
                       )}
                     </span>
-                    <span className="text-slate-400">
-                      Click column headers to sort (<strong className="text-slate-700 capitalize">{reportsSortField}</strong> {reportsSortDirection === 'asc' ? '▲' : '▼'})
+                    <span className="text-slate-400 dark:text-slate-500">
+                      Click column headers to sort (<strong className="text-slate-700 dark:text-slate-300 capitalize">{reportsSortField}</strong> {reportsSortDirection === 'asc' ? '▲' : '▼'})
                     </span>
                   </div>
                 </div>
@@ -1331,12 +1334,12 @@ export default function App() {
                 {recentReportsList.length === 0 ? (
                   <p className="text-xs text-slate-400 py-8 text-center">No return reports filed yet.</p>
                 ) : processedReports.length === 0 ? (
-                  <div className="text-center py-10 space-y-2 bg-slate-50 rounded-2xl border border-slate-200">
-                    <p className="text-xs font-bold text-slate-700">No return reports match the selected filters.</p>
+                  <div className="text-center py-10 space-y-2 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">No return reports match the selected filters.</p>
                     <button
                       type="button"
                       onClick={resetReportsFilters}
-                      className="text-xs font-bold text-blue-600 hover:underline"
+                      className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
                     >
                       Clear filters
                     </button>
@@ -1345,14 +1348,14 @@ export default function App() {
                   /* ============================================================ */
                   /* ROWS / TABLE VIEW: WITH SORTABLE COLUMNS & LIGHTBOX PHOTOS   */
                   /* ============================================================ */
-                  <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-xs">
                     <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse text-xs">
                         <thead>
-                          <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-black uppercase tracking-wider text-slate-500">
+                          <tr className="bg-slate-50/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
                             <th 
                               onClick={() => handleReportsSort('id')}
-                              className="py-3 px-3.5 font-black text-slate-900 w-16 cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              className="py-3 px-3.5 font-black text-slate-900 dark:text-white w-16 cursor-pointer select-none hover:text-blue-600 dark:hover:text-blue-400 transition-colors group"
                               title="Click to sort by Serial Number"
                             >
                               <div className="flex items-center">

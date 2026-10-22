@@ -178,24 +178,24 @@ export default function RMAReportsModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-5xl w-full p-5 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-5xl w-full p-5 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto">
         
         {/* Header & Controls */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
           <div className="flex items-center gap-2.5">
-            <div className="p-2.5 bg-blue-100 text-blue-700 rounded-2xl shadow-inner">
+            <div className="p-2.5 bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-400 rounded-2xl shadow-inner">
               <FileText className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-black text-slate-900">
+                <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
                   Logged RMA Return Reports
                 </h2>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-blue-100 text-blue-800">
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300">
                   {processedReports.length} Reports
                 </span>
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 Incoming return reports with clickable proof photos, reporter contact info, and GPS coordinates.
               </p>
             </div>
@@ -203,14 +203,14 @@ export default function RMAReportsModal({
 
           <div className="flex items-center gap-2 self-end sm:self-auto">
             {/* View Type Switcher */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200/80">
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200/80 dark:border-slate-700">
               <button
                 type="button"
                 onClick={() => handleSetViewMode('table')}
                 className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
                   viewMode === 'table'
-                    ? 'bg-white text-blue-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-800'
+                    ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
                 }`}
                 title="Rows / Table View (with SN column)"
               >
@@ -222,8 +222,8 @@ export default function RMAReportsModal({
                 onClick={() => handleSetViewMode('grid')}
                 className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
                   viewMode === 'grid'
-                    ? 'bg-white text-blue-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-800'
+                    ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
                 }`}
                 title="Grid / Cards View"
               >
@@ -234,7 +234,7 @@ export default function RMAReportsModal({
 
             <button
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -242,7 +242,7 @@ export default function RMAReportsModal({
         </div>
 
         {/* Filter & Sort Toolbar */}
-        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-2.5">
+        <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 space-y-2.5">
           <div className="flex flex-col md:flex-row md:items-center gap-2">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -254,7 +254,7 @@ export default function RMAReportsModal({
                   setCurrentPage(1);
                 }}
                 placeholder="Filter by SN (#), RMA #, barcode, item name, reporter, or defect..."
-                className="w-full pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500 shadow-xs"
+                className="w-full pl-9 pr-8 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-blue-500 shadow-xs"
               />
               {searchQuery && (
                 <button
@@ -263,7 +263,7 @@ export default function RMAReportsModal({
                     setSearchQuery('');
                     setCurrentPage(1);
                   }}
-                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 p-0.5 rounded-full"
+                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -277,7 +277,7 @@ export default function RMAReportsModal({
                   setReasonFilter(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-500 shadow-xs"
+                className="px-2.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-500 shadow-xs cursor-pointer"
               >
                 <option value="all">All Return Reasons</option>
                 {distinctReasons.map(r => (
@@ -291,7 +291,7 @@ export default function RMAReportsModal({
                   setStatusFilter(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-500 shadow-xs"
+                className="px-2.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-500 shadow-xs cursor-pointer"
               >
                 <option value="all">All Statuses</option>
                 <option value="logged">Logged in System</option>
@@ -302,7 +302,7 @@ export default function RMAReportsModal({
                 <button
                   type="button"
                   onClick={resetFilters}
-                  className="px-2.5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0"
+                  className="px-2.5 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0"
                   title="Reset all filters"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
@@ -316,9 +316,9 @@ export default function RMAReportsModal({
         {/* Content */}
         {processedReports.length === 0 ? (
           <div className="text-center py-12 space-y-2">
-            <Package className="w-10 h-10 text-slate-300 mx-auto" />
-            <h3 className="text-sm font-bold text-slate-700">No Return Reports Found</h3>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+            <Package className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto" />
+            <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">No Return Reports Found</h3>
+            <p className="text-xs text-slate-400 dark:text-slate-500 max-w-sm mx-auto">
               {hasActiveFilters 
                 ? 'No reports match your active filters. Click "Reset" to clear filters.' 
                 : 'Scan any item barcode in Reporter Mode and submit to record returns with proof photos.'}
@@ -328,14 +328,14 @@ export default function RMAReportsModal({
           /* ============================================================ */
           /* TABLE VIEW: WITH INTERACTIVE SORT HEADERS & LIGHTBOX PHOTOS  */
           /* ============================================================ */
-          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+          <div className="bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-xs">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-black uppercase tracking-wider text-slate-500 select-none">
+                  <tr className="bg-slate-50/90 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 select-none">
                     <th 
                       onClick={() => handleSort('id')}
-                      className="py-3 px-3.5 font-black text-slate-900 w-16 cursor-pointer hover:bg-slate-100/80 group"
+                      className="py-3 px-3.5 font-black text-slate-900 dark:text-white w-16 cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
                     >
                       <div className="flex items-center">
                         <span>SN</span>
@@ -344,7 +344,7 @@ export default function RMAReportsModal({
                     </th>
                     <th 
                       onClick={() => handleSort('rma_number')}
-                      className="py-3 px-3.5 font-bold cursor-pointer hover:bg-slate-100/80 group"
+                      className="py-3 px-3.5 font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
                     >
                       <div className="flex items-center">
                         <span>RMA #</span>
@@ -354,7 +354,7 @@ export default function RMAReportsModal({
                     <th className="py-3 px-3 w-14 text-center">Photo</th>
                     <th 
                       onClick={() => handleSort('barcode')}
-                      className="py-3 px-3.5 font-bold cursor-pointer hover:bg-slate-100/80 group"
+                      className="py-3 px-3.5 font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
                     >
                       <div className="flex items-center">
                         <span>Barcode</span>
@@ -363,7 +363,7 @@ export default function RMAReportsModal({
                     </th>
                     <th 
                       onClick={() => handleSort('name')}
-                      className="py-3 px-3.5 font-bold cursor-pointer hover:bg-slate-100/80 group"
+                      className="py-3 px-3.5 font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
                     >
                       <div className="flex items-center">
                         <span>Item Name</span>
@@ -372,7 +372,7 @@ export default function RMAReportsModal({
                     </th>
                     <th 
                       onClick={() => handleSort('reason')}
-                      className="py-3 px-3.5 font-bold cursor-pointer hover:bg-slate-100/80 group"
+                      className="py-3 px-3.5 font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
                     >
                       <div className="flex items-center">
                         <span>Reason</span>
@@ -381,7 +381,7 @@ export default function RMAReportsModal({
                     </th>
                     <th 
                       onClick={() => handleSort('reporter')}
-                      className="py-3 px-3.5 font-bold cursor-pointer hover:bg-slate-100/80 group"
+                      className="py-3 px-3.5 font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
                     >
                       <div className="flex items-center">
                         <span>Reported By</span>
@@ -390,7 +390,7 @@ export default function RMAReportsModal({
                     </th>
                     <th 
                       onClick={() => handleSort('status')}
-                      className="py-3 px-3 text-center font-bold cursor-pointer hover:bg-slate-100/80 group"
+                      className="py-3 px-3 text-center font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
                     >
                       <div className="flex items-center justify-center">
                         <span>Status</span>
@@ -399,7 +399,7 @@ export default function RMAReportsModal({
                     </th>
                     <th 
                       onClick={() => handleSort('created_at')}
-                      className="py-3 px-3.5 text-right font-bold cursor-pointer hover:bg-slate-100/80 group"
+                      className="py-3 px-3.5 text-right font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
                     >
                       <div className="flex items-center justify-end">
                         <span>Date & GPS</span>
@@ -407,13 +407,13 @@ export default function RMAReportsModal({
                       </div>
                     </th>
                     {canDeleteReports && (
-                      <th className="py-3 px-3.5 text-center font-bold select-none text-slate-500 w-16">
+                      <th className="py-3 px-3.5 text-center font-bold select-none text-slate-500 dark:text-slate-400 w-16">
                         Action
                       </th>
                     )}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-medium">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60 font-medium">
                   {paginatedReports.map((item) => {
                     const photoList = Array.isArray(item.photos) 
                       ? item.photos 
@@ -423,16 +423,16 @@ export default function RMAReportsModal({
                     const reporterContact = item.reporter_contact || (item.reported_by && item.reported_by.includes('(') ? item.reported_by.replace(/.*\((.*)\).*/, '$1') : '');
 
                     return (
-                      <tr key={item.id || item.rma_number} className="hover:bg-blue-50/30 transition-colors">
+                      <tr key={item.id || item.rma_number} className="hover:bg-blue-50/30 dark:hover:bg-slate-700/40 transition-colors">
                         {/* 1. SN COLUMN AT FAR LEFT */}
                         <td className="py-3 px-3.5 font-mono">
-                          <span className="font-black text-blue-900 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-lg text-xs">
+                          <span className="font-black text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg text-xs">
                             #{item.id}
                           </span>
                         </td>
 
                         {/* 2. RMA Number */}
-                        <td className="py-3 px-3.5 font-mono font-bold text-blue-700">
+                        <td className="py-3 px-3.5 font-mono font-bold text-blue-700 dark:text-blue-400">
                           {item.rma_number}
                         </td>
 
@@ -448,13 +448,13 @@ export default function RMAReportsModal({
                                 title: item.name || `Return ${item.rma_number}`,
                                 subtitle: `RMA #${item.rma_number} • Reported by ${reporterName} • ${item.reason || 'Damaged'}`
                               })}
-                              className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
+                              className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
                               title="Click to view full-size proof photo"
                             >
                               <img src={photoList[0]} alt="Proof" className="w-full h-full object-cover" />
                             </button>
                           ) : (
-                            <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto border border-slate-200">
+                            <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
                               <ImageIcon className="w-4 h-4" />
                             </div>
                           )}
@@ -462,29 +462,29 @@ export default function RMAReportsModal({
 
                         {/* 4. Barcode & SKU */}
                         <td className="py-3 px-3.5 font-mono">
-                          <div className="font-bold text-slate-800">{item.barcode}</div>
-                          {item.code && <div className="text-[10px] text-slate-400">{item.code}</div>}
+                          <div className="font-bold text-slate-800 dark:text-slate-200">{item.barcode}</div>
+                          {item.code && <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.code}</div>}
                         </td>
 
                         {/* 5. Item Name */}
-                        <td className="py-3 px-3.5 font-bold text-slate-900 max-w-[200px] truncate" title={item.name}>
+                        <td className="py-3 px-3.5 font-bold text-slate-900 dark:text-white max-w-[200px] truncate" title={item.name}>
                           {item.name || `Unidentified (${item.barcode})`}
                         </td>
 
                         {/* 6. Reason */}
                         <td className="py-3 px-3.5">
-                          <span className="px-2 py-0.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 font-bold text-[10px] inline-block">
+                          <span className="px-2 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[10px] inline-block">
                             {item.reason || 'Damaged'}
                           </span>
                         </td>
 
                         {/* 7. Reported By */}
                         <td className="py-3 px-3.5">
-                          <div className="font-bold text-slate-900 text-[11px]">
+                          <div className="font-bold text-slate-900 dark:text-slate-200 text-[11px]">
                             {reporterName}
                           </div>
                           {reporterContact && (
-                            <div className="font-mono text-slate-500 text-[10px]">
+                            <div className="font-mono text-slate-500 dark:text-slate-400 text-[10px]">
                               {reporterContact}
                             </div>
                           )}
@@ -494,28 +494,28 @@ export default function RMAReportsModal({
                         <td className="py-3 px-3 text-center">
                           <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
                             item.status === 'pending_admin_details'
-                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                              : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                              : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                           }`}>
                             {item.status === 'pending_admin_details' ? 'Unknown' : 'Logged'}
                           </span>
                         </td>
 
                         {/* 9. Date & GPS */}
-                        <td className="py-3 px-3.5 text-right font-mono text-[11px] text-slate-500">
+                        <td className="py-3 px-3.5 text-right font-mono text-[11px] text-slate-500 dark:text-slate-400">
                           <div>{new Date(item.created_at).toLocaleDateString()}</div>
                           {item.gps_latitude && item.gps_longitude ? (
                             <a
                               href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}
                               target="_blank"
                               rel="noreferrer"
-                              className="text-blue-600 hover:underline inline-flex items-center gap-0.5 text-[10px] font-bold"
+                              className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 text-[10px] font-bold"
                             >
                               <MapPin className="w-3 h-3 text-rose-500" />
                               <span>Map</span>
                             </a>
                           ) : (
-                            <span className="text-slate-300 text-[10px]">No GPS</span>
+                            <span className="text-slate-300 dark:text-slate-600 text-[10px]">No GPS</span>
                           )}
                         </td>
 
@@ -525,7 +525,7 @@ export default function RMAReportsModal({
                             <button
                               type="button"
                               onClick={() => onDeleteReport && onDeleteReport(item.id, item.rma_number)}
-                              className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors"
+                              className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors"
                               title={`Delete RMA #${item.rma_number}`}
                             >
                               <Trash2 className="w-4 h-4" />
@@ -567,35 +567,35 @@ export default function RMAReportsModal({
                 return (
                   <div 
                     key={item.id || item.rma_number}
-                    className="p-4 bg-slate-50 hover:bg-slate-100/70 border border-slate-200 hover:border-slate-300 rounded-2xl space-y-3 transition-all shadow-xs"
+                    className="p-4 bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100/70 dark:hover:bg-slate-700/60 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-2xl space-y-3 transition-all shadow-xs"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="font-mono font-black text-xs text-blue-900 bg-blue-100/80 border border-blue-200 px-2 py-0.5 rounded-lg">
+                          <span className="font-mono font-black text-xs text-blue-900 dark:text-blue-300 bg-blue-100/80 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 px-2 py-0.5 rounded-lg">
                             SN #{item.id}
                           </span>
-                          <span className="font-mono font-black text-blue-700 text-sm">
+                          <span className="font-mono font-black text-blue-700 dark:text-blue-400 text-sm">
                             {item.rma_number}
                           </span>
                         </div>
-                        <h4 className="font-bold text-slate-900 text-sm truncate" title={item.name}>
+                        <h4 className="font-bold text-slate-900 dark:text-white text-sm truncate" title={item.name}>
                           {item.name || `Unidentified (${item.barcode})`}
                         </h4>
-                        <div className="font-mono text-xs text-slate-500">
-                          Barcode: <strong className="text-slate-800">{item.barcode}</strong>
+                        <div className="font-mono text-xs text-slate-500 dark:text-slate-400">
+                          Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 shrink-0">
+                        <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 shrink-0">
                           {item.reason || 'Damaged'}
                         </span>
                         {canDeleteReports && (
                           <button
                             type="button"
                             onClick={() => onDeleteReport && onDeleteReport(item.id, item.rma_number)}
-                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 rounded-xl transition-colors"
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 dark:hover:bg-rose-900/50 rounded-xl transition-colors"
                             title={`Delete RMA #${item.rma_number}`}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -605,38 +605,38 @@ export default function RMAReportsModal({
                     </div>
 
                     {/* Reporter and Date */}
-                    <div className="text-xs text-slate-600 pt-2 border-t border-slate-200/80 flex flex-col gap-1">
+                    <div className="text-xs text-slate-600 dark:text-slate-300 pt-2 border-t border-slate-200/80 dark:border-slate-700/80 flex flex-col gap-1">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
-                          <User className="w-3.5 h-3.5 text-slate-400" />
-                          <span className="font-bold text-slate-800">{reporterName}</span>
+                          <User className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
+                          <span className="font-bold text-slate-800 dark:text-slate-200">{reporterName}</span>
                         </div>
                         {reporterContact && (
-                          <span className="font-mono text-slate-500 text-[11px]">{reporterContact}</span>
+                          <span className="font-mono text-slate-500 dark:text-slate-400 text-[11px]">{reporterContact}</span>
                         )}
                       </div>
 
-                      <div className="flex items-center justify-between text-[11px] text-slate-500">
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
                         <span>{new Date(item.created_at).toLocaleString()}</span>
                         {item.gps_latitude && item.gps_longitude ? (
                           <a
                             href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}
                             target="_blank"
                             rel="noreferrer"
-                            className="text-blue-600 hover:underline inline-flex items-center gap-0.5 font-bold"
+                            className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 font-bold"
                           >
                             <MapPin className="w-3 h-3 text-rose-500" />
                             <span>View GPS Location</span>
                           </a>
                         ) : (
-                          <span className="text-slate-400">GPS: Blank</span>
+                          <span className="text-slate-400 dark:text-slate-500">GPS: Blank</span>
                         )}
                       </div>
 
                       {/* Proof Photos with Click-to-Zoom Lightbox */}
                       {photoList.length > 0 && (
                         <div className="flex items-center gap-2 pt-1.5">
-                          <span className="text-[11px] text-slate-500 font-semibold">Proof Photos:</span>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold">Proof Photos:</span>
                           <div className="flex items-center gap-1.5">
                             {photoList.map((url, idx) => (
                               <button
@@ -649,7 +649,7 @@ export default function RMAReportsModal({
                                   title: item.name || `Return ${item.rma_number}`,
                                   subtitle: `Photo ${idx + 1} of ${photoList.length} • RMA #${item.rma_number} • Reported by ${reporterName}`
                                 })}
-                                className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 hover:scale-105 shadow-xs transition-transform cursor-zoom-in"
+                                className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-600 hover:scale-105 shadow-xs transition-transform cursor-zoom-in"
                                 title="Click to zoom proof photo"
                               >
                                 <img src={url} alt="Proof" className="w-full h-full object-cover" />

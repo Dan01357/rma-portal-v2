@@ -87,6 +87,10 @@ DROP POLICY IF EXISTS "Allow anon update products" ON public.products;
 CREATE POLICY "Allow anon update products" ON public.products
   FOR UPDATE TO anon, authenticated, service_role USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Allow anon delete products" ON public.products;
+CREATE POLICY "Allow anon delete products" ON public.products
+  FOR DELETE TO anon, authenticated, service_role USING (true);
+
 -- Policies for public.rma_reports
 DROP POLICY IF EXISTS "Allow anon read all rma_reports" ON public.rma_reports;
 CREATE POLICY "Allow anon read all rma_reports" ON public.rma_reports
@@ -99,6 +103,10 @@ CREATE POLICY "Allow anon insert rma_reports" ON public.rma_reports
 DROP POLICY IF EXISTS "Allow anon update rma_reports" ON public.rma_reports;
 CREATE POLICY "Allow anon update rma_reports" ON public.rma_reports
   FOR UPDATE TO anon, authenticated, service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow anon delete rma_reports" ON public.rma_reports;
+CREATE POLICY "Allow anon delete rma_reports" ON public.rma_reports
+  FOR DELETE TO anon, authenticated, service_role USING (true);
 
 -- ==============================================================================
 -- 5. SUPABASE STORAGE BUCKET FOR PHOTOS ('rma-photos')

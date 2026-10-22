@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseClient';
 import { INITIAL_PRODUCTS } from '../data/mockData';
+import { notificationService } from './notificationService';
 
 // Cross-tab broadcast channel for instant multi-device / multi-tab reactivity
 const syncChannel = typeof window !== 'undefined' && window.BroadcastChannel 
@@ -158,6 +159,9 @@ export const catalogService = {
           unitName: supaItem.unit_name || 'pc',
           hasSerialNumbers: supaItem.has_serial_numbers || false,
           imageUrl: supaItem.image_url || null, // Reference photo from admin
+          ae_name: supaItem.ae_name || null,
+          ae_email: supaItem.ae_email || null,
+          company: supaItem.company || null,
           isVerified: supaItem.is_verified !== false,
           source: 'Supabase Database (Yours)'
         };
@@ -172,6 +176,10 @@ export const catalogService = {
       (p.sku && p.sku.toLowerCase() === clean.toLowerCase())
     );
     if (mockItem) {
+      const isBonitaOrPingcon = (
+        (mockItem.brand && mockItem.brand.toLowerCase().includes('bonita')) ||
+        (mockItem.group && mockItem.group.toLowerCase().includes('pingcon'))
+      );
       return {
         id: mockItem.id,
         barcode: mockItem.barcode,
@@ -184,6 +192,9 @@ export const catalogService = {
         unitName: 'pc',
         hasSerialNumbers: mockItem.requires_serial || false,
         imageUrl: mockItem.image_url || null,
+        ae_name: null,
+        ae_email: null,
+        company: isBonitaOrPingcon ? 'Pingcon / Bonita' : 'A2Z2GO / Keysys',
         isVerified: true,
         source: 'Wholesale Verified Catalog'
       };
@@ -298,7 +309,7 @@ export const catalogService = {
   /**
    * ADMIN ACTION: Add a brand new product to the saved catalog
    */
-  async createProduct({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl }) {
+  async createProduct({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
     const cleanBarcode = String(barcode || '').trim();
     if (!cleanBarcode) throw new Error('Product Barcode is required.');
     if (!name || !name.trim()) throw new Error('Product Name is required.');
@@ -313,6 +324,9 @@ export const catalogService = {
       brand_name: brandName ? brandName.trim() : null,
       unit_name: unitName ? unitName.trim() : 'pc',
       image_url: imageUrl ? imageUrl.trim() : null,
+      ae_name: aeName ? aeName.trim() : null,
+      ae_email: aeEmail ? aeEmail.trim() : null,
+      company: company ? company.trim() : null,
       is_verified: true,
       updated_at: new Date().toISOString()
     };
@@ -332,7 +346,7 @@ export const catalogService = {
   /**
    * ADMIN ACTION: Edit an existing product record
    */
-  async updateProduct(id, { barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl }) {
+  async updateProduct(id, { barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
     if (!id && !barcode) throw new Error('Product identifier required for update.');
 
     const updates = {
@@ -344,6 +358,9 @@ export const catalogService = {
       brand_name: brandName !== undefined ? (brandName ? brandName.trim() : null) : undefined,
       unit_name: unitName ? unitName.trim() : undefined,
       image_url: imageUrl !== undefined ? (imageUrl ? imageUrl.trim() : null) : undefined,
+      ae_name: aeName !== undefined ? (aeName ? aeName.trim() : null) : undefined,
+      ae_email: aeEmail !== undefined ? (aeEmail ? aeEmail.trim() : null) : undefined,
+      company: company !== undefined ? (company ? company.trim() : null) : undefined,
       is_verified: true,
       updated_at: new Date().toISOString()
     };
@@ -451,7 +468,10 @@ export const catalogService = {
       gps_timestamp: isAccurateGps ? new Date().toISOString() : null,
       reporter_name: reporterName.trim(),
       reporter_contact: reporterContact.trim(),
-      reported_by: `${reporterName.trim()} (${reporterContact.trim()})`
+      reported_by: `${reporterName.trim()} (${reporterContact.trim()})`,
+      ae_name: isKnown ? (product.ae_name || product.aeName || null) : null,
+      ae_email: isKnown ? (product.ae_email || product.aeEmail || null) : null,
+      company: isKnown ? (product.company || null) : null
     };
 
     // 1. Insert into rma_reports
@@ -466,7 +486,14 @@ export const catalogService = {
       throw new Error(`Database error saving return report: ${reportError.message}`);
     }
 
-    // 2. If item is unknown, insert/upsert into Supabase products table as is_verified = false
+    const finalReport = insertedReport || reportRow;
+
+    // 2. Dispatch automated notification email in background
+    notificationService.sendRMANotification(finalReport).catch(err => {
+      console.warn('Background notification dispatch notice:', err.message);
+    });
+
+    // 3. If item is unknown, insert/upsert into Supabase products table as is_verified = false
     if (!isKnown) {
       const { error: prodError } = await supabase
         .from('products')
@@ -490,14 +517,14 @@ export const catalogService = {
     }
 
     // Trigger instant real-time notification
-    this.notifyChange('report-submitted', { report: insertedReport || reportRow });
+    this.notifyChange('report-submitted', { report: finalReport });
 
     return {
       success: true,
       rmaNumber,
       isKnown,
       status: reportRow.status,
-      report: insertedReport || reportRow
+      report: finalReport
     };
   },
 
@@ -570,7 +597,7 @@ export const catalogService = {
   /**
    * ADMIN ACTION: Fill in details for an unknown barcode, including optional product reference image.
    */
-  async updateBarcodeDetails({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl }) {
+  async updateBarcodeDetails({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
     const cleanBarcode = String(barcode || '').trim();
     if (!cleanBarcode) throw new Error('Barcode is required.');
 
@@ -583,6 +610,9 @@ export const catalogService = {
       brand_name: brandName ? brandName.trim() : null,
       unit_name: unitName ? unitName.trim() : 'pc',
       image_url: imageUrl ? imageUrl.trim() : null,
+      ae_name: aeName ? aeName.trim() : null,
+      ae_email: aeEmail ? aeEmail.trim() : null,
+      company: company ? company.trim() : null,
       is_verified: true,
       updated_at: new Date().toISOString()
     };
@@ -618,6 +648,9 @@ export const catalogService = {
           price: updates.price,
           price_with_vat: updates.price_with_vat,
           unit_name: updates.unit_name,
+          ae_name: updates.ae_name,
+          ae_email: updates.ae_email,
+          company: updates.company,
           status: 'pending'
         })
         .eq('barcode', cleanBarcode)
@@ -632,13 +665,14 @@ export const catalogService = {
   },
 
   /**
-   * Get all RMA reports
+   * Get all RMA reports (excluding deleted ones)
    */
-  async getRecentReports(limit = 50) {
+  async getRecentReports(limit = 100) {
     try {
       const { data, error } = await supabase
         .from('rma_reports')
         .select('*')
+        .not('status', 'eq', 'deleted')
         .order('created_at', { ascending: false })
         .limit(limit);
 
@@ -654,7 +688,7 @@ export const catalogService = {
   },
 
   /**
-   * Delete an RMA report
+   * Delete an RMA report (with robust hard-delete and soft-delete fallback)
    */
   async deleteReport(id, rmaNumber) {
     if (!id && !rmaNumber) return false;
@@ -665,8 +699,23 @@ export const catalogService = {
       } else {
         query = query.eq('rma_number', rmaNumber);
       }
-      const { error } = await query;
-      if (error) throw error;
+      const { data, error } = await query.select();
+
+      // If hard delete was blocked by missing RLS policy or affected 0 rows, fallback to soft delete
+      if (error || !data || data.length === 0) {
+        console.warn('Direct delete matched 0 rows or was blocked by RLS, executing status update fallback:', error?.message);
+        let softQuery = supabase.from('rma_reports').update({
+          status: 'deleted'
+        });
+        if (id) softQuery = softQuery.eq('id', id);
+        else softQuery = softQuery.eq('rma_number', rmaNumber);
+        const { error: softErr } = await softQuery;
+        if (softErr) {
+          console.error('Soft delete error:', softErr);
+          throw softErr;
+        }
+      }
+
       this.notifyChange('report-deleted', { id, rmaNumber });
       return true;
     } catch (e) {

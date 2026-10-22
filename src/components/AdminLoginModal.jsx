@@ -64,24 +64,24 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full p-6 sm:p-7 space-y-5">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full p-6 sm:p-7 space-y-5">
         
         {/* Top Icon & Title */}
         <div className="text-center space-y-1.5">
-          <div className="w-12 h-12 bg-blue-100 text-blue-700 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+          <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
             <Lock className="w-6 h-6" />
           </div>
-          <h2 className="text-xl font-black text-slate-900 tracking-tight">
+          <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
             Company Staff Verification
           </h2>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             One-Time Password (OTP) security gate for RMA admin access.
           </p>
         </div>
 
         {/* Error Notice */}
         {errorMessage && (
-          <div className="p-3 bg-rose-50 border border-rose-300 text-rose-800 rounded-2xl text-xs font-semibold flex items-start gap-2 animate-in fade-in">
+          <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 rounded-2xl text-xs font-semibold flex items-start gap-2 animate-in fade-in">
             <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
             <span>{errorMessage}</span>
           </div>
@@ -91,7 +91,7 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
         {step === 'email' && (
           <form onSubmit={handleRequestOtp} className="space-y-4">
             <div>
-              <label className="block text-xs font-black uppercase tracking-wider text-slate-500 mb-1.5">
+              <label className="block text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
                 Official Company Email Address
               </label>
               <div className="relative">
@@ -102,10 +102,10 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
                   autoFocus
                   value={emailInput}
                   onChange={(e) => setEmailInput(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white"
+                  className="w-full pl-11 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                 />
               </div>
-              <span className="block text-[11px] text-slate-400 mt-1">
+              <span className="block text-[11px] text-slate-400 dark:text-slate-500 mt-1">
                 Must be an active employee in company directory. Personal emails (@gmail) are not accepted.
               </span>
             </div>
@@ -127,7 +127,7 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
               <button
                 type="button"
                 onClick={onClose}
-                className="w-full py-2 text-xs font-bold text-slate-500 hover:text-slate-800 text-center"
+                className="w-full py-2 text-xs font-bold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 text-center"
               >
                 Cancel & Return to Public Portal
               </button>
@@ -138,18 +138,18 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
         {/* STEP 2: Enter 6-digit OTP */}
         {step === 'otp' && (
           <form onSubmit={handleVerifyOtp} className="space-y-4 animate-in fade-in">
-            <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-900 space-y-1">
+            <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-xs text-emerald-900 dark:text-emerald-200 space-y-1">
               <div className="flex items-center gap-1.5 font-bold">
                 <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>Verification code dispatched!</span>
               </div>
-              <p className="text-[11px] text-emerald-800">
+              <p className="text-[11px] text-emerald-800 dark:text-emerald-300">
                 Please check your inbox at <strong>{emailInput}</strong> for your OTP access code.
               </p>
             </div>
 
             <div>
-              <label className="block text-xs font-black uppercase tracking-wider text-slate-500 mb-1.5 text-center">
+              <label className="block text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 text-center">
                 Enter Verification Code or Token
               </label>
               <input
@@ -160,11 +160,11 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
                 value={otpInput}
                 onChange={(e) => setOtpInput(e.target.value.trim())}
                 placeholder="e.g. 123456"
-                className={`w-full py-3.5 text-center font-black font-mono bg-slate-50 border-2 border-blue-500 rounded-2xl text-slate-900 focus:outline-none focus:bg-white transition-all ${
+                className={`w-full py-3.5 text-center font-black font-mono bg-slate-50 dark:bg-slate-800 border-2 border-blue-500 rounded-2xl text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-800 transition-all ${
                   otpInput.length <= 8 ? 'tracking-[0.35em] text-2xl' : 'text-xs tracking-normal px-3'
                 }`}
               />
-              <span className="block text-[10px] text-slate-400 text-center mt-1">
+              <span className="block text-[10px] text-slate-400 dark:text-slate-500 text-center mt-1">
                 Enter the 6-digit OTP code sent to your email
               </span>
             </div>
@@ -186,14 +186,14 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
               <button
                 type="button"
                 onClick={() => setStep('email')}
-                className="text-slate-500 hover:text-slate-800 underline"
+                className="text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 underline"
               >
                 Change Email
               </button>
               <button
                 type="button"
                 onClick={handleRequestOtp}
-                className="text-blue-600 hover:text-blue-800 underline"
+                className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline"
               >
                 Resend Code
               </button>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, 
   CheckCircle, 
@@ -12,9 +12,13 @@ import {
   Search,
   ArrowUpDown,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  UserCheck,
+  Building2,
+  ChevronDown
 } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
+import { authService } from '../services/authService';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 
@@ -28,6 +32,14 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
   const [pageSize, setPageSize] = useState(10);
 
   const canVerify = currentUser?.role !== 'viewer';
+
+  // AE & Company state
+  const [employees, setEmployees] = useState([]);
+  const [loadingEmployees, setLoadingEmployees] = useState(false);
+  const [selectedAe, setSelectedAe] = useState(null);
+  const [aeSearch, setAeSearch] = useState('');
+  const [isAeDropdownOpen, setIsAeDropdownOpen] = useState(false);
+  const [company, setCompany] = useState('Pingcon / Bonita');
 
   const [formData, setFormData] = useState({
     code: '',
@@ -43,6 +55,16 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
   const [isSaving, setIsSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState(null);
 
+  useEffect(() => {
+    if (isOpen) {
+      setLoadingEmployees(true);
+      authService.getEmployees()
+        .then(list => setEmployees(list || []))
+        .catch(err => console.warn('Failed to fetch employees in PendingBarcodesModal:', err))
+        .finally(() => setLoadingEmployees(false));
+    }
+  }, [isOpen]);
+
   const handleSelect = (item) => {
     setSelectedBarcode(item);
     setFormData({
@@ -55,6 +77,27 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
       unitName: item.unit_name || 'pc',
       imageUrl: item.image_url || ''
     });
+
+    if (item.ae_name || item.ae_email) {
+      setSelectedAe({
+        name: item.ae_name || '',
+        email: item.ae_email || '',
+        department: item.ae_department || 'Account Executive'
+      });
+    } else {
+      setSelectedAe(null);
+    }
+
+    const sup = String(item.supplier_name || '').toLowerCase();
+    const nameStr = String(item.name || '').toLowerCase();
+    if (sup.includes('a2z') || sup.includes('keysys') || nameStr.includes('a2z') || nameStr.includes('keysys')) {
+      setCompany('A2Z2GO / Keysys');
+    } else {
+      setCompany('Pingcon / Bonita');
+    }
+
+    setAeSearch('');
+    setIsAeDropdownOpen(false);
     setStatusMsg(null);
   };
 
@@ -75,11 +118,28 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     }
   };
 
+  // Filter employees for AE Search
+  const filteredEmployees = useMemo(() => {
+    const q = aeSearch.toLowerCase().trim();
+    if (!q) return employees.slice(0, 15);
+    return employees.filter(emp => 
+      (emp.name || '').toLowerCase().includes(q) ||
+      (emp.email || emp.company_email || '').toLowerCase().includes(q) ||
+      (emp.department || '').toLowerCase().includes(q)
+    );
+  }, [employees, aeSearch]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedBarcode) return;
     if (!formData.name.trim()) {
       setStatusMsg({ type: 'error', text: 'Please enter a product name.' });
+      return;
+    }
+
+    // Customer AE required
+    if (!selectedAe || !selectedAe.email) {
+      setStatusMsg({ type: 'error', text: 'Customer Account Executive (AE) is required. Please search and select an AE.' });
       return;
     }
 
@@ -96,7 +156,10 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
         priceWithVat: formData.priceWithVat || (Number(formData.price) * 1.12).toFixed(2),
         brandName: formData.brandName,
         unitName: formData.unitName,
-        imageUrl: formData.imageUrl
+        imageUrl: formData.imageUrl,
+        aeName: selectedAe.name,
+        aeEmail: selectedAe.email,
+        company: company
       });
 
       setStatusMsg({ 
@@ -122,28 +185,19 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     let list = pendingList.filter(item => {
       if (!q) return true;
       return (
-        String(item.id || '').includes(q) ||
         (item.barcode || '').toLowerCase().includes(q) ||
+        String(item.id || '').includes(q) ||
         (item.name || '').toLowerCase().includes(q) ||
-        (item.code || '').toLowerCase().includes(q)
+        (item.supplier_name || '').toLowerCase().includes(q)
       );
     });
 
     list.sort((a, b) => {
-      let valA, valB;
       if (sortField === 'id') {
-        valA = Number(a.id) || 0;
-        valB = Number(b.id) || 0;
-      } else if (sortField === 'barcode') {
-        valA = String(a.barcode || '');
-        valB = String(b.barcode || '');
-      } else {
-        valA = new Date(a.created_at || 0).getTime();
-        valB = new Date(b.created_at || 0).getTime();
+        const idA = Number(a.id) || 0;
+        const idB = Number(b.id) || 0;
+        return sortDirection === 'asc' ? idA - idB : idB - idA;
       }
-
-      if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
-      if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
       return 0;
     });
 
@@ -156,37 +210,36 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     return processedPendingList.slice(start, start + pageSize);
   }, [processedPendingList, currentPage, pageSize]);
 
-  // IMPORTANT: All hooks (useMemo, useState, etc.) are declared above!
-  // Early return is strictly placed AFTER hooks to prevent React error #310
+  // Early return strictly placed AFTER hooks to prevent React error #310
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-xl w-full p-5 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto">
         
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-amber-100 text-amber-700 rounded-xl">
+            <div className="p-2.5 bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 rounded-2xl shadow-inner">
               <AlertTriangle className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-slate-900">
+                <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
                   Pending Unknown Barcodes
                 </h2>
-                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
                   {processedPendingList.length} Pending
                 </span>
               </div>
-              <p className="text-xs text-slate-500">
-                Filter, sort, paginate & update product details with clickable reference photos.
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Filter, sort, paginate & update product details with Customer AE assignment.
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors"
+            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -194,10 +247,10 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
 
         {/* Status notice */}
         {statusMsg && (
-          <div className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+          <div className={`p-3 rounded-2xl text-xs font-semibold flex items-center gap-2 ${
             statusMsg.type === 'success' 
-              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
-              : 'bg-rose-50 text-rose-800 border border-rose-200'
+              ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' 
+              : 'bg-rose-50 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
           }`}>
             <CheckCircle className="w-4 h-4 shrink-0" />
             <span>{statusMsg.text}</span>
@@ -210,9 +263,9 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
             {pendingList.length === 0 ? (
               <div className="text-center py-8 space-y-2">
                 <CheckCircle className="w-10 h-10 text-emerald-500 mx-auto" />
-                <h3 className="text-sm font-bold text-slate-700">All Barcodes Verified</h3>
-                <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                  When a reporter scans an unrecorded barcode, it will appear here so you can add its name, supplier, price, and reference photo.
+                <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">All Barcodes Verified</h3>
+                <p className="text-xs text-slate-400 dark:text-slate-500 max-w-sm mx-auto">
+                  When a reporter scans an unrecorded barcode, it will appear here so you can add its name, supplier, Customer AE, and reference photo.
                 </p>
               </div>
             ) : (
@@ -229,7 +282,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                         setCurrentPage(1);
                       }}
                       placeholder="Filter pending by barcode or SN..."
-                      className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                      className="w-full pl-9 pr-8 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 shadow-xs"
                     />
                     {searchQuery && (
                       <button
@@ -238,7 +291,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                           setSearchQuery('');
                           setCurrentPage(1);
                         }}
-                        className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 p-0.5"
+                        className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -256,11 +309,11 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                       }
                       setCurrentPage(1);
                     }}
-                    className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0"
+                    className="px-2.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0 border border-slate-200/80 dark:border-slate-700"
                     title="Toggle SN sorting"
                   >
                     <span className="font-mono text-[11px]">SN</span>
-                    {sortField === 'id' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />)}
+                    {sortField === 'id' && (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600 dark:text-blue-400" /> : <ArrowDown className="w-3 h-3 text-blue-600 dark:text-blue-400" />)}
                   </button>
                 </div>
 
@@ -274,22 +327,24 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                     paginatedList.map(item => (
                       <div 
                         key={item.id || item.barcode}
-                        className="p-3 bg-slate-50 hover:bg-blue-50/50 border border-slate-200 rounded-2xl flex items-center justify-between gap-3 transition-colors"
+                        className="p-3 bg-slate-50 dark:bg-slate-800/70 hover:bg-blue-50/50 dark:hover:bg-slate-700/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-between gap-3 transition-colors"
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
                           <Barcode className="w-6 h-6 text-slate-400 shrink-0" />
-                          <div>
+                          <div className="min-w-0">
                             <div className="flex items-center gap-2">
-                              <span className="font-mono font-black text-xs text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-lg">
-                                SN #{item.id}
-                              </span>
-                              <span className="font-mono text-sm font-bold text-blue-700">
+                              {item.id && (
+                                <span className="font-mono font-black text-[10px] text-amber-900 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.5 rounded-md">
+                                  #{item.id}
+                                </span>
+                              )}
+                              <span className="font-mono font-bold text-slate-900 dark:text-white text-xs truncate">
                                 {item.barcode}
                               </span>
                             </div>
-                            <span className="block text-[11px] text-slate-400 mt-0.5">
-                              Reported {new Date(item.created_at).toLocaleString()}
-                            </span>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                              {item.name || 'Unidentified item scanned by staff'}
+                            </div>
                           </div>
                         </div>
 
@@ -297,13 +352,13 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                           <button
                             type="button"
                             onClick={() => handleSelect(item)}
-                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all"
+                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all shrink-0 cursor-pointer"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                             <span>Enter Details</span>
                           </button>
                         ) : (
-                          <span className="px-3 py-1.5 bg-slate-100 text-slate-400 text-xs font-bold rounded-xl">
+                          <span className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-400 text-xs font-bold rounded-xl">
                             Read-Only
                           </span>
                         )}
@@ -327,50 +382,195 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
           </div>
         ) : (
           /* Edit Form */
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl flex items-center justify-between">
+          <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+            <div className="p-3 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 rounded-2xl flex items-center justify-between">
               <div>
-                <span className="text-[10px] font-bold uppercase text-blue-600 tracking-wider">
+                <span className="text-[10px] font-bold uppercase text-blue-600 dark:text-blue-400 tracking-wider">
                   Target Barcode
                 </span>
-                <div className="font-mono font-black text-slate-900 text-base">
+                <div className="font-mono font-black text-slate-900 dark:text-white text-base">
                   {selectedBarcode.barcode}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedBarcode(null)}
-                className="text-xs font-bold text-slate-500 hover:text-slate-800 underline"
+                className="text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white underline cursor-pointer"
               >
                 Back to List
               </button>
             </div>
 
-            <div className="space-y-3 text-xs font-semibold">
+            <div className="space-y-3 font-semibold">
               <div>
-                <label className="block text-slate-600 mb-1">Product Name *</label>
+                <label className="block text-slate-700 dark:text-slate-300 mb-1">Product Name *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Laptop Lenovo ThinkPad / Oreo Biscuit"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-blue-600"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                 />
               </div>
 
-              {/* Optional Product Reference Photo with Lightbox Zoom */}
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
-                <span className="block text-slate-700 font-bold">
+              {/* CUSTOMER AE SELECTOR */}
+              <div className="p-3 bg-blue-50/60 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 rounded-2xl space-y-2 relative">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-black text-blue-950 dark:text-blue-300">
+                    Customer Account Executive (AE) * <span className="text-rose-500 font-bold">(Required)</span>
+                  </label>
+                  <span className="text-[10px] text-blue-700 dark:text-blue-400 font-semibold">
+                    Receives CC on report emails
+                  </span>
+                </div>
+
+                {selectedAe ? (
+                  <div className="p-2.5 bg-white dark:bg-slate-800 border border-blue-300 dark:border-blue-700 rounded-xl flex items-center justify-between gap-2 shadow-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <UserCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="font-black text-slate-900 dark:text-white text-xs truncate">
+                          {selectedAe.name}
+                        </div>
+                        <div className="font-mono text-[11px] text-blue-600 dark:text-blue-400 truncate">
+                          {selectedAe.email}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedAe(null);
+                        setIsAeDropdownOpen(true);
+                      }}
+                      className="px-2.5 py-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-[11px] font-bold shrink-0 transition-colors"
+                    >
+                      Change AE
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        value={aeSearch}
+                        onFocus={() => setIsAeDropdownOpen(true)}
+                        onChange={(e) => {
+                          setAeSearch(e.target.value);
+                          setIsAeDropdownOpen(true);
+                        }}
+                        placeholder={loadingEmployees ? 'Loading staff directory...' : 'Search employee by name or company email...'}
+                        className="w-full pl-9 pr-8 py-2 bg-white dark:bg-slate-800 border border-blue-300 dark:border-blue-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600 shadow-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setIsAeDropdownOpen(prev => !prev)}
+                        className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      >
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {isAeDropdownOpen && (
+                      <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl divide-y divide-slate-100 dark:divide-slate-700">
+                        {filteredEmployees.length === 0 ? (
+                          <div className="p-3 text-center text-slate-400 text-xs">
+                            No employees found matching "{aeSearch}".
+                          </div>
+                        ) : (
+                          filteredEmployees.map((emp, idx) => {
+                            const empEmail = emp.email || emp.company_email || '';
+                            return (
+                              <button
+                                key={emp.id || empEmail || idx}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedAe({
+                                    name: emp.name,
+                                    email: empEmail,
+                                    department: emp.department || 'Account Executive'
+                                  });
+                                  setIsAeDropdownOpen(false);
+                                  setAeSearch('');
+                                }}
+                                className="w-full p-2.5 text-left hover:bg-blue-50 dark:hover:bg-slate-700/60 transition-colors flex items-center justify-between gap-2"
+                              >
+                                <div className="min-w-0">
+                                  <div className="font-bold text-slate-900 dark:text-white text-xs truncate">
+                                    {emp.name}
+                                  </div>
+                                  <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                                    {empEmail} {emp.department ? `• ${emp.department}` : ''}
+                                  </div>
+                                </div>
+                                <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase shrink-0">
+                                  Select
+                                </span>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* COMPANY SENDER ROUTING CATEGORY */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-2">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Company Sender & Email Routing
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCompany('Pingcon / Bonita')}
+                    className={`p-2 rounded-xl border text-left transition-all ${
+                      company === 'Pingcon / Bonita'
+                        ? 'bg-blue-50 dark:bg-blue-950/80 border-blue-600 text-blue-950 dark:text-blue-200 font-black'
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 font-semibold'
+                    }`}
+                  >
+                    <div className="text-xs font-bold flex items-center gap-1.5">
+                      <Building2 className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Pingcon / Bonita</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 font-mono truncate">
+                      finance@pingconmarketing.com
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCompany('A2Z2GO / Keysys')}
+                    className={`p-2 rounded-xl border text-left transition-all ${
+                      company === 'A2Z2GO / Keysys'
+                        ? 'bg-indigo-50 dark:bg-indigo-950/80 border-indigo-600 text-indigo-950 dark:text-indigo-200 font-black'
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 font-semibold'
+                    }`}
+                  >
+                    <div className="text-xs font-bold flex items-center gap-1.5">
+                      <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>A2Z2GO / Keysys</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 font-mono truncate">
+                      finance2@a2z2go.net
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Optional Product Reference Photo */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-2">
+                <span className="block text-slate-700 dark:text-slate-300 font-bold">
                   Reference Product Photo (Optional)
                 </span>
-                <p className="text-[11px] text-slate-400 font-normal">
-                  If uploaded, this photo will be displayed to reporters whenever they scan this barcode.
-                </p>
 
                 <div className="flex items-center gap-3">
                   {formData.imageUrl ? (
-                    <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-300 shrink-0 group">
+                    <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 shrink-0 group">
                       <button
                         type="button"
                         onClick={() => setLightboxPhoto({
@@ -393,12 +593,12 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                       </button>
                     </div>
                   ) : (
-                    <div className="w-16 h-16 rounded-xl border border-dashed border-slate-300 flex items-center justify-center text-slate-400 bg-white shrink-0">
+                    <div className="w-16 h-16 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center text-slate-400 bg-white dark:bg-slate-800 shrink-0">
                       <ImageIcon className="w-6 h-6" />
                     </div>
                   )}
 
-                  <label className="flex-1 py-2 px-3 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl text-center cursor-pointer text-xs font-bold text-slate-700 flex items-center justify-center gap-1.5 shadow-xs">
+                  <label className="flex-1 py-2 px-3 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 rounded-xl text-center cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center justify-center gap-1.5 shadow-xs transition-colors">
                     {isUploadingImage ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5 text-slate-500" />}
                     <span>{isUploadingImage ? 'Uploading...' : 'Upload Reference Photo'}</span>
                     <input
@@ -413,30 +613,30 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-600 mb-1">SKU / Item Code</label>
+                  <label className="block text-slate-600 dark:text-slate-400 mb-1">SKU / Item Code</label>
                   <input
                     type="text"
                     placeholder="e.g. P124124141"
                     value={formData.code}
                     onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-600"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-600 mb-1">Supplier Name</label>
+                  <label className="block text-slate-600 dark:text-slate-400 mb-1">Supplier Name</label>
                   <input
                     type="text"
                     placeholder="e.g. Savemore, Acer, Lenovo"
                     value={formData.supplierName}
                     onChange={(e) => setFormData({ ...formData, supplierName: e.target.value })}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-blue-600"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-slate-600 mb-1">Base Price (₱)</label>
+                  <label className="block text-slate-600 dark:text-slate-400 mb-1">Base Price (₱)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -450,45 +650,45 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                         priceWithVat: p ? (Number(p) * 1.12).toFixed(2) : '' 
                       });
                     }}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-blue-600"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-600 mb-1">Price w/ VAT (₱)</label>
+                  <label className="block text-slate-600 dark:text-slate-400 mb-1">Price w/ VAT (₱)</label>
                   <input
                     type="number"
                     step="0.01"
                     placeholder="0.00"
                     value={formData.priceWithVat}
                     onChange={(e) => setFormData({ ...formData, priceWithVat: e.target.value })}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-blue-600"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-600 mb-1">Unit</label>
+                  <label className="block text-slate-600 dark:text-slate-400 mb-1">Unit</label>
                   <input
                     type="text"
                     placeholder="pc, box, unit"
                     value={formData.unitName}
                     onChange={(e) => setFormData({ ...formData, unitName: e.target.value })}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-blue-600"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+            <div className="pt-3 flex justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => setSelectedBarcode(null)}
-                className="px-4 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl text-xs font-bold"
+                className="px-4 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-xs font-bold"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSaving}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md shadow-emerald-600/20"
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md shadow-emerald-600/20 cursor-pointer"
               >
                 {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 <span>Save & Verify Barcode</span>
