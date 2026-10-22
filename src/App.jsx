@@ -40,7 +40,9 @@ import {
   Sun,
   Moon,
   Settings,
-  Receipt
+  Receipt,
+  Printer,
+  QrCode
 } from 'lucide-react';
 import { catalogService } from './services/catalogService';
 import { creditMemoService } from './services/creditMemoService';
@@ -61,6 +63,8 @@ import ProductEditModal from './components/ProductEditModal';
 import ImageLightboxModal from './components/ImageLightboxModal';
 import NotificationBell from './components/NotificationBell';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
+import ReturnQRModal from './components/ReturnQRModal';
+import { QRCodeSVG } from 'qrcode.react';
 
 const DEFECT_REASONS = [
   'Damaged Box / Crushed Packaging',
@@ -109,6 +113,7 @@ export default function App() {
   const [voucherModalMemo, setVoucherModalMemo] = useState(null);
   const [voucherModalMemos, setVoucherModalMemos] = useState([]);
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
+  const [qrModalReport, setQrModalReport] = useState(null);
 
   // Listen to browser navigation
   useEffect(() => {
@@ -1040,15 +1045,24 @@ export default function App() {
         gps: gpsLocation.isAccurate ? gpsLocation : null
       });
 
-      // Show success screen
+      // Show success screen with full report details for QR sticker generation
       setSubmitSuccessReport({
+        rma_number: res.rmaNumber,
         rmaNumber: res.rmaNumber,
         barcode: cleanBarcode,
+        name: detectedProduct?.name || `Barcode ${cleanBarcode}`,
         productName: detectedProduct?.name || `Barcode ${cleanBarcode}`,
+        code: detectedProduct?.code || '',
+        sku: detectedProduct?.code || '',
         quantity,
+        unit_name: detectedProduct?.unit_name || 'pc',
+        supplier_name: detectedProduct?.supplier_name || 'Warehouse',
+        supplier: detectedProduct?.supplier_name || 'Warehouse',
         reason: selectedReason,
+        reporter_name: reporterName || 'Staff',
         photoCount: uploadedUrls.length,
-        hasGps: gpsLocation.isAccurate
+        hasGps: gpsLocation.isAccurate,
+        created_at: new Date().toISOString()
       });
 
       // Reset form
@@ -1141,14 +1155,68 @@ export default function App() {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setSubmitSuccessReport(null)}
-                  className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-2xl shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Report Another Item</span>
-                </button>
+                {/* Generated RMA QR Code Box Sticker Card */}
+                <div className="p-4 bg-white dark:bg-slate-950 border-2 border-dashed border-emerald-300 dark:border-emerald-800 rounded-2xl flex flex-col sm:flex-row items-center gap-4 text-left shadow-xs">
+                  <div className="p-2.5 bg-white rounded-xl border border-slate-300 dark:border-slate-700 shadow-xs shrink-0 text-center">
+                    <QRCodeSVG
+                      value={JSON.stringify({
+                        rma: submitSuccessReport.rmaNumber,
+                        barcode: submitSuccessReport.barcode,
+                        name: submitSuccessReport.productName,
+                        qty: submitSuccessReport.quantity || 1,
+                        reason: submitSuccessReport.reason,
+                        date: new Date().toISOString().split('T')[0]
+                      })}
+                      size={110}
+                      level="H"
+                      includeMargin={false}
+                    />
+                    <span className="text-[8px] font-mono font-black text-slate-700 block mt-1 tracking-wider">
+                      SCAN FOR RMA
+                    </span>
+                  </div>
+
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300">
+                        Box Sticker Ready
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {submitSuccessReport.quantity || 1} unit(s)
+                      </span>
+                    </div>
+                    <div className="font-mono font-black text-slate-900 dark:text-white text-base">
+                      {submitSuccessReport.rmaNumber}
+                    </div>
+                    <div className="font-bold text-slate-800 dark:text-slate-200 text-xs truncate">
+                      {submitSuccessReport.productName}
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Print this QR sticker and tape it directly to the returned box or item for instant warehouse intake scanning.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setQrModalReport(submitSuccessReport)}
+                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-2xl shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Print Box QR Sticker</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSubmitSuccessReport(null)}
+                    className="w-full py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-extrabold text-xs rounded-2xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Report Another Item</span>
+                  </button>
+                </div>
               </div>
             ) : (
               <form onSubmit={handleSubmitReport} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
@@ -2016,9 +2084,19 @@ export default function App() {
                                   </span>
                                 </td>
 
-                                {/* 2. RMA # */}
+                                {/* 2. RMA # + QR Sticker Button */}
                                 <td className="py-3 px-3.5 font-mono font-bold text-blue-700 dark:text-blue-400">
-                                  {item.rma_number}
+                                  <div className="flex items-center gap-1.5">
+                                    <span>{item.rma_number}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setQrModalReport(item)}
+                                      className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-md transition-colors cursor-pointer"
+                                      title={`View & Print Box QR Sticker for ${item.rma_number}`}
+                                    >
+                                      <QrCode className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
                                 </td>
 
                                 {/* 3. Photo Thumbnail with Lightbox */}
@@ -2260,6 +2338,14 @@ export default function App() {
                                   <span className="font-mono font-black text-blue-700 dark:text-blue-400 text-sm">
                                     {item.rma_number}
                                   </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setQrModalReport(item)}
+                                    className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-md transition-colors cursor-pointer"
+                                    title={`View & Print Box QR Sticker for ${item.rma_number}`}
+                                  >
+                                    <QrCode className="w-3.5 h-3.5" />
+                                  </button>
                                 </div>
                                 <h4 className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm mt-0.5">
                                   {item.name || `Unidentified (${item.barcode})`}
@@ -2503,6 +2589,7 @@ export default function App() {
         creditMemosList={creditMemosList}
         savedProductsList={savedProductsList}
         onEditProductFromReport={handleEditProductFromReport}
+        onViewReportQR={(rep) => setQrModalReport(rep)}
         onOpenCreditMemo={(rep) => {
           setIsReportsModalOpen(false);
           handleOpenCreditMemoForReport(rep);
@@ -2597,6 +2684,13 @@ export default function App() {
         title={lightboxPhoto?.title}
         subtitle={lightboxPhoto?.subtitle}
         onClose={() => setLightboxPhoto(null)}
+      />
+
+      {/* Return Merchandise Authorization QR Sticker Modal */}
+      <ReturnQRModal
+        isOpen={Boolean(qrModalReport)}
+        onClose={() => setQrModalReport(null)}
+        report={qrModalReport}
       />
 
       {/* Toast Alert Notification */}

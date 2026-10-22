@@ -21,7 +21,8 @@ import {
   ArrowUp,
   ArrowDown,
   Trash2,
-  Receipt
+  Receipt,
+  QrCode
 } from 'lucide-react';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
@@ -37,7 +38,8 @@ export default function RMAReportsModal({
   savedProductsList = [],
   onOpenCreditMemo,
   onViewCreditMemoVoucher,
-  onEditProductFromReport
+  onEditProductFromReport,
+  onViewReportQR
 }) {
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
   const [viewMode, setViewMode] = useState(() => {
@@ -508,9 +510,21 @@ export default function RMAReportsModal({
                           </span>
                         </td>
 
-                        {/* 2. RMA Number */}
+                        {/* 2. RMA Number + QR Code Sticker */}
                         <td className="py-3 px-3.5 font-mono font-bold text-blue-700 dark:text-blue-400">
-                          {item.rma_number}
+                          <div className="flex items-center gap-1.5">
+                            <span>{item.rma_number}</span>
+                            {onViewReportQR && (
+                              <button
+                                type="button"
+                                onClick={() => onViewReportQR(item)}
+                                className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-md transition-colors cursor-pointer"
+                                title={`View & Print Box QR Sticker for ${item.rma_number}`}
+                              >
+                                <QrCode className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </td>
 
                         {/* 3. Photo with Click-to-Zoom Lightbox */}
@@ -751,6 +765,16 @@ export default function RMAReportsModal({
                           <span className="font-mono font-black text-blue-700 dark:text-blue-400 text-sm">
                             {item.rma_number}
                           </span>
+                          {onViewReportQR && (
+                            <button
+                              type="button"
+                              onClick={() => onViewReportQR(item)}
+                              className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-md transition-colors cursor-pointer"
+                              title={`View & Print Box QR Sticker for ${item.rma_number}`}
+                            >
+                              <QrCode className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                         <h4 className="font-bold text-slate-900 dark:text-white text-sm truncate" title={item.name}>
                           {item.name || `Unidentified (${item.barcode})`}
