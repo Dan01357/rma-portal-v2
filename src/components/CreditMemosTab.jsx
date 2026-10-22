@@ -34,6 +34,7 @@ export default function CreditMemosTab({
   recentReportsList = [],
   currentUser
 }) {
+  const canManageCreditMemos = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState('credit_issued_at');
   const [sortDirection, setSortDirection] = useState('desc');
@@ -339,14 +340,16 @@ export default function CreditMemosTab({
               </button>
             )}
 
-            <button
-              type="button"
-              onClick={onOpenCreateModal}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-sm shadow-emerald-600/20 transition-all cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Issue Credit Memo</span>
-            </button>
+            {canManageCreditMemos && (
+              <button
+                type="button"
+                onClick={onOpenCreateModal}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-sm shadow-emerald-600/20 transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Issue Credit Memo</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -411,7 +414,7 @@ export default function CreditMemosTab({
                 <span>Print Selected ({selectedMemoNumbers.size})</span>
               </button>
 
-              {onRequestBulkDeleteCreditMemo && (
+              {canManageCreditMemos && onRequestBulkDeleteCreditMemo && (
                 <button
                   type="button"
                   onClick={handleBulkDelete}
@@ -446,14 +449,16 @@ export default function CreditMemosTab({
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
               When items are returned and pulled out from stores or warehouse inventory, Finance can issue official Credit Memos with approved credit amounts and printable vouchers.
             </p>
-            <button
-              type="button"
-              onClick={onOpenCreateModal}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Issue First Credit Memo</span>
-            </button>
+            {canManageCreditMemos && (
+              <button
+                type="button"
+                onClick={onOpenCreateModal}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Issue First Credit Memo</span>
+              </button>
+            )}
           </div>
         ) : processedMemos.length === 0 ? (
           <div className="text-center py-10 text-xs font-bold text-slate-500 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
@@ -628,16 +633,18 @@ export default function CreditMemosTab({
                               <Printer className="w-4 h-4" />
                             </button>
 
-                            <button
-                              type="button"
-                              onClick={() => onEditCreditMemo(memo)}
-                              className="p-1.5 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                              title="Edit Credit Memo"
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
+                            {canManageCreditMemos && (
+                              <button
+                                type="button"
+                                onClick={() => onEditCreditMemo(memo)}
+                                className="p-1.5 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                                title="Edit Credit Memo"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                            )}
 
-                            {onRequestDeleteCreditMemo && (
+                            {canManageCreditMemos && onRequestDeleteCreditMemo && (
                               <button
                                 type="button"
                                 onClick={() => onRequestDeleteCreditMemo(memo)}

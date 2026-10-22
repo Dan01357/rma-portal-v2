@@ -46,7 +46,8 @@ export default function RMAReportsModal({
     return localStorage.getItem('rma_reports_modal_view_mode') || 'table';
   });
 
-  const canDeleteReports = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
+  const canAdmin = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
+  const canDeleteReports = canAdmin;
 
   // Filtering & Sorting State
   const [searchQuery, setSearchQuery] = useState('');
@@ -634,18 +635,18 @@ export default function RMAReportsModal({
                           )}
                         </td>
 
-                        {/* 10. Actions: Edit Item / Save Product, Credit Memo & Delete */}
+                        {/* 10. Actions: Assign SKU / Save Product, Credit Memo & Delete */}
                         <td className="py-2.5 px-3.5 text-center">
                           <div className="flex items-center justify-center gap-1.5">
-                            {onEditProductFromReport && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
+                            {canAdmin && onEditProductFromReport && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                               <button
                                 type="button"
                                 onClick={() => onEditProductFromReport(item)}
                                 className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                title={`Edit item details and save "${item.name || item.barcode}" to Products catalog`}
+                                title={`Assign official SKU and save "${item.name || item.barcode}" to Products catalog`}
                               >
                                 <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                                <span>Edit Item</span>
+                                <span>Assign SKU</span>
                               </button>
                             )}
 
@@ -664,17 +665,20 @@ export default function RMAReportsModal({
                                   </button>
                                 );
                               }
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => onOpenCreditMemo && onOpenCreditMemo(item)}
-                                  className="px-2.5 py-1 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                  title="Issue Finance Credit Memo for this Return"
-                                >
-                                  <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                  <span>+ Credit Memo</span>
-                                </button>
-                              );
+                              if (canAdmin) {
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenCreditMemo && onOpenCreditMemo(item)}
+                                    className="px-2.5 py-1 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                    title="Issue Finance Credit Memo for this Return"
+                                  >
+                                    <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                    <span>+ Credit Memo</span>
+                                  </button>
+                                );
+                              }
+                              return null;
                             })()}
 
                             {canDeleteReports && (
@@ -815,15 +819,15 @@ export default function RMAReportsModal({
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-                        {onEditProductFromReport && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
+                        {canAdmin && onEditProductFromReport && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                           <button
                             type="button"
                             onClick={() => onEditProductFromReport(item)}
                             className="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                            title="Edit item details and save to catalog"
+                            title="Assign official SKU and save to Products catalog"
                           >
                             <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                            <span>Edit Item</span>
+                            <span>Assign SKU</span>
                           </button>
                         )}
                         {(() => {
@@ -841,17 +845,20 @@ export default function RMAReportsModal({
                               </button>
                             );
                           }
-                          return (
-                            <button
-                              type="button"
-                              onClick={() => onOpenCreditMemo && onOpenCreditMemo(item)}
-                              className="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                              title="Issue Credit Memo"
-                            >
-                              <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                              <span>+ CM</span>
-                            </button>
-                          );
+                          if (canAdmin) {
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => onOpenCreditMemo && onOpenCreditMemo(item)}
+                                className="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                title="Issue Credit Memo"
+                              >
+                                <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                <span>+ CM</span>
+                              </button>
+                            );
+                          }
+                          return null;
                         })()}
                         <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
                           isPendingUnknown

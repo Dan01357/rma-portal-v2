@@ -64,6 +64,7 @@ import ImageLightboxModal from './components/ImageLightboxModal';
 import NotificationBell from './components/NotificationBell';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
 import ReturnQRModal from './components/ReturnQRModal';
+import QuickRMAActionModal from './components/QuickRMAActionModal';
 import { QRCodeSVG } from 'qrcode.react';
 
 const DEFECT_REASONS = [
@@ -115,8 +116,56 @@ export default function App() {
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
   const [qrModalReport, setQrModalReport] = useState(null);
 
-  // Listen to browser navigation
+  // Quick RMA Action Modal State (triggered by Box QR scan or ?rma= URL parameter)
+  const [isQuickRmaModalOpen, setIsQuickRmaModalOpen] = useState(false);
+  const [quickRmaNumber, setQuickRmaNumber] = useState(null);
+
+  const parseRmaFromScan = (rawText) => {
+    if (!rawText) return null;
+    const str = String(rawText).trim();
+    if (str.includes('rma=')) {
+      try {
+        const url = new URL(str.startsWith('http') ? str : `https://example.com/${str.replace(/^\/?/, '')}`);
+        const val = url.searchParams.get('rma') || url.searchParams.get('rma_number');
+        if (val) return val;
+      } catch {}
+    }
+    if (str.startsWith('{') && str.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(str);
+        if (parsed.rma) return parsed.rma;
+      } catch {}
+    }
+    if (/^RMA-\d{4}-\d+-[A-Z0-9]+/i.test(str) || /^RMA-/i.test(str)) {
+      return str;
+    }
+    return null;
+  };
+
+  const handleCloseQuickRma = () => {
+    setIsQuickRmaModalOpen(false);
+    setQuickRmaNumber(null);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('rma') || url.searchParams.has('rma_number')) {
+        url.searchParams.delete('rma');
+        url.searchParams.delete('rma_number');
+        window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+      }
+    }
+  };
+
+  // Listen to browser navigation & check ?rma= query parameter
   useEffect(() => {
+    const checkRmaParam = () => {
+      const params = new URLSearchParams(window.location.search);
+      const rmaParam = params.get('rma') || params.get('rma_number');
+      if (rmaParam) {
+        setQuickRmaNumber(rmaParam);
+        setIsQuickRmaModalOpen(true);
+      }
+    };
+
     const handleLocationChange = () => {
       const path = window.location.pathname.toLowerCase();
       const hash = window.location.hash.toLowerCase();
@@ -127,7 +176,11 @@ export default function App() {
       if (onAdmin && !authService.getCurrentUser()) {
         setIsLoginModalOpen(true);
       }
+
+      checkRmaParam();
     };
+
+    checkRmaParam();
 
     window.addEventListener('popstate', handleLocationChange);
     window.addEventListener('hashchange', handleLocationChange);
@@ -1183,14 +1236,7 @@ export default function App() {
                 <div className="p-4 bg-white dark:bg-slate-950 border-2 border-dashed border-emerald-300 dark:border-emerald-800 rounded-2xl flex flex-col sm:flex-row items-center gap-4 text-left shadow-xs">
                   <div className="p-2.5 bg-white rounded-xl border border-slate-300 dark:border-slate-700 shadow-xs shrink-0 text-center">
                     <QRCodeSVG
-                      value={JSON.stringify({
-                        rma: submitSuccessReport.rmaNumber,
-                        barcode: submitSuccessReport.barcode,
-                        name: submitSuccessReport.productName,
-                        qty: submitSuccessReport.quantity || 1,
-                        reason: submitSuccessReport.reason,
-                        date: new Date().toISOString().split('T')[0]
-                      })}
+                      value={typeof window !== 'undefined' ? `${window.location.origin}/?rma=${encodeURIComponent(submitSuccessReport.rmaNumber)}` : submitSuccessReport.rmaNumber}
                       size={110}
                       level="H"
                       includeMargin={false}
@@ -2217,18 +2263,18 @@ export default function App() {
                                   )}
                                 </td>
 
-                                {/* 10. Actions: Edit Item / Save Product, Credit Memo & Delete */}
+                                {/* 10. Actions: Assign SKU / Save Product, Credit Memo & Delete */}
                                 <td className="py-2.5 px-3.5 text-center">
                                   <div className="flex items-center justify-center gap-1.5">
-                                    {!savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
+                                    {canEditProducts && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                                       <button
                                         type="button"
                                         onClick={() => handleEditProductFromReport(item)}
                                         className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                        title={`Edit item details and save "${item.name || item.barcode}" to Products catalog`}
+                                        title={`Assign official SKU and save "${item.name || item.barcode}" to Products catalog`}
                                       >
                                         <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                                        <span>Edit Item</span>
+                                        <span>Assign SKU</span>
                                       </button>
                                     )}
 
@@ -2247,17 +2293,20 @@ export default function App() {
                                           </button>
                                         );
                                       }
-                                      return (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleOpenCreditMemoForReport(item)}
-                                          className="px-2.5 py-1 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                          title="Issue Finance Credit Memo for this Return"
-                                        >
-                                          <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                          <span>+ Credit Memo</span>
-                                        </button>
-                                      );
+                                      if (canEditProducts) {
+                                        return (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenCreditMemoForReport(item)}
+                                            className="px-2.5 py-1 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                            title="Issue Finance Credit Memo for this Return"
+                                          >
+                                            <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                            <span>+ Credit Memo</span>
+                                          </button>
+                                        );
+                                      }
+                                      return null;
                                     })()}
 
                                     {canDeleteReports && (
@@ -2392,15 +2441,15 @@ export default function App() {
                                 </div>
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">
-                                {!savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
+                                {canEditProducts && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                                   <button
                                     type="button"
                                     onClick={() => handleEditProductFromReport(item)}
                                     className="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                                    title="Edit item details and save to catalog"
+                                    title="Assign official SKU and save to Products catalog"
                                   >
                                     <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                                    <span>Edit Item</span>
+                                    <span>Assign SKU</span>
                                   </button>
                                 )}
                                 {(() => {
@@ -2418,17 +2467,20 @@ export default function App() {
                                       </button>
                                     );
                                   }
-                                  return (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenCreditMemoForReport(item)}
-                                      className="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                                      title="Issue Credit Memo"
-                                    >
-                                      <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                      <span>+ CM</span>
-                                    </button>
-                                  );
+                                  if (canEditProducts) {
+                                    return (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenCreditMemoForReport(item)}
+                                        className="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                        title="Issue Credit Memo"
+                                      >
+                                        <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                        <span>+ CM</span>
+                                      </button>
+                                    );
+                                  }
+                                  return null;
                                 })()}
                                 <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300">
                                   {item.reason || 'Damaged'}
@@ -2602,7 +2654,13 @@ export default function App() {
         onClose={() => setIsScannerOpen(false)}
         onScanSuccess={(code) => {
           setIsScannerOpen(false);
-          setBarcodeInput(code);
+          const rma = parseRmaFromScan(code);
+          if (rma) {
+            setQuickRmaNumber(rma);
+            setIsQuickRmaModalOpen(true);
+          } else {
+            setBarcodeInput(code);
+          }
         }}
       />
 
@@ -2758,6 +2816,42 @@ export default function App() {
         isOpen={Boolean(qrModalReport)}
         onClose={() => setQrModalReport(null)}
         report={qrModalReport}
+        onOpenQuickAction={(rma) => {
+          setQuickRmaNumber(rma);
+          setIsQuickRmaModalOpen(true);
+        }}
+      />
+
+      {/* RMA QR Code Quick Processing Modal */}
+      <QuickRMAActionModal
+        isOpen={isQuickRmaModalOpen}
+        onClose={handleCloseQuickRma}
+        rmaNumber={quickRmaNumber}
+        currentUser={currentUser}
+        savedProductsList={savedProductsList}
+        creditMemosList={creditMemosList}
+        recentReportsList={recentReportsList}
+        onAssignSku={(reportToEdit) => {
+          handleEditProductFromReport(reportToEdit);
+        }}
+        onOpenCreditMemo={(rep, existing) => {
+          if (existing) {
+            setEditingCreditMemo(existing);
+            setSelectedCreditMemoReport(rep);
+            setIsCreditMemoModalOpen(true);
+          } else {
+            handleOpenCreditMemoForReport(rep);
+          }
+        }}
+        onViewCreditMemoVoucher={(memo) => {
+          setVoucherModalMemo(memo);
+          setIsVoucherModalOpen(true);
+        }}
+        onViewReportQR={(rep) => {
+          setQrModalReport(rep);
+        }}
+        onOpenLightbox={setLightboxPhoto}
+        onRefresh={refreshAllData}
       />
 
       {/* Toast Alert Notification */}

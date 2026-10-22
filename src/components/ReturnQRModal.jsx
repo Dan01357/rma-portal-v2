@@ -11,10 +11,11 @@ import {
   Hash, 
   Calendar, 
   User, 
-  AlertTriangle 
+  AlertTriangle,
+  Sparkles
 } from 'lucide-react';
 
-export default function ReturnQRModal({ isOpen, onClose, report }) {
+export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickAction }) {
   if (!isOpen || !report) return null;
 
   const rmaNumber = report.rma_number || report.rmaNumber || report.id || 'N/A';
@@ -32,17 +33,10 @@ export default function ReturnQRModal({ isOpen, onClose, report }) {
     day: 'numeric'
   });
 
-  // Machine-readable payload for 2D barcode / QR scanners
-  const qrPayload = JSON.stringify({
-    rma: rmaNumber,
-    barcode: barcode,
-    sku: sku,
-    name: itemName,
-    qty: quantity,
-    supplier: supplier,
-    reason: reason,
-    date: dateFormatted
-  });
+  // Clean RMA URL payload: when scanned by smartphone camera or barcode gun, opens RMA Quick Action
+  const qrPayload = typeof window !== 'undefined'
+    ? `${window.location.origin}/?rma=${encodeURIComponent(rmaNumber)}`
+    : rmaNumber;
 
   const handlePrint = () => {
     const originalTitle = document.title;
@@ -244,6 +238,20 @@ export default function ReturnQRModal({ isOpen, onClose, report }) {
             Standard label sizing for warehouse box stickers and thermal printers.
           </p>
           <div className="flex items-center gap-2">
+            {onOpenQuickAction && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenQuickAction(rmaNumber);
+                }}
+                className="px-3.5 py-2 text-xs font-bold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/70 hover:bg-blue-100 dark:hover:bg-blue-900/70 border border-blue-200 dark:border-blue-800 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="Open Quick Processing Actions for this RMA"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                <span>Quick Actions</span>
+              </button>
+            )}
             <button
               onClick={onClose}
               type="button"

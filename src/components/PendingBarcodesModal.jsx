@@ -34,7 +34,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const canVerify = currentUser?.role !== 'viewer';
+  const canVerify = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
 
   // AE & Company state
   const [employees, setEmployees] = useState([]);

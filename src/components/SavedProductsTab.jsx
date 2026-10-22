@@ -58,7 +58,7 @@ export default function SavedProductsTab({
     return localStorage.getItem('rma_saved_products_view_mode') || 'table';
   });
 
-  const canEdit = currentUser?.role !== 'viewer';
+  const canEdit = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
   const canDelete = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
 
   const handleSetViewMode = (mode) => {

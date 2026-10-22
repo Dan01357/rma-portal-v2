@@ -50,7 +50,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   const [skuError, setSkuError] = useState(null);
   const [nameError, setNameError] = useState(null);
 
-  const canEdit = currentUser?.role !== 'viewer';
+  const canEdit = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
 
   // Fetch employees from authService directory on open
   useEffect(() => {
