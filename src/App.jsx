@@ -205,6 +205,7 @@ export default function App() {
     window.history.pushState({}, '', path);
     const onAdmin = path === '/admin' || path === '#/admin';
     setIsAdminView(onAdmin);
+    setSelectedReportIds(new Set());
     if (onAdmin && !currentUser) {
       setIsLoginModalOpen(true);
     }
@@ -530,6 +531,12 @@ export default function App() {
       } else if (deleteModalState.type === 'report') {
         const { id, rmaNumber } = deleteModalState;
         await catalogService.deleteReport(id, rmaNumber);
+        setSelectedReportIds(prev => {
+          const next = new Set(prev);
+          if (id) next.delete(id);
+          if (rmaNumber) next.delete(rmaNumber);
+          return next;
+        });
         setRecentReportsList(prev => prev.filter(r => (id ? r.id !== id : r.rma_number !== rmaNumber)));
         showToast(`Deleted return report RMA #${rmaNumber}.`, 'success');
         refreshAllData();
@@ -544,6 +551,7 @@ export default function App() {
       } else if (deleteModalState.type === 'bulk_reports') {
         const items = deleteModalState.items || [];
         await catalogService.deleteMultipleReports(items);
+        setSelectedReportIds(new Set());
         const deletedIds = new Set(items.map(r => r.id));
         const deletedRmas = new Set(items.map(r => r.rma_number));
         setRecentReportsList(prev => prev.filter(r => !deletedIds.has(r.id) && !deletedRmas.has(r.rma_number)));
@@ -625,6 +633,21 @@ export default function App() {
   const [reportsCurrentPage, setReportsCurrentPage] = useState(1);
   const [reportsPageSize, setReportsPageSize] = useState(10);
   const [selectedReportIds, setSelectedReportIds] = useState(new Set());
+
+  // Automatically prune orphan report selection IDs whenever recentReportsList updates
+  useEffect(() => {
+    setSelectedReportIds(prev => {
+      if (prev.size === 0) return prev;
+      const valid = new Set(recentReportsList.flatMap(r => [r.id, r.rma_number].filter(Boolean)));
+      const next = new Set([...prev].filter(id => valid.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [recentReportsList]);
+
+  // Clear selections whenever the active tab changes (e.g. Products <-> Reports <-> Credit Memos)
+  useEffect(() => {
+    setSelectedReportIds(new Set());
+  }, [adminActiveTab]);
 
   // Fullscreen Image Lightbox Modal State
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
@@ -1072,6 +1095,7 @@ export default function App() {
       setSelectedReason(DEFECT_REASONS[0]);
       setExplanation('');
       setPhotoFiles([]);
+      setSelectedReportIds(new Set());
 
       // Refresh data
       refreshAllData();
@@ -1086,7 +1110,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 transition-colors duration-200">
       {/* Dynamic container width: clean mobile intake for public reporter, spacious SaaS for admin */}
-      <div className={`${isAdminView ? 'max-w-6xl' : 'max-w-xl'} mx-auto space-y-4 transition-all duration-300`}>
+      <div id="app-main-view-container" className={`${isAdminView ? 'max-w-6xl' : 'max-w-xl'} mx-auto space-y-4 transition-all duration-300`}>
 
         {/* ================================================================= */}
         {/* 1. PUBLIC REPORTER PORTAL (Accessible at '/' or default)          */}
@@ -2057,6 +2081,11 @@ export default function App() {
                               ? item.photos 
                               : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
                             const isSelected = selectedReportIds.has(item.id || item.rma_number);
+                            const matchedProduct = savedProductsList.find(p => p.barcode && String(p.barcode) === String(item.barcode));
+                            const resolvedName = (item.name && !item.name.toLowerCase().startsWith('unidentified')) 
+                              ? item.name 
+                              : (matchedProduct?.name || item.name || `Unidentified (${item.barcode})`);
+                            const isPendingUnknown = !matchedProduct && item.status === 'pending_admin_details';
 
                             return (
                               <tr 
@@ -2090,7 +2119,7 @@ export default function App() {
                                     <span>{item.rma_number}</span>
                                     <button
                                       type="button"
-                                      onClick={() => setQrModalReport(item)}
+                                      onClick={() => setQrModalReport({ ...item, name: resolvedName })}
                                       className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-md transition-colors cursor-pointer"
                                       title={`View & Print Box QR Sticker for ${item.rma_number}`}
                                     >
@@ -2108,7 +2137,7 @@ export default function App() {
                                         images: photoList,
                                         initialIndex: 0,
                                         url: photoList[0],
-                                        title: item.name || `Return ${item.rma_number}`,
+                                        title: resolvedName || `Return ${item.rma_number}`,
                                         subtitle: `RMA #${item.rma_number} • Reported by ${item.reporter_name || item.reported_by || 'Staff'} • ${item.reason || 'Damaged'}`
                                       })}
                                       className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
@@ -2130,12 +2159,14 @@ export default function App() {
                                 {/* 4. Barcode */}
                                 <td className="py-3 px-3.5 font-mono">
                                   <div className="font-bold text-slate-800 dark:text-slate-200">{item.barcode}</div>
-                                  {item.code && <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.code}</div>}
+                                  {(item.code || matchedProduct?.code) && (
+                                    <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.code || matchedProduct?.code}</div>
+                                  )}
                                 </td>
 
                                 {/* 5. Item Name */}
-                                <td className="py-3 px-3.5 font-bold text-slate-900 dark:text-white max-w-[200px] truncate" title={item.name}>
-                                  {item.name || `Unidentified (${item.barcode})`}
+                                <td className="py-3 px-3.5 font-bold text-slate-900 dark:text-white max-w-[200px] truncate" title={resolvedName}>
+                                  {resolvedName}
                                 </td>
 
                                 {/* 6. Reason */}
@@ -2160,11 +2191,11 @@ export default function App() {
                                 {/* 8. Status */}
                                 <td className="py-3 px-3 text-center">
                                   <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
-                                    item.status === 'pending_admin_details'
+                                    isPendingUnknown
                                       ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
                                       : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                                   }`}>
-                                    {item.status === 'pending_admin_details' ? 'Unknown' : 'Logged'}
+                                    {isPendingUnknown ? 'Unknown' : 'Logged'}
                                   </span>
                                 </td>
 
@@ -2313,6 +2344,11 @@ export default function App() {
                           ? item.photos 
                           : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
                         const isSelected = selectedReportIds.has(item.id || item.rma_number);
+                        const matchedProduct = savedProductsList.find(p => p.barcode && String(p.barcode) === String(item.barcode));
+                        const resolvedName = (item.name && !item.name.toLowerCase().startsWith('unidentified')) 
+                          ? item.name 
+                          : (matchedProduct?.name || item.name || `Unidentified (${item.barcode})`);
+                        const isPendingUnknown = !matchedProduct && item.status === 'pending_admin_details';
 
                         return (
                           <div 
@@ -2340,16 +2376,20 @@ export default function App() {
                                   </span>
                                   <button
                                     type="button"
-                                    onClick={() => setQrModalReport(item)}
+                                    onClick={() => setQrModalReport({ ...item, name: resolvedName })}
                                     className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-md transition-colors cursor-pointer"
                                     title={`View & Print Box QR Sticker for ${item.rma_number}`}
                                   >
                                     <QrCode className="w-3.5 h-3.5" />
                                   </button>
                                 </div>
-                                <h4 className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm mt-0.5">
-                                  {item.name || `Unidentified (${item.barcode})`}
+                                <h4 className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm mt-0.5 truncate" title={resolvedName}>
+                                  {resolvedName}
                                 </h4>
+                                <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                                  Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
+                                  {(item.code || matchedProduct?.code) && <span> • SKU: {item.code || matchedProduct?.code}</span>}
+                                </div>
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">
                                 {!savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
@@ -2610,29 +2650,56 @@ export default function App() {
         product={editingProduct}
         currentUser={currentUser}
         onSaved={async (prod) => {
-          // If this product matches any return report, synchronize rma_reports in Supabase
-          if (prod?.barcode) {
+          const barcode = prod?.barcode ? String(prod.barcode).trim() : '';
+          const name = prod?.name || '';
+          const code = prod?.code || prod?.sku || '';
+          const supplierName = prod?.supplier_name || prod?.supplierName || 'Savemore';
+          const price = Number(prod?.price || 0);
+          const priceWithVat = Number(prod?.price_with_vat || prod?.priceWithVat || price || 0);
+          const unitName = prod?.unit_name || prod?.unitName || 'pc';
+          const aeName = prod?.ae_name || prod?.aeName || null;
+          const aeEmail = prod?.ae_email || prod?.aeEmail || null;
+
+          if (barcode) {
+            // Optimistically update in-memory reports state so UI shows Logged immediately
+            setRecentReportsList(prev => prev.map(rep => {
+              if (rep.barcode && String(rep.barcode).trim() === barcode) {
+                return {
+                  ...rep,
+                  name: name || rep.name,
+                  code: code || rep.code,
+                  status: 'logged',
+                  supplier_name: supplierName,
+                  price: price,
+                  price_with_vat: priceWithVat,
+                  unit_name: unitName
+                };
+              }
+              return rep;
+            }));
+
+            // Persist to Supabase rma_reports table
             try {
               await supabase
                 .from('rma_reports')
                 .update({
-                  name: prod.name,
-                  code: prod.code,
-                  price: prod.price,
-                  price_with_vat: prod.price_with_vat,
-                  supplier_name: prod.supplier_name,
-                  unit_name: prod.unit_name,
-                  ae_name: prod.ae_name,
-                  ae_email: prod.ae_email,
+                  name: name,
+                  code: code,
+                  price: price,
+                  price_with_vat: priceWithVat,
+                  supplier_name: supplierName,
+                  unit_name: unitName,
+                  ae_name: aeName,
+                  ae_email: aeEmail,
                   status: 'logged'
                 })
-                .eq('barcode', prod.barcode);
+                .eq('barcode', barcode);
             } catch (e) {
               console.warn('Sync rma_reports from product save notice:', e);
             }
           }
-          refreshAllData();
-          showToast(`Product "${prod.name}" saved to catalog and linked reports updated!`, 'success');
+          await refreshAllData();
+          showToast(`Product "${name || 'Item'}" saved to catalog and linked reports updated!`, 'success');
         }}
         onDeleted={(prod) => {
           refreshAllData();

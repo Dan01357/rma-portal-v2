@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Receipt, 
   Search, 
@@ -40,6 +40,16 @@ export default function CreditMemosTab({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [selectedMemoNumbers, setSelectedMemoNumbers] = useState(new Set());
+
+  // Automatically prune orphan credit memo selection numbers whenever creditMemosList updates
+  useEffect(() => {
+    setSelectedMemoNumbers(prev => {
+      if (prev.size === 0) return prev;
+      const valid = new Set(creditMemosList.map(m => m.credit_memo_number).filter(Boolean));
+      const next = new Set([...prev].filter(num => valid.has(num)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [creditMemosList]);
 
   // Financial summary metrics
   const metrics = useMemo(() => {

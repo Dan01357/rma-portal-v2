@@ -58,6 +58,23 @@ export default function RMAReportsModal({
   const [pageSize, setPageSize] = useState(10);
   const [selectedReportIds, setSelectedReportIds] = useState(new Set());
 
+  // Automatically prune orphan report selection IDs whenever reports update
+  useEffect(() => {
+    setSelectedReportIds(prev => {
+      if (prev.size === 0) return prev;
+      const valid = new Set(reports.flatMap(r => [r.id, r.rma_number].filter(Boolean)));
+      const next = new Set([...prev].filter(id => valid.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [reports]);
+
+  // Reset selection when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setSelectedReportIds(new Set());
+    }
+  }, [isOpen]);
+
   const handleSetViewMode = (mode) => {
     setViewMode(mode);
     try {
@@ -483,6 +500,11 @@ export default function RMAReportsModal({
                     const reporterName = item.reporter_name || (item.reported_by && !item.reported_by.includes('(') ? item.reported_by : '') || 'Reporter';
                     const reporterContact = item.reporter_contact || (item.reported_by && item.reported_by.includes('(') ? item.reported_by.replace(/.*\((.*)\).*/, '$1') : '');
                     const isSelected = selectedReportIds.has(item.id || item.rma_number);
+                    const matchedProduct = savedProductsList.find(p => p.barcode && String(p.barcode) === String(item.barcode));
+                    const resolvedName = (item.name && !item.name.toLowerCase().startsWith('unidentified')) 
+                      ? item.name 
+                      : (matchedProduct?.name || item.name || `Unidentified (${item.barcode})`);
+                    const isPendingUnknown = !matchedProduct && item.status === 'pending_admin_details';
 
                     return (
                       <tr 
@@ -517,7 +539,7 @@ export default function RMAReportsModal({
                             {onViewReportQR && (
                               <button
                                 type="button"
-                                onClick={() => onViewReportQR(item)}
+                                onClick={() => onViewReportQR({ ...item, name: resolvedName })}
                                 className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-md transition-colors cursor-pointer"
                                 title={`View & Print Box QR Sticker for ${item.rma_number}`}
                               >
@@ -536,7 +558,7 @@ export default function RMAReportsModal({
                                 images: photoList,
                                 initialIndex: 0,
                                 url: photoList[0],
-                                title: item.name || `Return ${item.rma_number}`,
+                                title: resolvedName || `Return ${item.rma_number}`,
                                 subtitle: `RMA #${item.rma_number} • Reported by ${reporterName} • ${item.reason || 'Damaged'}`
                               })}
                               className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
@@ -554,12 +576,14 @@ export default function RMAReportsModal({
                         {/* 4. Barcode & SKU */}
                         <td className="py-3 px-3.5 font-mono">
                           <div className="font-bold text-slate-800 dark:text-slate-200">{item.barcode}</div>
-                          {item.code && <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.code}</div>}
+                          {(item.code || matchedProduct?.code) && (
+                            <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.code || matchedProduct?.code}</div>
+                          )}
                         </td>
 
                         {/* 5. Item Name */}
-                        <td className="py-3 px-3.5 font-bold text-slate-900 dark:text-white max-w-[200px] truncate" title={item.name}>
-                          {item.name || `Unidentified (${item.barcode})`}
+                        <td className="py-3 px-3.5 font-bold text-slate-900 dark:text-white max-w-[200px] truncate" title={resolvedName}>
+                          {resolvedName}
                         </td>
 
                         {/* 6. Reason */}
@@ -584,11 +608,11 @@ export default function RMAReportsModal({
                         {/* 8. Status */}
                         <td className="py-3 px-3 text-center">
                           <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
-                            item.status === 'pending_admin_details'
+                            isPendingUnknown
                               ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
                               : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                           }`}>
-                            {item.status === 'pending_admin_details' ? 'Unknown' : 'Logged'}
+                            {isPendingUnknown ? 'Unknown' : 'Logged'}
                           </span>
                         </td>
 
@@ -740,6 +764,11 @@ export default function RMAReportsModal({
                 const reporterName = item.reporter_name || (item.reported_by && !item.reported_by.includes('(') ? item.reported_by : '') || 'Reporter';
                 const reporterContact = item.reporter_contact || (item.reported_by && item.reported_by.includes('(') ? item.reported_by.replace(/.*\((.*)\).*/, '$1') : '');
                 const isSelected = selectedReportIds.has(item.id || item.rma_number);
+                const matchedProduct = savedProductsList.find(p => p.barcode && String(p.barcode) === String(item.barcode));
+                const resolvedName = (item.name && !item.name.toLowerCase().startsWith('unidentified')) 
+                  ? item.name 
+                  : (matchedProduct?.name || item.name || `Unidentified (${item.barcode})`);
+                const isPendingUnknown = !matchedProduct && item.status === 'pending_admin_details';
 
                 return (
                   <div 
@@ -768,7 +797,7 @@ export default function RMAReportsModal({
                           {onViewReportQR && (
                             <button
                               type="button"
-                              onClick={() => onViewReportQR(item)}
+                              onClick={() => onViewReportQR({ ...item, name: resolvedName })}
                               className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-md transition-colors cursor-pointer"
                               title={`View & Print Box QR Sticker for ${item.rma_number}`}
                             >
@@ -776,15 +805,16 @@ export default function RMAReportsModal({
                             </button>
                           )}
                         </div>
-                        <h4 className="font-bold text-slate-900 dark:text-white text-sm truncate" title={item.name}>
-                          {item.name || `Unidentified (${item.barcode})`}
+                        <h4 className="font-bold text-slate-900 dark:text-white text-sm truncate" title={resolvedName}>
+                          {resolvedName}
                         </h4>
                         <div className="font-mono text-xs text-slate-500 dark:text-slate-400">
                           Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
+                          {(item.code || matchedProduct?.code) && <span> • SKU: {item.code || matchedProduct?.code}</span>}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
                         {onEditProductFromReport && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                           <button
                             type="button"
@@ -823,6 +853,13 @@ export default function RMAReportsModal({
                             </button>
                           );
                         })()}
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          isPendingUnknown
+                            ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'
+                            : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300'
+                        }`}>
+                          {isPendingUnknown ? 'Unknown' : 'Logged'}
+                        </span>
                         <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 shrink-0">
                           {item.reason || 'Damaged'}
                         </span>

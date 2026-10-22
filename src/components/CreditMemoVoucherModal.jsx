@@ -43,6 +43,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
             margin: 0 !important;
             padding: 0 !important;
           }
+          #app-main-view-container,
           .print-hidden, .print\\:hidden {
             display: none !important;
           }

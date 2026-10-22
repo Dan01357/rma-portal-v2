@@ -248,13 +248,16 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         company: company
       };
 
+      let savedProductData;
       if (isEditing) {
-        await catalogService.updateProduct(product.id, payload);
+        const res = await catalogService.updateProduct(product.id, payload);
+        savedProductData = res?.product || { id: product.id, ...payload };
       } else {
-        await catalogService.createProduct(payload);
+        const res = await catalogService.createProduct(payload);
+        savedProductData = res?.product || payload;
       }
 
-      if (onSaved) onSaved();
+      if (onSaved) onSaved(savedProductData);
       onClose();
     } catch (err) {
       setErrorNotice(err.message);

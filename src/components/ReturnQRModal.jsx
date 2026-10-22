@@ -47,9 +47,11 @@ export default function ReturnQRModal({ isOpen, onClose, report }) {
   const handlePrint = () => {
     const originalTitle = document.title;
     document.title = `RMA-QR-Sticker-${rmaNumber}`;
+    document.body.classList.add('printing-sticker');
     window.print();
     setTimeout(() => {
       document.title = originalTitle;
+      document.body.classList.remove('printing-sticker');
     }, 1200);
   };
 
@@ -61,7 +63,7 @@ export default function ReturnQRModal({ isOpen, onClose, report }) {
         @media print {
           @page {
             size: auto;
-            margin: 10mm;
+            margin: 6mm;
           }
           html, body {
             background: #ffffff !important;
@@ -69,7 +71,9 @@ export default function ReturnQRModal({ isOpen, onClose, report }) {
             margin: 0 !important;
             padding: 0 !important;
           }
-          .no-print, .print\\:hidden {
+          #app-main-view-container,
+          .no-print, 
+          .print\\:hidden {
             display: none !important;
           }
           .modal-backdrop-print-fix {
@@ -91,11 +95,12 @@ export default function ReturnQRModal({ isOpen, onClose, report }) {
             display: block !important;
           }
           #rma-qr-box-sticker {
+            position: relative !important;
             border: 2.5px solid #000000 !important;
             box-shadow: none !important;
             width: 100% !important;
             max-width: 440px !important;
-            margin: 0 auto !important;
+            margin: 2mm auto !important;
             background: #ffffff !important;
             color: #000000 !important;
             page-break-inside: avoid !important;
@@ -106,7 +111,7 @@ export default function ReturnQRModal({ isOpen, onClose, report }) {
 
       <div 
         id="rma-qr-box-sticker-wrapper"
-        className="relative w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden my-6 flex flex-col max-h-[92vh]"
+        className="relative w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden my-4 sm:my-6 flex flex-col max-h-[95vh]"
       >
         
         {/* Modal Header */}
@@ -140,11 +145,11 @@ export default function ReturnQRModal({ isOpen, onClose, report }) {
           </div>
         </div>
 
-        {/* Scrollable Body: Printable Box Sticker Card */}
-        <div className="flex-1 overflow-y-auto p-5 sm:p-6 bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
+        {/* Scrollable Body: Printable Box Sticker Card (Never clipped at top) */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-start">
           <div 
             id="rma-qr-box-sticker"
-            className="w-full max-w-md bg-white border-2 border-slate-900 rounded-2xl p-5 shadow-sm text-slate-900 space-y-4"
+            className="w-full max-w-md bg-white border-2 border-slate-900 rounded-2xl p-5 shadow-sm text-slate-900 space-y-4 my-auto shrink-0"
           >
             {/* Top Bar: Company & Badge */}
             <div className="flex items-center justify-between border-b-2 border-slate-900 pb-2.5">

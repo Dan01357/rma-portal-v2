@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Package, 
   Search, 
@@ -42,6 +42,16 @@ export default function SavedProductsTab({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [selectedProductIds, setSelectedProductIds] = useState(new Set());
+  
+  // Automatically prune orphan product selection IDs whenever products list updates
+  useEffect(() => {
+    setSelectedProductIds(prev => {
+      if (prev.size === 0) return prev;
+      const valid = new Set(products.flatMap(p => [p.id, p.barcode].filter(Boolean)));
+      const next = new Set([...prev].filter(id => valid.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [products]);
   
   // File Explorer view type toggle: default to 'table' (rows list) as requested
   const [viewMode, setViewMode] = useState(() => {
