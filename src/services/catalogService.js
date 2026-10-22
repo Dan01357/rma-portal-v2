@@ -622,11 +622,14 @@ export const catalogService = {
 
     const finalReport = insertedReport || reportRow;
 
-    // 2. Dispatch automated notification email in background (detecting test mode)
-    const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
-    notificationService.sendRMANotification(finalReport, isTestActive).catch(err => {
-      console.warn('Background notification dispatch notice:', err.message);
-    });
+    // 2. Dispatch automated notification email ONLY if product already exists in database (isKnown)
+    // If it's an unknown barcode reported for the first time, email will be sent after admin verifies and assigns AE!
+    if (isKnown) {
+      const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
+      notificationService.sendRMANotification(finalReport, isTestActive).catch(err => {
+        console.warn('Background RMA report notification notice:', err.message);
+      });
+    }
 
     // 3. If item is unknown, insert/upsert into Supabase products table as is_verified = false
     if (!isKnown) {

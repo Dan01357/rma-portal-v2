@@ -82,6 +82,13 @@ export default function App() {
   // Admin Dashboard Active Tab: 'products' | 'reports' | 'search'
   const [adminActiveTab, setAdminActiveTab] = useState('products');
 
+  // Strict role gate: Only Super Admin can view Settings & SMTP
+  useEffect(() => {
+    if (adminActiveTab === 'settings' && currentUser?.role !== 'super_admin') {
+      setAdminActiveTab('products');
+    }
+  }, [adminActiveTab, currentUser]);
+
   // Saved Products State
   const [savedProductsList, setSavedProductsList] = useState([]);
   const [isSavedProductsLoading, setIsSavedProductsLoading] = useState(false);
@@ -1329,14 +1336,16 @@ export default function App() {
                   </span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-                  <button
-                    type="button"
-                    onClick={() => setAdminActiveTab('settings')}
-                    className="px-2.5 py-1 bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-xl text-[11px] font-black cursor-pointer shadow-2xs flex items-center gap-1 transition-all"
-                  >
-                    <Settings className="w-3 h-3 text-amber-600" />
-                    <span>Test SMTP Diagnostics</span>
-                  </button>
+                  {currentUser?.role === 'super_admin' && (
+                    <button
+                      type="button"
+                      onClick={() => setAdminActiveTab('settings')}
+                      className="px-2.5 py-1 bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-xl text-[11px] font-black cursor-pointer shadow-2xs flex items-center gap-1 transition-all"
+                    >
+                      <Settings className="w-3 h-3 text-amber-600" />
+                      <span>Test SMTP Diagnostics</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={toggleTestMode}
@@ -1453,18 +1462,20 @@ export default function App() {
                 <span>Return Reports ({recentReportsList.length})</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => setAdminActiveTab('settings')}
-                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
-                  adminActiveTab === 'settings'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Settings className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                <span>Settings & SMTP</span>
-              </button>
+              {currentUser?.role === 'super_admin' && (
+                <button
+                  type="button"
+                  onClick={() => setAdminActiveTab('settings')}
+                  className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+                    adminActiveTab === 'settings'
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Settings className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  <span>Settings & SMTP</span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -2144,12 +2155,11 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB 3: SETTINGS & GOOGLE SMTP NOTIFICATION SERVICE */}
-            {adminActiveTab === 'settings' && (
+            {/* TAB 3: SETTINGS & GOOGLE SMTP NOTIFICATION SERVICE (Super Admin Only) */}
+            {adminActiveTab === 'settings' && currentUser?.role === 'super_admin' && (
               <SettingsTab
                 isTestMode={isTestMode}
                 onToggleTestMode={toggleTestMode}
-                onResetData={handleResetDemoData}
               />
             )}
 

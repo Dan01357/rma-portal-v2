@@ -7,8 +7,7 @@ import {
   Mail, 
   RefreshCw, 
   CheckCircle2, 
-  AlertCircle, 
-  RotateCcw
+  AlertCircle
 } from 'lucide-react';
 import { rmaApi } from '../supabaseClient';
 import { applyEmailTestMode } from '../utils/rmaHelpers';
@@ -16,8 +15,7 @@ import { notificationService } from '../services/notificationService';
 
 export default function SettingsTab({ 
   isTestMode, 
-  onToggleTestMode, 
-  onResetData 
+  onToggleTestMode
 }) {
   const [connectionStatus, setConnectionStatus] = useState({
     loading: false,
@@ -266,23 +264,6 @@ export default function SettingsTab({
             )}
           </div>
         )}
-      </div>
-
-      {/* Local Data Reset */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm flex items-center justify-between">
-        <div>
-          <h3 className="font-semibold text-slate-800 dark:text-slate-200 text-sm">Demo Data & Storage Reset</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Restore factory sample tickets and default wholesale product catalog.</p>
-        </div>
-
-        <button
-          type="button"
-          onClick={onResetData}
-          className="px-4 py-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-300 dark:bg-slate-800 dark:hover:bg-rose-950/60 dark:hover:text-rose-300 dark:hover:border-rose-500/50 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 flex items-center space-x-1.5 transition-colors"
-        >
-          <RotateCcw className="w-4 h-4" />
-          <span>Reset Sample Data</span>
-        </button>
       </div>
 
     </div>

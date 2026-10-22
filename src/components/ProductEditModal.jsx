@@ -17,7 +17,6 @@ import {
 } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 import { authService } from '../services/authService';
-import { notificationService } from '../services/notificationService';
 import ImageLightboxModal from './ImageLightboxModal';
 import SupplierInput from './SupplierInput';
 
@@ -216,18 +215,6 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         await catalogService.updateProduct(product.id, payload);
       } else {
         await catalogService.createProduct(payload);
-      }
-
-      // Dispatch automated email notification to Customer AE & Company Recipients
-      try {
-        const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
-        notificationService.sendProductUpdateNotification({
-          product: { ...payload, id: product?.id },
-          isNew: !isEditing,
-          editorName: currentUser?.name || 'Admin'
-        }, isTestActive).catch(e => console.warn('Product notification notice:', e));
-      } catch (e) {
-        console.warn('Non-blocking product notification notice:', e);
       }
 
       if (onSaved) onSaved();

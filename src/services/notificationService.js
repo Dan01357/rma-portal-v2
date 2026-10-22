@@ -134,6 +134,10 @@ export const notificationService = {
             <div class="card">
               <div class="grid">
                 <div class="row">
+                  <div class="col-label">RMA Number:</div>
+                  <div class="col-val" style="font-family: monospace; font-size: 14px; font-weight: 800; color: #1e3a8a;">${rmaNumber}</div>
+                </div>
+                <div class="row">
                   <div class="col-label">Product Name:</div>
                   <div class="col-val">${itemName}</div>
                 </div>
@@ -148,19 +152,13 @@ export const notificationService = {
                 </div>` : ''}
                 <div class="row">
                   <div class="col-label">Return Quantity:</div>
-                  <div class="col-val">${report.quantity || 1} ${report.unit_name || 'pc'}</div>
+                  <div class="col-val" style="font-size: 14px; font-weight: 800; color: #0f172a;">${report.quantity || 1} ${report.unit_name || report.unit || 'pc'}</div>
                 </div>
                 <div class="row">
                   <div class="col-label">Supplier / Brand:</div>
-                  <div class="col-val">${report.supplier_name || 'Savemore'}</div>
+                  <div class="col-val">${report.supplier_name || report.supplierName || 'Savemore'}</div>
                 </div>
               </div>
-            </div>
-
-            <div class="section-title">Customer Account Executive (AE)</div>
-            <div class="ae-box">
-              <strong>${aeName}</strong>
-              ${aeEmail ? `<br><a href="mailto:${aeEmail}" style="color: #2563eb; font-family: monospace; font-size: 12px;">${aeEmail}</a>` : '<br><span style="color: #dc2626; font-size: 12px;">(No AE email assigned to product)</span>'}
             </div>
 
             <div class="section-title">Reporter Information</div>
@@ -199,10 +197,6 @@ export const notificationService = {
                 </div>
               `).join('')}
             </div>` : ''}
-
-            <div style="text-align: center; margin-top: 24px;">
-              <a href="https://rma-portal-v2.vercel.app" class="btn">Open RMA Portal Dashboard →</a>
-            </div>
           </div>
 
           <div class="footer">
@@ -364,12 +358,6 @@ export const notificationService = {
               </div>
             </div>
 
-            <div class="section-title">Assigned Customer Account Executive (AE)</div>
-            <div class="ae-box">
-              <strong>${product.aeName || product.ae_name || 'Unassigned'}</strong>
-              ${(product.aeEmail || product.ae_email) ? `<br><a href="mailto:${product.aeEmail || product.ae_email}" style="color: #2563eb; font-family: monospace; font-size: 12px;">${product.aeEmail || product.ae_email}</a>` : '<br><span style="color: #dc2626; font-size: 12px;">(No AE email assigned)</span>'}
-            </div>
-
             ${hasPhoto ? `
             <div class="section-title">Reference Product Photo</div>
             <div class="photo-box">
@@ -378,10 +366,6 @@ export const notificationService = {
 
             <div style="font-size: 12px; color: #64748b; margin-top: 16px;">
               Modified by: <strong>${editorName || 'Admin'}</strong> on ${new Date().toLocaleString()}
-            </div>
-
-            <div style="text-align: center; margin-top: 24px;">
-              <a href="https://rma-portal-v2.vercel.app/admin" class="btn">View in RMA Admin Portal →</a>
             </div>
           </div>
 
