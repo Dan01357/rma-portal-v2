@@ -39,9 +39,11 @@ import {
   Trash2,
   Sun,
   Moon,
-  Settings
+  Settings,
+  Receipt
 } from 'lucide-react';
 import { catalogService } from './services/catalogService';
+import { creditMemoService } from './services/creditMemoService';
 import TablePagination from './components/TablePagination';
 import { authService } from './services/authService';
 import { supabase } from './supabaseClient';
@@ -52,6 +54,9 @@ import AdminLoginModal from './components/AdminLoginModal';
 import EmployeeManagementModal from './components/EmployeeManagementModal';
 import SavedProductsTab from './components/SavedProductsTab';
 import SettingsTab from './components/SettingsTab';
+import CreditMemosTab from './components/CreditMemosTab';
+import CreditMemoModal from './components/CreditMemoModal';
+import CreditMemoVoucherModal from './components/CreditMemoVoucherModal';
 import ProductEditModal from './components/ProductEditModal';
 import ImageLightboxModal from './components/ImageLightboxModal';
 import NotificationBell from './components/NotificationBell';
@@ -95,6 +100,14 @@ export default function App() {
   const [isProductEditOpen, setIsProductEditOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [staffList, setStaffList] = useState([]);
+
+  // Credit Memos State
+  const [creditMemosList, setCreditMemosList] = useState([]);
+  const [isCreditMemoModalOpen, setIsCreditMemoModalOpen] = useState(false);
+  const [selectedCreditMemoReport, setSelectedCreditMemoReport] = useState(null);
+  const [editingCreditMemo, setEditingCreditMemo] = useState(null);
+  const [voucherModalMemo, setVoucherModalMemo] = useState(null);
+  const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
 
   // Listen to browser navigation
   useEffect(() => {
@@ -398,6 +411,45 @@ export default function App() {
     });
   };
 
+  // Credit Memo Handlers
+  const handleOpenCreditMemoForReport = (report) => {
+    setSelectedCreditMemoReport(report);
+    setEditingCreditMemo(null);
+    setIsCreditMemoModalOpen(true);
+  };
+
+  const handleOpenCreateCreditMemo = () => {
+    setSelectedCreditMemoReport(null);
+    setEditingCreditMemo(null);
+    setIsCreditMemoModalOpen(true);
+  };
+
+  const handleEditCreditMemo = (memo) => {
+    setSelectedCreditMemoReport(null);
+    setEditingCreditMemo(memo);
+    setIsCreditMemoModalOpen(true);
+  };
+
+  const handleViewCreditMemoVoucher = (memo) => {
+    setVoucherModalMemo(memo);
+    setIsVoucherModalOpen(true);
+  };
+
+  const requestDeleteCreditMemo = (memo) => {
+    if (!canDeleteReports) {
+      showToast('You do not have permission to void credit memos.', 'error');
+      return;
+    }
+    setDeleteModalState({
+      type: 'credit_memo',
+      item: memo,
+      title: 'Void & Delete Credit Memo?',
+      itemName: `${memo.credit_memo_number} (₱${Number(memo.credit_amount || 0).toLocaleString()})`,
+      itemType: 'credit memo',
+      itemDetails: `RMA: ${memo.rma_number || 'N/A'} • Product: ${memo.product_name || 'N/A'}`
+    });
+  };
+
   const handleConfirmDelete = async () => {
     if (!deleteModalState) return;
     setIsDeleteModalLoading(true);
@@ -435,6 +487,12 @@ export default function App() {
         const deletedRmas = new Set(items.map(r => r.rma_number));
         setRecentReportsList(prev => prev.filter(r => !deletedIds.has(r.id) && !deletedRmas.has(r.rma_number)));
         showToast(`Successfully deleted ${items.length} return reports.`, 'success');
+        refreshAllData();
+      } else if (deleteModalState.type === 'credit_memo') {
+        const memo = deleteModalState.item;
+        await creditMemoService.deleteCreditMemo(memo.credit_memo_number, memo.report_id);
+        setCreditMemosList(prev => prev.filter(m => m.credit_memo_number !== memo.credit_memo_number));
+        showToast(`Credit Memo ${memo.credit_memo_number} voided and removed.`, 'success');
         refreshAllData();
       }
       setDeleteModalState(null);
@@ -837,7 +895,8 @@ export default function App() {
         catalogService.getPendingBarcodes().then(pending => setPendingBarcodesList(pending || [])),
         catalogService.getRecentReports(50).then(reports => setRecentReportsList(reports || [])),
         catalogService.getSavedProducts().then(saved => setSavedProductsList(saved || [])),
-        authService.getEmployees().then(staff => setStaffList(staff || []))
+        authService.getEmployees().then(staff => setStaffList(staff || [])),
+        creditMemoService.getCreditMemos().then(memos => setCreditMemosList(memos || []))
       ]);
     } catch (e) {
       console.warn('Sync notice:', e);
@@ -1387,7 +1446,7 @@ export default function App() {
             )}
 
             {/* SaaS KPI Overview Strip */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
               {/* Metric 1: Saved Products */}
               <div 
                 onClick={() => setAdminActiveTab('products')}
@@ -1424,7 +1483,29 @@ export default function App() {
                 <div className="text-[11px] text-slate-400 dark:text-slate-500">Total filed returns</div>
               </div>
 
-              {/* Metric 3: Pending Barcodes */}
+              {/* Metric 3: Credit Memos (Finance Section) */}
+              <div 
+                onClick={() => setAdminActiveTab('credit_memos')}
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
+                  adminActiveTab === 'credit_memos' ? 'border-emerald-500 ring-2 ring-emerald-100 dark:ring-emerald-900/40' : 'border-slate-200 dark:border-slate-800'
+                }`}
+              >
+                <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 mb-2">
+                  <Receipt className="w-5 h-5" />
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">Finance</span>
+                </div>
+                <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
+                  {creditMemosList.length}
+                </div>
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Credit Memos</div>
+                <div className="text-[11px] text-slate-400 dark:text-slate-500 truncate">
+                  {creditMemosList.length > 0 
+                    ? `₱${creditMemosList.reduce((acc, m) => acc + Number(m.credit_amount || 0), 0).toLocaleString('en-US', { maximumFractionDigits: 0 })} credited`
+                    : 'Customer deductions'}
+                </div>
+              </div>
+
+              {/* Metric 4: Pending Barcodes */}
               <div 
                 onClick={() => setIsPendingModalOpen(true)}
                 className={`bg-white dark:bg-slate-900 border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
@@ -1442,7 +1523,7 @@ export default function App() {
                 <div className="text-[11px] text-slate-400 dark:text-slate-500">Awaiting admin verification</div>
               </div>
 
-              {/* Metric 4: Staff Directory */}
+              {/* Metric 5: Staff Directory */}
               <div 
                 onClick={() => {
                   if (currentUser.role === 'super_admin') setIsEmployeeModalOpen(true);
@@ -1489,6 +1570,19 @@ export default function App() {
               >
                 <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                 <span>Return Reports ({recentReportsList.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAdminActiveTab('credit_memos')}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+                  adminActiveTab === 'credit_memos'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span>Credit Memos ({creditMemosList.length})</span>
               </button>
 
               {currentUser?.role === 'super_admin' && (
@@ -1820,11 +1914,9 @@ export default function App() {
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
                             </th>
-                            {canDeleteReports && (
-                              <th className="py-3 px-3.5 text-center font-bold select-none text-slate-500 dark:text-slate-400 w-16">
-                                Action
-                              </th>
-                            )}
+                            <th className="py-3 px-3.5 text-center font-bold select-none text-slate-500 dark:text-slate-400">
+                              Finance & Actions
+                            </th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
@@ -1952,19 +2044,49 @@ export default function App() {
                                   )}
                                 </td>
 
-                                {/* 10. Action: Delete RMA */}
-                                {canDeleteReports && (
-                                  <td className="py-2.5 px-3.5 text-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => requestDeleteReport(item.id, item.rma_number)}
-                                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer"
-                                      title={`Delete RMA #${item.rma_number}`}
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  </td>
-                                )}
+                                {/* 10. Actions: Credit Memo & Delete */}
+                                <td className="py-2.5 px-3.5 text-center">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    {(() => {
+                                      const existingMemo = creditMemosList.find(m => m.rma_number === item.rma_number || m.report_id === item.id);
+                                      if (existingMemo) {
+                                        return (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleViewCreditMemoVoucher(existingMemo)}
+                                            className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                            title={`View Official Credit Memo Voucher: ${existingMemo.credit_memo_number}`}
+                                          >
+                                            <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                            <span>CM Voucher</span>
+                                          </button>
+                                        );
+                                      }
+                                      return (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenCreditMemoForReport(item)}
+                                          className="px-2.5 py-1 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                          title="Issue Finance Credit Memo for this Return"
+                                        >
+                                          <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                          <span>+ Credit Memo</span>
+                                        </button>
+                                      );
+                                    })()}
+
+                                    {canDeleteReports && (
+                                      <button
+                                        type="button"
+                                        onClick={() => requestDeleteReport(item.id, item.rma_number)}
+                                        className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer"
+                                        title={`Delete RMA #${item.rma_number}`}
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
                               </tr>
                             );
                           })}
@@ -2068,6 +2190,33 @@ export default function App() {
                                 </h4>
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">
+                                {(() => {
+                                  const existingMemo = creditMemosList.find(m => m.rma_number === item.rma_number || m.report_id === item.id);
+                                  if (existingMemo) {
+                                    return (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleViewCreditMemoVoucher(existingMemo)}
+                                        className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer"
+                                        title={`View Voucher: ${existingMemo.credit_memo_number}`}
+                                      >
+                                        <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                        <span>Voucher</span>
+                                      </button>
+                                    );
+                                  }
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenCreditMemoForReport(item)}
+                                      className="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                      title="Issue Credit Memo"
+                                    >
+                                      <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                      <span>+ CM</span>
+                                    </button>
+                                  );
+                                })()}
                                 <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300">
                                   {item.reason || 'Damaged'}
                                 </span>
@@ -2184,7 +2333,20 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB 3: SETTINGS & GOOGLE SMTP NOTIFICATION SERVICE (Super Admin Only) */}
+            {/* TAB 3: FINANCE CREDIT MEMO SECTION */}
+            {adminActiveTab === 'credit_memos' && (
+              <CreditMemosTab
+                creditMemosList={creditMemosList}
+                recentReportsList={recentReportsList}
+                currentUser={currentUser}
+                onOpenCreateModal={handleOpenCreateCreditMemo}
+                onEditCreditMemo={handleEditCreditMemo}
+                onViewVoucher={handleViewCreditMemoVoucher}
+                onRequestDeleteCreditMemo={requestDeleteCreditMemo}
+              />
+            )}
+
+            {/* TAB 4: SETTINGS & GOOGLE SMTP NOTIFICATION SERVICE (Super Admin Only) */}
             {adminActiveTab === 'settings' && currentUser?.role === 'super_admin' && (
               <SettingsTab
                 isTestMode={isTestMode}
@@ -2249,6 +2411,15 @@ export default function App() {
         currentUser={currentUser}
         onDeleteReport={requestDeleteReport}
         onBulkDeleteReport={requestBulkDeleteReports}
+        creditMemosList={creditMemosList}
+        onOpenCreditMemo={(rep) => {
+          setIsReportsModalOpen(false);
+          handleOpenCreditMemoForReport(rep);
+        }}
+        onViewCreditMemoVoucher={(memo) => {
+          setIsReportsModalOpen(false);
+          handleViewCreditMemoVoucher(memo);
+        }}
       />
 
       {/* Product Edit / Add Modal */}
@@ -2268,6 +2439,38 @@ export default function App() {
           refreshAllData();
           showToast(`Product "${prod.name}" deleted from catalog.`, 'success');
         }}
+      />
+
+      {/* Finance Credit Memo Issue / Edit Modal */}
+      <CreditMemoModal
+        isOpen={isCreditMemoModalOpen}
+        onClose={() => {
+          setIsCreditMemoModalOpen(false);
+          setSelectedCreditMemoReport(null);
+          setEditingCreditMemo(null);
+        }}
+        report={selectedCreditMemoReport}
+        creditMemo={editingCreditMemo}
+        currentUser={currentUser}
+        reportsList={recentReportsList}
+        onSaved={(memo) => {
+          refreshAllData();
+          showToast(`Credit Memo ${memo.credit_memo_number} saved!`, 'success');
+        }}
+        onViewVoucher={(memo) => {
+          setVoucherModalMemo(memo);
+          setIsVoucherModalOpen(true);
+        }}
+      />
+
+      {/* Official Printable Credit Memorandum Voucher Modal */}
+      <CreditMemoVoucherModal
+        isOpen={isVoucherModalOpen}
+        onClose={() => {
+          setIsVoucherModalOpen(false);
+          setVoucherModalMemo(null);
+        }}
+        creditMemo={voucherModalMemo}
       />
 
       {/* Fullscreen Image Lightbox Modal */}
