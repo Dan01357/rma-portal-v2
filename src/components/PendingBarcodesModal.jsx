@@ -58,6 +58,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
   const [isSaving, setIsSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState(null);
   const [skuError, setSkuError] = useState(null);
+  const [nameError, setNameError] = useState(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -104,6 +105,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     setIsAeDropdownOpen(false);
     setStatusMsg(null);
     setSkuError(null);
+    setNameError(null);
   };
 
   const handleImageFile = async (e) => {
@@ -146,6 +148,16 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     if (!selectedAe || !selectedAe.email) {
       setStatusMsg({ type: 'error', text: 'Customer Account Executive (AE) is required. Please search and select an AE.' });
       return;
+    }
+
+    // Validate Name uniqueness
+    if (formData.name && formData.name.trim()) {
+      const nameCheck = await catalogService.checkNameUnique(formData.name.trim(), null, selectedBarcode.barcode);
+      if (!nameCheck.isUnique) {
+        setNameError(nameCheck.error);
+        setStatusMsg({ type: 'error', text: nameCheck.error });
+        return;
+      }
     }
 
     // Validate SKU uniqueness
@@ -471,9 +483,26 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                   required
                   placeholder="e.g. Laptop Lenovo ThinkPad / Oreo Biscuit"
                   value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
+                  onChange={async (e) => {
+                    const val = e.target.value;
+                    setFormData({ ...formData, name: val });
+                    setNameError(null);
+                    if (val.trim()) {
+                      try {
+                        const res = await catalogService.checkNameUnique(val, null, selectedBarcode?.barcode);
+                        if (!res.isUnique) setNameError(res.error);
+                      } catch (err) {}
+                    }
+                  }}
+                  className={`w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border ${
+                    nameError ? 'border-rose-500 focus:border-rose-600' : 'border-slate-300 dark:border-slate-700 focus:border-blue-600'
+                  } rounded-xl text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-800`}
                 />
+                {nameError && (
+                  <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-1">
+                    {nameError}
+                  </p>
+                )}
               </div>
 
               {/* CUSTOMER AE SELECTOR */}

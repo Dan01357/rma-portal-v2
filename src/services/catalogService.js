@@ -341,12 +341,53 @@ export const catalogService = {
   },
 
   /**
+   * Check if a Product Name already exists in products database
+   */
+  async checkNameUnique(name, excludeId = null, excludeBarcode = null) {
+    if (!name || !String(name).trim()) return { isUnique: true };
+    const cleanName = String(name).trim();
+
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('id, name, code, barcode')
+        .not('name', 'like', '[DELETED]%')
+        .ilike('name', cleanName);
+
+      if (error || !data) return { isUnique: true };
+
+      const duplicate = data.find(p => {
+        if (excludeId && String(p.id) === String(excludeId)) return false;
+        if (excludeBarcode && String(p.barcode) === String(excludeBarcode)) return false;
+        return String(p.name || '').trim().toLowerCase() === cleanName.toLowerCase();
+      });
+
+      if (duplicate) {
+        return {
+          isUnique: false,
+          duplicate,
+          error: `Product Name "${cleanName}" is already registered in catalog (Barcode: ${duplicate.barcode}${duplicate.code ? ` • SKU: ${duplicate.code}` : ''}). Product names must be unique to prevent discrepancies.`
+        };
+      }
+    } catch (e) {
+      console.warn('Product name uniqueness check notice:', e.message);
+    }
+    return { isUnique: true };
+  },
+
+  /**
    * ADMIN ACTION: Add a brand new product to the saved catalog
    */
   async createProduct({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
     const cleanBarcode = String(barcode || '').trim();
     if (!cleanBarcode) throw new Error('Product Barcode is required.');
     if (!name || !name.trim()) throw new Error('Product Name is required.');
+
+    // Validate Name uniqueness
+    const nameCheck = await this.checkNameUnique(name, null, cleanBarcode);
+    if (!nameCheck.isUnique) {
+      throw new Error(nameCheck.error);
+    }
 
     // Validate SKU uniqueness
     if (code && String(code).trim()) {
@@ -390,6 +431,14 @@ export const catalogService = {
    */
   async updateProduct(id, { barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
     if (!id && !barcode) throw new Error('Product identifier required for update.');
+
+    // Validate Name uniqueness
+    if (name && String(name).trim()) {
+      const nameCheck = await this.checkNameUnique(name, id, barcode);
+      if (!nameCheck.isUnique) {
+        throw new Error(nameCheck.error);
+      }
+    }
 
     // Validate SKU uniqueness
     if (code && String(code).trim()) {
@@ -737,7 +786,13 @@ export const catalogService = {
    */
   async updateBarcodeDetails({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
     const cleanBarcode = String(barcode || '').trim();
-    if (!cleanBarcode) throw new Error('Barcode is required.');
+    // Validate Name uniqueness
+    if (name && String(name).trim() && name.trim() !== 'Unknown Item') {
+      const nameCheck = await this.checkNameUnique(name, null, cleanBarcode);
+      if (!nameCheck.isUnique) {
+        throw new Error(nameCheck.error);
+      }
+    }
 
     // Validate SKU uniqueness
     if (code && String(code).trim()) {

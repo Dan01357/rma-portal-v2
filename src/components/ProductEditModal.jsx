@@ -48,6 +48,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   const [isLoading, setIsLoading] = useState(false);
   const [errorNotice, setErrorNotice] = useState(null);
   const [skuError, setSkuError] = useState(null);
+  const [nameError, setNameError] = useState(null);
 
   const canEdit = currentUser?.role !== 'viewer';
 
@@ -123,8 +124,21 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
       setIsAeDropdownOpen(false);
       setErrorNotice(null);
       setSkuError(null);
+      setNameError(null);
     }
   }, [isOpen, product]);
+
+  const handleNameChange = async (val) => {
+    setName(val);
+    setNameError(null);
+    if (!val || !val.trim()) return;
+    try {
+      const res = await catalogService.checkNameUnique(val, product?.id, barcode);
+      if (!res.isUnique) {
+        setNameError(res.error);
+      }
+    } catch (e) {}
+  };
 
   const handleCodeChange = async (val) => {
     setCode(val);
@@ -176,6 +190,16 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
     if (!selectedAe || !selectedAe.email) {
       setErrorNotice('Customer Account Executive (AE) is required. Please search and select an AE from the company employee directory.');
       return;
+    }
+
+    // Check Product Name duplicate before submitting
+    if (name.trim()) {
+      const nameCheck = await catalogService.checkNameUnique(name.trim(), product?.id, barcode);
+      if (!nameCheck.isUnique) {
+        setNameError(nameCheck.error);
+        setErrorNotice(nameCheck.error);
+        return;
+      }
     }
 
     // Check SKU duplicate before submitting
@@ -335,10 +359,17 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                 type="text"
                 required
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => handleNameChange(e.target.value)}
                 placeholder="e.g. Oishi Popcorn Chocolate 60g"
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
+                className={`w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border ${
+                  nameError ? 'border-rose-500 focus:border-rose-600' : 'border-slate-300 dark:border-slate-700 focus:border-blue-600'
+                } rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-800`}
               />
+              {nameError && (
+                <p className="text-[11px] font-bold text-rose-600 dark:text-rose-400 mt-1">
+                  {nameError}
+                </p>
+              )}
             </div>
 
             {/* Barcode & SKU Code */}
