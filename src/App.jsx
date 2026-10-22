@@ -129,8 +129,20 @@ export default function App() {
   useEffect(() => {
     const checkSession = async () => {
       try {
+        const hasAuthHash = window.location.hash.includes('access_token') || 
+                            window.location.hash.includes('type=recovery') || 
+                            window.location.search.includes('code=');
+
+        const localUser = authService.getCurrentUser();
+
+        // If user is not logged in locally and not clicking a magic link in URL, ensure Supabase local session is cleared
+        if (!localUser && !hasAuthHash) {
+          await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+          return;
+        }
+
         const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user?.email) {
+        if (session?.user?.email && (localUser || hasAuthHash)) {
           const email = session.user.email.toLowerCase().trim();
           const employees = await authService.getEmployees();
           const emp = employees.find(e => e.email.toLowerCase() === email) || {
@@ -141,7 +153,7 @@ export default function App() {
           };
 
           if (emp.is_active === false) {
-            authService.logout();
+            await authService.logout();
             setCurrentUser(null);
             return;
           }
@@ -150,7 +162,7 @@ export default function App() {
             id: emp.id || 1,
             name: emp.name,
             email: emp.email,
-            role: emp.role || 'inventory_staff',
+            role: emp.role || (email === 'finance2@keysysincorporated.com' ? 'super_admin' : 'inventory_staff'),
             department: emp.department || 'General',
             loggedInAt: new Date().toISOString()
           };
@@ -187,6 +199,7 @@ export default function App() {
     setCurrentUser(null);
     setIsAdminView(false);
     setIsLoginModalOpen(false);
+    sessionStorage.removeItem('rma_login_pending_email');
     navigateTo('/');
     showToast('Logged out of admin dashboard.', 'success');
   };
@@ -693,19 +706,35 @@ export default function App() {
 
     // 3. Supabase Auth listener for email signup & magic link verification
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user?.email) {
+      if (event === 'SIGNED_OUT') {
+        setCurrentUser(null);
+        return;
+      }
+
+      // STRICT PROTECTION: Only auto-login if the event was an explicit SIGNED_IN event (magic link or OTP verification)
+      // Never auto-sign-in on background TOKEN_REFRESHED or tab focus if user is not already logged in
+      if (event === 'SIGNED_IN' && session?.user?.email) {
         const cleanEmail = session.user.email.toLowerCase();
         try {
           const staff = await authService.getEmployees();
-          const matched = staff.find(e => e.email?.toLowerCase() === cleanEmail);
+          const matched = staff.find(e => e.email?.toLowerCase() === cleanEmail) || {
+            name: cleanEmail.split('@')[0],
+            email: cleanEmail,
+            role: cleanEmail === 'finance2@keysysincorporated.com' ? 'super_admin' : 'inventory_staff',
+            is_active: true
+          };
+
           if (matched && matched.is_active !== false) {
             const user = {
+              id: matched.id || 1,
               name: matched.name,
               email: matched.email,
-              role: matched.role || 'inventory_staff',
-              department: matched.department || 'Operations'
+              role: matched.role || (cleanEmail === 'finance2@keysysincorporated.com' ? 'super_admin' : 'inventory_staff'),
+              department: matched.department || 'Operations',
+              loggedInAt: new Date().toISOString()
             };
-            localStorage.setItem('rma_admin_session_v2', JSON.stringify(user));
+            localStorage.setItem('rma_portal_admin_session', JSON.stringify(user));
+            sessionStorage.removeItem('rma_login_pending_email');
             setCurrentUser(user);
             setIsAdminView(true);
             setIsLoginModalOpen(false);

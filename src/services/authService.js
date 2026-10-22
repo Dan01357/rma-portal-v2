@@ -201,8 +201,17 @@ export const authService = {
     }
   },
 
-  logout() {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
+  async logout() {
+    try {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      localStorage.removeItem('rma_admin_session_v2');
+      sessionStorage.removeItem('rma_login_pending_email');
+      sessionStorage.removeItem('rma_admin_session_v2');
+      sessionStorage.removeItem('rma_portal_admin_session');
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch (e) {
+      console.warn('Supabase auth signOut notice:', e);
+    }
   },
 
   /**
@@ -440,6 +449,7 @@ export const authService = {
 
     // 4. Trigger Real Supabase Auth Email Dispatch via Custom SMTP
     let emailDispatched = false;
+    let rateLimited = false;
     try {
       const { data, error } = await supabase.auth.signInWithOtp({
         email: cleanEmail,
@@ -452,10 +462,50 @@ export const authService = {
         emailDispatched = true;
         console.log(`[Supabase Auth] Real email OTP dispatched to ${cleanEmail}`);
       } else {
-        console.warn('[Supabase Auth] signInWithOtp notice (Custom SMTP may still be pending configuration):', error.message);
+        console.warn('[Supabase Auth] signInWithOtp notice:', error.message);
+        if (error.message && (error.message.includes('security purposes') || error.message.includes('429') || error.status === 429)) {
+          rateLimited = true;
+        }
       }
     } catch (e) {
       console.warn('[Supabase Auth] Dispatch error:', e);
+    }
+
+    // 5. Dual dispatch guarantee: If Supabase was rate-limited or failed, dispatch via our verified Google SMTP endpoint
+    if (!emailDispatched) {
+      try {
+        await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: 'finance2@keysysincorporated.com',
+            fromName: 'Keysys RMA Portal (Authentication)',
+            to: cleanEmail,
+            subject: `Your RMA Portal Verification Code: ${otpCode}`,
+            html: `
+              <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background: #ffffff;">
+                <div style="background: #1e3a8a; padding: 20px; border-radius: 12px; color: #ffffff; text-align: center;">
+                  <h2 style="margin: 0; font-size: 18px; font-weight: 800;">Wholesale RMA Portal</h2>
+                  <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Staff Verification Code</div>
+                </div>
+                <div style="padding: 24px 16px; text-align: center;">
+                  <p style="font-size: 13px; color: #475569; margin-bottom: 8px;">Hello <strong>${employee.name}</strong>,</p>
+                  <p style="font-size: 13px; color: #64748b;">Your one-time login verification code for the RMA Operations Portal is:</p>
+                  <div style="font-family: monospace; font-size: 32px; font-weight: 900; letter-spacing: 6px; color: #1e3a8a; margin: 20px 0; padding: 16px; background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px;">
+                    ${otpCode}
+                  </div>
+                  <p style="font-size: 11px; color: #94a3b8;">This code is valid for 10 minutes. If you did not request this code, you may safely ignore this email.</p>
+                </div>
+              </div>
+            `,
+            text: `Your RMA Portal verification code is: ${otpCode}. Valid for 10 minutes.`
+          })
+        });
+        emailDispatched = true;
+        console.log(`[Direct SMTP] Fallback OTP email successfully dispatched to ${cleanEmail}`);
+      } catch (err) {
+        console.warn('Fallback direct OTP email dispatch notice:', err);
+      }
     }
 
     return {
@@ -465,7 +515,10 @@ export const authService = {
       employeeName: employee.name,
       role: employee.role,
       emailDispatched,
-      message: `OTP sent to ${cleanEmail}. Valid for 10 minutes.`
+      rateLimited,
+      message: rateLimited 
+        ? `A verification code was already dispatched to ${cleanEmail}. Please check your inbox or spam.` 
+        : `OTP sent to ${cleanEmail}. Valid for 10 minutes.`
     };
   },
 

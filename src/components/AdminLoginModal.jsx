@@ -3,18 +3,35 @@ import { Lock, Mail, ShieldCheck, KeyRound, AlertCircle, RefreshCw, CheckCircle,
 import { authService } from '../services/authService';
 
 export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
-  const [step, setStep] = useState('email'); // 'email' | 'otp'
-  const [emailInput, setEmailInput] = useState('');
+  const [step, setStep] = useState(() => {
+    return sessionStorage.getItem('rma_login_pending_email') ? 'otp' : 'email';
+  });
+  const [emailInput, setEmailInput] = useState(() => {
+    return sessionStorage.getItem('rma_login_pending_email') || '';
+  });
   const [otpInput, setOtpInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [countdown, setCountdown] = useState(0);
 
-  // Always reset to Step 1 (enter email) whenever modal is opened fresh
+  // Countdown timer for resend OTP cooldown (prevents 429 errors)
+  React.useEffect(() => {
+    if (countdown > 0) {
+      const timer = setTimeout(() => setCountdown(c => c - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [countdown]);
+
+  // Sync state when modal is opened fresh
   React.useEffect(() => {
     if (isOpen) {
-      setStep('email');
-      setEmailInput('');
-      setOtpInput('');
+      const savedEmail = sessionStorage.getItem('rma_login_pending_email');
+      if (savedEmail) {
+        setStep('otp');
+        setEmailInput(savedEmail);
+      } else {
+        setStep('email');
+      }
       setIsLoading(false);
       setErrorMessage(null);
     }
@@ -24,16 +41,25 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
 
   // Step 1: Request OTP
   const handleRequestOtp = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     const email = emailInput.trim().toLowerCase();
     if (!email) return;
+
+    if (countdown > 0) {
+      return; // Under cooldown
+    }
 
     setIsLoading(true);
     setErrorMessage(null);
 
     try {
-      await authService.requestOtp(email);
+      const res = await authService.requestOtp(email);
+      sessionStorage.setItem('rma_login_pending_email', email);
       setStep('otp');
+      setCountdown(60); // 60 seconds cooldown to protect from rate limits
+      if (res.rateLimited) {
+        setErrorMessage(res.message);
+      }
     } catch (err) {
       setErrorMessage(err.message);
     } finally {
@@ -53,6 +79,7 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
     try {
       const res = await authService.verifyOtp(emailInput, code);
       if (res.success && onLoginSuccess) {
+        sessionStorage.removeItem('rma_login_pending_email');
         onLoginSuccess(res.user);
       }
     } catch (err) {
@@ -185,18 +212,29 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
             <div className="flex items-center justify-between text-xs font-semibold pt-1">
               <button
                 type="button"
-                onClick={() => setStep('email')}
-                className="text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 underline"
+                onClick={() => {
+                  sessionStorage.removeItem('rma_login_pending_email');
+                  setStep('email');
+                  setOtpInput('');
+                  setErrorMessage(null);
+                }}
+                className="text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 underline cursor-pointer"
               >
                 Change Email
               </button>
-              <button
-                type="button"
-                onClick={handleRequestOtp}
-                className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline"
-              >
-                Resend Code
-              </button>
+              {countdown > 0 ? (
+                <span className="text-slate-400 dark:text-slate-500 text-xs font-mono">
+                  Resend Code ({countdown}s)
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleRequestOtp}
+                  className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline cursor-pointer"
+                >
+                  Resend Code
+                </button>
+              )}
             </div>
           </form>
         )}
