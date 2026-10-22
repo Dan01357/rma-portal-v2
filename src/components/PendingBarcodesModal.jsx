@@ -54,6 +54,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState(null);
+  const [skuError, setSkuError] = useState(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -99,6 +100,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     setAeSearch('');
     setIsAeDropdownOpen(false);
     setStatusMsg(null);
+    setSkuError(null);
   };
 
   const handleImageFile = async (e) => {
@@ -141,6 +143,16 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     if (!selectedAe || !selectedAe.email) {
       setStatusMsg({ type: 'error', text: 'Customer Account Executive (AE) is required. Please search and select an AE.' });
       return;
+    }
+
+    // Validate SKU uniqueness
+    if (formData.code && formData.code.trim()) {
+      const skuCheck = await catalogService.checkSkuUnique(formData.code, null, selectedBarcode.barcode);
+      if (!skuCheck.isUnique) {
+        setSkuError(skuCheck.error);
+        setStatusMsg({ type: 'error', text: skuCheck.error });
+        return;
+      }
     }
 
     setIsSaving(true);
@@ -538,7 +550,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                       <span>Pingcon / Bonita</span>
                     </div>
                     <div className="text-[10px] text-slate-400 mt-0.5 font-mono truncate">
-                      finance@pingconmarketing.com
+                      finance2@keysysincorporated.com
                     </div>
                   </button>
 
@@ -556,7 +568,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                       <span>A2Z2GO / Keysys</span>
                     </div>
                     <div className="text-[10px] text-slate-400 mt-0.5 font-mono truncate">
-                      finance2@a2z2go.net
+                      finance2@keysysincorporated.com
                     </div>
                   </button>
                 </div>
@@ -618,9 +630,26 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                     type="text"
                     placeholder="e.g. P124124141"
                     value={formData.code}
-                    onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
+                    onChange={async (e) => {
+                      const val = e.target.value;
+                      setFormData({ ...formData, code: val });
+                      setSkuError(null);
+                      if (val.trim()) {
+                        try {
+                          const res = await catalogService.checkSkuUnique(val, null, selectedBarcode?.barcode);
+                          if (!res.isUnique) setSkuError(res.error);
+                        } catch (err) {}
+                      }
+                    }}
+                    className={`w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border ${
+                      skuError ? 'border-rose-500 focus:border-rose-600' : 'border-slate-300 dark:border-slate-700 focus:border-blue-600'
+                    } rounded-xl text-slate-900 dark:text-white font-mono focus:outline-none focus:bg-white dark:focus:bg-slate-800`}
                   />
+                  {skuError && (
+                    <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-1">
+                      {skuError}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-slate-600 dark:text-slate-400 mb-1">Supplier Name</label>

@@ -33,11 +33,14 @@ export const notificationService = {
       rawName.includes('keysys')
     );
 
+    // The sender email is strictly finance2@keysysincorporated.com for both divisions
+    const UNIFIED_SENDER_EMAIL = 'finance2@keysysincorporated.com';
+
     if (isA2ZOrKeysys) {
       return {
         companyName: 'A2Z2GO / Keysys',
-        senderEmail: 'finance2@a2z2go.net',
-        senderName: 'A2Z2GO Finance (RMA Portal)',
+        senderEmail: UNIFIED_SENDER_EMAIL,
+        senderName: 'Keysys / A2Z2GO Finance (RMA Portal)',
         toEmail: 'azgodev@gmail.com',
         baseCcList: [
           'mgan@a2z2go.net',
@@ -51,7 +54,7 @@ export const notificationService = {
     // Default: Pingcon / Bonita
     return {
       companyName: 'Pingcon / Bonita',
-      senderEmail: 'finance@pingconmarketing.com',
+      senderEmail: UNIFIED_SENDER_EMAIL,
       senderName: 'Pingcon Finance (RMA Portal)',
       toEmail: 'azgodev@gmail.com',
       baseCcList: [

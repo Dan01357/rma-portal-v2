@@ -46,6 +46,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
 
   const [isLoading, setIsLoading] = useState(false);
   const [errorNotice, setErrorNotice] = useState(null);
+  const [skuError, setSkuError] = useState(null);
 
   const canEdit = currentUser?.role !== 'viewer';
 
@@ -120,8 +121,21 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
       setAeSearch('');
       setIsAeDropdownOpen(false);
       setErrorNotice(null);
+      setSkuError(null);
     }
   }, [isOpen, product]);
+
+  const handleCodeChange = async (val) => {
+    setCode(val);
+    setSkuError(null);
+    if (!val || !val.trim()) return;
+    try {
+      const res = await catalogService.checkSkuUnique(val, product?.id, barcode);
+      if (!res.isUnique) {
+        setSkuError(res.error);
+      }
+    } catch (e) {}
+  };
 
   const handlePriceChange = (val) => {
     setPrice(val);
@@ -161,6 +175,16 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
     if (!selectedAe || !selectedAe.email) {
       setErrorNotice('Customer Account Executive (AE) is required. Please search and select an AE from the company employee directory.');
       return;
+    }
+
+    // Check SKU duplicate before submitting
+    if (code.trim()) {
+      const skuCheck = await catalogService.checkSkuUnique(code, product?.id, barcode);
+      if (!skuCheck.isUnique) {
+        setSkuError(skuCheck.error);
+        setErrorNotice(skuCheck.error);
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -339,10 +363,17 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                 <input
                   type="text"
                   value={code}
-                  onChange={(e) => setCode(e.target.value)}
+                  onChange={(e) => handleCodeChange(e.target.value)}
                   placeholder="e.g. SS1742P"
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
+                  className={`w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border ${
+                    skuError ? 'border-rose-500 focus:border-rose-600' : 'border-slate-300 dark:border-slate-700 focus:border-blue-600'
+                  } rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-800`}
                 />
+                {skuError && (
+                  <p className="text-[11px] font-bold text-rose-600 dark:text-rose-400 mt-1">
+                    {skuError}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -471,7 +502,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                     <span>Pingcon / Bonita</span>
                   </div>
                   <div className="text-[10px] text-slate-400 mt-0.5 font-mono truncate">
-                    finance@pingconmarketing.com
+                    finance2@keysysincorporated.com
                   </div>
                 </button>
 
@@ -489,7 +520,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                     <span>A2Z2GO / Keysys</span>
                   </div>
                   <div className="text-[10px] text-slate-400 mt-0.5 font-mono truncate">
-                    finance2@a2z2go.net
+                    finance2@keysysincorporated.com
                   </div>
                 </button>
               </div>

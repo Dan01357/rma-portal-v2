@@ -307,12 +307,54 @@ export const catalogService = {
   },
 
   /**
+   * Check if an SKU / Item Code already exists in products database
+   */
+  async checkSkuUnique(code, excludeId = null, excludeBarcode = null) {
+    if (!code || !String(code).trim()) return { isUnique: true };
+    const cleanCode = String(code).trim();
+
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('id, name, code, barcode')
+        .ilike('code', cleanCode);
+
+      if (error || !data) return { isUnique: true };
+
+      const duplicate = data.find(p => {
+        if (excludeId && String(p.id) === String(excludeId)) return false;
+        if (excludeBarcode && String(p.barcode) === String(excludeBarcode)) return false;
+        return String(p.code || '').trim().toLowerCase() === cleanCode.toLowerCase();
+      });
+
+      if (duplicate) {
+        return {
+          isUnique: false,
+          duplicate,
+          error: `SKU / Item Code "${cleanCode}" is already assigned to "${duplicate.name}" (Barcode: ${duplicate.barcode}). SKUs must be unique for each product.`
+        };
+      }
+    } catch (e) {
+      console.warn('SKU uniqueness check notice:', e.message);
+    }
+    return { isUnique: true };
+  },
+
+  /**
    * ADMIN ACTION: Add a brand new product to the saved catalog
    */
   async createProduct({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
     const cleanBarcode = String(barcode || '').trim();
     if (!cleanBarcode) throw new Error('Product Barcode is required.');
     if (!name || !name.trim()) throw new Error('Product Name is required.');
+
+    // Validate SKU uniqueness
+    if (code && String(code).trim()) {
+      const skuCheck = await this.checkSkuUnique(code, null, cleanBarcode);
+      if (!skuCheck.isUnique) {
+        throw new Error(skuCheck.error);
+      }
+    }
 
     const newProd = {
       barcode: cleanBarcode,
@@ -349,6 +391,14 @@ export const catalogService = {
   async updateProduct(id, { barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
     if (!id && !barcode) throw new Error('Product identifier required for update.');
 
+    // Validate SKU uniqueness
+    if (code && String(code).trim()) {
+      const skuCheck = await this.checkSkuUnique(code, id, barcode);
+      if (!skuCheck.isUnique) {
+        throw new Error(skuCheck.error);
+      }
+    }
+
     const updates = {
       name: name ? name.trim() : undefined,
       code: code !== undefined ? (code ? code.trim() : null) : undefined,
@@ -381,7 +431,7 @@ export const catalogService = {
   },
 
   /**
-   * ADMIN ACTION: Delete a product record from database
+   * ADMIN ACTION: Permanently delete a product record from database
    */
   async deleteProduct(idOrProduct, fallbackBarcode) {
     let id = null;
@@ -407,23 +457,20 @@ export const catalogService = {
       return { success: true };
     }
 
-    let query = supabase.from('products').delete();
-    if (id) query = query.eq('id', id);
-    else query = query.eq('barcode', barcode);
+    let deleteError = null;
 
-    const { error } = await query;
+    if (id) {
+      const { error } = await supabase.from('products').delete().eq('id', id);
+      if (error) deleteError = error;
+    }
+    if (barcode) {
+      const { error } = await supabase.from('products').delete().eq('barcode', barcode);
+      if (error && !deleteError) deleteError = error;
+    }
 
-    // Fallback if DELETE policy is restricted: soft-delete
-    if (error) {
-      console.warn('Hard delete restricted, executing soft-delete:', error.message);
-      let softQuery = supabase.from('products').update({
-        is_verified: false,
-        name: `[DELETED] ${id || barcode}`,
-        updated_at: new Date().toISOString()
-      });
-      if (id) softQuery = softQuery.eq('id', id);
-      else softQuery = softQuery.eq('barcode', barcode);
-      await softQuery;
+    if (deleteError) {
+      console.error('Hard delete error from Supabase:', deleteError);
+      throw new Error(`Database error deleting product: ${deleteError.message}`);
     }
 
     this.notifyChange('product-deleted', { id, barcode, name });
@@ -660,6 +707,14 @@ export const catalogService = {
   async updateBarcodeDetails({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
     const cleanBarcode = String(barcode || '').trim();
     if (!cleanBarcode) throw new Error('Barcode is required.');
+
+    // Validate SKU uniqueness
+    if (code && String(code).trim()) {
+      const skuCheck = await this.checkSkuUnique(code, null, cleanBarcode);
+      if (!skuCheck.isUnique) {
+        throw new Error(skuCheck.error);
+      }
+    }
 
     const updates = {
       code: code ? code.trim() : null,

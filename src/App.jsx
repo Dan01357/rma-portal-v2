@@ -53,6 +53,7 @@ import SavedProductsTab from './components/SavedProductsTab';
 import ProductEditModal from './components/ProductEditModal';
 import ImageLightboxModal from './components/ImageLightboxModal';
 import NotificationBell from './components/NotificationBell';
+import DeleteConfirmationModal from './components/DeleteConfirmationModal';
 
 const DEFECT_REASONS = [
   'Damaged Box / Crushed Packaging',
@@ -305,24 +306,71 @@ export default function App() {
   const canDeleteReports = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
   const canVerifyBarcodes = currentUser?.role !== 'viewer';
 
-  // Delete RMA Return Report Handler
-  const handleDeleteReport = async (id, rmaNumber) => {
+  // Dedicated Confirmation Modal State for Deletions
+  const [deleteModalState, setDeleteModalState] = useState(null); // { type, item, id, rmaNumber, title, itemName, itemDetails, itemType }
+  const [isDeleteModalLoading, setIsDeleteModalLoading] = useState(false);
+
+  const requestDeleteProduct = (prod) => {
+    if (!canDeleteProducts) {
+      showToast('You do not have permission to delete catalog products.', 'error');
+      return;
+    }
+    const name = prod?.name || `Barcode ${prod?.barcode || ''}`;
+    setDeleteModalState({
+      type: 'product',
+      item: prod,
+      title: 'Delete Product from Catalog?',
+      itemName: name,
+      itemType: 'product',
+      itemDetails: `Barcode: ${prod?.barcode || 'N/A'}${prod?.code ? ` • SKU: ${prod.code}` : ''}`
+    });
+  };
+
+  const requestDeleteReport = (id, rmaNumber) => {
     if (!canDeleteReports) {
       showToast('You do not have permission to delete RMA reports.', 'error');
       return;
     }
-    const confirmed = window.confirm(`Are you sure you want to permanently delete RMA #${rmaNumber}? This action cannot be undone.`);
-    if (!confirmed) return;
+    setDeleteModalState({
+      type: 'report',
+      id,
+      rmaNumber,
+      title: 'Delete RMA Return Report?',
+      itemName: `RMA #${rmaNumber}`,
+      itemType: 'report',
+      itemDetails: `ID: ${id || 'N/A'} • Return Ticket`
+    });
+  };
 
+  const handleConfirmDelete = async () => {
+    if (!deleteModalState) return;
+    setIsDeleteModalLoading(true);
     try {
-      // Optimistically remove from UI immediately
-      setRecentReportsList(prev => prev.filter(r => (id ? r.id !== id : r.rma_number !== rmaNumber)));
-      await catalogService.deleteReport(id, rmaNumber);
-      showToast(`Deleted return report RMA #${rmaNumber}.`, 'success');
-      refreshAllData();
+      if (deleteModalState.type === 'product') {
+        const prod = deleteModalState.item;
+        const id = prod?.id;
+        const barcode = prod?.barcode;
+        await catalogService.deleteProduct(prod);
+        setSavedProductsList(prev => prev.filter(p => {
+          if (id && p.id === id) return false;
+          if (barcode && p.barcode === barcode) return false;
+          return true;
+        }));
+        showToast(`Deleted "${deleteModalState.itemName}" from database.`, 'success');
+        refreshAllData();
+      } else if (deleteModalState.type === 'report') {
+        const { id, rmaNumber } = deleteModalState;
+        await catalogService.deleteReport(id, rmaNumber);
+        setRecentReportsList(prev => prev.filter(r => (id ? r.id !== id : r.rma_number !== rmaNumber)));
+        showToast(`Deleted return report RMA #${rmaNumber}.`, 'success');
+        refreshAllData();
+      }
+      setDeleteModalState(null);
     } catch (e) {
-      showToast(e.message || 'Failed to delete report', 'error');
+      showToast(e.message || 'Failed to delete item from database', 'error');
       refreshAllData();
+    } finally {
+      setIsDeleteModalLoading(false);
     }
   };
 
@@ -782,16 +830,9 @@ export default function App() {
         {!isAdminView && (
           <div className="space-y-4 animate-in fade-in duration-200">
             
-            {/* Header with Theme Toggle & Notifications */}
+            {/* Header with Theme Toggle */}
             <div className="relative text-center space-y-1.5 py-2">
-              <div className="absolute right-0 top-0 flex items-center gap-2">
-                <NotificationBell
-                  notifications={notifications}
-                  onMarkAsRead={handleMarkAsRead}
-                  onMarkAllAsRead={handleMarkAllAsRead}
-                  onClearAll={handleClearAllNotifications}
-                  onSelectNotification={handleSelectNotification}
-                />
+              <div className="absolute right-0 top-0">
                 <button
                   type="button"
                   onClick={toggleTheme}
@@ -814,46 +855,46 @@ export default function App() {
               </p>
             </div>
 
-            {/* Submission Success Screen */}
+            {/* Submission Success Screen with Full Dark Mode Support */}
             {submitSuccessReport ? (
-              <div className="bg-white border border-emerald-200 rounded-3xl p-6 sm:p-8 shadow-sm text-center space-y-4 animate-in zoom-in-95">
-                <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+              <div className="bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/80 rounded-3xl p-6 sm:p-8 shadow-sm text-center space-y-4 animate-in zoom-in-95">
+                <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
                   <CheckCircle className="w-8 h-8" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-slate-900">Return Report Filed!</h2>
-                  <p className="text-xs text-slate-500 mt-1">
+                  <h2 className="text-xl font-black text-slate-900 dark:text-white">Return Report Filed!</h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                     Your report has been logged and the inventory team has been notified.
                   </p>
                 </div>
 
-                <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl text-left text-xs space-y-2">
-                  <div className="flex justify-between border-b border-emerald-200/80 pb-1.5">
-                    <span className="text-slate-500">RMA Number:</span>
-                    <strong className="font-mono text-emerald-800 text-sm">{submitSuccessReport.rmaNumber}</strong>
+                <div className="p-4 bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-2xl text-left text-xs space-y-2">
+                  <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
+                    <span className="text-slate-500 dark:text-slate-400">RMA Number:</span>
+                    <strong className="font-mono text-emerald-800 dark:text-emerald-300 text-sm">{submitSuccessReport.rmaNumber}</strong>
                   </div>
-                  <div className="flex justify-between border-b border-emerald-200/80 pb-1.5">
-                    <span className="text-slate-500">Barcode:</span>
-                    <strong className="font-mono text-slate-800">{submitSuccessReport.barcode}</strong>
+                  <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
+                    <span className="text-slate-500 dark:text-slate-400">Barcode:</span>
+                    <strong className="font-mono text-slate-800 dark:text-slate-200">{submitSuccessReport.barcode}</strong>
                   </div>
-                  <div className="flex justify-between border-b border-emerald-200/80 pb-1.5">
-                    <span className="text-slate-500">Item:</span>
-                    <strong className="text-slate-800 text-right">{submitSuccessReport.productName}</strong>
+                  <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
+                    <span className="text-slate-500 dark:text-slate-400">Item:</span>
+                    <strong className="text-slate-800 dark:text-slate-200 text-right">{submitSuccessReport.productName}</strong>
                   </div>
-                  <div className="flex justify-between border-b border-emerald-200/80 pb-1.5">
-                    <span className="text-slate-500">Reason:</span>
-                    <strong className="text-slate-800">{submitSuccessReport.reason}</strong>
+                  <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
+                    <span className="text-slate-500 dark:text-slate-400">Reason:</span>
+                    <strong className="text-slate-800 dark:text-slate-200">{submitSuccessReport.reason}</strong>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Photos Attached:</span>
-                    <strong className="text-emerald-700">{submitSuccessReport.photoCount} Image(s)</strong>
+                    <span className="text-slate-500 dark:text-slate-400">Photos Attached:</span>
+                    <strong className="text-emerald-700 dark:text-emerald-400">{submitSuccessReport.photoCount} Image(s)</strong>
                   </div>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => setSubmitSuccessReport(null)}
-                  className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-2xl shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2"
+                  className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-2xl shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Report Another Item</span>
@@ -1345,27 +1386,7 @@ export default function App() {
                   setEditingProduct(prod);
                   setIsProductEditOpen(true);
                 }}
-                onDeleteProduct={async (prod) => {
-                  try {
-                    const id = typeof prod === 'object' ? prod?.id : (typeof prod === 'number' ? prod : null);
-                    const barcode = typeof prod === 'object' ? prod?.barcode : (typeof prod === 'string' ? prod : null);
-                    const name = typeof prod === 'object' ? (prod?.name || 'Product') : 'Product';
-
-                    // Optimistically remove from state so the table/grid updates immediately
-                    setSavedProductsList(prev => prev.filter(p => {
-                      if (id && p.id === id) return false;
-                      if (barcode && p.barcode === barcode) return false;
-                      return true;
-                    }));
-
-                    await catalogService.deleteProduct(prod);
-                    showToast(`Deleted "${name}" from catalog.`, 'success');
-                    refreshAllData();
-                  } catch (e) {
-                    showToast(e.message || 'Failed to delete product', 'warning');
-                    refreshAllData();
-                  }
-                }}
+                onDeleteProduct={requestDeleteProduct}
                 currentUser={currentUser}
               />
             )}
@@ -1753,8 +1774,8 @@ export default function App() {
                                   <td className="py-2.5 px-3.5 text-center">
                                     <button
                                       type="button"
-                                      onClick={() => handleDeleteReport(item.id, item.rma_number)}
-                                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors"
+                                      onClick={() => requestDeleteReport(item.id, item.rma_number)}
+                                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer"
                                       title={`Delete RMA #${item.rma_number}`}
                                     >
                                       <Trash2 className="w-4 h-4" />
@@ -1815,8 +1836,8 @@ export default function App() {
                                 {canDeleteReports && (
                                   <button
                                     type="button"
-                                    onClick={() => handleDeleteReport(item.id, item.rma_number)}
-                                    className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 dark:hover:bg-rose-900/50 rounded-xl transition-colors"
+                                    onClick={() => requestDeleteReport(item.id, item.rma_number)}
+                                    className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 dark:hover:bg-rose-900/50 rounded-xl transition-colors cursor-pointer"
                                     title={`Delete RMA #${item.rma_number}`}
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
@@ -1936,7 +1957,7 @@ export default function App() {
         onClose={() => setIsReportsModalOpen(false)}
         reports={recentReportsList}
         currentUser={currentUser}
-        onDeleteReport={handleDeleteReport}
+        onDeleteReport={requestDeleteReport}
       />
 
       {/* Product Edit / Add Modal */}
@@ -1982,6 +2003,18 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Universal Delete Confirmation Modal */}
+      <DeleteConfirmationModal
+        isOpen={Boolean(deleteModalState)}
+        onClose={() => setDeleteModalState(null)}
+        onConfirm={handleConfirmDelete}
+        title={deleteModalState?.title || 'Confirm Deletion'}
+        itemName={deleteModalState?.itemName}
+        itemType={deleteModalState?.itemType || 'item'}
+        itemDetails={deleteModalState?.itemDetails}
+        isDeleting={isDeleteModalLoading}
+      />
 
     </div>
   );
