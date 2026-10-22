@@ -2487,6 +2487,7 @@ export default function App() {
         creditMemo={editingCreditMemo}
         currentUser={currentUser}
         reportsList={recentReportsList}
+        creditMemosCount={creditMemosList?.length || 0}
         onSaved={(memo) => {
           refreshAllData();
           showToast(`Credit Memo ${memo.credit_memo_number} saved!`, 'success');

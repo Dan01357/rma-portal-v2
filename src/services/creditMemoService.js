@@ -4,7 +4,8 @@ const CREDIT_MEMOS_STORAGE_KEY = 'rma_portal_credit_memos_v2';
 
 /**
  * Service for managing Finance Credit Memos
- * Linked directly to RMA Return Reports and stored in Supabase database
+ * Persists directly to the dedicated 'credit_memos' table in Supabase
+ * with seamless fallback to 'rma_reports' notes and localStorage
  */
 export const creditMemoService = {
   /**
@@ -13,8 +14,18 @@ export const creditMemoService = {
    */
   generateCreditMemoNumber(existingCount = 0) {
     const currentYear = new Date().getFullYear();
-    const seq = String(existingCount + 1).padStart(4, '0');
-    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let count = existingCount;
+    if (!count) {
+      try {
+        const raw = localStorage.getItem(CREDIT_MEMOS_STORAGE_KEY);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) count = list.length;
+        }
+      } catch (e) {}
+    }
+    const seq = String(count + 1).padStart(4, '0');
+    const chars = '0123456789ABCDEFGHJKLMNPQRSTUVWXYZ';
     let rand = '';
     for (let i = 0; i < 4; i++) {
       rand += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -23,29 +34,62 @@ export const creditMemoService = {
   },
 
   /**
-   * Get all Credit Memos from local cache and Supabase rma_reports
+   * Generate sequential Pull Out Reference (POR)
+   * Format: POR-YYYY-XXXX-RAND (e.g. POR-2026-0001-1A4D)
+   * Format: POR _ + Current Year + increasing serial number + random unique alphanumeric
+   */
+  generatePullOutReference(existingCount = 0) {
+    const currentYear = new Date().getFullYear();
+    let count = existingCount;
+    if (!count) {
+      try {
+        const raw = localStorage.getItem(CREDIT_MEMOS_STORAGE_KEY);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) count = list.length;
+        }
+      } catch (e) {}
+    }
+    const seq = String(count + 1).padStart(4, '0');
+    const chars = '0123456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let rand = '';
+    for (let i = 0; i < 4; i++) {
+      rand += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return `POR-${currentYear}-${seq}-${rand}`;
+  },
+
+  /**
+   * Get all Credit Memos from dedicated Supabase 'credit_memos' table,
+   * legacy 'rma_reports' notes, and local storage
    */
   async getCreditMemos() {
     const memosMap = new Map();
 
-    // 1. Load from local cache
+    // 1. Primary Source: Dedicated Supabase 'credit_memos' table
     try {
-      const raw = localStorage.getItem(CREDIT_MEMOS_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          parsed.forEach(m => {
-            if (m.credit_memo_number) {
-              memosMap.set(m.credit_memo_number, m);
-            }
-          });
+      const { data: dbMemos, error } = await supabase
+        .from('credit_memos')
+        .select('*')
+        .order('credit_issued_at', { ascending: false });
+
+      if (!error && Array.isArray(dbMemos)) {
+        for (const m of dbMemos) {
+          if (m.credit_memo_number) {
+            memosMap.set(m.credit_memo_number, {
+              ...m,
+              is_synced_to_db: true
+            });
+          }
         }
+      } else if (error) {
+        console.warn('Supabase credit_memos table read note:', error.message || error);
       }
     } catch (e) {
-      console.warn('Local credit memos read notice:', e);
+      console.warn('credit_memos fetch catch:', e);
     }
 
-    // 2. Load from Supabase rma_reports (checking notes for credit memo payload)
+    // 2. Legacy / Secondary fallback: Supabase rma_reports (checking notes for credit memo payload)
     try {
       const { data: reports, error } = await supabase
         .from('rma_reports')
@@ -58,7 +102,7 @@ export const creditMemoService = {
           if (r.notes && typeof r.notes === 'string' && r.notes.includes('credit_memo_number')) {
             try {
               const memoData = JSON.parse(r.notes);
-              if (memoData && memoData.credit_memo_number) {
+              if (memoData && memoData.credit_memo_number && !memosMap.has(memoData.credit_memo_number)) {
                 const combined = {
                   ...memoData,
                   report_id: r.id,
@@ -79,16 +123,37 @@ export const creditMemoService = {
         }
       }
     } catch (e) {
-      console.warn('Supabase credit memos fetch notice:', e);
+      console.warn('Supabase rma_reports memos fallback notice:', e);
     }
 
+    // 3. Merge with local cache for offline/unsynced entries
+    try {
+      const raw = localStorage.getItem(CREDIT_MEMOS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(m => {
+            if (m.credit_memo_number && !memosMap.has(m.credit_memo_number)) {
+              memosMap.set(m.credit_memo_number, m);
+            }
+          });
+        }
+      }
+    } catch (e) {}
+
     const list = Array.from(memosMap.values());
-    list.sort((a, b) => new Date(b.credit_issued_at || 0) - new Date(a.credit_issued_at || 0));
+    list.sort((a, b) => new Date(b.credit_issued_at || b.created_at || 0) - new Date(a.credit_issued_at || a.created_at || 0));
+
+    // Update local cache with latest merged list
+    try {
+      localStorage.setItem(CREDIT_MEMOS_STORAGE_KEY, JSON.stringify(list));
+    } catch (e) {}
+
     return list;
   },
 
   /**
-   * Save a newly issued Credit Memo to Supabase database
+   * Save a newly issued Credit Memo to Supabase 'credit_memos' table
    */
   async createCreditMemo(memoData) {
     const existing = await this.getCreditMemos();
@@ -98,14 +163,15 @@ export const creditMemoService = {
     const qty = Number(memoData.quantity) || 1;
     const grossAmount = Number((Number(memoData.amount) || (qty * unitPrice)).toFixed(2));
     const creditAmount = Number((Number(memoData.credit_amount) || grossAmount).toFixed(2));
+    const pullOutRef = memoData.pull_out_ref ? memoData.pull_out_ref.trim() : this.generatePullOutReference(existing.length);
+    const pullOutDate = memoData.pull_out_date || new Date().toISOString().split('T')[0];
 
     const newMemo = {
-      id: `cm-${Date.now()}`,
       credit_memo_number: cmNumber,
       rma_number: memoData.rma_number,
-      report_id: memoData.report_id || null,
-      barcode: memoData.barcode,
-      product_name: memoData.product_name || memoData.name,
+      report_id: memoData.report_id ? Number(memoData.report_id) : null,
+      barcode: memoData.barcode || 'N/A',
+      product_name: memoData.product_name || memoData.name || 'Item',
       sku: memoData.sku || memoData.code || null,
       supplier_name: memoData.supplier_name || memoData.supplierName || 'Savemore',
       company: 'Wholesale Distribution',
@@ -115,65 +181,71 @@ export const creditMemoService = {
       unit_name: memoData.unit_name || memoData.unit || 'pc',
       unit_price: unitPrice,
       amount: grossAmount,
-      pull_out_ref: memoData.pull_out_ref ? memoData.pull_out_ref.trim() : 'Warehouse Pull-Out',
-      pull_out_date: memoData.pull_out_date || new Date().toISOString().split('T')[0],
+      pull_out_ref: pullOutRef,
+      pull_out_date: pullOutDate,
       credit_amount: creditAmount,
       credit_issued_by: memoData.credit_issued_by || 'Finance Officer',
       credit_issued_by_email: memoData.credit_issued_by_email || '',
       credit_issued_at: new Date().toISOString(),
       notes: memoData.notes ? memoData.notes.trim() : '',
-      status: 'issued',
-      is_synced_to_db: true
+      status: 'issued'
     };
 
-    // 1. Save to local storage
-    const updatedList = [newMemo, ...existing.filter(m => m.credit_memo_number !== cmNumber)];
-    try {
-      localStorage.setItem(CREDIT_MEMOS_STORAGE_KEY, JSON.stringify(updatedList));
-    } catch (e) {}
-
-    // 2. Persist to Supabase rma_reports
     let dbSuccess = false;
+
+    // 1. Primary: Save to dedicated 'credit_memos' table in Supabase
+    try {
+      const { data, error } = await supabase
+        .from('credit_memos')
+        .upsert([newMemo], { onConflict: 'credit_memo_number' })
+        .select();
+
+      if (!error && data && data.length > 0) {
+        dbSuccess = true;
+        console.log(`[Supabase DB] Credit memo ${cmNumber} inserted into credit_memos table.`);
+        if (data[0].id) {
+          newMemo.id = data[0].id;
+        }
+      } else if (error) {
+        console.warn(`[Supabase DB] credit_memos table insert notice:`, error.message || error);
+      }
+    } catch (e) {
+      console.warn('credit_memos insert catch:', e);
+    }
+
+    // 2. Also update rma_reports status to 'credit_memo_issued' and store backup in notes
     if (memoData.rma_number) {
       try {
-        const { data, error } = await supabase
+        const { error: rmaErr } = await supabase
           .from('rma_reports')
           .update({
             notes: JSON.stringify(newMemo),
             status: 'credit_memo_issued'
           })
-          .eq('rma_number', memoData.rma_number)
-          .select();
+          .eq('rma_number', memoData.rma_number);
 
-        if (!error && data && data.length > 0) {
+        if (!rmaErr && !dbSuccess) {
+          // If credit_memos table didn't succeed but rma_reports updated, still mark dbSuccess
           dbSuccess = true;
-          console.log(`[Supabase DB] Credit memo ${cmNumber} successfully saved to rma_reports for RMA ${memoData.rma_number}`);
-        } else if (memoData.report_id) {
-          // Fallback by numeric id
-          const { data: idData, error: idErr } = await supabase
-            .from('rma_reports')
-            .update({
-              notes: JSON.stringify(newMemo),
-              status: 'credit_memo_issued'
-            })
-            .eq('id', memoData.report_id)
-            .select();
-
-          if (!idErr && idData && idData.length > 0) {
-            dbSuccess = true;
-          }
         }
       } catch (e) {
-        console.warn('Supabase DB save error:', e);
+        console.warn('rma_reports status sync notice:', e);
       }
     }
 
     newMemo.is_synced_to_db = dbSuccess;
+
+    // 3. Save to local storage
+    const updatedList = [newMemo, ...existing.filter(m => m.credit_memo_number !== cmNumber)];
+    try {
+      localStorage.setItem(CREDIT_MEMOS_STORAGE_KEY, JSON.stringify(updatedList));
+    } catch (e) {}
+
     return { success: true, memo: newMemo, dbSaved: dbSuccess };
   },
 
   /**
-   * Update an existing Credit Memo in Supabase database
+   * Update an existing Credit Memo in Supabase 'credit_memos' table
    */
   async updateCreditMemo(cmNumber, updates) {
     const existing = await this.getCreditMemos();
@@ -196,13 +268,33 @@ export const creditMemoService = {
       updated_at: new Date().toISOString(),
       is_synced_to_db: true
     };
-    existing[index] = updated;
 
+    // 1. Update in dedicated 'credit_memos' table
     try {
-      localStorage.setItem(CREDIT_MEMOS_STORAGE_KEY, JSON.stringify(existing));
-    } catch (e) {}
+      const { error } = await supabase
+        .from('credit_memos')
+        .update({
+          quantity: qty,
+          unit_price: unitPrice,
+          amount: amount,
+          pull_out_ref: updated.pull_out_ref,
+          pull_out_date: updated.pull_out_date,
+          credit_amount: creditAmount,
+          notes: updated.notes || '',
+          updated_at: new Date().toISOString()
+        })
+        .eq('credit_memo_number', cmNumber);
 
-    // Update Supabase rma_reports
+      if (error) {
+        console.warn('credit_memos table update notice:', error.message || error);
+      } else {
+        console.log(`[Supabase DB] Credit memo ${cmNumber} updated in credit_memos table.`);
+      }
+    } catch (e) {
+      console.warn('credit_memos update catch:', e);
+    }
+
+    // 2. Update rma_reports notes backup
     const rma = updated.rma_number;
     if (rma) {
       try {
@@ -213,11 +305,14 @@ export const creditMemoService = {
             status: 'credit_memo_issued'
           })
           .eq('rma_number', rma);
-        console.log(`[Supabase DB] Credit memo ${cmNumber} updated in rma_reports for RMA ${rma}`);
-      } catch (e) {
-        console.warn('Supabase update notice:', e);
-      }
+      } catch (e) {}
     }
+
+    // 3. Update localStorage
+    existing[index] = updated;
+    try {
+      localStorage.setItem(CREDIT_MEMOS_STORAGE_KEY, JSON.stringify(existing));
+    } catch (e) {}
 
     return { success: true, memo: updated };
   },
@@ -225,7 +320,7 @@ export const creditMemoService = {
   /**
    * Delete / Void a Credit Memo
    */
-  async deleteCreditMemo(cmNumber) {
+  async deleteCreditMemo(cmNumber, reportId) {
     const existing = await this.getCreditMemos();
     const target = existing.find(m => m.credit_memo_number === cmNumber);
     const filtered = existing.filter(m => m.credit_memo_number !== cmNumber);
@@ -234,8 +329,25 @@ export const creditMemoService = {
       localStorage.setItem(CREDIT_MEMOS_STORAGE_KEY, JSON.stringify(filtered));
     } catch (e) {}
 
-    // Reset notes and status in Supabase
-    if (target?.rma_number) {
+    // 1. Delete from dedicated 'credit_memos' table
+    try {
+      const { error } = await supabase
+        .from('credit_memos')
+        .delete()
+        .eq('credit_memo_number', cmNumber);
+
+      if (error) {
+        console.warn('credit_memos table delete notice:', error.message || error);
+      } else {
+        console.log(`[Supabase DB] Credit memo ${cmNumber} deleted from credit_memos table.`);
+      }
+    } catch (e) {
+      console.warn('credit_memos delete catch:', e);
+    }
+
+    // 2. Reset rma_reports status and clear notes
+    const rma = target?.rma_number;
+    if (rma) {
       try {
         await supabase
           .from('rma_reports')
@@ -243,11 +355,18 @@ export const creditMemoService = {
             notes: null,
             status: 'pending'
           })
-          .eq('rma_number', target.rma_number);
-        console.log(`[Supabase DB] Credit memo ${cmNumber} voided and reset in Supabase for RMA ${target.rma_number}`);
-      } catch (e) {
-        console.warn('Supabase delete notice:', e);
-      }
+          .eq('rma_number', rma);
+      } catch (e) {}
+    } else if (reportId) {
+      try {
+        await supabase
+          .from('rma_reports')
+          .update({
+            notes: null,
+            status: 'pending'
+          })
+          .eq('id', reportId);
+      } catch (e) {}
     }
 
     return { success: true };
@@ -268,7 +387,23 @@ export const creditMemoService = {
       localStorage.setItem(CREDIT_MEMOS_STORAGE_KEY, JSON.stringify(filtered));
     } catch (e) {}
 
-    // Reset all target reports in Supabase
+    // 1. Bulk delete from 'credit_memos' table
+    try {
+      const { error } = await supabase
+        .from('credit_memos')
+        .delete()
+        .in('credit_memo_number', memoNumbers);
+
+      if (error) {
+        console.warn('credit_memos bulk delete notice:', error.message || error);
+      } else {
+        console.log(`[Supabase DB] Bulk deleted ${memoNumbers.length} rows from credit_memos table.`);
+      }
+    } catch (e) {
+      console.warn('credit_memos bulk delete catch:', e);
+    }
+
+    // 2. Reset affected rma_reports
     const targetRmas = targets.map(t => t.rma_number).filter(Boolean);
     if (targetRmas.length > 0) {
       try {
@@ -279,13 +414,11 @@ export const creditMemoService = {
             status: 'pending'
           })
           .in('rma_number', targetRmas);
-        console.log(`[Supabase DB] Bulk voided ${targetRmas.length} credit memos in Supabase`);
-      } catch (e) {
-        console.warn('Supabase bulk delete notice:', e);
-      }
+      } catch (e) {}
     }
 
     return { success: true, deletedCount: targets.length };
   }
 };
+
 

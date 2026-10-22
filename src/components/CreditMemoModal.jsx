@@ -26,7 +26,8 @@ export default function CreditMemoModal({
   onSaved,
   onViewVoucher,
   currentUser,
-  reportsList = []
+  reportsList = [],
+  creditMemosCount = 0
 }) {
   const isEditing = Boolean(creditMemo && creditMemo.credit_memo_number);
 
@@ -44,17 +45,46 @@ export default function CreditMemoModal({
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
 
-  // Active report resolution: passed report, or report from creditMemo, or chosen from reportsList
+  // Active report resolution: prioritize user-selected report from dropdown, then passed report, then first report
   const activeReport = useMemo(() => {
-    if (report) return report;
     if (selectedReportId && reportsList.length > 0) {
-      return reportsList.find(r => String(r.id) === String(selectedReportId) || r.rma_number === selectedReportId) || reportsList[0];
+      const match = reportsList.find(r => String(r.id) === String(selectedReportId) || r.rma_number === selectedReportId);
+      if (match) return match;
     }
+    if (report) return report;
     if (!isEditing && reportsList.length > 0) {
       return reportsList[0];
     }
     return null;
   }, [report, selectedReportId, reportsList, isEditing]);
+
+  // Synchronize all form data when an RMA return ticket is selected
+  const applyReportToForm = (rep) => {
+    if (!rep) return;
+    const qty = Math.max(1, Number(rep.quantity) || 1);
+    const price = Number((Number(rep.price_with_vat ?? rep.price ?? 0)).toFixed(2));
+    const gross = Number((qty * price).toFixed(2));
+
+    setQuantity(qty);
+    setUnitPrice(price.toFixed(2));
+    setAmount(gross.toFixed(2));
+    setCreditAmount(gross.toFixed(2));
+
+    // Standardized POR: POR-2026-0001-1A4D
+    const por = creditMemoService.generatePullOutReference(creditMemosCount);
+    setPullOutRef(por);
+    setPullOutDate(new Date().toISOString().split('T')[0]);
+    setNotes('');
+  };
+
+  // Immediate handler when user picks an item from the dropdown: ALL data updates immediately
+  const handleReportDropdownChange = (newVal) => {
+    setSelectedReportId(newVal);
+    const found = reportsList.find(r => String(r.id) === String(newVal) || r.rma_number === newVal);
+    if (found) {
+      applyReportToForm(found);
+    }
+  };
 
   // Sync state ONLY when modal opens or target memo explicitly switches (Prevents 3.5s background polling resets!)
   useEffect(() => {
@@ -68,33 +98,26 @@ export default function CreditMemoModal({
       setIsLoading(false);
 
       if (isEditing && creditMemo) {
+        setSelectedReportId(creditMemo.report_id || creditMemo.rma_number || '');
         setQuantity(creditMemo.quantity || 1);
         setUnitPrice(Number(creditMemo.unit_price || 0).toFixed(2));
         setAmount(Number(creditMemo.amount || 0).toFixed(2));
-        setPullOutRef(creditMemo.pull_out_ref || '');
+        setPullOutRef(creditMemo.pull_out_ref || creditMemoService.generatePullOutReference(creditMemosCount));
         setPullOutDate(creditMemo.pull_out_date || new Date().toISOString().split('T')[0]);
         setCreditAmount(Number(creditMemo.credit_amount || creditMemo.amount || 0).toFixed(2));
         setNotes(creditMemo.notes || '');
       } else {
-        const rep = activeReport;
-        if (rep) {
-          const qty = Number(rep.quantity) || 1;
-          const price = Number((Number(rep.price_with_vat || rep.price || 0)).toFixed(2));
-          const gross = Number((qty * price).toFixed(2));
-          setQuantity(qty);
-          setUnitPrice(price.toFixed(2));
-          setAmount(gross.toFixed(2));
-          setCreditAmount(gross.toFixed(2));
-          setPullOutRef(`POR #${rep.rma_number?.split('-')?.[2] || '001'} - ${rep.supplier_name || 'Warehouse'}`);
-          setPullOutDate(new Date().toISOString().split('T')[0]);
-          setNotes('');
+        const initialReport = report || (reportsList.length > 0 ? reportsList[0] : null);
+        if (initialReport) {
+          setSelectedReportId(initialReport.id || initialReport.rma_number || '');
+          applyReportToForm(initialReport);
         }
       }
     } else if (!isOpen) {
       prevIsOpenRef.current = false;
       currentEditingRef.current = null;
     }
-  }, [isOpen, creditMemo, isEditing, activeReport]);
+  }, [isOpen, creditMemo, isEditing, report, reportsList, creditMemosCount]);
 
   const updateCalculations = (newQty, newPrice) => {
     const q = Number(newQty) || 0;
@@ -287,15 +310,15 @@ export default function CreditMemoModal({
             </div>
           )}
 
-          {/* Ticket Picker (when opening directly without a preselected report) */}
-          {!report && !isEditing && reportsList.length > 0 && (
+          {/* Ticket Picker (Always available when creating so user can switch tickets and sync all data) */}
+          {!isEditing && reportsList.length > 0 && (
             <div className="space-y-1">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                 Select Linked RMA Return Ticket *
               </label>
               <select
                 value={selectedReportId || activeReport?.id || activeReport?.rma_number || ''}
-                onChange={(e) => setSelectedReportId(e.target.value)}
+                onChange={(e) => handleReportDropdownChange(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800"
               >
                 {reportsList.map(r => (
@@ -412,16 +435,27 @@ export default function CreditMemoModal({
             {/* ROW 2: Pull Out Reference & Pull Out Date */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Pull Out Reference / Receipt # *
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Pull Out Reference / Receipt # *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setPullOutRef(creditMemoService.generatePullOutReference(creditMemosCount))}
+                    className="text-[10px] text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 flex items-center gap-1 font-semibold cursor-pointer"
+                    title="Generate a new POR reference code"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Regenerate POR</span>
+                  </button>
+                </div>
                 <input
                   type="text"
                   required
                   value={pullOutRef}
                   onChange={(e) => setPullOutRef(e.target.value)}
-                  placeholder="e.g. POR #10842 - Savemore SM North"
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800"
+                  placeholder="e.g. POR-2026-0001-1A4D"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800"
                 />
               </div>
 
