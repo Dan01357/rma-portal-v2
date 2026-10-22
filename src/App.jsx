@@ -52,6 +52,7 @@ import EmployeeManagementModal from './components/EmployeeManagementModal';
 import SavedProductsTab from './components/SavedProductsTab';
 import ProductEditModal from './components/ProductEditModal';
 import ImageLightboxModal from './components/ImageLightboxModal';
+import NotificationBell from './components/NotificationBell';
 
 const DEFECT_REASONS = [
   'Damaged Box / Crushed Packaging',
@@ -204,6 +205,98 @@ export default function App() {
   }, [isDarkMode]);
 
   const toggleTheme = () => setIsDarkMode(prev => !prev);
+
+  // Test Mode State (When active, emails route with .test domain and subject starts with "Test")
+  const [isTestMode, setIsTestMode] = useState(() => {
+    try {
+      return localStorage.getItem('rma_portal_test_mode') === 'true';
+    } catch (e) {
+      return false;
+    }
+  });
+
+  const toggleTestMode = () => {
+    setIsTestMode(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('rma_portal_test_mode', String(next));
+      } catch (e) {}
+      if (next) {
+        showToast('🧪 Test Mode Enabled: All recipient emails have .test appended & subject begins with "Test"', 'success');
+      } else {
+        showToast('Live Mode Enabled: Real email delivery active.', 'success');
+      }
+      return next;
+    });
+  };
+
+  // Facebook-Style Notifications System
+  const [notifications, setNotifications] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rma_portal_notifications_v2');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return [
+      {
+        id: 'seed-notif-1',
+        type: 'rma',
+        title: 'Wholesale RMA Portal Active',
+        message: 'Notification center ready. Intake events and return submissions will alert here.',
+        subtext: 'System Notification',
+        timestamp: new Date().toISOString(),
+        read: false
+      }
+    ];
+  });
+
+  // Persist notifications to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('rma_portal_notifications_v2', JSON.stringify(notifications.slice(0, 60)));
+    } catch (e) {}
+  }, [notifications]);
+
+  const addNotification = (notif) => {
+    setNotifications(prev => [
+      {
+        id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        timestamp: new Date().toISOString(),
+        read: false,
+        ...notif
+      },
+      ...prev
+    ]);
+  };
+
+  const handleMarkAsRead = (id) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  };
+
+  const handleMarkAllAsRead = () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    showToast('All notifications marked as read.', 'success');
+  };
+
+  const handleClearAllNotifications = () => {
+    setNotifications([]);
+    showToast('All notifications cleared.', 'success');
+  };
+
+  const handleSelectNotification = (notif) => {
+    if (notif.type === 'rma') {
+      if (isAdminView) {
+        setAdminActiveTab('reports');
+      } else {
+        setIsReportsModalOpen(true);
+      }
+    } else if (notif.type === 'unknown') {
+      setIsPendingModalOpen(true);
+    } else if (notif.type === 'product' || notif.type === 'delete') {
+      if (isAdminView) {
+        setAdminActiveTab('products');
+      }
+    }
+  };
 
   // Role Permissions
   const canManageRoles = currentUser?.role === 'super_admin';
@@ -390,6 +483,35 @@ export default function App() {
     const unsubscribeBus = catalogService.onDataChange((evt) => {
       console.log('[Realtime Event Bus] Event:', evt.type);
       refreshAllData();
+
+      if (evt.type === 'report-submitted') {
+        const rep = evt.payload?.report;
+        addNotification({
+          type: 'rma',
+          title: `New Return: ${rep?.rma_number || 'RMA Report'}`,
+          message: `${rep?.name || rep?.barcode || 'Item'} (${rep?.quantity || 1} units) - Defect: ${rep?.reason || 'Damaged'}`,
+          subtext: rep?.reporter_name ? `Reported by ${rep.reporter_name}` : null
+        });
+      } else if (evt.type === 'unknown-barcode') {
+        addNotification({
+          type: 'unknown',
+          title: 'Unknown Barcode Scanned',
+          message: `Barcode #${evt.payload?.barcode} needs catalog verification.`,
+          subtext: 'Action Required'
+        });
+      } else if (evt.type === 'product-deleted') {
+        addNotification({
+          type: 'delete',
+          title: 'Product Removed',
+          message: `Product ${evt.payload?.name ? `"${evt.payload.name}"` : `#${evt.payload?.barcode || ''}`} was deleted from catalog.`
+        });
+      } else if (evt.type === 'barcode-verified') {
+        addNotification({
+          type: 'product',
+          title: 'Barcode Verified',
+          message: `Barcode #${evt.payload?.barcode} was verified and catalog details updated.`
+        });
+      }
     });
 
     // 2. Supabase Realtime channel for instant multi-device / database updates
@@ -660,9 +782,16 @@ export default function App() {
         {!isAdminView && (
           <div className="space-y-4 animate-in fade-in duration-200">
             
-            {/* Header with Theme Toggle */}
+            {/* Header with Theme Toggle & Notifications */}
             <div className="relative text-center space-y-1.5 py-2">
-              <div className="absolute right-0 top-0">
+              <div className="absolute right-0 top-0 flex items-center gap-2">
+                <NotificationBell
+                  notifications={notifications}
+                  onMarkAsRead={handleMarkAsRead}
+                  onMarkAllAsRead={handleMarkAllAsRead}
+                  onClearAll={handleClearAllNotifications}
+                  onSelectNotification={handleSelectNotification}
+                />
                 <button
                   type="button"
                   onClick={toggleTheme}
@@ -1003,7 +1132,31 @@ export default function App() {
                 </p>
               </div>
 
-              <div className="flex items-center gap-2 self-start md:self-auto">
+              <div className="flex items-center gap-2 self-start md:self-auto flex-wrap">
+                {/* TEST MODE TOGGLE BUTTON */}
+                <button
+                  type="button"
+                  onClick={toggleTestMode}
+                  className={`px-3 py-2 rounded-2xl text-xs font-black flex items-center gap-1.5 transition-all shadow-xs border ${
+                    isTestMode
+                      ? 'bg-amber-100 dark:bg-amber-950/80 border-amber-400 dark:border-amber-700 text-amber-900 dark:text-amber-200 ring-2 ring-amber-300 dark:ring-amber-900'
+                      : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+                  }`}
+                  title={isTestMode ? 'Test Mode Active: Emails route with .test domain and subject starts with "Test"' : 'Click to enable Test Mode'}
+                >
+                  <span className={`w-2 h-2 rounded-full ${isTestMode ? 'bg-amber-500 animate-ping' : 'bg-slate-400'}`}></span>
+                  <span>{isTestMode ? '🧪 Test Mode: ON' : '🧪 Test Mode: OFF'}</span>
+                </button>
+
+                {/* NOTIFICATION BELL */}
+                <NotificationBell
+                  notifications={notifications}
+                  onMarkAsRead={handleMarkAsRead}
+                  onMarkAllAsRead={handleMarkAllAsRead}
+                  onClearAll={handleClearAllNotifications}
+                  onSelectNotification={handleSelectNotification}
+                />
+
                 <button
                   type="button"
                   onClick={toggleTheme}
@@ -1033,6 +1186,25 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            {/* Test Mode Notification Banner */}
+            {isTestMode && (
+              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-2xl flex items-center justify-between gap-3 text-xs font-bold text-amber-900 dark:text-amber-200 animate-in fade-in">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">🧪</span>
+                  <span>
+                    <strong>TEST MODE ACTIVE:</strong> All email recipients will receive with <code>.test</code> domain (e.g. <code>mgan@pingconmarketing.com.test</code>). The email subject will start with <code>Test - </code>.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleTestMode}
+                  className="px-2.5 py-1 bg-amber-200 dark:bg-amber-900 hover:bg-amber-300 dark:hover:bg-amber-800 text-amber-950 dark:text-amber-100 rounded-xl text-[11px] font-black shrink-0 cursor-pointer"
+                >
+                  Disable Test Mode
+                </button>
+              </div>
+            )}
 
             {/* SaaS KPI Overview Strip */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1175,11 +1347,23 @@ export default function App() {
                 }}
                 onDeleteProduct={async (prod) => {
                   try {
-                    await catalogService.deleteProduct(prod.id, prod.barcode);
-                    showToast(`Deleted "${prod.name}" from catalog.`, 'success');
+                    const id = typeof prod === 'object' ? prod?.id : (typeof prod === 'number' ? prod : null);
+                    const barcode = typeof prod === 'object' ? prod?.barcode : (typeof prod === 'string' ? prod : null);
+                    const name = typeof prod === 'object' ? (prod?.name || 'Product') : 'Product';
+
+                    // Optimistically remove from state so the table/grid updates immediately
+                    setSavedProductsList(prev => prev.filter(p => {
+                      if (id && p.id === id) return false;
+                      if (barcode && p.barcode === barcode) return false;
+                      return true;
+                    }));
+
+                    await catalogService.deleteProduct(prod);
+                    showToast(`Deleted "${name}" from catalog.`, 'success');
                     refreshAllData();
                   } catch (e) {
-                    showToast(e.message, 'warning');
+                    showToast(e.message || 'Failed to delete product', 'warning');
+                    refreshAllData();
                   }
                 }}
                 currentUser={currentUser}

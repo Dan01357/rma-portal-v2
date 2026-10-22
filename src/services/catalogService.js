@@ -383,8 +383,29 @@ export const catalogService = {
   /**
    * ADMIN ACTION: Delete a product record from database
    */
-  async deleteProduct(id, barcode) {
-    if (!id && !barcode) throw new Error('Product identifier required for deletion.');
+  async deleteProduct(idOrProduct, fallbackBarcode) {
+    let id = null;
+    let barcode = null;
+    let name = '';
+
+    if (typeof idOrProduct === 'object' && idOrProduct !== null) {
+      id = idOrProduct.id || null;
+      barcode = idOrProduct.barcode || null;
+      name = idOrProduct.name || '';
+    } else {
+      id = idOrProduct || null;
+      barcode = fallbackBarcode || null;
+    }
+
+    // If numeric or string passed without object
+    if (!id && !barcode && idOrProduct) {
+      barcode = String(idOrProduct);
+    }
+
+    if (!id && !barcode) {
+      console.warn('Delete called without id or barcode:', idOrProduct);
+      return { success: true };
+    }
 
     let query = supabase.from('products').delete();
     if (id) query = query.eq('id', id);
@@ -405,8 +426,8 @@ export const catalogService = {
       await softQuery;
     }
 
-    this.notifyChange('product-deleted', { id, barcode });
-    return { success: true };
+    this.notifyChange('product-deleted', { id, barcode, name });
+    return { success: true, id, barcode };
   },
 
   /**
@@ -438,10 +459,48 @@ export const catalogService = {
       throw new Error('Your contact info (phone number or email) is required.');
     }
 
-    // Generate readable RMA Number: RMA-YYYYMMDD-XXXX
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    const rmaNumber = `RMA-${today}-${randomSuffix}`;
+    // Format: "RMA-YYYY-XXXX-RAND" (e.g. RMA-2026-0001-A14R)
+    // RMA + Current Year + Serial Number of this RMA - Random unique alphanumeric
+    let nextSeq = 1;
+    try {
+      const { data: latestRows } = await supabase
+        .from('rma_reports')
+        .select('id, rma_number')
+        .order('id', { ascending: false })
+        .limit(10);
+
+      let maxNum = 0;
+      if (latestRows && latestRows.length > 0) {
+        for (const row of latestRows) {
+          if (row.id && !isNaN(Number(row.id))) {
+            maxNum = Math.max(maxNum, Number(row.id));
+          }
+          if (row.rma_number) {
+            const m = String(row.rma_number).match(/RMA-\d{4}-(\d+)-/i);
+            if (m && m[1]) {
+              maxNum = Math.max(maxNum, parseInt(m[1], 10));
+            }
+          }
+        }
+      }
+      if (maxNum > 0) {
+        nextSeq = maxNum + 1;
+      } else {
+        const { count } = await supabase.from('rma_reports').select('id', { count: 'exact', head: true });
+        nextSeq = (count || 0) + 1;
+      }
+    } catch (e) {
+      nextSeq = 1;
+    }
+
+    const currentYear = new Date().getFullYear();
+    const seqStr = String(nextSeq).padStart(4, '0');
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let randomSuffix = '';
+    for (let i = 0; i < 4; i++) {
+      randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    const rmaNumber = `RMA-${currentYear}-${seqStr}-${randomSuffix}`;
 
     const isKnown = Boolean(product && product.isVerified !== false);
 
@@ -488,8 +547,9 @@ export const catalogService = {
 
     const finalReport = insertedReport || reportRow;
 
-    // 2. Dispatch automated notification email in background
-    notificationService.sendRMANotification(finalReport).catch(err => {
+    // 2. Dispatch automated notification email in background (detecting test mode)
+    const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
+    notificationService.sendRMANotification(finalReport, isTestActive).catch(err => {
       console.warn('Background notification dispatch notice:', err.message);
     });
 

@@ -38,6 +38,27 @@ export default async function handler(req, res) {
       text
     } = payload || {};
 
+    const isTestMode = Boolean(
+      payload?.isTestMode ||
+      (typeof to === 'string' && to.endsWith('.test')) ||
+      (Array.isArray(cc) && cc.some(c => typeof c === 'string' && c.endsWith('.test')))
+    );
+
+    if (isTestMode) {
+      console.log('🧪 [TEST MODE ACTIVE] Simulated email dispatch bypassed live SMTP:');
+      console.log('From:', from);
+      console.log('To:', to);
+      console.log('CC:', cc);
+      console.log('Subject:', subject);
+      return res.status(200).json({
+        success: true,
+        testMode: true,
+        message: `Test mode active: simulated email dispatch with subject "${subject}". Live emails to .test recipients safely suppressed.`,
+        to,
+        cc
+      });
+    }
+
     const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER || 'finance2@keysysincorporated.com';
     const smtpPass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD;
 

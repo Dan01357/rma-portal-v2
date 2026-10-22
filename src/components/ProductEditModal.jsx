@@ -45,11 +45,8 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   const [company, setCompany] = useState('Pingcon / Bonita');
 
   const [isLoading, setIsLoading] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [errorNotice, setErrorNotice] = useState(null);
 
-  const canDelete = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
   const canEdit = currentUser?.role !== 'viewer';
 
   // Fetch employees from authService directory on open
@@ -122,7 +119,6 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
       setPhotoFile(null);
       setAeSearch('');
       setIsAeDropdownOpen(false);
-      setShowDeleteConfirm(false);
       setErrorNotice(null);
     }
   }, [isOpen, product]);
@@ -205,21 +201,6 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
     }
   };
 
-  const handleDelete = async () => {
-    if (!product?.id && !product?.barcode) return;
-    setIsDeleting(true);
-    try {
-      await catalogService.deleteProduct(product.id, product.barcode);
-      if (onDeleted) onDeleted(product);
-      onClose();
-    } catch (err) {
-      setErrorNotice(err.message);
-    } finally {
-      setIsDeleting(false);
-      setShowDeleteConfirm(false);
-    }
-  };
-
   if (!isOpen) return null;
 
   return (
@@ -258,36 +239,6 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
             <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300 rounded-2xl text-xs font-semibold flex items-center gap-2 animate-in fade-in">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
               <span>{errorNotice}</span>
-            </div>
-          )}
-
-          {/* Delete Confirmation Box */}
-          {showDeleteConfirm && (
-            <div className="p-4 bg-rose-50/80 dark:bg-rose-950/80 border-2 border-rose-300 dark:border-rose-700 rounded-2xl space-y-2.5 text-xs animate-in fade-in">
-              <span className="font-bold text-rose-900 dark:text-rose-200 block text-sm">
-                Confirm Product Deletion?
-              </span>
-              <p className="text-rose-800 dark:text-rose-300">
-                Are you sure you want to delete <strong>"{name || barcode}"</strong>? This will remove it from the custom database.
-              </p>
-              <div className="flex justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setShowDeleteConfirm(false)}
-                  className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={isDeleting}
-                  onClick={handleDelete}
-                  className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm"
-                >
-                  {isDeleting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                  <span>Yes, Delete Product</span>
-                </button>
-              </div>
             </div>
           )}
 
@@ -606,20 +557,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         </div>
 
         {/* Pinned Footer with Actions */}
-        <div className="p-4 sm:px-6 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0">
-          <div>
-            {isEditing && canDelete && !showDeleteConfirm && (
-              <button
-                type="button"
-                onClick={() => setShowDeleteConfirm(true)}
-                className="px-3 py-2 text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete</span>
-              </button>
-            )}
-          </div>
-
+        <div className="p-4 sm:px-6 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3 shrink-0">
           <div className="flex items-center gap-2">
             <button
               type="button"

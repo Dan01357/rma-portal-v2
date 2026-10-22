@@ -66,7 +66,7 @@ export const notificationService = {
   /**
    * Build clean, modern HTML email notification body
    */
-  generateEmailHtml(report, config) {
+  generateEmailHtml(report, config, isTestMode = false) {
     const rmaNumber = report.rma_number || 'RMA-PENDING';
     const itemName = report.name || `Unidentified Item (${report.barcode})`;
     const reporter = report.reporter_name || report.reported_by || 'Warehouse Staff';
@@ -110,12 +110,18 @@ export const notificationService = {
       <body>
         <div class="container">
           <div class="header">
-            <span class="badge">${config.companyName}</span>
-            <h1 class="title">New RMA Return Report: ${rmaNumber}</h1>
+            <span class="badge">${isTestMode ? `[TEST MODE] ${config.companyName}` : config.companyName}</span>
+            <h1 class="title">${isTestMode ? 'Test - ' : ''}New RMA Return Report: ${rmaNumber}</h1>
             <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Automated Warehouse Intake Notification</div>
           </div>
           
           <div class="content">
+            ${isTestMode ? `
+            <div style="background: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 12px 16px; border-radius: 12px; margin-bottom: 20px; font-weight: 700; font-size: 13px;">
+              🧪 TEST MODE DISPATCH: All recipient email addresses have been suffixed with <code>.test</code>. Live delivery to real staff and customers was safely bypassed.
+            </div>
+            ` : ''}
+
             <div class="reason-box">
               🚨 Return Defect: ${report.reason || 'Damaged / Defective'}
               ${report.explanation ? `<div style="font-weight: 400; font-size: 12px; margin-top: 4px; color: #9f1239;">${report.explanation}</div>` : ''}
@@ -198,7 +204,7 @@ export const notificationService = {
 
           <div class="footer">
             This automated alert was dispatched by the Wholesale RMA Return Portal.<br>
-            Sender: ${config.senderEmail} • Main Recipient: ${config.toEmail}
+            Sender: ${config.senderEmail} • Main Recipient: ${isTestMode ? `${config.toEmail}.test` : config.toEmail}
           </div>
         </div>
       </body>
@@ -209,8 +215,13 @@ export const notificationService = {
   /**
    * Dispatch email notification for a newly submitted RMA report
    */
-  async sendRMANotification(report) {
+  async sendRMANotification(report, isTestMode = false) {
     if (!report) return { success: false, error: 'No report data provided' };
+
+    const testActive = Boolean(
+      isTestMode || 
+      (typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true')
+    );
 
     try {
       const config = this.resolveCompanyConfig(report);
@@ -220,12 +231,22 @@ export const notificationService = {
       if (report.ae_email && report.ae_email.includes('@')) {
         ccSet.add(report.ae_email.trim());
       }
-      const finalCcList = Array.from(ccSet);
+      let finalCcList = Array.from(ccSet);
+      let toEmail = config.toEmail;
 
-      const subject = `[RMA Alert] ${report.rma_number || 'New Return'}: ${report.name || report.barcode} (${report.reason || 'Damaged'})`;
-      const htmlBody = this.generateEmailHtml(report, config);
+      let subject = `[RMA Alert] ${report.rma_number || 'New Return'}: ${report.name || report.barcode} (${report.reason || 'Damaged'})`;
 
-      console.log(`[RMA Email Dispatch] Sending from "${config.senderEmail}" to "${config.toEmail}", CC: [${finalCcList.join(', ')}]`);
+      if (testActive) {
+        // In test mode: all recipients will have .test appended so it won't be sent to them
+        toEmail = toEmail.endsWith('.test') ? toEmail : `${toEmail}.test`;
+        finalCcList = finalCcList.map(e => e.endsWith('.test') ? e : `${e}.test`);
+        // Subject email must have "Test" as the first word
+        subject = `Test - [RMA Alert] ${report.rma_number || 'New Return'}: ${report.name || report.barcode} (${report.reason || 'Damaged'})`;
+      }
+
+      const htmlBody = this.generateEmailHtml(report, config, testActive);
+
+      console.log(`[RMA Email Dispatch] (TestMode: ${testActive}) Sending from "${config.senderEmail}" to "${toEmail}", CC: [${finalCcList.join(', ')}]`);
 
       const res = await fetch('/api/send-email', {
         method: 'POST',
@@ -234,12 +255,13 @@ export const notificationService = {
         },
         body: JSON.stringify({
           from: config.senderEmail,
-          fromName: config.senderName,
-          to: config.toEmail,
+          fromName: testActive ? `[TEST] ${config.senderName}` : config.senderName,
+          to: toEmail,
           cc: finalCcList,
           subject,
           html: htmlBody,
-          text: `New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}`
+          isTestMode: testActive,
+          text: `${testActive ? 'Test - ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}`
         })
       });
 

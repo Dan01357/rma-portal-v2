@@ -591,7 +591,7 @@ export default function SavedProductsTab({
                           {canDelete && (
                             <button
                               type="button"
-                              onClick={() => onDeleteProduct(product.id || product.barcode, product.name)}
+                              onClick={() => onDeleteProduct(product)}
                               className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors"
                               title="Delete product"
                             >
@@ -722,7 +722,7 @@ export default function SavedProductsTab({
                   {canDelete && (
                     <button
                       type="button"
-                      onClick={() => onDeleteProduct(product.id || product.barcode, product.name)}
+                      onClick={() => onDeleteProduct(product)}
                       className="px-3 py-1.5 bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
                       title="Delete product permanently"
                     >
