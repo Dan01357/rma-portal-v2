@@ -2111,15 +2111,17 @@ export default function App() {
                                 {/* 10. Actions: Edit Item / Save Product, Credit Memo & Delete */}
                                 <td className="py-2.5 px-3.5 text-center">
                                   <div className="flex items-center justify-center gap-1.5">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleEditProductFromReport(item)}
-                                      className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                      title={`Edit item details and save "${item.name || item.barcode}" to Products catalog`}
-                                    >
-                                      <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                                      <span>Edit Item</span>
-                                    </button>
+                                    {!savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEditProductFromReport(item)}
+                                        className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                        title={`Edit item details and save "${item.name || item.barcode}" to Products catalog`}
+                                      >
+                                        <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                                        <span>Edit Item</span>
+                                      </button>
+                                    )}
 
                                     {(() => {
                                       const existingMemo = creditMemosList.find(m => m.rma_number === item.rma_number || m.report_id === item.id);
@@ -2264,15 +2266,17 @@ export default function App() {
                                 </h4>
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">
-                                <button
-                                  type="button"
-                                  onClick={() => handleEditProductFromReport(item)}
-                                  className="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                                  title="Edit item details and save to catalog"
-                                >
-                                  <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                                  <span>Edit Item</span>
-                                </button>
+                                {!savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleEditProductFromReport(item)}
+                                    className="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                    title="Edit item details and save to catalog"
+                                  >
+                                    <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                                    <span>Edit Item</span>
+                                  </button>
+                                )}
                                 {(() => {
                                   const existingMemo = creditMemosList.find(m => m.rma_number === item.rma_number || m.report_id === item.id);
                                   if (existingMemo) {
@@ -2497,6 +2501,7 @@ export default function App() {
         onDeleteReport={requestDeleteReport}
         onBulkDeleteReport={requestBulkDeleteReports}
         creditMemosList={creditMemosList}
+        savedProductsList={savedProductsList}
         onEditProductFromReport={handleEditProductFromReport}
         onOpenCreditMemo={(rep) => {
           setIsReportsModalOpen(false);

@@ -34,6 +34,7 @@ export default function RMAReportsModal({
   onDeleteReport,
   onBulkDeleteReport,
   creditMemosList = [],
+  savedProductsList = [],
   onOpenCreditMemo,
   onViewCreditMemoVoucher,
   onEditProductFromReport
@@ -598,7 +599,7 @@ export default function RMAReportsModal({
                         {/* 10. Actions: Edit Item / Save Product, Credit Memo & Delete */}
                         <td className="py-2.5 px-3.5 text-center">
                           <div className="flex items-center justify-center gap-1.5">
-                            {onEditProductFromReport && (
+                            {onEditProductFromReport && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                               <button
                                 type="button"
                                 onClick={() => onEditProductFromReport(item)}
@@ -760,7 +761,7 @@ export default function RMAReportsModal({
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0">
-                        {onEditProductFromReport && (
+                        {onEditProductFromReport && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                           <button
                             type="button"
                             onClick={() => onEditProductFromReport(item)}
