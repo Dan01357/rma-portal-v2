@@ -150,26 +150,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
       return;
     }
 
-    // Validate Name uniqueness
-    if (formData.name && formData.name.trim()) {
-      const nameCheck = await catalogService.checkNameUnique(formData.name.trim(), null, selectedBarcode.barcode);
-      if (!nameCheck.isUnique) {
-        setNameError(nameCheck.error);
-        setStatusMsg({ type: 'error', text: nameCheck.error });
-        return;
-      }
-    }
-
-    // Validate SKU uniqueness
-    if (formData.code && formData.code.trim()) {
-      const skuCheck = await catalogService.checkSkuUnique(formData.code, null, selectedBarcode.barcode);
-      if (!skuCheck.isUnique) {
-        setSkuError(skuCheck.error);
-        setStatusMsg({ type: 'error', text: skuCheck.error });
-        return;
-      }
-    }
-
+    // Deduplication removed: 1 SKU from company can have more than one barcode assignation
     setIsSaving(true);
     setStatusMsg(null);
 
@@ -483,16 +464,10 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                   required
                   placeholder="e.g. Laptop Lenovo ThinkPad / Oreo Biscuit"
                   value={formData.name}
-                  onChange={async (e) => {
+                  onChange={(e) => {
                     const val = e.target.value;
                     setFormData({ ...formData, name: val });
                     setNameError(null);
-                    if (val.trim()) {
-                      try {
-                        const res = await catalogService.checkNameUnique(val, null, selectedBarcode?.barcode);
-                        if (!res.isUnique) setNameError(res.error);
-                      } catch (err) {}
-                    }
                   }}
                   className={`w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border ${
                     nameError ? 'border-rose-500 focus:border-rose-600' : 'border-slate-300 dark:border-slate-700 focus:border-blue-600'
@@ -667,16 +642,10 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                     type="text"
                     placeholder="e.g. P124124141"
                     value={formData.code}
-                    onChange={async (e) => {
+                    onChange={(e) => {
                       const val = e.target.value;
                       setFormData({ ...formData, code: val });
                       setSkuError(null);
-                      if (val.trim()) {
-                        try {
-                          const res = await catalogService.checkSkuUnique(val, null, selectedBarcode?.barcode);
-                          if (!res.isUnique) setSkuError(res.error);
-                        } catch (err) {}
-                      }
                     }}
                     className={`w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border ${
                       skuError ? 'border-rose-500 focus:border-rose-600' : 'border-slate-300 dark:border-slate-700 focus:border-blue-600'

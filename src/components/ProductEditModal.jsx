@@ -118,28 +118,14 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
     }
   }, [isOpen, product]);
 
-  const handleNameChange = async (val) => {
+  const handleNameChange = (val) => {
     setName(val);
     setNameError(null);
-    if (!val || !val.trim()) return;
-    try {
-      const res = await catalogService.checkNameUnique(val, product?.id, barcode);
-      if (!res.isUnique) {
-        setNameError(res.error);
-      }
-    } catch (e) {}
   };
 
-  const handleCodeChange = async (val) => {
+  const handleCodeChange = (val) => {
     setCode(val);
     setSkuError(null);
-    if (!val || !val.trim()) return;
-    try {
-      const res = await catalogService.checkSkuUnique(val, product?.id, barcode);
-      if (!res.isUnique) {
-        setSkuError(res.error);
-      }
-    } catch (e) {}
   };
 
   const handlePriceChange = (val) => {
@@ -205,26 +191,6 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
       return;
     }
 
-    // Check Product Name duplicate before submitting
-    if (name.trim()) {
-      const nameCheck = await catalogService.checkNameUnique(name.trim(), product?.id, barcode);
-      if (!nameCheck.isUnique) {
-        setNameError(nameCheck.error);
-        setErrorNotice(nameCheck.error);
-        return;
-      }
-    }
-
-    // Check SKU duplicate before submitting
-    if (code.trim()) {
-      const skuCheck = await catalogService.checkSkuUnique(code, product?.id, barcode);
-      if (!skuCheck.isUnique) {
-        setSkuError(skuCheck.error);
-        setErrorNotice(skuCheck.error);
-        return;
-      }
-    }
-
     setIsLoading(true);
     setErrorNotice(null);
 
@@ -269,7 +235,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
       <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-lg w-full flex flex-col max-h-[92vh] overflow-hidden">
         
         {/* Header */}

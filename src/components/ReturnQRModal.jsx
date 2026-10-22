@@ -50,7 +50,7 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200 modal-backdrop-print-fix">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200 modal-backdrop-print-fix">
       
       {/* Print Specific Stylesheet Injection */}
       <style>{`

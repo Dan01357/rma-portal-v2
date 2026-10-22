@@ -307,71 +307,16 @@ export const catalogService = {
   },
 
   /**
-   * Check if an SKU / Item Code already exists in products database
+   * Check if an SKU / Item Code already exists in products database (Deduplication removed: 1 SKU can have multiple barcodes)
    */
   async checkSkuUnique(code, excludeId = null, excludeBarcode = null) {
-    if (!code || !String(code).trim()) return { isUnique: true };
-    const cleanCode = String(code).trim();
-
-    try {
-      const { data, error } = await supabase
-        .from('products')
-        .select('id, name, code, barcode')
-        .ilike('code', cleanCode);
-
-      if (error || !data) return { isUnique: true };
-
-      const duplicate = data.find(p => {
-        if (excludeId && String(p.id) === String(excludeId)) return false;
-        if (excludeBarcode && String(p.barcode) === String(excludeBarcode)) return false;
-        return String(p.code || '').trim().toLowerCase() === cleanCode.toLowerCase();
-      });
-
-      if (duplicate) {
-        return {
-          isUnique: false,
-          duplicate,
-          error: `SKU / Item Code "${cleanCode}" is already assigned to "${duplicate.name}" (Barcode: ${duplicate.barcode}). SKUs must be unique for each product.`
-        };
-      }
-    } catch (e) {
-      console.warn('SKU uniqueness check notice:', e.message);
-    }
     return { isUnique: true };
   },
 
   /**
-   * Check if a Product Name already exists in products database
+   * Check if a Product Name already exists in products database (Deduplication removed)
    */
   async checkNameUnique(name, excludeId = null, excludeBarcode = null) {
-    if (!name || !String(name).trim()) return { isUnique: true };
-    const cleanName = String(name).trim();
-
-    try {
-      const { data, error } = await supabase
-        .from('products')
-        .select('id, name, code, barcode')
-        .not('name', 'like', '[DELETED]%')
-        .ilike('name', cleanName);
-
-      if (error || !data) return { isUnique: true };
-
-      const duplicate = data.find(p => {
-        if (excludeId && String(p.id) === String(excludeId)) return false;
-        if (excludeBarcode && String(p.barcode) === String(excludeBarcode)) return false;
-        return String(p.name || '').trim().toLowerCase() === cleanName.toLowerCase();
-      });
-
-      if (duplicate) {
-        return {
-          isUnique: false,
-          duplicate,
-          error: `Product Name "${cleanName}" is already registered in catalog (Barcode: ${duplicate.barcode}${duplicate.code ? ` • SKU: ${duplicate.code}` : ''}). Product names must be unique to prevent discrepancies.`
-        };
-      }
-    } catch (e) {
-      console.warn('Product name uniqueness check notice:', e.message);
-    }
     return { isUnique: true };
   },
 
@@ -382,20 +327,6 @@ export const catalogService = {
     const cleanBarcode = String(barcode || '').trim();
     if (!cleanBarcode) throw new Error('Product Barcode is required.');
     if (!name || !name.trim()) throw new Error('Product Name is required.');
-
-    // Validate Name uniqueness
-    const nameCheck = await this.checkNameUnique(name, null, cleanBarcode);
-    if (!nameCheck.isUnique) {
-      throw new Error(nameCheck.error);
-    }
-
-    // Validate SKU uniqueness
-    if (code && String(code).trim()) {
-      const skuCheck = await this.checkSkuUnique(code, null, cleanBarcode);
-      if (!skuCheck.isUnique) {
-        throw new Error(skuCheck.error);
-      }
-    }
 
     const newProd = {
       barcode: cleanBarcode,
@@ -432,22 +363,7 @@ export const catalogService = {
   async updateProduct(id, { barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
     if (!id && !barcode) throw new Error('Product identifier required for update.');
 
-    // Validate Name uniqueness
-    if (name && String(name).trim()) {
-      const nameCheck = await this.checkNameUnique(name, id, barcode);
-      if (!nameCheck.isUnique) {
-        throw new Error(nameCheck.error);
-      }
-    }
-
-    // Validate SKU uniqueness
-    if (code && String(code).trim()) {
-      const skuCheck = await this.checkSkuUnique(code, id, barcode);
-      if (!skuCheck.isUnique) {
-        throw new Error(skuCheck.error);
-      }
-    }
-
+    // Deduplication removed: 1 SKU from company can have more than one barcode assignation
     const updates = {
       name: name ? name.trim() : undefined,
       code: code !== undefined ? (code ? code.trim() : null) : undefined,
@@ -785,23 +701,6 @@ export const catalogService = {
    * ADMIN ACTION: Fill in details for an unknown barcode, including optional product reference image.
    */
   async updateBarcodeDetails({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
-    const cleanBarcode = String(barcode || '').trim();
-    // Validate Name uniqueness
-    if (name && String(name).trim() && name.trim() !== 'Unknown Item') {
-      const nameCheck = await this.checkNameUnique(name, null, cleanBarcode);
-      if (!nameCheck.isUnique) {
-        throw new Error(nameCheck.error);
-      }
-    }
-
-    // Validate SKU uniqueness
-    if (code && String(code).trim()) {
-      const skuCheck = await this.checkSkuUnique(code, null, cleanBarcode);
-      if (!skuCheck.isUnique) {
-        throw new Error(skuCheck.error);
-      }
-    }
-
     const updates = {
       code: code ? code.trim() : null,
       name: name ? name.trim() : 'Unknown Item',

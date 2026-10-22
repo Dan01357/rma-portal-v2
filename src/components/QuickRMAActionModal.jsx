@@ -171,29 +171,24 @@ export default function QuickRMAActionModal({
         console.warn('Supabase user lookup warning:', dbErr);
       }
 
-      // 2. Fallback to hardcoded directory
-      if (!emp) {
-        const defaultList = [
-          { name: 'Danilo Alvaro Jr. (Super Admin)', email: 'finance2@keysysincorporated.com', role: 'super_admin', is_active: true },
-          { name: 'Alleli F. Almaida', email: 'alleli.almaida@ph.keysys.com', role: 'admin', is_active: true },
-          { name: 'Analiza B. Benosa', email: 'finance@a2z2go.net', role: 'admin', is_active: true },
-          { name: 'Glencel O. Azogue', email: 'accountspayable@keysysincorporated.com', role: 'admin', is_active: true },
-          { name: 'Jarmen A. Cachero', email: 'finance4@keysysincorporated.com', role: 'admin', is_active: true },
-          { name: 'Mark John A. Aquino', email: 'mark.aquino@a2z2go.net', role: 'admin', is_active: true },
-          { name: 'Ralph Raven A. Alido', email: 'ralph.alido@a2z2go.net', role: 'admin', is_active: true },
-          { name: 'Mary T. Gan', email: 'mgan@pingconmarketing.com', role: 'admin', is_active: true }
-        ];
-        emp = defaultList.find(e => e.email.toLowerCase() === cleanEmail);
-      }
+      // 2. Check designated admins directory
+      const defaultAdminList = [
+        { name: 'Danilo Alvaro Jr. (Super Admin)', email: 'finance2@keysysincorporated.com', role: 'super_admin', is_active: true, department: 'Finance Systems / IT' },
+        { name: 'Alleli F. Almaida', email: 'alleli.almaida@ph.keysys.com', role: 'admin', is_active: true, department: 'Finance' },
+        { name: 'Analiza B. Benosa', email: 'finance@a2z2go.net', role: 'admin', is_active: true, department: 'Finance' },
+        { name: 'Glencel O. Azogue', email: 'accountspayable@keysysincorporated.com', role: 'admin', is_active: true, department: 'Accounts Payable' },
+        { name: 'Jarmen A. Cachero', email: 'finance4@keysysincorporated.com', role: 'admin', is_active: true, department: 'Finance Systems' },
+        { name: 'Mark John A. Aquino', email: 'mark.aquino@a2z2go.net', role: 'admin', is_active: true, department: 'A2Z2GO Procurement' },
+        { name: 'Ralph Raven A. Alido', email: 'ralph.alido@a2z2go.net', role: 'admin', is_active: true, department: 'A2Z2GO Operations' },
+        { name: 'Mary T. Gan', email: 'mgan@pingconmarketing.com', role: 'admin', is_active: true, department: 'Executive Management' }
+      ];
 
-      // Special override for Danilo Alvaro
-      if (cleanEmail === 'finance2@keysysincorporated.com') {
+      const designatedAdmin = defaultAdminList.find(e => e.email.toLowerCase() === cleanEmail);
+      if (designatedAdmin) {
         emp = {
-          name: 'Danilo Alvaro Jr. (Super Admin)',
-          email: 'finance2@keysysincorporated.com',
-          role: 'super_admin',
-          is_active: true,
-          department: 'Finance Systems / IT'
+          ...(emp || {}),
+          ...designatedAdmin,
+          role: designatedAdmin.role
         };
       }
 
@@ -263,25 +258,27 @@ export default function QuickRMAActionModal({
   const reporterContact = report?.reporter_contact || report?.reporter_phone || report?.phone || '';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
-      <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden my-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
         
         {/* Header Bar */}
-        <div className="relative bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-900 px-5 sm:px-6 py-4 text-white">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 bg-white/10 rounded-xl backdrop-blur-xs border border-white/20">
+        <div className="relative shrink-0 bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-900 px-4 sm:px-6 py-3.5 sm:py-4 text-white">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <div className="p-2 bg-white/10 rounded-xl backdrop-blur-xs border border-white/20 shrink-0">
                 <Sparkles className="w-5 h-5 text-amber-300" />
               </div>
-              <div>
-                <h3 className="text-base sm:text-lg font-black tracking-tight flex items-center gap-2">
-                  <span>RMA Quick Processing</span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/20 text-white font-bold">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm sm:text-lg font-black tracking-tight truncate">
+                    RMA Quick Processing
+                  </h3>
+                  <span className="hidden sm:inline-flex text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/20 text-white font-bold shrink-0">
                     Box QR Action
                   </span>
-                </h3>
-                <p className="text-xs text-blue-100 font-medium">
-                  Instant warehouse intake, SKU assignment & Credit Memo
+                </div>
+                <p className="text-[11px] sm:text-xs text-blue-100 font-medium truncate">
+                  Instant intake, SKU assignment & Credit Memo
                 </p>
               </div>
             </div>
@@ -289,7 +286,7 @@ export default function QuickRMAActionModal({
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
+              className="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer shrink-0"
               title="Close Quick Actions"
             >
               <X className="w-5 h-5" />
@@ -298,7 +295,7 @@ export default function QuickRMAActionModal({
         </div>
 
         {/* Modal Body */}
-        <div className="p-5 sm:p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+        <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto overscroll-contain">
 
           {/* 1. Loading State */}
           {isLoadingReport && (
@@ -634,7 +631,7 @@ export default function QuickRMAActionModal({
         </div>
 
         {/* Footer */}
-        <div className="bg-slate-50 dark:bg-slate-800/80 px-5 sm:px-6 py-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+        <div className="shrink-0 bg-slate-50 dark:bg-slate-800/80 px-4 sm:px-6 py-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
           <span className="text-slate-500 font-mono text-[11px]">
             {report?.rma_number || rmaNumber || 'RMA Portal'}
           </span>

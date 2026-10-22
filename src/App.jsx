@@ -119,6 +119,15 @@ export default function App() {
   // Quick RMA Action Modal State (triggered by Box QR scan or ?rma= URL parameter)
   const [isQuickRmaModalOpen, setIsQuickRmaModalOpen] = useState(false);
   const [quickRmaNumber, setQuickRmaNumber] = useState(null);
+  const [pendingQuickRmaNumber, setPendingQuickRmaNumber] = useState(null);
+
+  const restoreQuickRmaIfPending = () => {
+    if (pendingQuickRmaNumber) {
+      setQuickRmaNumber(pendingQuickRmaNumber);
+      setIsQuickRmaModalOpen(true);
+      setPendingQuickRmaNumber(null);
+    }
+  };
 
   const parseRmaFromScan = (rawText) => {
     if (!rawText) return null;
@@ -145,6 +154,7 @@ export default function App() {
   const handleCloseQuickRma = () => {
     setIsQuickRmaModalOpen(false);
     setQuickRmaNumber(null);
+    setPendingQuickRmaNumber(null);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       if (url.searchParams.has('rma') || url.searchParams.has('rma_number')) {
@@ -2704,6 +2714,7 @@ export default function App() {
         onClose={() => {
           setIsProductEditOpen(false);
           setEditingProduct(null);
+          restoreQuickRmaIfPending();
         }}
         product={editingProduct}
         currentUser={currentUser}
@@ -2758,10 +2769,12 @@ export default function App() {
           }
           await refreshAllData();
           showToast(`Product "${name || 'Item'}" saved to catalog and linked reports updated!`, 'success');
+          restoreQuickRmaIfPending();
         }}
         onDeleted={(prod) => {
           refreshAllData();
           showToast(`Product "${prod.name}" deleted from catalog.`, 'success');
+          restoreQuickRmaIfPending();
         }}
       />
 
@@ -2772,6 +2785,7 @@ export default function App() {
           setIsCreditMemoModalOpen(false);
           setSelectedCreditMemoReport(null);
           setEditingCreditMemo(null);
+          restoreQuickRmaIfPending();
         }}
         report={selectedCreditMemoReport}
         creditMemo={editingCreditMemo}
@@ -2781,6 +2795,7 @@ export default function App() {
         onSaved={(memo) => {
           refreshAllData();
           showToast(`Credit Memo ${memo.credit_memo_number} saved!`, 'success');
+          restoreQuickRmaIfPending();
         }}
         onViewVoucher={(memo) => {
           setVoucherModalMemo(memo);
@@ -2795,6 +2810,7 @@ export default function App() {
           setIsVoucherModalOpen(false);
           setVoucherModalMemo(null);
           setVoucherModalMemos([]);
+          restoreQuickRmaIfPending();
         }}
         creditMemo={voucherModalMemo}
         creditMemos={voucherModalMemos}
@@ -2814,9 +2830,13 @@ export default function App() {
       {/* Return Merchandise Authorization QR Sticker Modal */}
       <ReturnQRModal
         isOpen={Boolean(qrModalReport)}
-        onClose={() => setQrModalReport(null)}
+        onClose={() => {
+          setQrModalReport(null);
+          restoreQuickRmaIfPending();
+        }}
         report={qrModalReport}
         onOpenQuickAction={(rma) => {
+          setPendingQuickRmaNumber(null);
           setQuickRmaNumber(rma);
           setIsQuickRmaModalOpen(true);
         }}
@@ -2832,9 +2852,15 @@ export default function App() {
         creditMemosList={creditMemosList}
         recentReportsList={recentReportsList}
         onAssignSku={(reportToEdit) => {
+          const currentRma = quickRmaNumber || reportToEdit?.rma_number;
+          setPendingQuickRmaNumber(currentRma);
+          setIsQuickRmaModalOpen(false);
           handleEditProductFromReport(reportToEdit);
         }}
         onOpenCreditMemo={(rep, existing) => {
+          const currentRma = quickRmaNumber || rep?.rma_number;
+          setPendingQuickRmaNumber(currentRma);
+          setIsQuickRmaModalOpen(false);
           if (existing) {
             setEditingCreditMemo(existing);
             setSelectedCreditMemoReport(rep);
@@ -2844,10 +2870,16 @@ export default function App() {
           }
         }}
         onViewCreditMemoVoucher={(memo) => {
+          const currentRma = quickRmaNumber || memo?.rma_number;
+          setPendingQuickRmaNumber(currentRma);
+          setIsQuickRmaModalOpen(false);
           setVoucherModalMemo(memo);
           setIsVoucherModalOpen(true);
         }}
         onViewReportQR={(rep) => {
+          const currentRma = quickRmaNumber || rep?.rma_number;
+          setPendingQuickRmaNumber(currentRma);
+          setIsQuickRmaModalOpen(false);
           setQrModalReport(rep);
         }}
         onOpenLightbox={setLightboxPhoto}
