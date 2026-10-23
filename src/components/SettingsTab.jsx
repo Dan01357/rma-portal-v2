@@ -60,7 +60,7 @@ export default function SettingsTab({
   const [isSavingRecipients, setIsSavingRecipients] = useState(false);
   const [recipientFeedback, setRecipientFeedback] = useState(null);
 
-  // Coworker Purchase Order & SKU Catalog API State
+  // Live Product Catalog API State
   const [poApiKey, setPoApiKey] = useState(() => purchaseOrdersApi.getApiKey() || '');
   const [poApiStatus, setPoApiStatus] = useState({
     loading: false,
@@ -115,7 +115,7 @@ export default function SettingsTab({
   };
 
   const handleCheckPoApi = async () => {
-    setPoApiStatus({ loading: true, checked: false, connected: false, message: 'Testing Coworker API...' });
+    setPoApiStatus({ loading: true, checked: false, connected: false, message: 'Testing Product Catalog API...' });
     const result = await purchaseOrdersApi.testConnection(true);
     setPoApiStatus({
       loading: false,
@@ -139,7 +139,7 @@ export default function SettingsTab({
           updated_at: new Date().toISOString()
         });
       } catch (e) {}
-      setPoKeyFeedback({ type: 'success', message: 'Coworker API Key saved!' });
+      setPoKeyFeedback({ type: 'success', message: 'Catalog API Key saved!' });
       handleCheckPoApi();
     } catch (err) {
       setPoKeyFeedback({ type: 'error', message: err.message });
@@ -622,7 +622,7 @@ export default function SettingsTab({
         </p>
       </div>
 
-      {/* 4. Coworker Purchase Order & SKU Catalog API Integration (EXTERNAL_API_KEY_DANILO) */}
+      {/* 4. Live Product Catalog API Integration (EXTERNAL_API_KEY_DANILO) */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-7 shadow-sm space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
           <div className="flex items-center space-x-3">
@@ -631,13 +631,13 @@ export default function SettingsTab({
             </div>
             <div>
               <h2 className="font-extrabold text-slate-900 dark:text-white text-base flex items-center gap-2">
-                <span>Coworker Database API (Live SKU Auto-Suggestions)</span>
+                <span>Live Product Catalog API (SKU Auto-Suggestions)</span>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 font-mono font-bold">
                   EXTERNAL_API_KEY_DANILO
                 </span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Direct integration with coworker's Laravel Cloud database (5,793+ SKUs in erply_products)
+                Direct integration with Enterprise Laravel Cloud product catalog (5,793+ SKUs in erply_products)
               </p>
             </div>
           </div>

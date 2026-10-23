@@ -4,6 +4,7 @@ import {
   Save, 
   Trash2, 
   Upload, 
+  Camera,
   AlertCircle, 
   RefreshCw, 
   CheckCircle, 
@@ -27,7 +28,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   const [name, setName] = useState('');
   const [barcode, setBarcode] = useState('');
   const [code, setCode] = useState('');
-  const [supplierName, setSupplierName] = useState('Savemore');
+  const [supplierName, setSupplierName] = useState('');
   const [price, setPrice] = useState('');
   const [priceWithVat, setPriceWithVat] = useState('');
   const [unitName, setUnitName] = useState('pc');
@@ -106,7 +107,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         setName('');
         setBarcode('');
         setCode('');
-        setSupplierName('Savemore');
+        setSupplierName('');
         setPrice('');
         setPriceWithVat('');
         setUnitName('pc');
@@ -138,17 +139,35 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
     if (!item) return;
     if (item.name) setName(item.name);
     if (item.code || item.sku) setCode(item.code || item.sku);
-    if (item.supplierName || item.supplier_name) setSupplierName(item.supplierName || item.supplier_name);
-    if (item.price !== undefined && item.price !== null) {
+    if (item.barcode && !barcode) setBarcode(item.barcode);
+
+    // Auto populate existing data; if none leave blank, no fake data
+    setSupplierName(item.supplierName || item.supplier_name || '');
+
+    if (item.price !== undefined && item.price !== null && Number(item.price) > 0) {
       const p = Number(item.price);
       setPrice(p.toFixed(2));
-      setPriceWithVat(item.priceWithVat ? String(item.priceWithVat) : (p * 1.12).toFixed(2));
+      setPriceWithVat(item.priceWithVat && Number(item.priceWithVat) > 0 ? String(Number(item.priceWithVat).toFixed(2)) : (p * 1.12).toFixed(2));
+    } else {
+      setPrice('');
+      setPriceWithVat('');
     }
-    if (item.unitName || item.unit_name) setUnitName(item.unitName || item.unit_name);
-    if (!photoPreview && item.imageUrl) {
+
+    if (item.unitName || item.unit_name) {
+      setUnitName(item.unitName || item.unit_name);
+    } else {
+      setUnitName('pc');
+    }
+
+    // Do NOT auto generate fake image. Only set if real image exists from catalog
+    if (item.imageUrl) {
       setImageUrl(item.imageUrl);
       setPhotoPreview(item.imageUrl);
+    } else if (!photoFile) {
+      setImageUrl('');
+      setPhotoPreview(null);
     }
+
     setNameError(null);
     setSkuError(null);
   };
@@ -342,19 +361,33 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                   </div>
                 )}
 
-                <div className="flex-1 space-y-1">
-                  <label className="inline-flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer shadow-sm transition-all">
-                    <Upload className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>Upload New Photo</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handlePhotoSelect}
-                      className="hidden"
-                    />
-                  </label>
+                <div className="flex-1 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="inline-flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer shadow-xs transition-all">
+                      <Upload className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>Upload Photo</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handlePhotoSelect}
+                        className="hidden"
+                      />
+                    </label>
+
+                    <label className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 font-bold rounded-xl text-xs cursor-pointer shadow-xs transition-all">
+                      <Camera className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>Take Picture</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handlePhotoSelect}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
                   <p className="text-[11px] text-slate-400 dark:text-slate-500">
-                    This image will be displayed when reporters scan this barcode.
+                    Optional: Upload or take a picture of the product. Displayed when reporters scan this barcode.
                   </p>
                 </div>
               </div>

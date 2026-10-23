@@ -1,14 +1,8 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Package, 
-  Search, 
   Building2, 
   Sparkles, 
-  Check, 
-  Tag, 
-  ChevronDown, 
   RefreshCw, 
-  Coins,
   ArrowRight
 } from 'lucide-react';
 import { purchaseOrdersApi } from '../services/purchaseOrdersApi';
@@ -18,10 +12,9 @@ import { catalogService } from '../services/catalogService';
  * Product & SKU Real-Time Auto-Suggest Input
  * 
  * - Supports searching by Product Name OR SKU / Item Code
- * - Queries Coworker's live Purchase Order / Erply DB (5,793+ SKUs)
- * - Concurrently searches saved products catalog in Supabase
- * - Auto-populates: Name, SKU, Supplier, Base Price, Price w/ VAT, Unit
- * - Keyboard navigation (Up/Down/Enter/Escape) & mobile-optimized touch
+ * - Queries Enterprise Erply DB (5,793+ SKUs) & Supabase Saved Products
+ * - Auto-populates all details on selection WITHOUT re-opening dropdown on other fields
+ * - Strictly no fake/auto-generated images or data
  */
 export default function ProductAutoSuggest({
   mode = 'name', // 'name' | 'code'
@@ -45,6 +38,8 @@ export default function ProductAutoSuggest({
 
   const wrapperRef = useRef(null);
   const debounceTimerRef = useRef(null);
+  const isFocusedRef = useRef(false);
+  const userTypedRef = useRef(false);
 
   // Pre-fetch local catalog once for instant offline/zero-latency matching
   useEffect(() => {
@@ -71,6 +66,7 @@ export default function ProductAutoSuggest({
     function handleClickOutside(event) {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
         setIsOpen(false);
+        userTypedRef.current = false;
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -81,14 +77,22 @@ export default function ProductAutoSuggest({
     };
   }, []);
 
-  // Perform search whenever value changes
+  // Perform search ONLY when value changes due to explicit user typing in THIS field
   useEffect(() => {
+    // If change was not initiated by user typing in this specific input, never open or search
+    if (!userTypedRef.current || !isFocusedRef.current) {
+      setIsOpen(false);
+      setIsLoading(false);
+      return;
+    }
+
     const query = String(value || '').trim();
 
     // If query is short or matches the exact item that was just selected, don't re-trigger popover
     if (query.length < 2) {
       setSuggestions([]);
       setIsLoading(false);
+      setIsOpen(false);
       return;
     }
 
@@ -96,6 +100,7 @@ export default function ProductAutoSuggest({
       (mode === 'name' && query.toLowerCase() === (lastSelected.name || '').toLowerCase()) ||
       (mode === 'code' && query.toLowerCase() === (lastSelected.code || lastSelected.sku || '').toLowerCase())
     )) {
+      setIsOpen(false);
       return;
     }
 
@@ -118,11 +123,11 @@ export default function ProductAutoSuggest({
           })
           .map(p => ({
             id: p.id || p.code || p.sku,
-            name: p.name,
-            code: p.code || p.sku,
-            sku: p.code || p.sku,
-            barcode: p.barcode,
-            supplierName: p.supplier_name || p.supplierName || 'Savemore',
+            name: p.name || '',
+            code: p.code || p.sku || '',
+            sku: p.code || p.sku || '',
+            barcode: p.barcode || '',
+            supplierName: p.supplier_name || p.supplierName || '',
             price: Number(p.price || 0),
             priceWithVat: Number(p.price_with_vat || (p.price ? p.price * 1.12 : 0)).toFixed(2),
             unitName: p.unit_name || p.unitName || 'pc',
@@ -132,7 +137,7 @@ export default function ProductAutoSuggest({
             isCatalog: true
           }));
 
-        // 2. Query coworker external database API (erply_products)
+        // 2. Query live database API (erply_products)
         let apiMatches = [];
         try {
           const remoteResults = await purchaseOrdersApi.searchProducts(query, 30);
@@ -145,23 +150,23 @@ export default function ProductAutoSuggest({
 
               return {
                 id: item.id || item.sku,
-                name: item.name,
-                code: item.sku || item.barcode,
-                sku: item.sku,
-                barcode: item.barcode,
-                supplierName: item.supplier || item.raw_data?.supplierName || 'Savemore',
+                name: item.name || '',
+                code: item.sku || item.barcode || '',
+                sku: item.sku || '',
+                barcode: item.barcode || '',
+                supplierName: item.supplier || item.raw_data?.supplierName || '',
                 price: Number(basePrice.toFixed(2)),
                 priceWithVat: pVat,
                 unitName: item.raw_data?.unitName || 'pc',
-                imageUrl: item.image_url || '',
+                imageUrl: item.image_url || item.imageUrl || '',
                 brandName: item.brand || item.raw_data?.brandName || '',
-                source: 'Coworker Erply DB',
+                source: 'Erply Catalog',
                 isCatalog: false
               };
             });
           }
         } catch (apiErr) {
-          console.warn('[ProductAutoSuggest] Coworker API query notice:', apiErr.message);
+          console.warn('[ProductAutoSuggest] API query notice:', apiErr.message);
         }
 
         // 3. Deduplicate by code / sku / name (local catalog takes priority)
@@ -176,9 +181,12 @@ export default function ProductAutoSuggest({
           }
         }
 
-        setSuggestions(combined.slice(0, 15));
-        setIsOpen(combined.length > 0);
-        setHighlightedIndex(-1);
+        // Only open dropdown if the user is still actively focused in this field
+        if (isFocusedRef.current && userTypedRef.current) {
+          setSuggestions(combined.slice(0, 15));
+          setIsOpen(combined.length > 0);
+          setHighlightedIndex(-1);
+        }
       } catch (err) {
         console.warn('[ProductAutoSuggest] Search error:', err);
       } finally {
@@ -194,6 +202,8 @@ export default function ProductAutoSuggest({
   }, [value, mode, localCatalog, lastSelected]);
 
   const handleSelect = (product) => {
+    userTypedRef.current = false;
+    isFocusedRef.current = false;
     setLastSelected(product);
     setIsOpen(false);
     setSuggestions([]);
@@ -227,6 +237,7 @@ export default function ProductAutoSuggest({
       }
     } else if (e.key === 'Escape') {
       setIsOpen(false);
+      userTypedRef.current = false;
     }
   };
 
@@ -242,14 +253,26 @@ export default function ProductAutoSuggest({
           required={required}
           value={value}
           onChange={(e) => {
+            userTypedRef.current = true;
             onChange(e.target.value);
             setLastSelected(null);
           }}
           onFocus={() => {
-            if (suggestions.length > 0) setIsOpen(true);
+            isFocusedRef.current = true;
+            if (suggestions.length > 0 && userTypedRef.current) {
+              setIsOpen(true);
+            }
+          }}
+          onBlur={() => {
+            isFocusedRef.current = false;
+            // Delay closing to allow clicks on dropdown items
+            setTimeout(() => {
+              setIsOpen(false);
+              userTypedRef.current = false;
+            }, 250);
           }}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder || (mode === 'code' ? 'e.g. P124124141 (auto-suggests from DB)' : 'e.g. Oishi Popcorn Chocolate (auto-suggests from DB)')}
+          placeholder={placeholder || (mode === 'code' ? 'e.g. P124124141' : 'e.g. Oishi Popcorn Chocolate 60g')}
           className={`${className} ${isLoading ? 'pr-8' : ''}`}
         />
 
@@ -289,7 +312,11 @@ export default function ProductAutoSuggest({
                 <button
                   key={`${item.code}-${idx}`}
                   type="button"
-                  onClick={() => handleSelect(item)}
+                  onMouseDown={(e) => {
+                    // Prevent blur from closing dropdown before click registers
+                    e.preventDefault();
+                    handleSelect(item);
+                  }}
                   onMouseEnter={() => setHighlightedIndex(idx)}
                   className={`w-full text-left p-2.5 rounded-xl text-xs transition-all cursor-pointer flex items-start justify-between gap-3 ${
                     isHighlighted
@@ -336,12 +363,20 @@ export default function ProductAutoSuggest({
 
                   {/* Price & Selection Pill */}
                   <div className="text-right shrink-0 space-y-0.5">
-                    <div className="font-mono font-black text-slate-900 dark:text-white text-xs">
-                      ₱{Number(item.priceWithVat || item.price || 0).toFixed(2)}
-                    </div>
-                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
-                      Base: ₱{Number(item.price || 0).toFixed(2)}
-                    </div>
+                    {item.priceWithVat && Number(item.priceWithVat) > 0 ? (
+                      <>
+                        <div className="font-mono font-black text-slate-900 dark:text-white text-xs">
+                          ₱{Number(item.priceWithVat || item.price || 0).toFixed(2)}
+                        </div>
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                          Base: ₱{Number(item.price || 0).toFixed(2)}
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-[10px] text-slate-400 font-mono italic">
+                        No Price
+                      </span>
+                    )}
                     <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400">
                       <span>Select</span>
                       <ArrowRight className="w-2.5 h-2.5" />

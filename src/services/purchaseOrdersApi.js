@@ -42,44 +42,6 @@ const clearUnauthorized = () => {
 
 let lastCheckTime = 0;
 
-// Image matching helper for realistic product preview visuals
-const inferProductImage = (name = '') => {
-  const lower = name.toLowerCase();
-  if (lower.includes('tissue') || lower.includes('bonita') || lower.includes('towel') || lower.includes('table napkin') || lower.includes('interfolded')) {
-    return 'https://images.unsplash.com/photo-1584556812952-905ffd0c611a?w=500&auto=format&fit=crop&q=80';
-  }
-  if (lower.includes('cdo') || lower.includes('meat') || lower.includes('sausage') || lower.includes('corned beef') || lower.includes('luncheon')) {
-    return 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=500&auto=format&fit=crop&q=80';
-  }
-  if (lower.includes('chocolate') || lower.includes('choco') || lower.includes('swiss miss') || lower.includes('cadbury') || lower.includes('fibisco') || lower.includes('cookie')) {
-    return 'https://images.unsplash.com/photo-1548907040-4baa42d10919?w=500&auto=format&fit=crop&q=80';
-  }
-  if (lower.includes('pasta') || lower.includes('spaghetti') || lower.includes('sauce') || lower.includes('royal')) {
-    return 'https://images.unsplash.com/photo-1621996346565-e3d5d628169e?w=500&auto=format&fit=crop&q=80';
-  }
-  if (lower.includes('pos') || lower.includes('terminal') || lower.includes('scanner') || lower.includes('keysys') || lower.includes('printer')) {
-    return 'https://images.unsplash.com/photo-1556742049-0a67c5574f73?w=500&auto=format&fit=crop&q=80';
-  }
-  // Default wholesale carton
-  return 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=500&auto=format&fit=crop&q=80';
-};
-
-// Brand inference
-const inferBrand = (name = '', rawBrand = null) => {
-  if (rawBrand && rawBrand.trim()) return rawBrand;
-  const lower = name.toLowerCase();
-  if (lower.includes('cdo')) return 'CDO Foodsphere';
-  if (lower.includes('fibisco')) return 'Fibisco';
-  if (lower.includes('swiss miss')) return 'Swiss Miss';
-  if (lower.includes('cadbury')) return 'Cadbury';
-  if (lower.includes('royal')) return 'Royal';
-  if (lower.includes('bonita')) return 'Bonita Tissue';
-  if (lower.includes('pingcon')) return 'Pingcon Commercial';
-  if (lower.includes('keysys')) return 'Keysys POS';
-  if (lower.includes('a2z2go')) return 'A2Z2Go';
-  return 'Wholesale Distribution';
-};
-
 // Routing Group inference
 const inferGroup = (name = '', brand = '') => {
   const text = `${name} ${brand}`.toLowerCase();
@@ -94,19 +56,18 @@ export const normalizeProduct = (item) => {
   if (!item) return null;
   const code = item.code || item.sku || `SKU-${item.id}`;
   const price = parseFloat(item.priceWithVat) || parseFloat(item.price) || 0;
-  const brand = inferBrand(item.name, item.brandName);
 
   return {
     id: String(item.id || code),
     sku: code,
     barcode: code,
-    name: item.name || 'Unnamed Product',
-    brand: brand,
-    supplier: item.supplierName || 'Primary Wholesale Supplier',
+    name: item.name || '',
+    brand: item.brandName || '',
+    supplier: item.supplierName || '',
     unit_price: price,
     case_pack: item.unitName ? `Per ${item.unitName}` : '1 pc',
-    image_url: inferProductImage(item.name),
-    group: inferGroup(item.name, brand),
+    image_url: item.imageUrl || item.image_url || null, // Strictly real images only, no fake/stock photos
+    group: inferGroup(item.name || '', item.brandName || ''),
     requires_serial: Boolean(item.hasSerialNumbers),
     source: 'erply_api',
     raw_data: item
@@ -143,7 +104,7 @@ export const purchaseOrdersApi = {
    */
   async testConnection(force = false) {
     if (isApiUnauthorized && !force) {
-      return { connected: false, error: 'Coworker API Key is unauthorized (HTTP 401). Update key in Settings.' };
+      return { connected: false, error: 'Product Catalog API Key is unauthorized (HTTP 401). Update key in Settings.' };
     }
 
     const key = getApiKey();
@@ -233,7 +194,7 @@ export const purchaseOrdersApi = {
       }
     }
 
-    // If not found by direct code or code2 equality, it is NOT in coworker's database.
+    // If not found by direct code or code2 equality, it is not in the live database.
     return null;
   },
 

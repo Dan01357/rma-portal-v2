@@ -168,12 +168,12 @@ export default function SubmitRMATab({
         sku: `SKU-${String(productOrCode).slice(-8).toUpperCase()}`,
         barcode: String(productOrCode),
         name: `Uncatalogued Product (${productOrCode})`,
-        brand: 'Wholesale Distribution',
-        supplier: 'Wholesale Supplier Hub',
-        unit_price: 100.00,
-        case_pack: 'Custom Carton',
-        image_url: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=500&auto=format&fit=crop&q=80',
-        group: 'Group 2 (PINGCON & BONITA TISSUE)',
+        brand: '',
+        supplier: '',
+        unit_price: 0,
+        case_pack: 'pc',
+        image_url: null,
+        group: 'Standard Items',
         requires_serial: false
       };
       setSelectedProduct(unlisted);
@@ -321,7 +321,7 @@ export default function SubmitRMATab({
         defect_category: formData.defectCategory,
         technical_diagnosis: formData.technicalDiagnosis || 'Physical inspection required by warehouse team.',
         gps_coordinates: formData.gpsCoordinates || 'Intake Terminal',
-        photos: formData.photos.length > 0 ? formData.photos : [selectedProduct.image_url],
+        photos: formData.photos.length > 0 ? formData.photos : (selectedProduct.image_url ? [selectedProduct.image_url] : []),
         status: 'Pending Inspection',
         pull_out_confirmed: false,
         credit_memo_no: '',
@@ -622,12 +622,19 @@ export default function SubmitRMATab({
             <div className="p-4 sm:p-5 bg-slate-50 dark:bg-slate-950/80 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-5 animate-in fade-in duration-200">
               
               {/* Product Photo */}
-              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white shrink-0 shadow-sm">
-                <img 
-                  src={selectedProduct.image_url} 
-                  alt={selectedProduct.name} 
-                  className="w-full h-full object-cover" 
-                />
+              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shrink-0 shadow-xs flex items-center justify-center">
+                {selectedProduct.image_url ? (
+                  <img 
+                    src={selectedProduct.image_url} 
+                    alt={selectedProduct.name} 
+                    className="w-full h-full object-cover" 
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-slate-300 dark:text-slate-600 p-2 text-center">
+                    <Package className="w-7 h-7 mb-1 opacity-60" />
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">No Image</span>
+                  </div>
+                )}
               </div>
 
               {/* Product Profile Meta */}

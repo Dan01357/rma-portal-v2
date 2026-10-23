@@ -108,7 +108,7 @@ export const catalogService = {
   /**
    * Fast Barcode / SKU Lookup:
    * PRIORITY 1: Look in our custom Supabase 'products' table (returns product name and reference image)
-   * PRIORITY 2: Look in Coworker's live API (erply_products)
+   * PRIORITY 2: Look in Enterprise live API (erply_products)
    */
   async findProduct(barcodeOrQuery) {
     const clean = String(barcodeOrQuery || '').trim();
@@ -207,7 +207,7 @@ export const catalogService = {
    * COMPREHENSIVE MULTI-PRODUCT SEARCH:
    * Searches BOTH:
    * 1. Supabase 'products' table (Priority 1)
-   * 2. Coworker's live API & Enterprise Wholesale Catalog (Priority 2)
+   * 2. Live Product Catalog API & Enterprise Wholesale Catalog (Priority 2)
    * Returns ALL matching products (e.g. chocolates, biscuits, coffee, etc.) up to limit.
    */
   async searchAllProducts(query, limit = 50) {

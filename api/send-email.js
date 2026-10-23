@@ -124,7 +124,7 @@ export default async function handler(req, res) {
     let finalText = text || '';
 
     // If Test Mode is active:
-    // DO NOT send to actual coworkers or customer AE!
+    // DO NOT send to actual recipients or customer AE!
     // Instead, reroute the delivery to finance2@keysysincorporated.com so Danilo sees the sent and received email in Gmail without disturbing anyone!
     if (isTestMode) {
       const originalTo = to;

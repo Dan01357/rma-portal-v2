@@ -8,6 +8,7 @@ import {
   RefreshCw, 
   Barcode, 
   Upload, 
+  Camera,
   Image as ImageIcon,
   Search,
   ArrowUpDown,
@@ -49,7 +50,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
   const [formData, setFormData] = useState({
     code: '',
     name: '',
-    supplierName: 'Savemore',
+    supplierName: '',
     price: '',
     priceWithVat: '',
     brandName: '',
@@ -77,7 +78,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     setFormData({
       code: item.code || '',
       name: item.name && !item.name.includes('Unidentified') ? item.name : '',
-      supplierName: item.supplier_name && item.supplier_name !== 'Pending Assignment' ? item.supplier_name : 'Savemore',
+      supplierName: item.supplier_name && item.supplier_name !== 'Pending Assignment' ? item.supplier_name : '',
       price: item.price ? String(item.price) : '',
       priceWithVat: item.price_with_vat ? String(item.price_with_vat) : '',
       brandName: item.brand_name || '',
@@ -116,14 +117,14 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
       ...prev,
       name: item.name || prev.name,
       code: item.code || item.sku || prev.code,
-      supplierName: item.supplierName || item.supplier_name || prev.supplierName,
-      price: item.price !== undefined && item.price !== null ? String(item.price) : prev.price,
-      priceWithVat: item.priceWithVat !== undefined && item.priceWithVat !== null 
-        ? String(item.priceWithVat) 
-        : (item.price ? String((Number(item.price) * 1.12).toFixed(2)) : prev.priceWithVat),
-      unitName: item.unitName || item.unit_name || prev.unitName || 'pc',
-      brandName: item.brandName || item.brand || prev.brandName,
-      imageUrl: prev.imageUrl || item.imageUrl || ''
+      supplierName: item.supplierName || item.supplier_name || '',
+      price: (item.price !== undefined && item.price !== null && Number(item.price) > 0) ? String(Number(item.price).toFixed(2)) : '',
+      priceWithVat: (item.priceWithVat !== undefined && item.priceWithVat !== null && Number(item.priceWithVat) > 0)
+        ? String(Number(item.priceWithVat).toFixed(2))
+        : (item.price && Number(item.price) > 0 ? String((Number(item.price) * 1.12).toFixed(2)) : ''),
+      unitName: item.unitName || item.unit_name || 'pc',
+      brandName: item.brandName || item.brand || '',
+      imageUrl: item.imageUrl || ''
     }));
     setNameError(null);
     setSkuError(null);
@@ -630,16 +631,30 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                     </div>
                   )}
 
-                  <label className="flex-1 py-2 px-3 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 rounded-xl text-center cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center justify-center gap-1.5 shadow-xs transition-colors">
-                    {isUploadingImage ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5 text-slate-500" />}
-                    <span>{isUploadingImage ? 'Uploading...' : 'Upload Reference Photo'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageFile}
-                      className="hidden"
-                    />
-                  </label>
+                  <div className="flex-1 flex flex-wrap gap-2">
+                    <label className="flex-1 min-w-[120px] py-2 px-3 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 rounded-xl text-center cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center justify-center gap-1.5 shadow-xs transition-colors">
+                      {isUploadingImage ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />}
+                      <span>{isUploadingImage ? 'Uploading...' : 'Upload Photo'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageFile}
+                        className="hidden"
+                      />
+                    </label>
+
+                    <label className="flex-1 min-w-[120px] py-2 px-3 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-300 dark:border-blue-700 rounded-xl text-center cursor-pointer text-xs font-bold text-blue-700 dark:text-blue-300 flex items-center justify-center gap-1.5 shadow-xs transition-colors">
+                      {isUploadingImage ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />}
+                      <span>Take Picture</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handleImageFile}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
                 </div>
               </div>
 
