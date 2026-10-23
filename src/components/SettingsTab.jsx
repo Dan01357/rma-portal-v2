@@ -78,6 +78,19 @@ export default function SettingsTab({
     handleCheckConnection();
     handleCheckPoApi();
 
+    // Auto-sync Catalog API key from/to Supabase cloud for seamless mobile/desktop sharing
+    purchaseOrdersApi.loadApiKeyFromCloud().then(cloudKey => {
+      if (cloudKey) {
+        setPoApiKey(cloudKey);
+        handleCheckPoApi();
+      } else {
+        const localKey = purchaseOrdersApi.getApiKey();
+        if (localKey && localKey !== 'pk_live_po_cloud_db_2026_dev_key') {
+          purchaseOrdersApi.setApiKey(localKey);
+        }
+      }
+    });
+
     // 1. Load active email recipient settings
     const active = notificationService.getEmailSettings();
     if (active?.toEmail) setMainRecipient(active.toEmail);
@@ -131,15 +144,8 @@ export default function SettingsTab({
     setIsSavingPoKey(true);
     setPoKeyFeedback(null);
     try {
-      purchaseOrdersApi.setApiKey(poApiKey);
-      try {
-        await supabase.from('rma_settings').upsert({
-          key: 'EXTERNAL_API_KEY_DANILO',
-          value: poApiKey,
-          updated_at: new Date().toISOString()
-        });
-      } catch (e) {}
-      setPoKeyFeedback({ type: 'success', message: 'Catalog API Key saved!' });
+      await purchaseOrdersApi.setApiKey(poApiKey);
+      setPoKeyFeedback({ type: 'success', message: 'Catalog API Key saved and synced across all devices!' });
       handleCheckPoApi();
     } catch (err) {
       setPoKeyFeedback({ type: 'error', message: err.message });

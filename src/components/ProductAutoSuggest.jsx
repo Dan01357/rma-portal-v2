@@ -80,7 +80,7 @@ export default function ProductAutoSuggest({
   // Perform search ONLY when value changes due to explicit user typing in THIS field
   useEffect(() => {
     // If change was not initiated by user typing in this specific input, never open or search
-    if (!userTypedRef.current || !isFocusedRef.current) {
+    if (!userTypedRef.current) {
       setIsOpen(false);
       setIsLoading(false);
       return;
@@ -181,8 +181,8 @@ export default function ProductAutoSuggest({
           }
         }
 
-        // Only open dropdown if the user is still actively focused in this field
-        if (isFocusedRef.current && userTypedRef.current) {
+        // Open dropdown if user typed in this field
+        if (userTypedRef.current) {
           setSuggestions(combined.slice(0, 15));
           setIsOpen(combined.length > 0);
           setHighlightedIndex(-1);
@@ -265,11 +265,11 @@ export default function ProductAutoSuggest({
           }}
           onBlur={() => {
             isFocusedRef.current = false;
-            // Delay closing to allow clicks on dropdown items
+            // Delay closing to allow taps or clicks on dropdown items
             setTimeout(() => {
               setIsOpen(false);
               userTypedRef.current = false;
-            }, 250);
+            }, 350);
           }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder || (mode === 'code' ? 'e.g. P124124141' : 'e.g. Oishi Popcorn Chocolate 60g')}
@@ -317,6 +317,11 @@ export default function ProductAutoSuggest({
                     e.preventDefault();
                     handleSelect(item);
                   }}
+                  onTouchEnd={(e) => {
+                    e.preventDefault();
+                    handleSelect(item);
+                  }}
+                  onClick={() => handleSelect(item)}
                   onMouseEnter={() => setHighlightedIndex(idx)}
                   className={`w-full text-left p-2.5 rounded-xl text-xs transition-all cursor-pointer flex items-start justify-between gap-3 ${
                     isHighlighted

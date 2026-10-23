@@ -7,6 +7,8 @@
  * - proof_of_delivery_items: 554,000+ line items history
  */
 
+import { supabase } from '../supabaseClient';
+
 const BASE_URL = import.meta.env.VITE_PO_API_URL || 'https://purchase-order-db-production-ff1oho.laravel.cloud/api/v1';
 const getApiKey = () => {
   if (typeof window !== 'undefined') {
@@ -77,18 +79,68 @@ export const normalizeProduct = (item) => {
 export const purchaseOrdersApi = {
   /**
    * Healthcheck & table access check
+  /**
+   * Load API key from Supabase cloud so mobile devices automatically get the key without manual re-entry
    */
-  setApiKey(key) {
+  async loadApiKeyFromCloud() {
+    if (typeof window === 'undefined') return null;
+    const stored = localStorage.getItem('EXTERNAL_API_KEY_DANILO') || localStorage.getItem('rma_po_api_key');
+    if (stored && stored.trim() && stored.trim() !== 'pk_live_po_cloud_db_2026_dev_key') {
+      return stored.trim();
+    }
+
+    try {
+      const { data } = await supabase
+        .from('products')
+        .select('code')
+        .eq('barcode', '__CONFIG_PO_API_KEY__')
+        .maybeSingle();
+
+      if (data?.code && data.code.trim() && data.code.trim() !== 'pk_live_po_cloud_db_2026_dev_key') {
+        const cloudKey = data.code.trim();
+        localStorage.setItem('EXTERNAL_API_KEY_DANILO', cloudKey);
+        localStorage.setItem('rma_po_api_key', cloudKey);
+        clearUnauthorized();
+        return cloudKey;
+      }
+    } catch (e) {
+      console.warn('Notice loading cloud API key:', e?.message || e);
+    }
+    return null;
+  },
+
+  /**
+   * Set API key and sync to Supabase for all devices (PC, mobile, tablet)
+   */
+  async setApiKey(key) {
     if (typeof window !== 'undefined') {
       if (key && key.trim()) {
-        localStorage.setItem('EXTERNAL_API_KEY_DANILO', key.trim());
-        localStorage.setItem('rma_po_api_key', key.trim());
+        const clean = key.trim();
+        localStorage.setItem('EXTERNAL_API_KEY_DANILO', clean);
+        localStorage.setItem('rma_po_api_key', clean);
+        clearUnauthorized();
+
+        // Sync to cloud so mobile devices have instant access
+        try {
+          await supabase.from('products').upsert({
+            barcode: '__CONFIG_PO_API_KEY__',
+            name: 'System Config PO API Key',
+            code: clean,
+            is_verified: false,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'barcode' });
+        } catch (e) {
+          console.warn('Cloud API key sync notice:', e);
+        }
       } else {
         localStorage.removeItem('EXTERNAL_API_KEY_DANILO');
         localStorage.removeItem('rma_po_api_key');
+        clearUnauthorized();
+        try {
+          await supabase.from('products').delete().eq('barcode', '__CONFIG_PO_API_KEY__');
+        } catch (e) {}
       }
     }
-    clearUnauthorized();
   },
 
   getApiKey() {
@@ -103,11 +155,21 @@ export const purchaseOrdersApi = {
    * Healthcheck & table access check
    */
   async testConnection(force = false) {
-    if (isApiUnauthorized && !force) {
-      return { connected: false, error: 'Product Catalog API Key is unauthorized (HTTP 401). Update key in Settings.' };
+    let key = getApiKey();
+    if (!key || key === 'pk_live_po_cloud_db_2026_dev_key') {
+      const cloudKey = await this.loadApiKeyFromCloud();
+      if (cloudKey) key = cloudKey;
     }
 
-    const key = getApiKey();
+    if (isApiUnauthorized && !force) {
+      const cloudKey = await this.loadApiKeyFromCloud();
+      if (cloudKey) {
+        key = cloudKey;
+      } else {
+        return { connected: false, error: 'Product Catalog API Key is unauthorized (HTTP 401). Update key in Settings.' };
+      }
+    }
+
     lastCheckTime = Date.now();
 
     try {
@@ -138,11 +200,19 @@ export const purchaseOrdersApi = {
    * Checks erply_products table (5,793 items)
    */
   async findProductByBarcode(barcodeOrCode) {
-    if (!barcodeOrCode || isApiUnauthorized) return null;
+    if (!barcodeOrCode) return null;
     const clean = String(barcodeOrCode).trim();
     if (!clean) return null;
 
-    const key = getApiKey();
+    let key = getApiKey();
+    if (!key || key === 'pk_live_po_cloud_db_2026_dev_key' || isApiUnauthorized) {
+      const cloudKey = await this.loadApiKeyFromCloud();
+      if (cloudKey) {
+        key = cloudKey;
+      } else if (isApiUnauthorized) {
+        return null;
+      }
+    }
     // Backend SQL is case-sensitive. Try exact code variations:
     const codeCandidates = Array.from(new Set([clean, clean.toUpperCase(), clean.toLowerCase()]));
 
@@ -203,9 +273,17 @@ export const purchaseOrdersApi = {
    * Overcomes backend case-sensitivity by testing capitalized and uppercase terms
    */
   async searchProducts(query, limit = 250) {
-    if (!query || query.trim().length === 0 || isApiUnauthorized) return [];
-    const trimmed = query.trim();
-    const key = getApiKey();
+    if (!query || query.trim().length === 0) return [];
+
+    let key = getApiKey();
+    if (!key || key === 'pk_live_po_cloud_db_2026_dev_key' || isApiUnauthorized) {
+      const cloudKey = await this.loadApiKeyFromCloud();
+      if (cloudKey) {
+        key = cloudKey;
+      } else if (isApiUnauthorized) {
+        return [];
+      }
+    }
 
     // Build variations to handle case-sensitive SQL (e.g., 'tissue' -> 'Tissue', 'TISSUE', 'tissue')
     const capitalized = trimmed.charAt(0).toUpperCase() + trimmed.slice(1);

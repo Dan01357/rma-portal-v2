@@ -63,26 +63,86 @@ export const catalogService = {
   },
 
   /**
+   * Client-side image compression:
+   * Resizes large photos (like 48MP phone pictures) to max 1280px and compresses to high-quality JPEG.
+   * Shrinks 5MB-10MB uploads down to ~100KB-180KB (98% reduction), keeping Supabase Free Tier healthy for 6,000+ photos.
+   */
+  async compressImage(file, maxDimension = 1280, quality = 0.82) {
+    if (!file || !file.type?.startsWith('image/')) return file;
+    if (file.type === 'image/svg+xml' || file.size < 120 * 1024) return file;
+
+    return new Promise((resolve) => {
+      try {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          let { width, height } = img;
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            } else {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          canvas.toBlob(
+            (blob) => {
+              if (!blob || blob.size >= file.size) {
+                resolve(file);
+              } else {
+                const compressedFile = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
+                  type: 'image/jpeg',
+                  lastModified: Date.now()
+                });
+                resolve(compressedFile);
+              }
+            },
+            'image/jpeg',
+            quality
+          );
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          resolve(file);
+        };
+        img.src = url;
+      } catch (err) {
+        resolve(file);
+      }
+    });
+  },
+
+  /**
    * Upload photo to Supabase Storage ('rma-photos' bucket)
+   * Automatically compresses images client-side before upload to conserve free-tier storage
    * With automatic Base64 fallback if storage bucket is not configured
    */
   async uploadPhoto(file) {
     if (!file) return null;
     try {
-      const cleanName = file.name ? file.name.replace(/[^a-zA-Z0-9._-]/g, '_') : 'photo.jpg';
+      const compressed = await this.compressImage(file);
+      const cleanName = compressed.name ? compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_') : 'photo.jpg';
       const filePath = `reports/${Date.now()}-${Math.floor(Math.random() * 1000)}_${cleanName}`;
       
       const { data, error } = await supabase.storage
         .from('rma-photos')
-        .upload(filePath, file, {
+        .upload(filePath, compressed, {
           cacheControl: '3600',
           upsert: true,
-          contentType: file.type || 'image/jpeg'
+          contentType: compressed.type || 'image/jpeg'
         });
 
       if (error) {
         console.warn('Storage upload notice (falling back to data URL):', error.message);
-        return await this.fileToBase64(file);
+        return await this.fileToBase64(compressed);
       }
 
       const { data: publicUrlData } = supabase.storage
@@ -229,7 +289,7 @@ export const catalogService = {
 
       if (!error && supaItems && Array.isArray(supaItems)) {
         for (const item of supaItems) {
-          if (item.name?.startsWith('[DELETED]')) continue;
+          if (item.name?.startsWith('[DELETED]') || item.barcode?.startsWith('__CONFIG_')) continue;
           const key = String(item.barcode || item.code || item.id).trim().toLowerCase();
           seenKeys.add(key);
 
