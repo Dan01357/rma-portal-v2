@@ -235,11 +235,13 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-lg w-full flex flex-col max-h-[92vh] overflow-hidden">
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-lg w-full flex flex-col max-h-[92dvh] sm:max-h-[92vh] overflow-hidden my-0 sm:my-auto">
+        {/* Mobile Drag Indicator */}
+        <div className="bottom-sheet-handle sm:hidden" />
         
         {/* Header */}
-        <div className="p-5 sm:p-6 pb-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-white dark:bg-slate-900">
+        <div className="p-4 sm:p-6 pb-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-white dark:bg-slate-900">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-400 rounded-2xl shadow-inner">
               <Package className="w-5 h-5" />
@@ -562,12 +564,12 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         </div>
 
         {/* Pinned Footer with Actions */}
-        <div className="p-4 sm:px-6 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3 shrink-0">
+        <div className="p-4 sm:px-6 pb-safe bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3 shrink-0">
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white text-xs font-bold"
+              className="touch-target px-4 py-2 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white text-xs font-bold"
             >
               Cancel
             </button>
@@ -577,7 +579,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                 type="submit"
                 form="product-edit-form"
                 disabled={isLoading}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all cursor-pointer"
+                className="touch-target px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all cursor-pointer active:scale-95"
               >
                 {isLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                 <span>{isEditing ? 'Save Changes' : 'Save Product'}</span>

@@ -249,8 +249,8 @@ export default function CreditMemosTab({
   return (
     <div className="space-y-4 animate-in fade-in">
       
-      {/* Financial Summary KPI Strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* Financial Summary KPI Strip: Fluid responsive grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 shadow-sm">
           <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 mb-1.5">
             <Receipt className="w-5 h-5" />

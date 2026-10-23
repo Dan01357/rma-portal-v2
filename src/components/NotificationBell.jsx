@@ -122,7 +122,7 @@ export default function NotificationBell({
 
       {/* Floating Dropdown Window (Facebook Style) */}
       {isOpen && (
-        <div className="absolute right-0 mt-2.5 w-[340px] sm:w-[400px] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 z-50 overflow-hidden flex flex-col max-h-[85vh] sm:max-h-[560px] animate-in fade-in zoom-in-95 duration-150">
+        <div className="absolute right-0 mt-2.5 w-[calc(100vw-1.5rem)] sm:w-[400px] max-w-[400px] -mr-2 sm:mr-0 bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 z-50 overflow-hidden flex flex-col max-h-[85dvh] sm:max-h-[560px] animate-in fade-in zoom-in-95 duration-150">
           
           {/* Header */}
           <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-white dark:bg-slate-900">

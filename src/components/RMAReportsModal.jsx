@@ -248,8 +248,10 @@ export default function RMAReportsModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-5xl w-full p-5 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-5xl w-full p-4 sm:p-6 space-y-4 max-h-[92dvh] sm:max-h-[92vh] overflow-y-auto overscroll-contain pb-safe my-0 sm:my-auto">
+        {/* Mobile Drag Indicator */}
+        <div className="bottom-sheet-handle sm:hidden" />
         
         {/* Header & Controls */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">

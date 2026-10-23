@@ -108,11 +108,16 @@ export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog =
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92dvh] pb-safe">
         
+        {/* Mobile bottom-sheet drag handle */}
+        <div className="sm:hidden pt-2.5 pb-1 flex justify-center shrink-0">
+          <div className="w-10 h-1 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+        </div>
+
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
           <div className="flex items-center space-x-3">
             <div className="p-2 rounded-xl bg-brand-50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-500/20">
               <Camera className="w-5 h-5" />
@@ -128,7 +133,7 @@ export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog =
               <button
                 type="button"
                 onClick={switchCamera}
-                className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs flex items-center space-x-1 border border-slate-200 dark:border-slate-700 transition-colors"
+                className="min-h-[44px] px-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs flex items-center space-x-1.5 border border-slate-200 dark:border-slate-700 transition-colors"
                 title="Switch Camera"
               >
                 <RefreshCw className="w-4 h-4" />
@@ -138,7 +143,8 @@ export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog =
             <button
               type="button"
               onClick={onClose}
-              className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              aria-label="Close scanner"
             >
               <X className="w-5 h-5" />
             </button>

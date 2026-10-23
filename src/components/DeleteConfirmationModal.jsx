@@ -14,13 +14,18 @@ export default function DeleteConfirmationModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/65 backdrop-blur-sm animate-in fade-in">
       <div 
-        className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-150"
+        className="bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl border-t sm:border border-slate-200 dark:border-slate-800 max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-150 pb-safe"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Mobile bottom-sheet drag handle */}
+        <div className="sm:hidden pt-2.5 pb-1 flex justify-center shrink-0">
+          <div className="w-10 h-1 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+        </div>
+
         {/* Header with Hazard Icon */}
-        <div className="p-6 pb-4 flex items-start gap-4">
+        <div className="p-5 sm:p-6 pb-4 flex items-start gap-4">
           <div className="w-12 h-12 rounded-2xl bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 shadow-inner">
             <Trash2 className="w-6 h-6" />
           </div>
@@ -34,9 +39,10 @@ export default function DeleteConfirmationModal({
                 type="button"
                 onClick={onClose}
                 disabled={isDeleting}
-                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                aria-label="Close"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">

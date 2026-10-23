@@ -269,11 +269,13 @@ export default function CreditMemoModal({
 
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-xl w-full flex flex-col max-h-[92vh] overflow-hidden">
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-xl w-full flex flex-col max-h-[92dvh] sm:max-h-[92vh] overflow-hidden my-0 sm:my-auto">
+        {/* Mobile Drag Indicator */}
+        <div className="bottom-sheet-handle sm:hidden" />
         
         {/* Header */}
-        <div className="p-5 sm:p-6 pb-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-white dark:bg-slate-900">
+        <div className="p-4 sm:p-6 pb-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-white dark:bg-slate-900">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 rounded-2xl shadow-inner">
               <Receipt className="w-5 h-5" />
@@ -562,39 +564,39 @@ export default function CreditMemoModal({
         </div>
 
         {/* Pinned Footer with Actions */}
-        <div className="p-4 sm:px-6 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0">
+        <div className="p-4 sm:px-6 pb-safe bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 shrink-0 flex-wrap sm:flex-nowrap">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white text-xs font-bold"
+            className="touch-target px-4 py-2 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white text-xs font-bold"
           >
             Cancel
           </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
             <button
               type="button"
               onClick={(e) => handleSubmit(e, true)}
               disabled={isLoading}
-              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+              className="touch-target px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
               title="Save Credit Memo and open printable official voucher"
             >
-              <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
-              <span>Save & View Voucher</span>
+              <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400 shrink-0" />
+              <span className="truncate">Save & View Voucher</span>
             </button>
 
             <button
               type="submit"
               form="credit-memo-form"
               disabled={isLoading}
-              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
+              className="touch-target px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all cursor-pointer active:scale-95"
             >
               {isLoading ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
               ) : (
                 <CheckCircle className="w-3.5 h-3.5" />
               )}
-              <span>{isEditing ? 'Update Credit Memo' : 'Issue Credit Memo'}</span>
+              <span className="truncate">{isEditing ? 'Update Credit Memo' : 'Issue Credit Memo'}</span>
             </button>
           </div>
         </div>

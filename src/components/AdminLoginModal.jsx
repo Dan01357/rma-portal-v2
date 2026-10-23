@@ -90,8 +90,13 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full p-6 sm:p-7 space-y-5">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in">
+      <div className="bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl border-t sm:border border-slate-200 dark:border-slate-800 max-w-md w-full p-6 sm:p-7 space-y-5 pb-safe max-h-[92dvh] overflow-y-auto">
+        
+        {/* Mobile bottom-sheet drag handle */}
+        <div className="sm:hidden -mt-2 mb-2 flex justify-center shrink-0">
+          <div className="w-10 h-1 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+        </div>
         
         {/* Top Icon & Title */}
         <div className="text-center space-y-1.5">

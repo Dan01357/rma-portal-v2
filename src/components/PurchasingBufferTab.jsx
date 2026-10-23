@@ -142,7 +142,7 @@ export default function PurchasingBufferTab({ tickets = [], onUpdateTicket }) {
       </div>
 
       {/* Supplier Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
         {supplierList.map((group) => {
           const matchedSupplier = liveSuppliers.find(s => 
             s.sheet_supplier_name?.toLowerCase() === group.supplierName.toLowerCase() ||
@@ -269,12 +269,17 @@ export default function PurchasingBufferTab({ tickets = [], onUpdateTicket }) {
 
       {/* Live Supplier Directory Modal (610 Suppliers) */}
       {isSupplierModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border-t sm:border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl w-full max-w-3xl max-h-[92dvh] flex flex-col shadow-2xl animate-in zoom-in-95 duration-200 pb-safe">
+            {/* Mobile bottom-sheet drag handle */}
+            <div className="sm:hidden pt-2.5 pb-1 flex justify-center shrink-0">
+              <div className="w-10 h-1 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+            </div>
+
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <div>
-                <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
                   <Building2 className="w-5 h-5 text-purple-600 dark:text-purple-400" />
                   Live Supplier Directory ({liveSuppliers.length > 0 ? liveSuppliers.length : 610} Vendors)
                 </h3>
@@ -285,7 +290,8 @@ export default function PurchasingBufferTab({ tickets = [], onUpdateTicket }) {
               <button
                 type="button"
                 onClick={() => setIsSupplierModalOpen(false)}
-                className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold"
+                className="min-w-[44px] min-h-[44px] rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center text-slate-500 font-bold transition-colors"
+                aria-label="Close"
               >
                 ✕
               </button>

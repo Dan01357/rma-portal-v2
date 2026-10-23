@@ -27,7 +27,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
   const isBulk = memosToRender.length > 1;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-2 sm:p-6 bg-slate-900/70 backdrop-blur-sm animate-in fade-in overflow-y-auto">
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in overflow-y-auto">
       
       {/* Print Specific Stylesheet Injection */}
       <style>{`
@@ -79,8 +79,10 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
 
       <div 
         id="credit-memo-voucher-print-root"
-        className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-2xl w-full flex flex-col max-h-[95vh] overflow-hidden text-slate-900"
+        className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 max-w-2xl w-full flex flex-col max-h-[92dvh] sm:max-h-[95vh] overflow-hidden text-slate-900 my-0 sm:my-auto pb-safe"
       >
+        {/* Mobile Drag Indicator */}
+        <div className="bottom-sheet-handle sm:hidden print:hidden" />
         {/* Top Control Bar (Hidden when printing) */}
         <div className="p-4 sm:px-6 bg-slate-100 border-b border-slate-200 flex items-center justify-between shrink-0 print:hidden">
           <div className="flex items-center gap-2">

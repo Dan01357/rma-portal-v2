@@ -42,8 +42,10 @@ import {
   Settings,
   Receipt,
   Printer,
-  QrCode
+  QrCode,
+  Download
 } from 'lucide-react';
+import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
 import { creditMemoService } from './services/creditMemoService';
 import TablePagination from './components/TablePagination';
@@ -1171,9 +1173,9 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 transition-colors duration-200">
+    <div className="min-h-dvh bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 lg:p-8 pt-safe pb-safe transition-colors duration-200 overflow-x-clip">
       {/* Dynamic container width: clean mobile intake for public reporter, spacious SaaS for admin */}
-      <div id="app-main-view-container" className={`${isAdminView ? 'max-w-6xl' : 'max-w-xl'} mx-auto space-y-4 transition-all duration-300`}>
+      <div id="app-main-view-container" className={`${isAdminView ? 'w-full max-w-7xl' : 'w-full max-w-xl'} mx-auto space-y-4 sm:space-y-6 transition-all duration-300`}>
 
         {/* ================================================================= */}
         {/* 1. PUBLIC REPORTER PORTAL (Accessible at '/' or default)          */}
@@ -1181,45 +1183,46 @@ export default function App() {
         {!isAdminView && (
           <div className="space-y-4 animate-in fade-in duration-200">
             
-            {/* Header with Theme Toggle */}
-            <div className="relative text-center space-y-1.5 py-2">
-              <div className="absolute right-0 top-0">
-                <button
-                  type="button"
-                  onClick={toggleTheme}
-                  className="p-2.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white shadow-xs transition-colors"
-                  title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-                  aria-label="Toggle Theme"
-                >
-                  {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
-                </button>
-              </div>
-
-              <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 inline-block">
+            {/* Responsive Top Bar with Badge & Theme Toggle */}
+            <div className="flex items-center justify-between gap-3 pt-1 pb-1">
+              <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 inline-block shadow-2xs">
                 Customer & Warehouse Returns
               </span>
-              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="touch-target p-2 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white shadow-xs transition-colors cursor-pointer shrink-0"
+                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                aria-label="Toggle Theme"
+              >
+                {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
+              </button>
+            </div>
+
+            {/* Fluid Header Typography */}
+            <div className="text-center space-y-1.5 pb-1">
+              <h1 className="text-fluid-title font-black text-slate-900 dark:text-white tracking-tight">
                 Report Item for Return
               </h1>
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+              <p className="text-fluid-subtitle text-slate-500 dark:text-slate-400 max-w-md mx-auto">
                 Scan code, attach proof photo, and submit return report.
               </p>
             </div>
 
             {/* Submission Success Screen with Full Dark Mode Support */}
             {submitSuccessReport ? (
-              <div className="bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/80 rounded-3xl p-6 sm:p-8 shadow-sm text-center space-y-4 animate-in zoom-in-95">
+              <div className="bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/80 rounded-3xl p-5 sm:p-8 shadow-sm text-center space-y-4 animate-in zoom-in-95">
                 <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
                   <CheckCircle className="w-8 h-8" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-slate-900 dark:text-white">Return Report Filed!</h2>
+                  <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">Return Report Filed!</h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                     Your report has been logged and the inventory team has been notified.
                   </p>
                 </div>
 
-                <div className="p-4 bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-2xl text-left text-xs space-y-2">
+                <div className="p-3.5 sm:p-4 bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-2xl text-left text-xs space-y-2">
                   <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
                     <span className="text-slate-500 dark:text-slate-400">RMA Number:</span>
                     <strong className="font-mono text-emerald-800 dark:text-emerald-300 text-sm">{submitSuccessReport.rmaNumber}</strong>
@@ -1230,7 +1233,7 @@ export default function App() {
                   </div>
                   <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
                     <span className="text-slate-500 dark:text-slate-400">Item:</span>
-                    <strong className="text-slate-800 dark:text-slate-200 text-right">{submitSuccessReport.productName}</strong>
+                    <strong className="text-slate-800 dark:text-slate-200 text-right truncate ml-2">{submitSuccessReport.productName}</strong>
                   </div>
                   <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
                     <span className="text-slate-500 dark:text-slate-400">Reason:</span>
@@ -1243,9 +1246,10 @@ export default function App() {
                 </div>
 
                 {/* Generated RMA QR Code Box Sticker Card */}
-                <div className="p-4 bg-white dark:bg-slate-950 border-2 border-dashed border-emerald-300 dark:border-emerald-800 rounded-2xl flex flex-col sm:flex-row items-center gap-4 text-left shadow-xs">
+                <div className="p-3.5 sm:p-4 bg-white dark:bg-slate-950 border-2 border-dashed border-emerald-300 dark:border-emerald-800 rounded-2xl flex flex-col sm:flex-row items-center gap-3.5 sm:gap-4 text-left shadow-xs">
                   <div className="p-2.5 bg-white rounded-xl border border-slate-300 dark:border-slate-700 shadow-xs shrink-0 text-center">
                     <QRCodeSVG
+                      id="filed-report-qr-svg"
                       value={typeof window !== 'undefined' ? `${window.location.origin}/?rma=${encodeURIComponent(submitSuccessReport.rmaNumber)}` : submitSuccessReport.rmaNumber}
                       size={110}
                       level="H"
@@ -1256,8 +1260,8 @@ export default function App() {
                     </span>
                   </div>
 
-                  <div className="space-y-1 min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
+                  <div className="space-y-1 min-w-0 flex-1 text-center sm:text-left">
+                    <div className="flex items-center justify-center sm:justify-start gap-1.5">
                       <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300">
                         Box Sticker Ready
                       </span>
@@ -1265,36 +1269,59 @@ export default function App() {
                         {submitSuccessReport.quantity || 1} unit(s)
                       </span>
                     </div>
-                    <div className="font-mono font-black text-slate-900 dark:text-white text-base">
+                    <div className="font-mono font-black text-slate-900 dark:text-white text-base truncate">
                       {submitSuccessReport.rmaNumber}
                     </div>
                     <div className="font-bold text-slate-800 dark:text-slate-200 text-xs truncate">
                       {submitSuccessReport.productName}
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Print this QR sticker and tape it directly to the returned box or item for instant warehouse intake scanning.
+                      Download QR or print sticker to tape directly to the returned box for instant warehouse intake scanning.
                     </p>
                   </div>
                 </div>
 
-                {/* Action Buttons */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                {/* Action Buttons: Download QR, Print Sticker, Report Another */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await downloadQrCodePng({
+                          svgElementOrId: 'filed-report-qr-svg',
+                          rmaNumber: submitSuccessReport.rmaNumber,
+                          productName: submitSuccessReport.productName,
+                          barcode: submitSuccessReport.barcode
+                        });
+                        showToast(`QR Code for ${submitSuccessReport.rmaNumber} downloaded!`, 'success');
+                      } catch (err) {
+                        console.error('Failed to download QR code:', err);
+                        showToast('Failed to download QR image.', 'warning');
+                      }
+                    }}
+                    className="touch-target w-full py-3 px-3 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white font-extrabold text-xs rounded-2xl shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                    title="Download high-resolution QR code PNG to your device"
+                  >
+                    <Download className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Download QR</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setQrModalReport(submitSuccessReport)}
-                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-2xl shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    className="touch-target w-full py-3 px-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-2xl shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
                   >
-                    <Printer className="w-4 h-4" />
-                    <span>Print Box QR Sticker</span>
+                    <Printer className="w-4 h-4 shrink-0" />
+                    <span>Print Box Sticker</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setSubmitSuccessReport(null)}
-                    className="w-full py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-extrabold text-xs rounded-2xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    className="touch-target w-full py-3 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-extrabold text-xs rounded-2xl transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
                   >
-                    <Plus className="w-4 h-4" />
-                    <span>Report Another Item</span>
+                    <Plus className="w-4 h-4 shrink-0" />
+                    <span>Report Another</span>
                   </button>
                 </div>
               </div>
@@ -1657,60 +1684,60 @@ export default function App() {
               </div>
             )}
 
-            {/* SaaS KPI Overview Strip */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            {/* SaaS KPI Overview Strip: Fluid grid tracks for all viewports */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3.5">
               {/* Metric 1: Saved Products */}
               <div 
                 onClick={() => setAdminActiveTab('products')}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
                   adminActiveTab === 'products' ? 'border-indigo-500 ring-2 ring-indigo-100 dark:ring-indigo-900/40' : 'border-slate-200 dark:border-slate-800'
                 }`}
               >
-                <div className="flex items-center justify-between text-indigo-600 dark:text-indigo-400 mb-2">
-                  <Package className="w-5 h-5" />
-                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">Database</span>
+                <div className="flex items-center justify-between text-indigo-600 dark:text-indigo-400 mb-1.5 sm:mb-2">
+                  <Package className="w-5 h-5 shrink-0" />
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">Database</span>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
+                <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
                   {savedProductsList.length}
                 </div>
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Saved Products</div>
-                <div className="text-[11px] text-slate-400 dark:text-slate-500">Custom items in catalog</div>
+                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Catalog items</div>
               </div>
 
               {/* Metric 2: Return Reports */}
               <div 
                 onClick={() => setAdminActiveTab('reports')}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
                   adminActiveTab === 'reports' ? 'border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900/40' : 'border-slate-200 dark:border-slate-800'
                 }`}
               >
-                <div className="flex items-center justify-between text-blue-600 dark:text-blue-400 mb-2">
-                  <FileText className="w-5 h-5" />
-                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">Reports</span>
+                <div className="flex items-center justify-between text-blue-600 dark:text-blue-400 mb-1.5 sm:mb-2">
+                  <FileText className="w-5 h-5 shrink-0" />
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">Reports</span>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
+                <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
                   {recentReportsList.length}
                 </div>
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">RMA Returns</div>
-                <div className="text-[11px] text-slate-400 dark:text-slate-500">Total filed returns</div>
+                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Total filed returns</div>
               </div>
 
               {/* Metric 3: Credit Memos (Finance Section) */}
               <div 
                 onClick={() => setAdminActiveTab('credit_memos')}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
                   adminActiveTab === 'credit_memos' ? 'border-emerald-500 ring-2 ring-emerald-100 dark:ring-emerald-900/40' : 'border-slate-200 dark:border-slate-800'
                 }`}
               >
-                <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 mb-2">
-                  <Receipt className="w-5 h-5" />
-                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">Finance</span>
+                <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 mb-1.5 sm:mb-2">
+                  <Receipt className="w-5 h-5 shrink-0" />
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">Finance</span>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
+                <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
                   {creditMemosList.length}
                 </div>
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Credit Memos</div>
-                <div className="text-[11px] text-slate-400 dark:text-slate-500 truncate">
+                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">
                   {creditMemosList.length > 0 
                     ? `₱${creditMemosList.reduce((acc, m) => acc + Number(m.credit_amount || 0), 0).toLocaleString('en-US', { maximumFractionDigits: 0 })} credited`
                     : 'Customer deductions'}
@@ -1720,19 +1747,19 @@ export default function App() {
               {/* Metric 4: Pending Barcodes */}
               <div 
                 onClick={() => setIsPendingModalOpen(true)}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-4 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
                   pendingBarcodesList.length > 0 ? 'border-amber-400 bg-amber-50/20 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-800'
                 }`}
               >
-                <div className="flex items-center justify-between text-amber-600 dark:text-amber-400 mb-2">
-                  <AlertTriangle className="w-5 h-5" />
-                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">Action Req.</span>
+                <div className="flex items-center justify-between text-amber-600 dark:text-amber-400 mb-1.5 sm:mb-2">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">Action</span>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
+                <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
                   {pendingBarcodesList.length}
                 </div>
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Pending Barcodes</div>
-                <div className="text-[11px] text-slate-400 dark:text-slate-500">Awaiting admin verification</div>
+                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Needs verification</div>
               </div>
 
               {/* Metric 5: Staff Directory */}
@@ -1740,60 +1767,60 @@ export default function App() {
                 onClick={() => {
                   if (currentUser.role === 'super_admin') setIsEmployeeModalOpen(true);
                 }}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-4 sm:p-5 shadow-sm ${
+                className={`col-span-2 sm:col-span-1 bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm ${
                   currentUser.role === 'super_admin' ? 'cursor-pointer hover:shadow-md hover:border-purple-300 dark:hover:border-purple-700' : ''
                 } border-slate-200 dark:border-slate-800`}
               >
-                <div className="flex items-center justify-between text-purple-600 dark:text-purple-400 mb-2">
-                  <Users className="w-5 h-5" />
-                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300">Team</span>
+                <div className="flex items-center justify-between text-purple-600 dark:text-purple-400 mb-1.5 sm:mb-2">
+                  <Users className="w-5 h-5 shrink-0" />
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300">Team</span>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
+                <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
                   {staffList.length || 25}
                 </div>
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Staff Directory</div>
-                <div className="text-[11px] text-slate-400 dark:text-slate-500">Authorized company staff</div>
+                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Company staff</div>
               </div>
             </div>
 
-            {/* Production-Level Tab Segmented Switcher */}
-            <div className="flex flex-wrap items-center gap-2 bg-slate-200/70 dark:bg-slate-800/80 p-1.5 rounded-2xl">
+            {/* Production-Level Tab Segmented Switcher: Horizontally scrollable on mobile, wrapping on desktop */}
+            <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-200/70 dark:bg-slate-800/80 p-1.5 rounded-2xl overflow-x-auto no-scrollbar sm:flex-wrap">
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('products')}
-                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                   adminActiveTab === 'products'
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <Package className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <Package className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
                 <span>Saved Products ({savedProductsList.length})</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('reports')}
-                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                   adminActiveTab === 'reports'
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                 <span>Return Reports ({recentReportsList.length})</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('credit_memos')}
-                className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                   adminActiveTab === 'credit_memos'
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 <span>Credit Memos ({creditMemosList.length})</span>
               </button>
 
@@ -1801,13 +1828,13 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setAdminActiveTab('settings')}
-                  className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+                  className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                     adminActiveTab === 'settings'
                       ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
-                  <Settings className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  <Settings className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                   <span>Settings & SMTP</span>
                 </button>
               )}
@@ -1815,9 +1842,9 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsPendingModalOpen(true)}
-                className="px-3.5 py-2 rounded-xl text-xs font-bold text-amber-800 dark:text-amber-400 hover:bg-amber-100/60 dark:hover:bg-amber-950/40 flex items-center gap-1.5 ml-auto transition-colors cursor-pointer"
+                className="touch-target px-3.5 py-2 rounded-xl text-xs font-bold text-amber-800 dark:text-amber-400 hover:bg-amber-100/60 dark:hover:bg-amber-950/40 flex items-center gap-1.5 sm:ml-auto transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                 <span>Pending Queue ({pendingBarcodesList.length})</span>
               </button>
 
@@ -1825,9 +1852,9 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsEmployeeModalOpen(true)}
-                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-purple-800 dark:text-purple-400 hover:bg-purple-100/60 dark:hover:bg-purple-950/40 flex items-center gap-1.5 transition-colors cursor-pointer"
+                  className="touch-target px-3.5 py-2 rounded-xl text-xs font-bold text-purple-800 dark:text-purple-400 hover:bg-purple-100/60 dark:hover:bg-purple-950/40 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
-                  <Users className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                  <Users className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
                   <span>Roles & Access</span>
                 </button>
               )}
