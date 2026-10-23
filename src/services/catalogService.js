@@ -306,6 +306,10 @@ export const catalogService = {
     }
   },
 
+  async getProducts() {
+    return this.getSavedProducts();
+  },
+
   /**
    * Check if an SKU / Item Code already exists in products database (Deduplication removed: 1 SKU can have multiple barcodes)
    */

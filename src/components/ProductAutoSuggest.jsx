@@ -49,11 +49,20 @@ export default function ProductAutoSuggest({
   // Pre-fetch local catalog once for instant offline/zero-latency matching
   useEffect(() => {
     let isMounted = true;
-    catalogService.getProducts().then(products => {
-      if (isMounted && Array.isArray(products)) {
-        setLocalCatalog(products);
+    const loadCatalog = async () => {
+      try {
+        const fetchFn = catalogService.getSavedProducts || catalogService.getProducts;
+        if (typeof fetchFn === 'function') {
+          const products = await fetchFn.call(catalogService);
+          if (isMounted && Array.isArray(products)) {
+            setLocalCatalog(products);
+          }
+        }
+      } catch (err) {
+        console.warn('[ProductAutoSuggest] Catalog prefetch notice:', err?.message || err);
       }
-    }).catch(() => {});
+    };
+    loadCatalog();
     return () => { isMounted = false; };
   }, []);
 
