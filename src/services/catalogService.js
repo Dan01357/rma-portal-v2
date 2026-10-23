@@ -354,6 +354,21 @@ export const catalogService = {
     if (error) throw new Error(`Failed to save product: ${error.message}`);
 
     this.notifyChange('product-created', { barcode: cleanBarcode, product: data });
+
+    // Automated email dispatch: alert AE & finance when a new product is saved
+    try {
+      const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
+      notificationService.sendProductUpdateNotification({
+        product: data,
+        isNew: true,
+        editorName: 'Admin'
+      }, isTestActive).catch(err => {
+        console.warn('Background product creation email dispatch notice:', err.message);
+      });
+    } catch (e) {
+      console.warn('Failed to dispatch product creation email:', e);
+    }
+
     return { success: true, product: data };
   },
 
@@ -392,6 +407,22 @@ export const catalogService = {
     if (error) throw new Error(`Failed to update product: ${error.message}`);
 
     this.notifyChange('product-updated', { id, barcode, updates });
+
+    // Automated email dispatch: alert AE & finance when an existing product is updated/saved
+    try {
+      const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
+      const updatedProduct = data?.[0] || { id, barcode, ...updates };
+      notificationService.sendProductUpdateNotification({
+        product: updatedProduct,
+        isNew: false,
+        editorName: 'Admin'
+      }, isTestActive).catch(err => {
+        console.warn('Background product update email dispatch notice:', err.message);
+      });
+    } catch (e) {
+      console.warn('Failed to dispatch product update email:', e);
+    }
+
     return { success: true, product: data?.[0] };
   },
 
@@ -542,7 +573,25 @@ export const catalogService = {
     }
     const rmaNumber = `RMA-${currentYear}-${seqStr}-${randomSuffix}`;
 
-    const isKnown = Boolean(product && product.isVerified !== false);
+    // Auto-resolve product from database if not passed in or still pending client-side detection
+    let resolvedProduct = product;
+    if (!resolvedProduct || !resolvedProduct.name || resolvedProduct.name.startsWith('Unidentified Item')) {
+      try {
+        const found = await this.findProduct(cleanBarcode);
+        if (found) {
+          resolvedProduct = found;
+        }
+      } catch (e) {
+        console.warn('Could not auto-resolve product during submitReport:', e);
+      }
+    }
+
+    const isKnown = Boolean(
+      resolvedProduct && 
+      resolvedProduct.isVerified !== false && 
+      resolvedProduct.is_verified !== false &&
+      !resolvedProduct.name?.startsWith('Unidentified Item')
+    );
 
     // Filter GPS: Only save if accuracy is <= 150 meters
     const isAccurateGps = gps && gps.latitude && gps.accuracy && Number(gps.accuracy) <= 150;
@@ -550,13 +599,13 @@ export const catalogService = {
     const reportRow = {
       rma_number: rmaNumber,
       barcode: cleanBarcode,
-      code: isKnown ? product.code : null,
-      name: isKnown ? product.name : `Unidentified Item (${cleanBarcode})`,
+      code: isKnown ? (resolvedProduct.code || resolvedProduct.barcode) : null,
+      name: isKnown ? resolvedProduct.name : `Unidentified Item (${cleanBarcode})`,
       quantity: Number(quantity) || 1,
-      supplier_name: isKnown ? product.supplierName : 'Pending Assignment',
-      price: isKnown ? Number(product.price || 0) : 0,
-      price_with_vat: isKnown ? Number(product.priceWithVat || 0) : 0,
-      unit_name: isKnown ? (product.unitName || 'pc') : 'pc',
+      supplier_name: isKnown ? (resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Savemore') : 'Pending Assignment',
+      price: isKnown ? Number(resolvedProduct.price || 0) : 0,
+      price_with_vat: isKnown ? Number(resolvedProduct.price_with_vat || resolvedProduct.priceWithVat || resolvedProduct.price || 0) : 0,
+      unit_name: isKnown ? (resolvedProduct.unit_name || resolvedProduct.unitName || 'pc') : 'pc',
       status: isKnown ? 'pending' : 'pending_admin_details',
       reason: reason || 'Damaged Box / Crushed Packaging',
       explanation: explanation || null,
@@ -568,9 +617,9 @@ export const catalogService = {
       reporter_name: reporterName.trim(),
       reporter_contact: reporterContact.trim(),
       reported_by: `${reporterName.trim()} (${reporterContact.trim()})`,
-      ae_name: isKnown ? (product.ae_name || product.aeName || null) : null,
-      ae_email: isKnown ? (product.ae_email || product.aeEmail || null) : null,
-      company: isKnown ? (product.company || null) : null
+      ae_name: isKnown ? (resolvedProduct.ae_name || resolvedProduct.aeName || null) : null,
+      ae_email: isKnown ? (resolvedProduct.ae_email || resolvedProduct.aeEmail || null) : null,
+      company: isKnown ? (resolvedProduct.company || null) : null
     };
 
     // 1. Insert into rma_reports
@@ -791,6 +840,20 @@ export const catalogService = {
     }
 
     this.notifyChange('barcode-verified', { barcode: cleanBarcode, updates });
+
+    // Automated email dispatch: alert AE & finance when an unassigned barcode is verified & assigned to catalog
+    try {
+      const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
+      notificationService.sendProductUpdateNotification({
+        product: { barcode: cleanBarcode, ...updates },
+        isNew: false,
+        editorName: 'Admin'
+      }, isTestActive).catch(err => {
+        console.warn('Background barcode verification product email dispatch notice:', err.message);
+      });
+    } catch (e) {
+      console.warn('Failed to dispatch verification email:', e);
+    }
 
     return { success: true };
   },

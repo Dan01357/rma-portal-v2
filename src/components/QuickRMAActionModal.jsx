@@ -54,6 +54,41 @@ export default function QuickRMAActionModal({
   const [authError, setAuthError] = useState(null);
   const [authSuccessMsg, setAuthSuccessMsg] = useState(null);
 
+  // Sandbox Test Mode State (mirrors admin website toggle)
+  const [isTestMode, setIsTestMode] = useState(() => {
+    try {
+      return typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
+    } catch (e) {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const handleStorage = () => {
+      try {
+        setIsTestMode(localStorage.getItem('rma_portal_test_mode') === 'true');
+      } catch (e) {}
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('rma-data-changed', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('rma-data-changed', handleStorage);
+    };
+  }, []);
+
+  const toggleTestMode = () => {
+    setIsTestMode(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('rma_portal_test_mode', String(next));
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'test-mode-toggled', isTestMode: next } }));
+      } catch (e) {}
+      return next;
+    });
+  };
+
   // Check if current logged-in user is already admin or super admin
   useEffect(() => {
     if (!isOpen) return;
@@ -315,6 +350,36 @@ export default function QuickRMAActionModal({
               <X className="w-5 h-5" />
             </button>
           </div>
+        </div>
+
+        {/* Test Mode Enabler Strip (Matches Admin Website) */}
+        <div className={`px-4 sm:px-6 py-2.5 flex items-center justify-between gap-3 text-xs border-b transition-colors shrink-0 ${
+          isTestMode 
+            ? 'bg-amber-50 dark:bg-amber-950/70 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200' 
+            : 'bg-slate-100 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+        }`}>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-base shrink-0">🧪</span>
+            <div className="min-w-0">
+              <span className="font-extrabold truncate block text-[11px] sm:text-xs">
+                {isTestMode ? 'TEST MODE ACTIVE (Safe Sandbox)' : 'Live Email Delivery Active'}
+              </span>
+              <span className="text-[10px] opacity-80 hidden sm:inline">
+                {isTestMode ? 'Test emails routed exclusively to finance2@keysysincorporated.com' : 'Live notifications sent to staff & customer AE'}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={toggleTestMode}
+            className={`px-3 py-1 rounded-xl text-[11px] font-black cursor-pointer shrink-0 transition-all ${
+              isTestMode
+                ? 'bg-amber-200 dark:bg-amber-900 hover:bg-amber-300 dark:hover:bg-amber-800 text-amber-950 dark:text-amber-100 shadow-xs'
+                : 'bg-white dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-600 shadow-2xs'
+            }`}
+          >
+            {isTestMode ? 'Disable Test Mode' : 'Enable Test Mode'}
+          </button>
         </div>
 
         {/* Modal Body */}

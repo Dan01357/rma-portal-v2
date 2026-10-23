@@ -325,11 +325,27 @@ export default function App() {
     }
   });
 
+  useEffect(() => {
+    const handleSyncTestMode = () => {
+      try {
+        setIsTestMode(localStorage.getItem('rma_portal_test_mode') === 'true');
+      } catch (e) {}
+    };
+    window.addEventListener('storage', handleSyncTestMode);
+    window.addEventListener('rma-data-changed', handleSyncTestMode);
+    return () => {
+      window.removeEventListener('storage', handleSyncTestMode);
+      window.removeEventListener('rma-data-changed', handleSyncTestMode);
+    };
+  }, []);
+
   const toggleTestMode = () => {
     setIsTestMode(prev => {
       const next = !prev;
       try {
         localStorage.setItem('rma_portal_test_mode', String(next));
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'test-mode-toggled', isTestMode: next } }));
       } catch (e) {}
       if (next) {
         showToast('🧪 Test Mode Enabled: Emails safely sent exclusively to finance2@keysysincorporated.com', 'success');

@@ -583,7 +583,7 @@ export async function printHighResCanvas(canvas, documentTitle = 'Print Document
   document.body.classList.add('is-printing-highres');
 
   const dataUrl = canvas.toDataURL('image/png');
-  mount.innerHTML = `<img id="dedicated-print-image" src="${dataUrl}" alt="${documentTitle}" />`;
+  mount.innerHTML = `<img id="dedicated-print-image" src="${dataUrl}" alt="${documentTitle}" style="display:block;margin:0 auto;max-width:175mm;max-height:245mm;width:auto;height:auto;object-fit:contain;page-break-inside:avoid;break-inside:avoid;" />`;
 
   const img = mount.querySelector('img');
 

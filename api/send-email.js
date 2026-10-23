@@ -163,7 +163,19 @@ export default async function handler(req, res) {
       attachments: Array.isArray(attachments) ? attachments : []
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    let info;
+    try {
+      info = await transporter.sendMail(mailOptions);
+    } catch (sendErr) {
+      if (mailOptions.attachments && mailOptions.attachments.length > 0) {
+        console.warn('sendMail with attachments failed, retrying without attachments:', sendErr.message);
+        mailOptions.attachments = [];
+        info = await transporter.sendMail(mailOptions);
+      } else {
+        throw sendErr;
+      }
+    }
+
     console.log('Email dispatched successfully via Gmail SMTP:', info.messageId, 'TestMode:', isTestMode);
 
     return res.status(200).json({

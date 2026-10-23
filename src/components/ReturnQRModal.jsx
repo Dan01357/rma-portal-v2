@@ -113,59 +113,7 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200 modal-backdrop-print-fix">
-      
-      {/* Print Specific Stylesheet Injection */}
-      <style>{`
-        @media print {
-          @page {
-            size: auto;
-            margin: 6mm;
-          }
-          html, body {
-            background: #ffffff !important;
-            color: #000000 !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-          #app-main-view-container,
-          .no-print, 
-          .print\\:hidden {
-            display: none !important;
-          }
-          .modal-backdrop-print-fix {
-            position: static !important;
-            background: transparent !important;
-            padding: 0 !important;
-            overflow: visible !important;
-            display: block !important;
-          }
-          #rma-qr-box-sticker-wrapper {
-            position: static !important;
-            background: #ffffff !important;
-            box-shadow: none !important;
-            border: none !important;
-            max-width: 100% !important;
-            overflow: visible !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            display: block !important;
-          }
-          #rma-qr-box-sticker {
-            position: relative !important;
-            border: 2.5px solid #000000 !important;
-            box-shadow: none !important;
-            width: 100% !important;
-            max-width: 440px !important;
-            margin: 2mm auto !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-          }
-        }
-      `}</style>
-
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
       <div 
         id="rma-qr-box-sticker-wrapper"
         className="relative w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92dvh] sm:max-h-[95vh] my-0 sm:my-auto"
