@@ -24,6 +24,7 @@ import { notificationService } from '../services/notificationService';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import SupplierInput from './SupplierInput';
+import ProductAutoSuggest from './ProductAutoSuggest';
 import { supabase } from '../supabaseClient';
 
 export default function PendingBarcodesModal({ isOpen, onClose, pendingList = [], onUpdated, currentUser }) {
@@ -107,6 +108,25 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     setStatusMsg(null);
     setSkuError(null);
     setNameError(null);
+  };
+
+  const handleAutoPopulate = (item) => {
+    if (!item) return;
+    setFormData(prev => ({
+      ...prev,
+      name: item.name || prev.name,
+      code: item.code || item.sku || prev.code,
+      supplierName: item.supplierName || item.supplier_name || prev.supplierName,
+      price: item.price !== undefined && item.price !== null ? String(item.price) : prev.price,
+      priceWithVat: item.priceWithVat !== undefined && item.priceWithVat !== null 
+        ? String(item.priceWithVat) 
+        : (item.price ? String((Number(item.price) * 1.12).toFixed(2)) : prev.priceWithVat),
+      unitName: item.unitName || item.unit_name || prev.unitName || 'pc',
+      brandName: item.brandName || item.brand || prev.brandName,
+      imageUrl: prev.imageUrl || item.imageUrl || ''
+    }));
+    setNameError(null);
+    setSkuError(null);
   };
 
   const handleImageFile = async (e) => {
@@ -450,25 +470,21 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
             <div className="space-y-3 font-semibold">
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 mb-1">Product Name *</label>
-                <input
-                  type="text"
+                <ProductAutoSuggest
+                  mode="name"
                   required
                   placeholder="e.g. Laptop Lenovo ThinkPad / Oreo Biscuit"
                   value={formData.name}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setFormData({ ...formData, name: val });
+                  onChange={(val) => {
+                    setFormData(prev => ({ ...prev, name: val }));
                     setNameError(null);
                   }}
+                  onSelectProduct={handleAutoPopulate}
+                  error={nameError}
                   className={`w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border ${
                     nameError ? 'border-rose-500 focus:border-rose-600' : 'border-slate-300 dark:border-slate-700 focus:border-blue-600'
-                  } rounded-xl text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-800`}
+                  } rounded-xl text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-800 text-xs sm:text-sm`}
                 />
-                {nameError && (
-                  <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-1">
-                    {nameError}
-                  </p>
-                )}
               </div>
 
               {/* CUSTOMER AE SELECTOR */}
@@ -630,24 +646,20 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-600 dark:text-slate-400 mb-1">SKU / Item Code</label>
-                  <input
-                    type="text"
+                  <ProductAutoSuggest
+                    mode="code"
                     placeholder="e.g. P124124141"
                     value={formData.code}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setFormData({ ...formData, code: val });
+                    onChange={(val) => {
+                      setFormData(prev => ({ ...prev, code: val }));
                       setSkuError(null);
                     }}
+                    onSelectProduct={handleAutoPopulate}
+                    error={skuError}
                     className={`w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border ${
                       skuError ? 'border-rose-500 focus:border-rose-600' : 'border-slate-300 dark:border-slate-700 focus:border-blue-600'
-                    } rounded-xl text-slate-900 dark:text-white font-mono focus:outline-none focus:bg-white dark:focus:bg-slate-800`}
+                    } rounded-xl text-slate-900 dark:text-white font-mono focus:outline-none focus:bg-white dark:focus:bg-slate-800 text-xs sm:text-sm`}
                   />
-                  {skuError && (
-                    <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-1">
-                      {skuError}
-                    </p>
-                  )}
                 </div>
                 <div>
                   <label className="block text-slate-600 dark:text-slate-400 mb-1">Supplier Name</label>

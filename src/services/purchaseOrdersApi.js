@@ -10,10 +10,12 @@
 const BASE_URL = import.meta.env.VITE_PO_API_URL || 'https://purchase-order-db-production-ff1oho.laravel.cloud/api/v1';
 const getApiKey = () => {
   if (typeof window !== 'undefined') {
+    const storedDanilo = localStorage.getItem('EXTERNAL_API_KEY_DANILO');
+    if (storedDanilo && storedDanilo.trim()) return storedDanilo.trim();
     const stored = localStorage.getItem('rma_po_api_key');
     if (stored && stored.trim()) return stored.trim();
   }
-  return import.meta.env.VITE_PO_API_KEY || 'pk_live_po_cloud_db_2026_dev_key';
+  return import.meta.env.VITE_EXTERNAL_API_KEY_DANILO || import.meta.env.VITE_PO_API_KEY || 'pk_live_po_cloud_db_2026_dev_key';
 };
 
 let isApiUnauthorized = (() => {
@@ -118,12 +120,18 @@ export const purchaseOrdersApi = {
   setApiKey(key) {
     if (typeof window !== 'undefined') {
       if (key && key.trim()) {
+        localStorage.setItem('EXTERNAL_API_KEY_DANILO', key.trim());
         localStorage.setItem('rma_po_api_key', key.trim());
       } else {
+        localStorage.removeItem('EXTERNAL_API_KEY_DANILO');
         localStorage.removeItem('rma_po_api_key');
       }
     }
     clearUnauthorized();
+  },
+
+  getApiKey() {
+    return getApiKey();
   },
 
   isUnauthorized() {

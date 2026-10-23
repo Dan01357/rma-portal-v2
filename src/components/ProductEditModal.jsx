@@ -19,6 +19,7 @@ import { catalogService } from '../services/catalogService';
 import { authService } from '../services/authService';
 import ImageLightboxModal from './ImageLightboxModal';
 import SupplierInput from './SupplierInput';
+import ProductAutoSuggest from './ProductAutoSuggest';
 
 export default function ProductEditModal({ isOpen, onClose, product, onSaved, onDeleted, currentUser }) {
   const isEditing = Boolean(product && product.id);
@@ -130,6 +131,25 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
 
   const handleCodeChange = (val) => {
     setCode(val);
+    setSkuError(null);
+  };
+
+  const handleAutoPopulate = (item) => {
+    if (!item) return;
+    if (item.name) setName(item.name);
+    if (item.code || item.sku) setCode(item.code || item.sku);
+    if (item.supplierName || item.supplier_name) setSupplierName(item.supplierName || item.supplier_name);
+    if (item.price !== undefined && item.price !== null) {
+      const p = Number(item.price);
+      setPrice(p.toFixed(2));
+      setPriceWithVat(item.priceWithVat ? String(item.priceWithVat) : (p * 1.12).toFixed(2));
+    }
+    if (item.unitName || item.unit_name) setUnitName(item.unitName || item.unit_name);
+    if (!photoPreview && item.imageUrl) {
+      setImageUrl(item.imageUrl);
+      setPhotoPreview(item.imageUrl);
+    }
+    setNameError(null);
     setSkuError(null);
   };
 
@@ -345,21 +365,18 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Product Name *
               </label>
-              <input
-                type="text"
+              <ProductAutoSuggest
+                mode="name"
                 required
                 value={name}
-                onChange={(e) => handleNameChange(e.target.value)}
+                onChange={handleNameChange}
+                onSelectProduct={handleAutoPopulate}
                 placeholder="e.g. Oishi Popcorn Chocolate 60g"
+                error={nameError}
                 className={`w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border ${
                   nameError ? 'border-rose-500 focus:border-rose-600' : 'border-slate-300 dark:border-slate-700 focus:border-blue-600'
                 } rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-800`}
               />
-              {nameError && (
-                <p className="text-[11px] font-bold text-rose-600 dark:text-rose-400 mt-1">
-                  {nameError}
-                </p>
-              )}
             </div>
 
             {/* Barcode & SKU Code */}
@@ -382,20 +399,17 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   SKU / Item Code
                 </label>
-                <input
-                  type="text"
+                <ProductAutoSuggest
+                  mode="code"
                   value={code}
-                  onChange={(e) => handleCodeChange(e.target.value)}
+                  onChange={handleCodeChange}
+                  onSelectProduct={handleAutoPopulate}
                   placeholder="e.g. SS1742P"
+                  error={skuError}
                   className={`w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border ${
                     skuError ? 'border-rose-500 focus:border-rose-600' : 'border-slate-300 dark:border-slate-700 focus:border-blue-600'
                   } rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-800`}
                 />
-                {skuError && (
-                  <p className="text-[11px] font-bold text-rose-600 dark:text-rose-400 mt-1">
-                    {skuError}
-                  </p>
-                )}
               </div>
             </div>
 

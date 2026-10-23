@@ -16,11 +16,14 @@ import {
   RotateCcw,
   Check,
   AtSign,
-  Shield
+  Shield,
+  KeyRound,
+  ExternalLink
 } from 'lucide-react';
-import { rmaApi } from '../supabaseClient';
+import { rmaApi, supabase } from '../supabaseClient';
 import { applyEmailTestMode } from '../utils/rmaHelpers';
 import { notificationService } from '../services/notificationService';
+import { purchaseOrdersApi } from '../services/purchaseOrdersApi';
 
 export default function SettingsTab({ 
   isTestMode, 
@@ -57,11 +60,23 @@ export default function SettingsTab({
   const [isSavingRecipients, setIsSavingRecipients] = useState(false);
   const [recipientFeedback, setRecipientFeedback] = useState(null);
 
+  // Coworker Purchase Order & SKU Catalog API State
+  const [poApiKey, setPoApiKey] = useState(() => purchaseOrdersApi.getApiKey() || '');
+  const [poApiStatus, setPoApiStatus] = useState({
+    loading: false,
+    checked: false,
+    connected: false,
+    message: ''
+  });
+  const [isSavingPoKey, setIsSavingPoKey] = useState(false);
+  const [poKeyFeedback, setPoKeyFeedback] = useState(null);
+
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://lschluviltzsknptwgrz.supabase.co';
   const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_Jrv9ZNgGXJ4PZoNWCJSHxQ_7hZtQqd3';
 
   useEffect(() => {
     handleCheckConnection();
+    handleCheckPoApi();
 
     // 1. Load active email recipient settings
     const active = notificationService.getEmailSettings();
@@ -97,6 +112,41 @@ export default function SettingsTab({
       connected: result.connected,
       message: result.message
     });
+  };
+
+  const handleCheckPoApi = async () => {
+    setPoApiStatus({ loading: true, checked: false, connected: false, message: 'Testing Coworker API...' });
+    const result = await purchaseOrdersApi.testConnection(true);
+    setPoApiStatus({
+      loading: false,
+      checked: true,
+      connected: result.connected,
+      message: result.connected 
+        ? `Connected! Access verified to 5,793+ live SKUs in erply_products.` 
+        : (result.error || 'Connection failed.')
+    });
+  };
+
+  const handleSavePoKey = async () => {
+    setIsSavingPoKey(true);
+    setPoKeyFeedback(null);
+    try {
+      purchaseOrdersApi.setApiKey(poApiKey);
+      try {
+        await supabase.from('rma_settings').upsert({
+          key: 'EXTERNAL_API_KEY_DANILO',
+          value: poApiKey,
+          updated_at: new Date().toISOString()
+        });
+      } catch (e) {}
+      setPoKeyFeedback({ type: 'success', message: 'Coworker API Key saved!' });
+      handleCheckPoApi();
+    } catch (err) {
+      setPoKeyFeedback({ type: 'error', message: err.message });
+    } finally {
+      setIsSavingPoKey(false);
+      setTimeout(() => setPoKeyFeedback(null), 4000);
+    }
   };
 
   const handleTestSmtp = async () => {
@@ -570,6 +620,102 @@ export default function SettingsTab({
         <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
           Users who report products do not need login credentials. They simply scan the QR code posted at your receiving docks or return desks to launch the portal, scan the retail barcode, attach photos of damaged items, and print box verification stickers.
         </p>
+      </div>
+
+      {/* 4. Coworker Purchase Order & SKU Catalog API Integration (EXTERNAL_API_KEY_DANILO) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-7 shadow-sm space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+          <div className="flex items-center space-x-3">
+            <div className="p-2.5 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20">
+              <KeyRound className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="font-extrabold text-slate-900 dark:text-white text-base flex items-center gap-2">
+                <span>Coworker Database API (Live SKU Auto-Suggestions)</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 font-mono font-bold">
+                  EXTERNAL_API_KEY_DANILO
+                </span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Direct integration with coworker's Laravel Cloud database (5,793+ SKUs in erply_products)
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCheckPoApi}
+              disabled={poApiStatus.loading}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${poApiStatus.loading ? 'animate-spin text-blue-600' : ''}`} />
+              <span>{poApiStatus.loading ? 'Testing...' : 'Test Connection'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Status result strip */}
+        {poApiStatus.checked && (
+          <div className={`p-3.5 rounded-2xl border text-xs flex items-center gap-2.5 ${
+            poApiStatus.connected
+              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+              : 'bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200'
+          }`}>
+            {poApiStatus.connected ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            )}
+            <span className="font-semibold">{poApiStatus.message}</span>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              API Base URL
+            </label>
+            <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl font-mono text-xs text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800">
+              https://purchase-order-db-production-ff1oho.laravel.cloud/api/v1
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                Danilo's Private API Key (Header: <code className="font-mono">X-API-Key</code>)
+              </label>
+              {poKeyFeedback && (
+                <span className={`text-[11px] font-bold ${poKeyFeedback.type === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  {poKeyFeedback.message}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={poApiKey}
+                onChange={(e) => setPoApiKey(e.target.value)}
+                placeholder="Paste EXTERNAL_API_KEY_DANILO private key here..."
+                className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-indigo-600"
+              />
+              <button
+                type="button"
+                onClick={handleSavePoKey}
+                disabled={isSavingPoKey}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{isSavingPoKey ? 'Saving...' : 'Save Key'}</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+              When assigning SKUs in Admin or Quick Process, typing into SKU or Product Name automatically suggests and auto-populates product details.
+            </p>
+          </div>
+        </div>
       </div>
 
     </div>

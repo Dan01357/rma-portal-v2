@@ -1138,10 +1138,11 @@ export default function App() {
       }
 
       // 2. Submit report to Supabase
+      const submitQty = Math.max(1, parseInt(quantity, 10) || 1);
       const res = await catalogService.submitReport({
         barcode: cleanBarcode,
         product: detectedProduct,
-        quantity,
+        quantity: submitQty,
         reporterName,
         reporterContact,
         reason: selectedReason,
@@ -1159,7 +1160,7 @@ export default function App() {
         productName: detectedProduct?.name || `Barcode ${cleanBarcode}`,
         code: detectedProduct?.code || '',
         sku: detectedProduct?.code || '',
-        quantity,
+        quantity: submitQty,
         unit_name: detectedProduct?.unit_name || 'pc',
         supplier_name: detectedProduct?.supplier_name || 'Warehouse',
         supplier: detectedProduct?.supplier_name || 'Warehouse',
@@ -1384,19 +1385,43 @@ export default function App() {
                       />
                     </div>
 
-                    <div className="flex items-center border border-slate-300 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-800 px-2 py-1">
+                    <div className="flex items-center border border-slate-300 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-800 px-1.5 py-1 focus-within:border-blue-600 focus-within:ring-1 focus-within:ring-blue-600 shadow-2xs">
                       <button
                         type="button"
-                        onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                        className="p-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
+                        onClick={() => setQuantity(Math.max(1, (parseInt(quantity, 10) || 1) - 1))}
+                        className="p-1.5 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white cursor-pointer active:scale-95 transition-transform"
+                        title="Decrease quantity (-1)"
                       >
                         <Minus className="w-3.5 h-3.5" />
                       </button>
-                      <span className="w-6 text-center text-xs font-black text-slate-800 dark:text-slate-200">{quantity}</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="99999"
+                        value={quantity}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '') {
+                            setQuantity('');
+                          } else {
+                            const parsed = parseInt(val, 10);
+                            if (!isNaN(parsed) && parsed >= 0) {
+                              setQuantity(parsed);
+                            }
+                          }
+                        }}
+                        onBlur={() => {
+                          const q = Math.max(1, parseInt(quantity, 10) || 1);
+                          setQuantity(q);
+                        }}
+                        className="w-12 text-center text-xs font-black text-slate-800 dark:text-slate-200 bg-transparent border-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        title="Directly enter return quantity"
+                      />
                       <button
                         type="button"
-                        onClick={() => setQuantity(quantity + 1)}
-                        className="p-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
+                        onClick={() => setQuantity(Math.max(1, (parseInt(quantity, 10) || 0) + 1))}
+                        className="p-1.5 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white cursor-pointer active:scale-95 transition-transform"
+                        title="Increase quantity (+1)"
                       >
                         <Plus className="w-3.5 h-3.5" />
                       </button>
