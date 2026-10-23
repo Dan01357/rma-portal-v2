@@ -15,7 +15,8 @@ import {
   ArrowDown,
   UserCheck,
   Building2,
-  ChevronDown
+  ChevronDown,
+  Trash2
 } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 import { authService } from '../services/authService';
@@ -122,6 +123,23 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
       console.warn('Image upload error:', err);
     } finally {
       setIsUploadingImage(false);
+    }
+  };
+
+  const [deletingId, setDeletingId] = useState(null);
+
+  const handleDeletePending = async (item) => {
+    if (!window.confirm(`Are you sure you want to dismiss and delete pending barcode ${item.barcode}?`)) {
+      return;
+    }
+    setDeletingId(item.id || item.barcode);
+    try {
+      await catalogService.deletePendingBarcode(item.barcode, item.id);
+      if (onUpdated) onUpdated();
+    } catch (e) {
+      console.warn('Failed to delete pending barcode:', e);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -406,14 +424,30 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                         </div>
 
                         {canVerify ? (
-                          <button
-                            type="button"
-                            onClick={() => handleSelect(item)}
-                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all shrink-0 cursor-pointer"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                            <span>Enter Details</span>
-                          </button>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleSelect(item)}
+                              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                              <span>Enter Details</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={deletingId === (item.id || item.barcode)}
+                              onClick={() => handleDeletePending(item)}
+                              title="Dismiss / Remove this pending barcode"
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                              aria-label="Delete pending barcode"
+                            >
+                              {deletingId === (item.id || item.barcode) ? (
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin text-rose-500" />
+                              ) : (
+                                <Trash2 className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
                         ) : (
                           <span className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-400 text-xs font-bold rounded-xl">
                             Read-Only

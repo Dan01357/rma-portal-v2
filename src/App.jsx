@@ -67,6 +67,7 @@ import NotificationBell from './components/NotificationBell';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
 import ReturnQRModal from './components/ReturnQRModal';
 import QuickRMAActionModal from './components/QuickRMAActionModal';
+import PortalAccessQRModal from './components/PortalAccessQRModal';
 import { QRCodeSVG } from 'qrcode.react';
 
 const DEFECT_REASONS = [
@@ -122,6 +123,7 @@ export default function App() {
   const [isQuickRmaModalOpen, setIsQuickRmaModalOpen] = useState(false);
   const [quickRmaNumber, setQuickRmaNumber] = useState(null);
   const [pendingQuickRmaNumber, setPendingQuickRmaNumber] = useState(null);
+  const [isPortalAccessQrOpen, setIsPortalAccessQrOpen] = useState(false);
 
   const restoreQuickRmaIfPending = () => {
     if (pendingQuickRmaNumber) {
@@ -968,10 +970,10 @@ export default function App() {
     window.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', handleFocus);
 
-    // 5. Fast 3.5-second heartbeat polling so background tabs and mobile stay 100% in sync
+    // 5. Calm 20-second heartbeat backup polling (realtime Supabase handles instant live sync)
     const pollInterval = setInterval(() => {
       refreshAllData();
-    }, 3500);
+    }, 20000);
 
     return () => {
       unsubscribeBus();
@@ -1183,20 +1185,31 @@ export default function App() {
         {!isAdminView && (
           <div className="space-y-4 animate-in fade-in duration-200">
             
-            {/* Responsive Top Bar with Badge & Theme Toggle */}
+            {/* Responsive Top Bar with Badge, QR Poster Access & Theme Toggle */}
             <div className="flex items-center justify-between gap-3 pt-1 pb-1">
               <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 inline-block shadow-2xs">
                 Customer & Warehouse Returns
               </span>
-              <button
-                type="button"
-                onClick={toggleTheme}
-                className="touch-target p-2 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white shadow-xs transition-colors cursor-pointer shrink-0"
-                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-                aria-label="Toggle Theme"
-              >
-                {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPortalAccessQrOpen(true)}
+                  className="touch-target px-3 py-1.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 shadow-xs transition-colors flex items-center gap-1.5 text-xs font-bold cursor-pointer"
+                  title="Open Shareable QR Code & Warehouse Poster"
+                >
+                  <QrCode className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span className="hidden sm:inline">Portal QR & Poster</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  className="touch-target p-2 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white shadow-xs transition-colors cursor-pointer shrink-0"
+                  title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                  aria-label="Toggle Theme"
+                >
+                  {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
+                </button>
+              </div>
             </div>
 
             {/* Fluid Header Typography */}
@@ -1635,6 +1648,16 @@ export default function App() {
 
                 <button
                   type="button"
+                  onClick={() => setIsPortalAccessQrOpen(true)}
+                  className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+                  title="Generate QR code and poster for users to report returns"
+                >
+                  <QrCode className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>Scan to Report QR</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => navigateTo('/')}
                   className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
                 >
@@ -1739,7 +1762,7 @@ export default function App() {
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Credit Memos</div>
                 <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">
                   {creditMemosList.length > 0 
-                    ? `₱${creditMemosList.reduce((acc, m) => acc + Number(m.credit_amount || 0), 0).toLocaleString('en-US', { maximumFractionDigits: 0 })} credited`
+                    ? `₱${creditMemosList.reduce((acc, m) => acc + Number(m.credit_amount || m.amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} credited`
                     : 'Customer deductions'}
                 </div>
               </div>
@@ -2655,6 +2678,7 @@ export default function App() {
               <SettingsTab
                 isTestMode={isTestMode}
                 onToggleTestMode={toggleTestMode}
+                onOpenPortalQr={() => setIsPortalAccessQrOpen(true)}
               />
             )}
 
@@ -2937,6 +2961,12 @@ export default function App() {
         itemType={deleteModalState?.itemType || 'item'}
         itemDetails={deleteModalState?.itemDetails}
         isDeleting={isDeleteModalLoading}
+      />
+
+      {/* Public Portal Access & Reporting Instructions QR Modal */}
+      <PortalAccessQRModal
+        isOpen={isPortalAccessQrOpen}
+        onClose={() => setIsPortalAccessQrOpen(false)}
       />
 
     </div>

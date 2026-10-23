@@ -373,6 +373,157 @@ export async function downloadBoxStickerPng({
 }
 
 /**
+ * Download Official Workplace Instruction Poster (PNG)
+ * High-resolution 1200x1700px poster with QR code and numbered step-by-step reporting instructions.
+ */
+export async function downloadPortalPosterPng({
+  svgElementOrId,
+  portalUrl = 'https://rma-portal-v2.vercel.app',
+  filename = 'RMA-Scan-To-Report-Poster.png'
+}) {
+  const svgEl = typeof svgElementOrId === 'string'
+    ? document.getElementById(svgElementOrId)
+    : svgElementOrId;
+
+  if (!svgEl) {
+    throw new Error('Portal QR SVG element not found in DOM.');
+  }
+
+  const { img, blobUrl } = await svgToImage(svgEl);
+
+  try {
+    const canvas = document.createElement('canvas');
+    const width = 1200;
+    const height = 1750;
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not initialize 2D canvas context.');
+
+    // 1. Clean White Background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
+    // 2. Outer Border
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 14;
+    ctx.strokeRect(30, 30, width - 60, height - 60);
+
+    // 3. Header Hero Banner (Navy Gradient)
+    const grad = ctx.createLinearGradient(30, 30, width - 30, 240);
+    grad.addColorStop(0, '#1e3a8a');
+    grad.addColorStop(1, '#0f172a');
+    ctx.fillStyle = grad;
+    ctx.fillRect(30, 30, width - 60, 210);
+
+    ctx.fillStyle = '#60a5fa';
+    ctx.font = '900 24px "Inter", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('WHOLESALE RMA INTAKE & VERIFICATION', width / 2, 85);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 44px "Inter", system-ui, sans-serif';
+    ctx.fillText('SCAN TO REPORT RETURNED PRODUCT', width / 2, 145);
+
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '500 22px "Inter", system-ui, sans-serif';
+    ctx.fillText('Warehouse Dock Intake • Store Repackers • Customer Defect Reporting', width / 2, 195);
+
+    // 4. Center QR Code Frame
+    const qrFrameX = 260;
+    const qrFrameY = 280;
+    const qrFrameSize = 680;
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(qrFrameX, qrFrameY, qrFrameSize, qrFrameSize);
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(qrFrameX, qrFrameY, qrFrameSize, qrFrameSize);
+
+    // Draw QR code inside frame
+    const qrSize = 580;
+    const qrOffset = (qrFrameSize - qrSize) / 2;
+    ctx.drawImage(img, qrFrameX + qrOffset, qrFrameY + qrOffset, qrSize, qrSize);
+
+    // 5. Portal URL Pill
+    ctx.fillStyle = '#2563eb';
+    ctx.beginPath();
+    ctx.roundRect((width - 640) / 2, 990, 640, 60, 16);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 24px "Inter", monospace, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(portalUrl.replace(/^https?:\/\//, ''), width / 2, 1030);
+
+    // 6. Step-by-Step Instructions Container
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '900 32px "Inter", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('HOW TO FILE A RETURN REPORT', width / 2, 1110);
+
+    const steps = [
+      { num: '1', title: 'Scan QR with Phone', desc: 'Open camera app on mobile phone/tablet and point at this code' },
+      { num: '2', title: 'Scan Barcode or Search', desc: 'Use camera barcode reader or live lookup across 5,700+ ERPLY items' },
+      { num: '3', title: 'Attach Defect Photos', desc: 'Snap photo of damaged packaging and enter return quantity' },
+      { num: '4', title: 'Print Box QR Sticker', desc: 'Tape generated thermal sticker on outer box for dock receiving' }
+    ];
+
+    steps.forEach((step, idx) => {
+      const stepY = 1170 + idx * 115;
+
+      // Step pill background
+      ctx.fillStyle = '#f1f5f9';
+      ctx.beginPath();
+      ctx.roundRect(80, stepY, width - 160, 95, 18);
+      ctx.fill();
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Number badge
+      ctx.fillStyle = '#2563eb';
+      ctx.beginPath();
+      ctx.arc(135, stepY + 47, 30, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 28px "Inter", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(step.num, 135, stepY + 57);
+
+      // Text
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 26px "Inter", sans-serif';
+      ctx.fillText(step.title, 190, stepY + 40);
+
+      ctx.fillStyle = '#475569';
+      ctx.font = '500 20px "Inter", sans-serif';
+      ctx.fillText(step.desc, 190, stepY + 75);
+    });
+
+    // 7. Footer note
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = 'bold 20px "Inter", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('No login required to submit return tickets • Authorized Wholesale System', width / 2, 1690);
+
+    canvas.toBlob((blob) => {
+      if (blob) {
+        triggerDownload(blob, filename);
+      } else {
+        triggerDownload(canvas.toDataURL('image/png'), filename);
+      }
+    }, 'image/png');
+
+    return true;
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
+/**
  * Download raw SVG file
  */
 export function downloadQrSvg(svgElementOrId, filename = 'rma-qr-code.svg') {
@@ -387,3 +538,4 @@ export function downloadQrSvg(svgElementOrId, filename = 'rma-qr-code.svg') {
   triggerDownload(blob, filename.endsWith('.svg') ? filename : `${filename}.svg`);
   return true;
 }
+

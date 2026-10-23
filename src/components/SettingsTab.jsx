@@ -7,7 +7,8 @@ import {
   Mail, 
   RefreshCw, 
   CheckCircle2, 
-  AlertCircle
+  AlertCircle,
+  QrCode
 } from 'lucide-react';
 import { rmaApi } from '../supabaseClient';
 import { applyEmailTestMode } from '../utils/rmaHelpers';
@@ -15,7 +16,8 @@ import { notificationService } from '../services/notificationService';
 
 export default function SettingsTab({ 
   isTestMode, 
-  onToggleTestMode
+  onToggleTestMode,
+  onOpenPortalQr
 }) {
   const [connectionStatus, setConnectionStatus] = useState({
     loading: false,
@@ -264,6 +266,36 @@ export default function SettingsTab({
             )}
           </div>
         )}
+      </div>
+
+      {/* 3. Public Reporting Portal Access QR & Dock Posters */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-7 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+          <div className="flex items-center space-x-3">
+            <div className="p-2.5 rounded-2xl bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/20">
+              <QrCode className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="font-extrabold text-slate-900 dark:text-white text-base">Public Reporting Portal Access QR</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Generate high-res QR codes and printable posters for receiving docks & store repackers</p>
+            </div>
+          </div>
+
+          {onOpenPortalQr && (
+            <button
+              type="button"
+              onClick={onOpenPortalQr}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer self-start sm:self-auto"
+            >
+              <QrCode className="w-4 h-4" />
+              <span>View & Download Poster</span>
+            </button>
+          )}
+        </div>
+
+        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+          Users who report products do not need login credentials. They simply scan the QR code posted at your receiving docks or return desks to launch the portal, scan the retail barcode, attach photos of damaged items, and print box verification stickers.
+        </p>
       </div>
 
     </div>

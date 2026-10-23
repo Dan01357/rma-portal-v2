@@ -78,18 +78,19 @@ export default function QuickRMAActionModal({
     setVerifiedAdmin(null);
   }, [isOpen, currentUser]);
 
-  // Load RMA Report Data when rmaNumber is passed
+  // 1. Primary fetch when modal opens or rmaNumber changes
   useEffect(() => {
     if (!isOpen || !rmaNumber) {
       setReport(null);
       setReportError(null);
+      setIsLoadingReport(false);
       return;
     }
 
     let isMounted = true;
     const cleanRma = String(rmaNumber).trim();
 
-    // 1. Try local list first for instant responsiveness
+    // Try local list first for instant responsiveness
     const localMatch = recentReportsList.find(
       r => String(r.rma_number || '').toUpperCase() === cleanRma.toUpperCase() ||
            String(r.id) === cleanRma
@@ -97,12 +98,13 @@ export default function QuickRMAActionModal({
 
     if (localMatch) {
       setReport(localMatch);
+      setIsLoadingReport(false);
+    } else {
+      setIsLoadingReport(true);
     }
-
-    // 2. Fetch fresh record from Supabase
-    setIsLoadingReport(true);
     setReportError(null);
 
+    // Fetch fresh record from Supabase
     (async () => {
       try {
         let query = supabase.from('rma_reports').select('*');
@@ -138,6 +140,25 @@ export default function QuickRMAActionModal({
     return () => {
       isMounted = false;
     };
+  }, [isOpen, rmaNumber]);
+
+  // 2. Silent background sync when recentReportsList updates (WITHOUT triggering loading spinners or unmounting UI)
+  useEffect(() => {
+    if (!isOpen || !rmaNumber || !recentReportsList.length) return;
+    const cleanRma = String(rmaNumber).trim().toUpperCase();
+    const match = recentReportsList.find(
+      r => String(r.rma_number || '').toUpperCase() === cleanRma || String(r.id) === cleanRma
+    );
+    if (match) {
+      setReport(prev => {
+        if (!prev) return match;
+        // Only trigger state update if meaningful fields actually changed
+        if (prev.status !== match.status || prev.code !== match.code || prev.name !== match.name || prev.notes !== match.notes) {
+          return match;
+        }
+        return prev;
+      });
+    }
   }, [isOpen, rmaNumber, recentReportsList]);
 
   // Verification Form Submit
@@ -299,8 +320,8 @@ export default function QuickRMAActionModal({
         {/* Modal Body */}
         <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto overscroll-contain">
 
-          {/* 1. Loading State */}
-          {isLoadingReport && (
+          {/* 1. Loading State (Only if not yet loaded) */}
+          {isLoadingReport && !report && (
             <div className="py-8 text-center space-y-3">
               <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
               <p className="text-xs font-bold text-slate-600 dark:text-slate-400">
@@ -310,7 +331,7 @@ export default function QuickRMAActionModal({
           )}
 
           {/* 2. Error Loading Report */}
-          {reportError && (
+          {reportError && !report && (
             <div className="p-4 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-2xl flex items-start gap-3 text-rose-800 dark:text-rose-200">
               <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
               <div className="space-y-1 text-xs">
@@ -330,7 +351,7 @@ export default function QuickRMAActionModal({
           )}
 
           {/* 3. Report Loaded: Display Summary Card */}
-          {report && !isLoadingReport && (
+          {report && (
             <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-700 pb-3">
                 <div className="space-y-0.5">

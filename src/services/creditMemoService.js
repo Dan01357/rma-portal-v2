@@ -76,8 +76,12 @@ export const creditMemoService = {
       if (!error && Array.isArray(dbMemos)) {
         for (const m of dbMemos) {
           if (m.credit_memo_number) {
+            const creditAmt = Number(m.credit_amount ?? m.amount ?? 0);
+            const grossAmt = Number(m.amount ?? m.credit_amount ?? 0);
             memosMap.set(m.credit_memo_number, {
               ...m,
+              credit_amount: creditAmt,
+              amount: grossAmt || creditAmt,
               is_synced_to_db: true
             });
           }
@@ -103,8 +107,12 @@ export const creditMemoService = {
             try {
               const memoData = JSON.parse(r.notes);
               if (memoData && memoData.credit_memo_number && !memosMap.has(memoData.credit_memo_number)) {
+                const creditAmt = Number(memoData.credit_amount ?? memoData.amount ?? 0);
+                const grossAmt = Number(memoData.amount ?? memoData.credit_amount ?? 0);
                 const combined = {
                   ...memoData,
+                  credit_amount: creditAmt,
+                  amount: grossAmt || creditAmt,
                   report_id: r.id,
                   rma_number: r.rma_number || memoData.rma_number,
                   barcode: r.barcode || memoData.barcode,
@@ -181,6 +189,7 @@ export const creditMemoService = {
       unit_name: memoData.unit_name || memoData.unit || 'pc',
       unit_price: unitPrice,
       amount: grossAmount,
+      credit_amount: creditAmount,
       pull_out_ref: pullOutRef,
       pull_out_date: pullOutDate,
       credit_issued_by: memoData.credit_issued_by || 'Analiza B. Benoza (Finance Head)',

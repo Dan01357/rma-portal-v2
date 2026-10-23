@@ -636,21 +636,38 @@ export const catalogService = {
    */
   async getPendingBarcodes() {
     try {
-      // 1. Fetch unverified items from products table
-      const { data: unverifiedProds, error } = await supabase
+      // 1. Fetch active (non-deleted) RMA reports to know which barcodes are actually in play
+      const { data: activeReports, error: rError } = await supabase
+        .from('rma_reports')
+        .select('id, rma_number, barcode, code, name, supplier_name, price, price_with_vat, status, created_at')
+        .not('status', 'eq', 'deleted')
+        .order('created_at', { ascending: false });
+
+      if (rError) {
+        console.warn('Error fetching active reports for pending cross-check:', rError.message);
+      }
+
+      const activeBarcodesWithReports = new Set(
+        (activeReports || []).map(r => r.barcode).filter(Boolean)
+      );
+
+      // 2. Fetch unverified items from products table
+      const { data: unverifiedProds, error: pError } = await supabase
         .from('products')
         .select('*')
         .eq('is_verified', false)
         .not('name', 'like', '[DELETED]%')
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.warn('Error fetching unverified products:', error.message);
+      if (pError) {
+        console.warn('Error fetching unverified products:', pError.message);
       }
 
       const pendingMap = new Map();
+
+      // Only add to pending if there is an active report referencing this unverified barcode!
       (unverifiedProds || []).forEach(p => {
-        if (p.barcode) {
+        if (p.barcode && activeBarcodesWithReports.has(p.barcode)) {
           pendingMap.set(p.barcode, {
             ...p,
             id: p.id,
@@ -665,15 +682,10 @@ export const catalogService = {
         }
       });
 
-      // 2. Cross-check rma_reports for any pending_admin_details to ensure nothing is missed
-      const { data: pendingReports, error: rError } = await supabase
-        .from('rma_reports')
-        .select('*')
-        .eq('status', 'pending_admin_details')
-        .order('created_at', { ascending: false });
-
-      if (!rError && pendingReports) {
-        pendingReports.forEach(r => {
+      // 3. Include any active rma_reports marked as 'pending_admin_details'
+      (activeReports || [])
+        .filter(r => r.status === 'pending_admin_details')
+        .forEach(r => {
           if (r.barcode && !pendingMap.has(r.barcode)) {
             pendingMap.set(r.barcode, {
               id: r.id,
@@ -688,12 +700,31 @@ export const catalogService = {
             });
           }
         });
-      }
 
       return Array.from(pendingMap.values());
     } catch (e) {
       console.warn('Error fetching pending barcodes:', e.message);
       return [];
+    }
+  },
+
+  /**
+   * ADMIN ACTION: Permanently dismiss or delete an unverified barcode from pending queue
+   */
+  async deletePendingBarcode(barcode, productId) {
+    if (!barcode && !productId) return false;
+    try {
+      if (productId) {
+        await supabase.from('products').delete().eq('id', productId);
+      }
+      if (barcode) {
+        await supabase.from('products').delete().eq('barcode', barcode).eq('is_verified', false);
+      }
+      this.notifyChange('pending-barcode-deleted', { barcode, productId });
+      return true;
+    } catch (e) {
+      console.warn('Failed to delete pending barcode:', e);
+      return false;
     }
   },
 
@@ -793,6 +824,16 @@ export const catalogService = {
   async deleteReport(id, rmaNumber) {
     if (!id && !rmaNumber) return false;
     try {
+      // First find barcode of report to check for orphan cleanup
+      let barcodeToCheck = null;
+      try {
+        let findQ = supabase.from('rma_reports').select('barcode').limit(1);
+        if (id) findQ = findQ.eq('id', id);
+        else findQ = findQ.eq('rma_number', rmaNumber);
+        const { data: found } = await findQ;
+        if (found && found.length > 0) barcodeToCheck = found[0].barcode;
+      } catch (e) {}
+
       let query = supabase.from('rma_reports').delete();
       if (id) {
         query = query.eq('id', id);
@@ -814,6 +855,21 @@ export const catalogService = {
           console.error('Soft delete error:', softErr);
           throw softErr;
         }
+      }
+
+      // Check if unverified product should be cleaned up
+      if (barcodeToCheck) {
+        try {
+          const { data: otherReports } = await supabase
+            .from('rma_reports')
+            .select('id')
+            .eq('barcode', barcodeToCheck)
+            .not('status', 'eq', 'deleted');
+          if (!otherReports || otherReports.length === 0) {
+            // Delete orphan unverified product
+            await supabase.from('products').delete().eq('barcode', barcodeToCheck).eq('is_verified', false);
+          }
+        } catch (e) {}
       }
 
       this.notifyChange('report-deleted', { id, rmaNumber });
