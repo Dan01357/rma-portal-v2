@@ -81,7 +81,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
       priceWithVat: item.price_with_vat ? String(item.price_with_vat) : '',
       brandName: item.brand_name || '',
       unitName: item.unit_name || 'pc',
-      imageUrl: item.image_url || ''
+      imageUrl: '' // Strictly start with empty state for unassigned pending barcodes
     });
 
     if (item.ae_name || item.ae_email) {
@@ -653,8 +653,9 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                       </button>
                     </div>
                   ) : (
-                    <div className="w-16 h-16 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center text-slate-400 bg-white dark:bg-slate-800 shrink-0">
-                      <ImageIcon className="w-6 h-6" />
+                    <div className="w-16 h-16 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 flex flex-col items-center justify-center text-slate-400 bg-white dark:bg-slate-800 shrink-0">
+                      <ImageIcon className="w-5 h-5 mb-0.5 opacity-60" />
+                      <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">No Image</span>
                     </div>
                   )}
 

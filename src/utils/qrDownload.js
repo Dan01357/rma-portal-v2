@@ -159,10 +159,10 @@ export async function downloadQrCodePng({
 }
 
 /**
- * Download Complete Official RMA Box Verification Label (PNG)
- * High-res 1200 x 1650 px graphic formatted specifically for box adhesion & thermal prints.
+ * Generate Complete Official RMA Box Verification Label Canvas
+ * High-res 1200 x 1680 px graphic formatted specifically for box adhesion & thermal prints.
  */
-export async function downloadBoxStickerPng({
+export async function generateBoxStickerCanvas({
   svgElementOrId,
   rmaNumber = 'RMA-TICKET',
   supplier = 'Savemore',
@@ -173,8 +173,7 @@ export async function downloadBoxStickerPng({
   unit = 'pc',
   reason = 'Defective / Return',
   reporter = 'Warehouse Staff',
-  dateFormatted = '',
-  filename
+  dateFormatted = ''
 }) {
   const svgEl = typeof svgElementOrId === 'string'
     ? document.getElementById(svgElementOrId)
@@ -357,29 +356,46 @@ export async function downloadBoxStickerPng({
     ctx.textAlign = 'center';
     ctx.fillText('ATTACH SECURELY TO OUTER BOX OR RETURNED MERCHANDISE', width / 2, 1560);
 
-    const finalFilename = filename || `${rmaNumber}-Sticker-Label.png`;
-    canvas.toBlob((blob) => {
-      if (blob) {
-        triggerDownload(blob, finalFilename);
-      } else {
-        triggerDownload(canvas.toDataURL('image/png'), finalFilename);
-      }
-    }, 'image/png');
-
-    return true;
+    return canvas;
   } finally {
     URL.revokeObjectURL(blobUrl);
   }
 }
 
 /**
- * Download Official Workplace Instruction Poster (PNG)
- * High-resolution 1200x1700px poster with QR code and numbered step-by-step reporting instructions.
+ * Download Complete Official RMA Box Verification Label (PNG)
  */
-export async function downloadPortalPosterPng({
+export async function downloadBoxStickerPng(options) {
+  const canvas = await generateBoxStickerCanvas(options);
+  const finalFilename = options.filename || `${options.rmaNumber || 'RMA'}-Sticker-Label.png`;
+  canvas.toBlob((blob) => {
+    if (blob) {
+      triggerDownload(blob, finalFilename);
+    } else {
+      triggerDownload(canvas.toDataURL('image/png'), finalFilename);
+    }
+  }, 'image/png');
+  return true;
+}
+
+/**
+ * Print Complete Official RMA Box Verification Label
+ * Targets high-resolution label canvas directly, avoiding browser wrappers.
+ */
+export async function printBoxSticker(options) {
+  const canvas = await generateBoxStickerCanvas(options);
+  const documentTitle = options.documentTitle || `RMA-Verification-Label-${options.rmaNumber || 'Ticket'}`;
+  await printHighResCanvas(canvas, documentTitle);
+  return true;
+}
+
+/**
+ * Generate Official Workplace Instruction Poster Canvas
+ * High-resolution 1200x1750px poster with QR code and numbered step-by-step reporting instructions.
+ */
+export async function generatePortalPosterCanvas({
   svgElementOrId,
-  portalUrl = 'https://rma-portal-v2.vercel.app',
-  filename = 'RMA-Scan-To-Report-Poster.png'
+  portalUrl = 'https://rma-portal-v2.vercel.app'
 }) {
   const svgEl = typeof svgElementOrId === 'string'
     ? document.getElementById(svgElementOrId)
@@ -463,10 +479,10 @@ export async function downloadPortalPosterPng({
     ctx.fillText('HOW TO FILE A RETURN REPORT', width / 2, 1110);
 
     const steps = [
-      { num: '1', title: 'Scan QR with Phone', desc: 'Open camera app on mobile phone/tablet and point at this code' },
-      { num: '2', title: 'Scan Barcode or Search', desc: 'Use camera barcode reader or live lookup across 5,700+ ERPLY items' },
-      { num: '3', title: 'Attach Defect Photos', desc: 'Snap photo of damaged packaging and enter return quantity' },
-      { num: '4', title: 'Print Box QR Sticker', desc: 'Tape generated thermal sticker on outer box for dock receiving' }
+      { num: '1', title: 'Step 1: Scan QR with Phone', desc: 'Open camera app on mobile phone/tablet and point at this code' },
+      { num: '2', title: 'Step 2: Scan Barcode or Search', desc: 'Use the built-in camera barcode reader or search the catalog.' },
+      { num: '3', title: 'Step 3: Attach Defect Photos', desc: 'Snap photo of damaged packaging and enter return quantity' },
+      { num: '4', title: 'Step 4: Print Box QR Sticker', desc: 'Tape generated thermal sticker on outer box for dock receiving' }
     ];
 
     steps.forEach((step, idx) => {
@@ -509,18 +525,95 @@ export async function downloadPortalPosterPng({
     ctx.textAlign = 'center';
     ctx.fillText('No login required to submit return tickets • Authorized Wholesale System', width / 2, 1690);
 
-    canvas.toBlob((blob) => {
-      if (blob) {
-        triggerDownload(blob, filename);
-      } else {
-        triggerDownload(canvas.toDataURL('image/png'), filename);
-      }
-    }, 'image/png');
-
-    return true;
+    return canvas;
   } finally {
     URL.revokeObjectURL(blobUrl);
   }
+}
+
+/**
+ * Download Official Workplace Instruction Poster (PNG)
+ */
+export async function downloadPortalPosterPng({
+  svgElementOrId,
+  portalUrl = 'https://rma-portal-v2.vercel.app',
+  filename = 'RMA-Scan-To-Report-Poster.png'
+}) {
+  const canvas = await generatePortalPosterCanvas({ svgElementOrId, portalUrl });
+  canvas.toBlob((blob) => {
+    if (blob) {
+      triggerDownload(blob, filename);
+    } else {
+      triggerDownload(canvas.toDataURL('image/png'), filename);
+    }
+  }, 'image/png');
+  return true;
+}
+
+/**
+ * Print Official Workplace Instruction Poster
+ * Targets the high-resolution downloadable poster canvas directly.
+ */
+export async function printPortalPoster({
+  svgElementOrId,
+  portalUrl = 'https://rma-portal-v2.vercel.app',
+  documentTitle = 'RMA-Public-Reporting-Poster'
+}) {
+  const canvas = await generatePortalPosterCanvas({ svgElementOrId, portalUrl });
+  await printHighResCanvas(canvas, documentTitle);
+  return true;
+}
+
+/**
+ * Mount and print a high-resolution canvas element directly in browser.
+ * Hides all modal dialog shells and backgrounds during print.
+ */
+export async function printHighResCanvas(canvas, documentTitle = 'Print Document') {
+  if (typeof document === 'undefined') return;
+
+  let mount = document.getElementById('dedicated-print-mount');
+  if (!mount) {
+    mount = document.createElement('div');
+    mount.id = 'dedicated-print-mount';
+    document.body.appendChild(mount);
+  }
+
+  const originalTitle = document.title;
+  document.title = documentTitle;
+  document.body.classList.add('is-printing-highres');
+
+  const dataUrl = canvas.toDataURL('image/png');
+  mount.innerHTML = `<img id="dedicated-print-image" src="${dataUrl}" alt="${documentTitle}" />`;
+
+  const img = mount.querySelector('img');
+
+  const cleanup = () => {
+    document.body.classList.remove('is-printing-highres');
+    if (mount) mount.innerHTML = '';
+    document.title = originalTitle;
+    window.removeEventListener('afterprint', cleanup);
+  };
+
+  window.addEventListener('afterprint', cleanup, { once: true });
+
+  await new Promise((resolve) => {
+    if (img && img.complete) {
+      resolve();
+    } else if (img) {
+      img.onload = () => resolve();
+      img.onerror = () => resolve();
+    } else {
+      resolve();
+    }
+  });
+
+  // Brief pause to ensure DOM update is painted
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  window.print();
+
+  // Safety fallback cleanup in case afterprint does not fire
+  setTimeout(cleanup, 4000);
 }
 
 /**

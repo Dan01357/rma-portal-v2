@@ -16,12 +16,13 @@ import {
   Info,
   RefreshCw
 } from 'lucide-react';
-import { downloadPortalPosterPng, downloadQrCodePng } from '../utils/qrDownload';
+import { downloadPortalPosterPng, downloadQrCodePng, printPortalPoster } from '../utils/qrDownload';
 
 export default function PortalAccessQRModal({ isOpen, onClose }) {
   const [isCopied, setIsCopied] = useState(false);
   const [isDownloadingPoster, setIsDownloadingPoster] = useState(false);
   const [isDownloadingQr, setIsDownloadingQr] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   if (!isOpen) return null;
 
@@ -73,8 +74,20 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
     }
   };
 
-  const handlePrint = () => {
-    window.print();
+  const handlePrint = async () => {
+    setIsPrinting(true);
+    try {
+      await printPortalPoster({
+        svgElementOrId: 'portal-access-qr-svg',
+        portalUrl,
+        documentTitle: 'RMA-Public-Reporting-Poster'
+      });
+    } catch (err) {
+      console.error('Error printing poster:', err);
+      window.print();
+    } finally {
+      setIsPrinting(false);
+    }
   };
 
   return (
@@ -174,7 +187,7 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
                   1
                 </div>
                 <div>
-                  <div className="font-bold text-slate-900 dark:text-white">Scan QR with Phone</div>
+                  <div className="font-bold text-slate-900 dark:text-white">Step 1: Scan QR with Phone</div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
                     Open your smartphone camera or scanner and point at this QR code to launch the reporting portal.
                   </p>
@@ -186,9 +199,9 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
                   2
                 </div>
                 <div>
-                  <div className="font-bold text-slate-900 dark:text-white">Scan Barcode or Search</div>
+                  <div className="font-bold text-slate-900 dark:text-white">Step 2: Scan Barcode or Search</div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
-                    Tap "Launch Camera Barcode Scanner" or search the product by SKU or name in the live 5,700+ catalog.
+                    Use the built-in camera barcode reader or search the catalog.
                   </p>
                 </div>
               </div>
@@ -198,7 +211,7 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
                   3
                 </div>
                 <div>
-                  <div className="font-bold text-slate-900 dark:text-white">Snap Defect Photos</div>
+                  <div className="font-bold text-slate-900 dark:text-white">Step 3: Snap Defect Photos</div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
                     Attach photos of damaged cartons or packaging breaches. Enter quantity and tap "Submit Return Ticket".
                   </p>
@@ -210,7 +223,7 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
                   4
                 </div>
                 <div>
-                  <div className="font-bold text-slate-900 dark:text-white">Print Box QR Sticker</div>
+                  <div className="font-bold text-slate-900 dark:text-white">Step 4: Print Box QR Sticker</div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
                     Print the generated thermal sticker or download it to tape directly onto the returned carton for receiving dock intake.
                   </p>
@@ -251,12 +264,13 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
 
             <button
               type="button"
+              disabled={isPrinting}
               onClick={handlePrint}
               className="min-h-[44px] px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Print directly to standard printer"
+              title="Print high-resolution reporting poster"
             >
-              <Printer className="w-3.5 h-3.5" />
-              <span>Print</span>
+              {isPrinting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
+              <span>{isPrinting ? 'Preparing Poster...' : 'Print'}</span>
             </button>
           </div>
         </div>

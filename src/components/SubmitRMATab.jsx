@@ -438,13 +438,13 @@ export default function SubmitRMATab({
             </button>
           </div>
 
-          {/* Live SKU Search Dropdown / Input (Connected to 5,793 live ERPLY items) */}
+          {/* Live SKU Search Dropdown / Input */}
           {isSearchingManually && (
             <div className="p-4 bg-slate-50 dark:bg-slate-950/70 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 animate-in fade-in duration-200">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                   <Search className="w-3.5 h-3.5 text-brand-600" />
-                  Live Product Lookup (5,793 ERPLY Items):
+                  Live Product Catalog Lookup:
                 </label>
                 <span className="text-[10px] text-slate-500 font-mono">
                   Type code or brand name
@@ -522,7 +522,7 @@ export default function SubmitRMATab({
                   ))
                 ) : searchQuery ? (
                   <div className="col-span-2 text-center py-6 text-xs text-slate-500">
-                    {isSearchingLive ? 'Searching live ERPLY database...' : `No matching products found for "${searchQuery}". You can still type the barcode manually or launch the camera.`}
+                    {isSearchingLive ? 'Searching live catalog database...' : `No matching products found for "${searchQuery}". You can still type the barcode manually or launch the camera.`}
                   </div>
                 ) : (
                   catalog.slice(0, 6).map(prod => (
@@ -566,10 +566,10 @@ export default function SubmitRMATab({
 
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { sku: 'P2478P', label: 'CDO Luncheon Meat (Live ERPLY)' },
-                    { sku: 'P1728P', label: 'Fibisco Crunchies (Live ERPLY)' },
-                    { sku: 'SS1247P', label: 'Swiss Miss Choco (Live ERPLY)' },
-                    { sku: 'SS1561P', label: 'Royal Filipino (Live ERPLY)' },
+                    { sku: 'P2478P', label: 'CDO Luncheon Meat' },
+                    { sku: 'P1728P', label: 'Fibisco Crunchies' },
+                    { sku: 'SS1247P', label: 'Swiss Miss Choco' },
+                    { sku: 'SS1561P', label: 'Royal Filipino' },
                     { sku: 'PC-TIS-001', label: 'Pingcon Jumbo Tissue' },
                     { sku: 'BON-FAC-001', label: 'Bonita Facial Box' }
                   ].map((item) => (

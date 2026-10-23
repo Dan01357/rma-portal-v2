@@ -79,8 +79,13 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         setPrice(product.price !== undefined ? String(product.price) : '0');
         setPriceWithVat(product.price_with_vat !== undefined ? String(product.price_with_vat) : String(product.priceWithVat || '0'));
         setUnitName(product.unit_name || product.unitName || 'pc');
-        setImageUrl(product.image_url || product.imageUrl || '');
-        setPhotoPreview(product.image_url || product.imageUrl || null);
+
+        // Only preload image if it is an existing verified catalog product with an official image.
+        // For unassigned barcodes or new SKU assignments, strictly start with empty state placeholder.
+        const isVerifiedCatalogItem = Boolean(product.id && product.is_verified !== false);
+        const catalogImage = isVerifiedCatalogItem ? (product.image_url || product.imageUrl || '') : '';
+        setImageUrl(catalogImage);
+        setPhotoPreview(catalogImage || null);
 
         // Prepopulate AE if saved
         if (product.ae_name || product.ae_email) {
@@ -311,8 +316,9 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                     </div>
                   </div>
                 ) : (
-                  <div className="w-20 h-20 rounded-2xl bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 flex items-center justify-center shrink-0 border border-slate-300 dark:border-slate-600">
-                    <ImageIcon className="w-7 h-7" />
+                  <div className="w-20 h-20 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex flex-col items-center justify-center shrink-0 border-2 border-dashed border-slate-300 dark:border-slate-700">
+                    <ImageIcon className="w-6 h-6 mb-0.5 opacity-60" />
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">No Image</span>
                   </div>
                 )}
 

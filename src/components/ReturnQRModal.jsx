@@ -11,13 +11,14 @@ import {
   Sparkles,
   RefreshCw
 } from 'lucide-react';
-import { downloadQrCodePng, downloadBoxStickerPng } from '../utils/qrDownload';
+import { downloadQrCodePng, downloadBoxStickerPng, printBoxSticker } from '../utils/qrDownload';
 
 export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickAction }) {
   if (!isOpen || !report) return null;
 
   const [downloadingType, setDownloadingType] = useState(null); // 'qr' | 'label' | null
   const [downloadNotice, setDownloadNotice] = useState(null);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   const rmaNumber = report.rma_number || report.rmaNumber || report.id || 'N/A';
   const barcode = report.barcode || 'N/A';
@@ -39,15 +40,29 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
     ? `${window.location.origin}/?rma=${encodeURIComponent(rmaNumber)}`
     : rmaNumber;
 
-  const handlePrint = () => {
-    const originalTitle = document.title;
-    document.title = `RMA-QR-Sticker-${rmaNumber}`;
-    document.body.classList.add('printing-sticker');
-    window.print();
-    setTimeout(() => {
-      document.title = originalTitle;
-      document.body.classList.remove('printing-sticker');
-    }, 1200);
+  const handlePrint = async () => {
+    setIsPrinting(true);
+    try {
+      await printBoxSticker({
+        svgElementOrId: 'rma-sticker-qr-svg',
+        rmaNumber,
+        supplier,
+        itemName,
+        barcode,
+        sku,
+        quantity,
+        unit,
+        reason,
+        reporter,
+        dateFormatted,
+        documentTitle: `RMA-Verification-Label-${rmaNumber}`
+      });
+    } catch (err) {
+      console.error('Failed to print sticker directly:', err);
+      window.print();
+    } finally {
+      setIsPrinting(false);
+    }
   };
 
   const handleDownloadQrOnly = async () => {
@@ -327,12 +342,13 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
             {/* 3. Print Sticker Button */}
             <button
               onClick={handlePrint}
+              disabled={isPrinting}
               type="button"
-              className="touch-target px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-md shadow-blue-600/25 cursor-pointer active:scale-95"
-              title="Print Sticker or Save PDF"
+              className="touch-target px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-md shadow-blue-600/25 cursor-pointer active:scale-95 disabled:opacity-75"
+              title="Print high-resolution official sticker label"
             >
-              <Printer className="w-4 h-4" />
-              <span className="truncate">Print Label</span>
+              {isPrinting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+              <span className="truncate">{isPrinting ? 'Preparing Label...' : 'Print Label'}</span>
             </button>
 
             {/* 4. Quick Actions / Close */}

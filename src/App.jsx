@@ -507,30 +507,29 @@ export default function App() {
   // Edit item from Return Reports to save into Products catalog
   const handleEditProductFromReport = (report) => {
     if (!report) return;
-    const existing = savedProductsList.find(p => p.barcode === report.barcode);
-    if (existing) {
+    const existing = savedProductsList.find(p => p.barcode && String(p.barcode) === String(report.barcode));
+    if (existing && existing.is_verified) {
       setEditingProduct(existing);
     } else {
-      const photoList = Array.isArray(report.photos) 
-        ? report.photos 
-        : (typeof report.photos === 'string' ? JSON.parse(report.photos || '[]') : []);
-
       const cleanName = report.name && !report.name.toLowerCase().includes('unidentified') 
         ? report.name 
         : '';
 
+      // Unassigned barcode: MUST start with NO default product image (empty placeholder state)
+      // Never preload damage / defect report photos as product catalog images!
       setEditingProduct({
         name: cleanName,
         barcode: report.barcode || '',
-        code: report.code || report.sku || '',
-        supplier_name: report.supplier_name || 'Savemore',
-        price: report.price || 0,
-        price_with_vat: report.price_with_vat || report.price || 0,
-        unit_name: report.unit_name || 'pc',
-        image_url: photoList[0] || report.photo_url || report.image_url || '',
-        ae_name: report.ae_name || '',
-        ae_email: report.ae_email || '',
-        company: 'Wholesale Distribution'
+        code: report.code || report.sku || (existing?.code || ''),
+        supplier_name: report.supplier_name || existing?.supplier_name || 'Savemore',
+        price: report.price || existing?.price || 0,
+        price_with_vat: report.price_with_vat || existing?.price_with_vat || report.price || 0,
+        unit_name: report.unit_name || existing?.unit_name || 'pc',
+        image_url: '', // Strictly empty state / placeholder
+        ae_name: report.ae_name || existing?.ae_name || '',
+        ae_email: report.ae_email || existing?.ae_email || '',
+        company: 'Wholesale Distribution',
+        is_verified: false
       });
     }
     setIsProductEditOpen(true);

@@ -26,18 +26,27 @@ export default function NotificationBell({
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  // Close dropdown on click outside
+  // Close dropdown on click outside or touch or Escape key
   useEffect(() => {
     function handleClickOutside(event) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setIsOpen(false);
       }
     }
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+      }
+    }
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen]);
 
@@ -100,7 +109,7 @@ export default function NotificationBell({
 
   return (
     <div className="relative inline-block text-left" ref={dropdownRef}>
-      {/* Bell Button with Facebook-style unread counter */}
+      {/* Bell Button with unread counter */}
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
@@ -120,10 +129,30 @@ export default function NotificationBell({
         )}
       </button>
 
-      {/* Floating Dropdown Window (Facebook Style) */}
+      {/* Mobile Backdrop Overlay (< 768px) */}
       {isOpen && (
-        <div className="absolute right-0 mt-2.5 w-[calc(100vw-1.5rem)] sm:w-[400px] max-w-[400px] -mr-2 sm:mr-0 bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 z-50 overflow-hidden flex flex-col max-h-[85dvh] sm:max-h-[560px] animate-in fade-in zoom-in-95 duration-150">
-          
+        <div 
+          className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 md:hidden transition-opacity"
+          onClick={() => setIsOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Responsive Notification Menu / Drawer */}
+      {isOpen && (
+        <div 
+          className="
+            fixed inset-x-3 top-16 z-50 max-h-[80dvh]
+            md:absolute md:inset-auto md:right-0 md:top-full md:mt-2.5 md:w-[420px] md:max-h-[580px]
+            bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800
+            overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150
+          "
+        >
+          {/* Mobile Drag Indicator */}
+          <div className="md:hidden pt-2.5 pb-0.5 flex justify-center shrink-0">
+            <div className="w-10 h-1 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+          </div>
+
           {/* Header */}
           <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-white dark:bg-slate-900">
             <div className="flex items-center gap-2">
@@ -142,7 +171,7 @@ export default function NotificationBell({
                 <button
                   type="button"
                   onClick={onMarkAllAsRead}
-                  className="px-2.5 py-1 text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-xl transition-colors flex items-center gap-1"
+                  className="px-2.5 py-1 text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
                   title="Mark all as read"
                 >
                   <CheckCheck className="w-3.5 h-3.5" />
@@ -152,7 +181,9 @@ export default function NotificationBell({
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer touch-target"
+                title="Close notifications"
+                aria-label="Close notifications"
               >
                 <X className="w-4 h-4" />
               </button>
