@@ -8,7 +8,15 @@ import {
   RefreshCw, 
   CheckCircle2, 
   AlertCircle,
-  QrCode
+  QrCode,
+  Users,
+  Plus,
+  Trash2,
+  Save,
+  RotateCcw,
+  Check,
+  AtSign,
+  Shield
 } from 'lucide-react';
 import { rmaApi } from '../supabaseClient';
 import { applyEmailTestMode } from '../utils/rmaHelpers';
@@ -17,7 +25,8 @@ import { notificationService } from '../services/notificationService';
 export default function SettingsTab({ 
   isTestMode, 
   onToggleTestMode,
-  onOpenPortalQr
+  onOpenPortalQr,
+  currentUser
 }) {
   const [connectionStatus, setConnectionStatus] = useState({
     loading: false,
@@ -36,11 +45,47 @@ export default function SettingsTab({
     hadSpaces: false
   });
 
+  // Super Admin Configurable RMA Email Recipients State
+  const [mainRecipient, setMainRecipient] = useState('azgodev@gmail.com');
+  const [ccRecipients, setCcRecipients] = useState([
+    'mgan@pingconmarketing.com',
+    'marketing@pingconmarketing.com',
+    'azgan@pingconmarketing.com',
+    'jaezelle.benito@pingconmarketing.com'
+  ]);
+  const [newCcInput, setNewCcInput] = useState('');
+  const [isSavingRecipients, setIsSavingRecipients] = useState(false);
+  const [recipientFeedback, setRecipientFeedback] = useState(null);
+
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://lschluviltzsknptwgrz.supabase.co';
   const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_Jrv9ZNgGXJ4PZoNWCJSHxQ_7hZtQqd3';
 
   useEffect(() => {
     handleCheckConnection();
+
+    // 1. Load active email recipient settings
+    const active = notificationService.getEmailSettings();
+    if (active?.toEmail) setMainRecipient(active.toEmail);
+    if (Array.isArray(active?.baseCcList)) setCcRecipients(active.baseCcList);
+
+    // 2. Load from Supabase rma_settings if available
+    notificationService.loadEmailSettingsFromDb().then(dbSettings => {
+      if (dbSettings?.toEmail) setMainRecipient(dbSettings.toEmail);
+      if (Array.isArray(dbSettings?.baseCcList)) setCcRecipients(dbSettings.baseCcList);
+    });
+
+    const handleSyncRecipients = () => {
+      const updated = notificationService.getEmailSettings();
+      if (updated?.toEmail) setMainRecipient(updated.toEmail);
+      if (Array.isArray(updated?.baseCcList)) setCcRecipients(updated.baseCcList);
+    };
+
+    window.addEventListener('rma-settings-changed', handleSyncRecipients);
+    window.addEventListener('storage', handleSyncRecipients);
+    return () => {
+      window.removeEventListener('rma-settings-changed', handleSyncRecipients);
+      window.removeEventListener('storage', handleSyncRecipients);
+    };
   }, []);
 
   const handleCheckConnection = async () => {
@@ -68,6 +113,79 @@ export default function SettingsTab({
     });
   };
 
+  // Add CC email to list
+  const handleAddCcEmail = (e) => {
+    if (e) e.preventDefault();
+    const clean = newCcInput.trim().toLowerCase();
+    if (!clean) return;
+
+    if (!clean.includes('@') || !clean.includes('.')) {
+      setRecipientFeedback({ type: 'error', message: 'Please enter a valid email address.' });
+      return;
+    }
+
+    if (ccRecipients.map(c => c.toLowerCase()).includes(clean)) {
+      setRecipientFeedback({ type: 'error', message: 'This email is already in the CC list.' });
+      return;
+    }
+
+    setCcRecipients(prev => [...prev, clean]);
+    setNewCcInput('');
+    setRecipientFeedback(null);
+  };
+
+  // Remove CC email from list
+  const handleRemoveCcEmail = (emailToRemove) => {
+    setCcRecipients(prev => prev.filter(email => email.toLowerCase() !== emailToRemove.toLowerCase()));
+    setRecipientFeedback(null);
+  };
+
+  // Restore Default Corporate Recipients
+  const handleResetDefaults = () => {
+    const defaults = {
+      toEmail: 'azgodev@gmail.com',
+      baseCcList: [
+        'mgan@pingconmarketing.com',
+        'marketing@pingconmarketing.com',
+        'azgan@pingconmarketing.com',
+        'jaezelle.benito@pingconmarketing.com'
+      ]
+    };
+    setMainRecipient(defaults.toEmail);
+    setCcRecipients(defaults.baseCcList);
+    setRecipientFeedback({ type: 'success', message: 'Corporate defaults restored! Click "Save Changes" to apply.' });
+  };
+
+  // Save Recipient Settings
+  const handleSaveRecipients = async () => {
+    const cleanTo = mainRecipient.trim().toLowerCase();
+    if (!cleanTo || !cleanTo.includes('@') || !cleanTo.includes('.')) {
+      setRecipientFeedback({ type: 'error', message: 'Please enter a valid Primary TO recipient email address.' });
+      return;
+    }
+
+    setIsSavingRecipients(true);
+    setRecipientFeedback(null);
+
+    try {
+      await notificationService.saveEmailSettings({
+        toEmail: cleanTo,
+        baseCcList: ccRecipients
+      });
+      setRecipientFeedback({ 
+        type: 'success', 
+        message: 'RMA email recipients successfully updated and active for all notifications!' 
+      });
+      setTimeout(() => setRecipientFeedback(null), 4000);
+    } catch (err) {
+      setRecipientFeedback({ type: 'error', message: err.message || 'Failed to save recipients.' });
+    } finally {
+      setIsSavingRecipients(false);
+    }
+  };
+
+  const isSuperAdmin = currentUser?.role === 'super_admin';
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       
@@ -87,7 +205,156 @@ export default function SettingsTab({
         </p>
       </div>
 
-      {/* Test Mode Switch Card */}
+      {/* CARD 1: SUPER ADMIN RMA EMAIL RECIPIENTS CONFIGURATION */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+          <div className="flex items-center space-x-3">
+            <div className="p-2.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
+                  RMA Email Notification Recipients
+                </h2>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                  Super Admin
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Configure Main TO recipient and Corporate CC distribution list for all official RMA return reports.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <button
+              type="button"
+              onClick={handleResetDefaults}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Reset to corporate standard recipients"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset Defaults</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSaveRecipients}
+              disabled={isSavingRecipients}
+              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black rounded-xl flex items-center gap-1.5 transition-all shadow-sm cursor-pointer disabled:opacity-50"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>{isSavingRecipients ? 'Saving...' : 'Save Recipients'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Feedback message */}
+        {recipientFeedback && (
+          <div className={`p-3.5 rounded-2xl text-xs font-bold border flex items-center gap-2 animate-in fade-in ${
+            recipientFeedback.type === 'success'
+              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+              : 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+          }`}>
+            {recipientFeedback.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+            )}
+            <span>{recipientFeedback.message}</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-6">
+          {/* Main Primary Recipient (TO) */}
+          <div className="space-y-2">
+            <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center justify-between">
+              <span>Primary Main Recipient (TO Address)</span>
+              <span className="text-[11px] font-normal text-slate-400 lowercase">Single Primary Target</span>
+            </label>
+            <div className="relative">
+              <AtSign className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="email"
+                value={mainRecipient}
+                onChange={(e) => setMainRecipient(e.target.value)}
+                placeholder="e.g. azgodev@gmail.com or finance@company.com"
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl text-xs font-mono text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              The primary destination mailbox for automated RMA alerts. In Live Mode, emails are dispatched directly to this address.
+            </p>
+          </div>
+
+          {/* CC Distribution List */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Carbon Copy Distribution List (CC Addresses)
+              </label>
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                {ccRecipients.length} Recipient{ccRecipients.length === 1 ? '' : 's'}
+              </span>
+            </div>
+
+            {/* CC Chips / Badges Container */}
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl min-h-[58px] flex flex-wrap gap-2 items-center">
+              {ccRecipients.length === 0 ? (
+                <span className="text-xs text-slate-400 italic">No CC recipients configured. Add one below.</span>
+              ) : (
+                ccRecipients.map((email) => (
+                  <span
+                    key={email}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono shadow-2xs group"
+                  >
+                    <span>{email}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveCcEmail(email)}
+                      className="text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer p-0.5 rounded-md"
+                      title={`Remove ${email}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+
+            {/* Add new CC form */}
+            <form onSubmit={handleAddCcEmail} className="flex gap-2">
+              <div className="relative flex-1">
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="email"
+                  value={newCcInput}
+                  onChange={(e) => setNewCcInput(e.target.value)}
+                  placeholder="Enter email to add to CC (e.g. manager@pingconmarketing.com)"
+                  className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <button
+                type="submit"
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add CC</span>
+              </button>
+            </form>
+
+            <div className="p-3 bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-900/40 rounded-xl text-[11px] text-blue-900 dark:text-blue-200 leading-relaxed flex items-start gap-2">
+              <Check className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+              <span>
+                <strong>Smart Dynamic AE Addition:</strong> The Customer Account Executive (AE) assigned to the product (e.g. <code>alleli.almaida@ph.keysys.com</code>) is <strong>automatically appended</strong> to this CC list upon report dispatch.
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* CARD 2: TEST MODE SWITCH CARD */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="space-y-1">
@@ -132,13 +399,20 @@ export default function SettingsTab({
         </div>
 
         {/* Live email preview example */}
-        <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-mono space-y-1">
+        <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-mono space-y-1.5">
           <span className="text-[11px] font-sans font-semibold text-slate-500 dark:text-slate-400 block mb-1">
-            Example Recipient Output with current setting:
+            Live Recipient Output with Current Configuration:
           </span>
           <div className="text-slate-700 dark:text-slate-300">
-            To: <span className={isTestMode ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-emerald-600 dark:text-emerald-400'}>
-              {isTestMode ? 'finance2@keysysincorporated.com (Live target azgodev@gmail.com safely bypassed)' : 'azgodev@gmail.com'}
+            <strong>Target TO:</strong> <span className={isTestMode ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-emerald-600 dark:text-emerald-400 font-bold'}>
+              {isTestMode ? `finance2@keysysincorporated.com (Live target "${mainRecipient}" safely bypassed)` : mainRecipient}
+            </span>
+          </div>
+          <div className="text-slate-700 dark:text-slate-300">
+            <strong>Target CC:</strong> <span className={isTestMode ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-700 dark:text-slate-300'}>
+              {isTestMode 
+                ? '[] (All CC recipients bypassed in Sandbox)' 
+                : `${ccRecipients.join(', ') || 'None'} + [Customer AE email]`}
             </span>
           </div>
         </div>

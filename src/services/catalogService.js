@@ -354,21 +354,6 @@ export const catalogService = {
     if (error) throw new Error(`Failed to save product: ${error.message}`);
 
     this.notifyChange('product-created', { barcode: cleanBarcode, product: data });
-
-    // Automated email dispatch: alert AE & finance when a new product is saved
-    try {
-      const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
-      notificationService.sendProductUpdateNotification({
-        product: data,
-        isNew: true,
-        editorName: 'Admin'
-      }, isTestActive).catch(err => {
-        console.warn('Background product creation email dispatch notice:', err.message);
-      });
-    } catch (e) {
-      console.warn('Failed to dispatch product creation email:', e);
-    }
-
     return { success: true, product: data };
   },
 
@@ -407,22 +392,6 @@ export const catalogService = {
     if (error) throw new Error(`Failed to update product: ${error.message}`);
 
     this.notifyChange('product-updated', { id, barcode, updates });
-
-    // Automated email dispatch: alert AE & finance when an existing product is updated/saved
-    try {
-      const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
-      const updatedProduct = data?.[0] || { id, barcode, ...updates };
-      notificationService.sendProductUpdateNotification({
-        product: updatedProduct,
-        isNew: false,
-        editorName: 'Admin'
-      }, isTestActive).catch(err => {
-        console.warn('Background product update email dispatch notice:', err.message);
-      });
-    } catch (e) {
-      console.warn('Failed to dispatch product update email:', e);
-    }
-
     return { success: true, product: data?.[0] };
   },
 
@@ -817,7 +786,22 @@ export const catalogService = {
       console.warn('Product catalog update notice:', err.message);
     }
 
-    // 2. Update all pending RMA reports that referenced this barcode
+    // 2. Fetch all pending reports matching this barcode so we can dispatch the official RMA notification email
+    let pendingReportsToNotify = [];
+    try {
+      const { data: matchedReports } = await supabase
+        .from('rma_reports')
+        .select('*')
+        .eq('barcode', cleanBarcode)
+        .or('status.eq.pending_admin_details,name.ilike.%unidentified%');
+      if (matchedReports && matchedReports.length > 0) {
+        pendingReportsToNotify = matchedReports;
+      }
+    } catch (e) {
+      console.warn('Notice querying pending rma_reports:', e.message);
+    }
+
+    // 3. Update all pending RMA reports that referenced this barcode
     try {
       await supabase
         .from('rma_reports')
@@ -841,18 +825,31 @@ export const catalogService = {
 
     this.notifyChange('barcode-verified', { barcode: cleanBarcode, updates });
 
-    // Automated email dispatch: alert AE & finance when an unassigned barcode is verified & assigned to catalog
-    try {
-      const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
-      notificationService.sendProductUpdateNotification({
-        product: { barcode: cleanBarcode, ...updates },
-        isNew: false,
-        editorName: 'Admin'
-      }, isTestActive).catch(err => {
-        console.warn('Background barcode verification product email dispatch notice:', err.message);
-      });
-    } catch (e) {
-      console.warn('Failed to dispatch verification email:', e);
+    // 4. Automated RMA Alert dispatch: alert AE & configured TO/CC recipients for the newly verified RMA report(s)
+    if (pendingReportsToNotify.length > 0) {
+      try {
+        const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
+        for (const rep of pendingReportsToNotify) {
+          const enrichedReport = {
+            ...rep,
+            code: updates.code,
+            name: updates.name,
+            supplier_name: updates.supplier_name,
+            price: updates.price,
+            price_with_vat: updates.price_with_vat,
+            unit_name: updates.unit_name,
+            ae_name: updates.ae_name,
+            ae_email: updates.ae_email,
+            company: updates.company,
+            status: 'pending'
+          };
+          notificationService.sendRMANotification(enrichedReport, isTestActive).catch(err => {
+            console.warn('Background RMA report notification notice on SKU assignment:', err.message);
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to dispatch RMA alert email on barcode verification:', e);
+      }
     }
 
     return { success: true };

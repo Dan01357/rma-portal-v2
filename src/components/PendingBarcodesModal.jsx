@@ -188,52 +188,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
         company: company
       });
 
-      // Dispatch automated RMA notification email with data from Return Reports table
-      try {
-        const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
-        
-        let reportData = null;
-        try {
-          const { data: matchedReports } = await supabase
-            .from('rma_reports')
-            .select('*')
-            .eq('barcode', selectedBarcode.barcode)
-            .order('created_at', { ascending: false })
-            .limit(1);
-          if (matchedReports && matchedReports.length > 0) {
-            reportData = matchedReports[0];
-          }
-        } catch (e) {
-          console.warn('Could not fetch return report for notification:', e);
-        }
 
-        const reportToNotify = {
-          rma_number: reportData?.rma_number || selectedBarcode.rma_number || `RMA-${new Date().getFullYear()}-0001`,
-          barcode: selectedBarcode.barcode,
-          code: formData.code,
-          name: formData.name,
-          quantity: reportData?.quantity || selectedBarcode.quantity || 1,
-          unit_name: formData.unitName || reportData?.unit_name || 'pc',
-          supplier_name: formData.supplierName,
-          reason: reportData?.reason || selectedBarcode.reason || 'Damaged Box / Crushed Packaging',
-          explanation: reportData?.explanation || selectedBarcode.explanation || '',
-          photos: reportData?.photos || selectedBarcode.photos || (formData.imageUrl ? [formData.imageUrl] : []),
-          reporter_name: reportData?.reporter_name || selectedBarcode.reporter_name || 'Warehouse Staff',
-          reporter_contact: reportData?.reporter_contact || selectedBarcode.reporter_contact || 'N/A',
-          gps_latitude: reportData?.gps_latitude || selectedBarcode.gps_latitude,
-          gps_longitude: reportData?.gps_longitude || selectedBarcode.gps_longitude,
-          gps_accuracy: reportData?.gps_accuracy || selectedBarcode.gps_accuracy,
-          ae_name: selectedAe.name,
-          ae_email: selectedAe.email,
-          company: company
-        };
-
-        notificationService.sendRMANotification(reportToNotify, isTestActive).catch(e => {
-          console.warn('Post-verification RMA report notification error:', e);
-        });
-      } catch (e) {
-        console.warn('Non-blocking notification notice:', e);
-      }
 
       setStatusMsg({ 
         type: 'success', 

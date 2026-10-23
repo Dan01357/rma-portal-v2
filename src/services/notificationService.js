@@ -12,23 +12,126 @@
  *    - TO: azgodev@gmail.com
  *    - CC: [Customer AE Company Email, mgan@a2z2go.net, marketing@a2z2go.net, azgan@a2z2go.net, jaezelle.benito@pingconmarketing.com]
  */
+import { supabase } from '../supabaseClient';
+
+const DEFAULT_RECIPIENTS = {
+  toEmail: 'azgodev@gmail.com',
+  baseCcList: [
+    'mgan@pingconmarketing.com',
+    'marketing@pingconmarketing.com',
+    'azgan@pingconmarketing.com',
+    'jaezelle.benito@pingconmarketing.com'
+  ]
+};
 
 export const notificationService = {
   /**
-   * Determine company configuration (Divisions removed - unified corporate setup)
+   * Get configured RMA email recipients (with local storage and corporate defaults)
+   */
+  getEmailSettings() {
+    try {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('rma_portal_email_recipients');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.toEmail) {
+            return {
+              toEmail: String(parsed.toEmail).trim(),
+              baseCcList: Array.isArray(parsed.baseCcList) ? parsed.baseCcList : DEFAULT_RECIPIENTS.baseCcList
+            };
+          }
+        }
+      }
+    } catch (e) {}
+    return { ...DEFAULT_RECIPIENTS };
+  },
+
+  /**
+   * Load email recipients from Supabase rma_settings table (if table exists)
+   */
+  async loadEmailSettingsFromDb() {
+    try {
+      const { data, error } = await supabase
+        .from('rma_settings')
+        .select('*')
+        .eq('key', 'email_recipients')
+        .single();
+
+      if (!error && data?.value?.toEmail) {
+        const settings = {
+          toEmail: String(data.value.toEmail).trim(),
+          baseCcList: Array.isArray(data.value.baseCcList) ? data.value.baseCcList : DEFAULT_RECIPIENTS.baseCcList
+        };
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('rma_portal_email_recipients', JSON.stringify(settings));
+        }
+        return settings;
+      }
+    } catch (e) {
+      // Supabase rma_settings table might not be created yet; fallback silently
+    }
+    return this.getEmailSettings();
+  },
+
+  /**
+   * Super Admin action: Save updated TO and CC recipients for RMA notifications
+   */
+  async saveEmailSettings({ toEmail, baseCcList }) {
+    const cleanTo = String(toEmail || '').trim();
+    if (!cleanTo || !cleanTo.includes('@')) {
+      throw new Error('A valid Primary TO recipient email is required.');
+    }
+
+    const cleanCcList = Array.isArray(baseCcList)
+      ? Array.from(new Set(baseCcList.map(e => String(e).trim()).filter(e => e.includes('@'))))
+      : [];
+
+    const newSettings = {
+      toEmail: cleanTo,
+      baseCcList: cleanCcList
+    };
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('rma_portal_email_recipients', JSON.stringify(newSettings));
+      window.dispatchEvent(new CustomEvent('rma-settings-changed', { detail: newSettings }));
+      window.dispatchEvent(new Event('storage'));
+      try {
+        if (window.BroadcastChannel) {
+          const ch = new BroadcastChannel('rma_portal_sync_bus');
+          ch.postMessage({ type: 'email-settings-updated', settings: newSettings });
+        }
+      } catch (e) {}
+    }
+
+    // Try persisting to Supabase rma_settings table
+    try {
+      await supabase
+        .from('rma_settings')
+        .upsert({
+          key: 'email_recipients',
+          value: newSettings,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'key' });
+    } catch (e) {
+      console.warn('Notice: rma_settings table not created yet in Supabase. Local storage active.');
+    }
+
+    return { success: true, settings: newSettings };
+  },
+
+  /**
+   * Determine company configuration with user-configurable recipients
    */
   resolveCompanyConfig(report) {
+    const settings = this.getEmailSettings();
     return {
       companyName: 'Wholesale RMA Returns',
       senderEmail: 'finance2@keysysincorporated.com',
       senderName: 'Wholesale RMA Finance Portal',
-      toEmail: 'azgodev@gmail.com',
-      baseCcList: [
-        'mgan@pingconmarketing.com',
-        'marketing@pingconmarketing.com',
-        'azgan@pingconmarketing.com',
-        'jaezelle.benito@pingconmarketing.com'
-      ]
+      toEmail: settings.toEmail || DEFAULT_RECIPIENTS.toEmail,
+      baseCcList: Array.isArray(settings.baseCcList) && settings.baseCcList.length > 0 
+        ? settings.baseCcList 
+        : DEFAULT_RECIPIENTS.baseCcList
     };
   },
 

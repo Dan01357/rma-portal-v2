@@ -2694,6 +2694,7 @@ export default function App() {
                 isTestMode={isTestMode}
                 onToggleTestMode={toggleTestMode}
                 onOpenPortalQr={() => setIsPortalAccessQrOpen(true)}
+                currentUser={currentUser}
               />
             )}
 
@@ -2813,8 +2814,14 @@ export default function App() {
               return rep;
             }));
 
-            // Persist to Supabase rma_reports table
+            // Persist to Supabase rma_reports table and alert on newly verified pending reports
             try {
+              const { data: matchedPending } = await supabase
+                .from('rma_reports')
+                .select('*')
+                .eq('barcode', barcode)
+                .or('status.eq.pending_admin_details,name.ilike.%unidentified%');
+
               await supabase
                 .from('rma_reports')
                 .update({
@@ -2829,6 +2836,28 @@ export default function App() {
                   status: 'logged'
                 })
                 .eq('barcode', barcode);
+
+              // If this return was waiting for SKU assignment, dispatch the official RMA report notification email!
+              if (matchedPending && matchedPending.length > 0) {
+                const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
+                for (const rep of matchedPending) {
+                  const enrichedReport = {
+                    ...rep,
+                    name: name,
+                    code: code,
+                    price: price,
+                    price_with_vat: priceWithVat,
+                    supplier_name: supplierName,
+                    unit_name: unitName,
+                    ae_name: aeName,
+                    ae_email: aeEmail,
+                    status: 'logged'
+                  };
+                  notificationService.sendRMANotification(enrichedReport, isTestActive).catch(e => {
+                    console.warn('Background RMA report notification notice on SKU assignment:', e);
+                  });
+                }
+              }
             } catch (e) {
               console.warn('Sync rma_reports from product save notice:', e);
             }
