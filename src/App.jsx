@@ -87,8 +87,21 @@ export default function App() {
     return path === '/admin' || path.startsWith('/admin/') || hash === '#/admin' || window.location.search.includes('admin=true');
   });
 
-  // Authenticated Admin User
-  const [currentUser, setCurrentUser] = useState(() => authService.getCurrentUser());
+  // Authenticated Admin User (with fallback to quick action admin session)
+  const [currentUser, setCurrentUser] = useState(() => {
+    const fromAuth = authService.getCurrentUser();
+    if (fromAuth) return fromAuth;
+    try {
+      const quick = typeof window !== 'undefined' ? (sessionStorage.getItem('rma_quick_auth_admin') || localStorage.getItem('rma_quick_auth_admin')) : null;
+      if (quick) {
+        const parsed = JSON.parse(quick);
+        if (parsed && (parsed.role === 'super_admin' || parsed.role === 'admin')) {
+          return parsed;
+        }
+      }
+    } catch (e) {}
+    return null;
+  });
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
 
@@ -2968,6 +2981,7 @@ export default function App() {
         onClose={handleCloseQuickRma}
         rmaNumber={quickRmaNumber}
         currentUser={currentUser}
+        onAdminVerified={(admin) => setCurrentUser(admin)}
         savedProductsList={savedProductsList}
         creditMemosList={creditMemosList}
         recentReportsList={recentReportsList}

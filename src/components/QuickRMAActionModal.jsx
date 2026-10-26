@@ -33,6 +33,7 @@ export default function QuickRMAActionModal({
   onClose,
   rmaNumber,
   currentUser,
+  onAdminVerified,
   savedProductsList = [],
   creditMemosList = [],
   recentReportsList = [],
@@ -98,13 +99,14 @@ export default function QuickRMAActionModal({
       return;
     }
 
-    // Check session storage cache for verified admin
+    // Check session or local storage cache for verified admin
     try {
-      const cached = sessionStorage.getItem(QUICK_AUTH_STORAGE_KEY);
+      const cached = sessionStorage.getItem(QUICK_AUTH_STORAGE_KEY) || localStorage.getItem(QUICK_AUTH_STORAGE_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed && (parsed.role === 'super_admin' || parsed.role === 'admin')) {
           setVerifiedAdmin(parsed);
+          if (onAdminVerified) onAdminVerified(parsed);
           return;
         }
       }
@@ -276,6 +278,12 @@ export default function QuickRMAActionModal({
 
       setVerifiedAdmin(verified);
       sessionStorage.setItem(QUICK_AUTH_STORAGE_KEY, JSON.stringify(verified));
+      try {
+        localStorage.setItem(QUICK_AUTH_STORAGE_KEY, JSON.stringify(verified));
+      } catch (e) {}
+      if (onAdminVerified) {
+        onAdminVerified(verified);
+      }
       setAuthSuccessMsg(`Welcome, ${verified.name}! Admin Quick Actions unlocked.`);
     } catch (err) {
       setAuthError(`Verification error: ${err.message}`);

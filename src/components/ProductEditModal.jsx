@@ -52,7 +52,6 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   const [skuError, setSkuError] = useState(null);
   const [nameError, setNameError] = useState(null);
 
-  const canEdit = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
 
   // Fetch employees from authService directory on open
   useEffect(() => {
@@ -627,17 +626,15 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
               Cancel
             </button>
             
-            {canEdit && (
-              <button
-                type="submit"
-                form="product-edit-form"
-                disabled={isLoading}
-                className="touch-target px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all cursor-pointer active:scale-95"
-              >
-                {isLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                <span>{isEditing ? 'Save Changes' : 'Save Product'}</span>
-              </button>
-            )}
+            <button
+              type="submit"
+              form="product-edit-form"
+              disabled={isLoading}
+              className="touch-target px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all cursor-pointer active:scale-95"
+            >
+              {isLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              <span>{isEditing ? 'Save Changes' : 'Save Product'}</span>
+            </button>
           </div>
         </div>
 
