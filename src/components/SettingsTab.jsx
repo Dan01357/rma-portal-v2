@@ -24,6 +24,7 @@ import { rmaApi, supabase } from '../supabaseClient';
 import { applyEmailTestMode } from '../utils/rmaHelpers';
 import { notificationService } from '../services/notificationService';
 import { purchaseOrdersApi } from '../services/purchaseOrdersApi';
+import ApiKeysManagementSection from './ApiKeysManagementSection';
 
 export default function SettingsTab({ 
   isTestMode, 
@@ -723,6 +724,9 @@ export default function SettingsTab({
           </div>
         </div>
       </div>
+
+      {/* 5. MULTI-SYSTEM REST API KEYS & INTEGRATION (SHA-256 HASHED) */}
+      <ApiKeysManagementSection />
 
     </div>
   );
