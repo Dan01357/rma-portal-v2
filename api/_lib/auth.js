@@ -3,22 +3,30 @@ import { hashApiKey } from './keyUtils.js';
 
 /**
  * Applies standard RFC CORS headers to the response.
+ * Dynamically reflects caller origin when present to support browser clients (fetch/axios) with credentials.
  */
-export function setCorsHeaders(res) {
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
+export function setCorsHeaders(res, req = null) {
+  const origin = req?.headers?.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader(
     'Access-Control-Allow-Headers',
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, x-api-key, Authorization'
   );
+  res.setHeader('Access-Control-Max-Age', '86400');
 }
 
 /**
  * Standardized JSON response helper.
  */
-export function sendJson(res, statusCode, body) {
-  setCorsHeaders(res);
+export function sendJson(res, statusCode, body, req = null) {
+  setCorsHeaders(res, req);
   return res.status(statusCode).json(body);
 }
 
@@ -31,10 +39,10 @@ export function sendJson(res, statusCode, body) {
  * Returns client context { id, name, rateLimit, maskedKey } or throws/responds with 401/403.
  */
 export async function requireApiKey(req, res) {
-  setCorsHeaders(res);
+  setCorsHeaders(res, req);
 
   if (req.method === 'OPTIONS') {
-    res.status(200).end();
+    res.status(204).end();
     return null;
   }
 

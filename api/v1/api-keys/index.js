@@ -3,10 +3,10 @@ import { generateApiKeyPair, ALLOWED_SYSTEMS } from '../../_lib/keyUtils.js';
 import { sendJson, setCorsHeaders } from '../../_lib/auth.js';
 
 export default async function handler(req, res) {
-  setCorsHeaders(res);
+  setCorsHeaders(res, req);
 
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    return res.status(204).end();
   }
 
   // GET: List all API Keys (Masked only, safe for admin dashboard)

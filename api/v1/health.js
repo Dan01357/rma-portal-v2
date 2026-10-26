@@ -3,10 +3,10 @@ import { setCorsHeaders, sendJson } from '../_lib/auth.js';
 import { hashApiKey } from '../_lib/keyUtils.js';
 
 export default async function handler(req, res) {
-  setCorsHeaders(res);
+  setCorsHeaders(res, req);
 
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    return res.status(204).end();
   }
 
   const startTime = Date.now();
