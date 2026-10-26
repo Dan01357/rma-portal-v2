@@ -1,7 +1,10 @@
 {
   "rewrites": [
     { "source": "/docs", "destination": "/api/docs" },
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/api/v1/api-keys/:id", "destination": "/api/v1/api-keys/[id]?id=:id" },
+    { "source": "/api/v1/rma/:id", "destination": "/api/v1/rma/[id]?id=:id" },
+    { "source": "/api/v1/products/:id", "destination": "/api/v1/products/[id]?id=:id" },
+    { "source": "/api/v1/credit-memos/:id", "destination": "/api/v1/credit-memos/[id]?id=:id" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

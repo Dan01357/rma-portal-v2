@@ -88,9 +88,14 @@ export default function ApiKeysManagementSection() {
         })
       });
 
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || 'Failed to generate key');
+      const text = await res.text();
+      let json = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch (e) {}
+
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.message || `Failed to generate key (Status ${res.status}): ${text.slice(0, 100)}`);
       }
 
       // Store revealed key to show user once
@@ -119,12 +124,21 @@ export default function ApiKeysManagementSection() {
 
     setActionLoading(`rotate-${keyItem.id}`);
     try {
-      const res = await fetch(`/api/v1/api-keys/${keyItem.id}`, {
-        method: 'PATCH'
+      // Use query parameter which routes cleanly to both index.js and [id].js
+      const res = await fetch(`/api/v1/api-keys?id=${encodeURIComponent(keyItem.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: keyItem.id })
       });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || 'Failed to rotate key');
+      
+      const text = await res.text();
+      let json = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch (e) {}
+
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.message || `Failed to rotate key (Status ${res.status}): ${text.slice(0, 100)}`);
       }
 
       setRevealedKey({
@@ -136,6 +150,7 @@ export default function ApiKeysManagementSection() {
       setHasCopied(false);
       await loadKeys();
     } catch (err) {
+      console.error('Rotate key error:', err);
       alert('Failed to rotate key: ' + err.message);
     } finally {
       setActionLoading(null);
@@ -151,18 +166,35 @@ export default function ApiKeysManagementSection() {
 
     setActionLoading(`revoke-${keyItem.id}`);
     try {
-      const res = await fetch(`/api/v1/api-keys/${keyItem.id}`, {
-        method: 'DELETE'
+      const res = await fetch(`/api/v1/api-keys?id=${encodeURIComponent(keyItem.id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: keyItem.id })
       });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || 'Failed to revoke key');
+
+      const text = await res.text();
+      let json = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch (e) {}
+
+      if (!res.ok || (json && !json.success)) {
+        // Direct Supabase fallback in case of serverless routing error
+        const { error: dbErr } = await supabase
+          .from('api_keys')
+          .delete()
+          .eq('id', keyItem.id);
+
+        if (dbErr) {
+          throw new Error(json?.message || dbErr.message || `Status ${res.status}`);
+        }
       }
 
       await loadKeys();
       setFeedback({ type: 'success', message: `API Key for ${keyItem.name} revoked successfully.` });
       setTimeout(() => setFeedback(null), 4000);
     } catch (err) {
+      console.error('Revoke key error:', err);
       alert('Failed to revoke key: ' + err.message);
     } finally {
       setActionLoading(null);
