@@ -1,6 +1,6 @@
 import { supabase } from '../../_lib/supabase.js';
 import { requireApiKey, sendJson, setCorsHeaders } from '../../_lib/auth.js';
-import lookupHandler from './lookup.js';
+import lookupHandler from '../../_lib/lookupHandler.js';
 
 export default async function handler(req, res) {
   setCorsHeaders(res);
