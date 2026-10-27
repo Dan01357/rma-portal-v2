@@ -109,7 +109,20 @@ export const rmaApi = {
     const cleanBarcode = String(barcode).trim();
     if (!cleanBarcode) return null;
 
-    // 1. Supabase lookup
+    // 1. Secure Serverless Proxy (/api/v1/products/lookup)
+    try {
+      const res = await fetch(`/api/v1/products/lookup?barcode=${encodeURIComponent(cleanBarcode)}`, {
+        headers: { 'Accept': 'application/json' }
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.found && json.product) {
+          return json.product;
+        }
+      }
+    } catch (e) {}
+
+    // 2. Direct Supabase lookup fallback
     if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
@@ -126,7 +139,7 @@ export const rmaApi = {
       }
     }
 
-    // 2. Local catalog fallback
+    // 3. Local catalog fallback
     const localProds = getLocalProducts();
     return localProds.find(p => 
       String(p.barcode).trim().toLowerCase() === cleanBarcode.toLowerCase() ||

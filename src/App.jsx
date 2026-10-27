@@ -984,19 +984,28 @@ export default function App() {
       }
     });
 
-    // 2. Supabase Realtime channel for instant multi-device / database updates
-    const realtimeChannel = supabase
-      .channel('rma_realtime_stream')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rma_reports' }, () => {
-        refreshAllData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
-        refreshAllData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'admin_users' }, () => {
-        refreshAllData();
-      })
-      .subscribe();
+    // 2. Supabase Realtime channel with graceful error handling & HTTP polling fallback
+    let realtimeChannel = null;
+    try {
+      realtimeChannel = supabase
+        .channel('rma_realtime_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rma_reports' }, () => {
+          refreshAllData();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
+          refreshAllData();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'admin_users' }, () => {
+          refreshAllData();
+        })
+        .subscribe((status) => {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            console.warn('[Realtime] WebSocket connection unavailable on this device/network. Operating smoothly on HTTP/REST polling fallback.');
+          }
+        });
+    } catch (wsErr) {
+      console.warn('[Realtime] Subscription skipped (WebSocket unavailable):', wsErr?.message || wsErr);
+    }
 
     // 3. Supabase Auth listener for email signup & magic link verification
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -1054,7 +1063,11 @@ export default function App() {
 
     return () => {
       unsubscribeBus();
-      supabase.removeChannel(realtimeChannel);
+      if (realtimeChannel) {
+        try {
+          supabase.removeChannel(realtimeChannel);
+        } catch (e) {}
+      }
       authListener?.subscription?.unsubscribe();
       window.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleFocus);

@@ -1,11 +1,17 @@
 import { supabase } from '../../_lib/supabase.js';
 import { requireApiKey, sendJson, setCorsHeaders } from '../../_lib/auth.js';
+import lookupHandler from './lookup.js';
 
 export default async function handler(req, res) {
   setCorsHeaders(res);
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
+  }
+
+  // Gracefully route /api/v1/products/lookup to lookupHandler if invoked by dynamic router
+  if (req.query?.id === 'lookup') {
+    return lookupHandler(req, res);
   }
 
   const client = await requireApiKey(req, res);

@@ -168,20 +168,56 @@ export const catalogService = {
 
   /**
    * Fast Barcode / SKU Lookup:
-   * PRIORITY 1: Look in our custom Supabase 'products' table (returns product name and reference image, plus assigned AE)
-   * PRIORITY 2: Look in coworker's ERPLY POS/ERP live API (erply_products by ean_code)
-   * PRIORITY 3: Wholesale Verified Catalog Fallback
-   * If there is no ean_code, returns null (tantamount to uncatalogued item awaiting admin assignment)
+   * PRIORITY 1: Secure Serverless Proxy (/api/v1/products/lookup)
+   *             Works across ANY mobile phone, dock scanner, or incognito browser without requiring client credentials.
+   * PRIORITY 2: Direct Supabase Database Fallback (if serverless API is offline or unreachable)
+   * PRIORITY 3: Wholesale Verified Catalog Fallback (Group 1 & 2 Products)
+   * Returns null if uncatalogued, prompting the user with the unregistered barcode workflow.
    */
   async findProduct(barcodeOrQuery) {
     const clean = String(barcodeOrQuery || '').trim();
     if (!clean) return null;
 
-    // 1. SUPABASE LOOKUP (PRIORITY #1 - Checks assigned barcode & AE in our database)
+    // 1. SECURE SERVERLESS PROXY LOOKUP (PRIORITY #1: /api/v1/products/lookup)
+    // Server securely holds the Laravel Cloud API credentials and queries Supabase + erply_products
+    try {
+      const res = await fetch(`/api/v1/products/lookup?barcode=${encodeURIComponent(clean)}`, {
+        headers: { 'Accept': 'application/json' }
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.found && json.product) {
+          const p = json.product;
+          return {
+            id: p.id,
+            barcode: p.barcode || clean,
+            code: p.code || p.sku || clean,
+            name: p.name,
+            price: Number(p.price || 0),
+            priceWithVat: Number(p.priceWithVat || p.price_with_vat || p.price || 0),
+            supplierName: p.supplierName || p.supplier_name || 'Savemore',
+            brandName: p.brandName || p.brand_name || null,
+            unitName: p.unitName || p.unit_name || 'pc',
+            hasSerialNumbers: Boolean(p.hasSerialNumbers || p.has_serial_numbers),
+            imageUrl: p.imageUrl || p.image_url || null,
+            ae_name: p.ae_name || null,
+            ae_email: p.ae_email || null,
+            company: p.company || null,
+            isVerified: p.isVerified !== false && p.is_verified !== false,
+            source: json.source === 'database' ? 'Supabase Database (Yours)' : (json.source === 'erply_api' ? 'ERPLY POS/ERP Catalog (Live API)' : 'Wholesale Master Catalog')
+          };
+        } else if (json.success && !json.found) {
+          // Explicitly confirmed not found in database or live catalog
+          return null;
+        }
+      }
+    } catch (apiErr) {
+      console.warn('Server lookup proxy unavailable (falling back to client DB):', apiErr.message);
+    }
+
+    // 2. Direct Supabase Fallback (if serverless API endpoint was offline or in local client dev)
     try {
       let supaItem = null;
-
-      // 1a. Direct exact barcode match
       const { data: byBarcode, error: errBarcode } = await supabase
         .from('products')
         .select('*')
@@ -194,7 +230,6 @@ export const catalogService = {
         }
       }
 
-      // 1b. Exact SKU/Code match if not found by barcode
       if (!supaItem) {
         const { data: byCode, error: errCode } = await supabase
           .from('products')
@@ -221,7 +256,7 @@ export const catalogService = {
           brandName: supaItem.brand_name || null,
           unitName: supaItem.unit_name || 'pc',
           hasSerialNumbers: supaItem.has_serial_numbers || false,
-          imageUrl: supaItem.image_url || null, // Reference photo from admin
+          imageUrl: supaItem.image_url || null,
           ae_name: supaItem.ae_name || null,
           ae_email: supaItem.ae_email || null,
           company: supaItem.company || null,
@@ -231,33 +266,6 @@ export const catalogService = {
       }
     } catch (e) {
       console.warn('Supabase lookup exception:', e.message);
-    }
-
-    // 2. COWORKER'S ERPLY LIVE CATALOG API (PRIORITY #2: erply_products via ean_code)
-    try {
-      const poItem = await purchaseOrdersApi.findProductByBarcode(clean);
-      if (poItem) {
-        return {
-          id: poItem.id,
-          barcode: poItem.barcode || clean,
-          code: poItem.code || poItem.sku,
-          name: poItem.name,
-          price: Number(poItem.price || 0),
-          priceWithVat: Number(poItem.price_with_vat || poItem.priceWithVat || 0),
-          supplierName: poItem.supplier || poItem.supplier_name || 'Savemore',
-          brandName: poItem.brand || poItem.brand_name || null,
-          unitName: poItem.unit_name || 'pc',
-          hasSerialNumbers: poItem.has_serial_numbers || false,
-          imageUrl: poItem.image_url || null,
-          ae_name: null, // 1st time: AE not yet recorded in database
-          ae_email: null,
-          company: null,
-          isVerified: true,
-          source: 'ERPLY POS/ERP Catalog (Coworker API)'
-        };
-      }
-    } catch (e) {
-      console.warn('Live ERPLY API lookup notice:', e?.message || e);
     }
 
     // 3. Wholesale Verified Catalog Fallback (Group 1 & 2 Products)
@@ -290,16 +298,16 @@ export const catalogService = {
       };
     }
 
-    // If there is no ean_code stored or matched, treat as uncatalogued barcode to be assigned by admin
     return null;
   },
 
   /**
    * COMPREHENSIVE MULTI-PRODUCT SEARCH:
    * Searches BOTH:
-   * 1. Supabase 'products' table (Priority 1)
-   * 2. Live Product Catalog API & Enterprise Wholesale Catalog (Priority 2)
-   * Returns ALL matching products (e.g. chocolates, biscuits, coffee, etc.) up to limit.
+   * 1. Secure Serverless Proxy Search (/api/v1/products/lookup?search=...)
+   * 2. Supabase 'products' table (Priority 2 Fallback)
+   * 3. Enterprise Wholesale Catalog (Priority 3 Fallback)
+   * Returns ALL matching products up to limit.
    */
   async searchAllProducts(query, limit = 50) {
     const clean = String(query || '').trim();
@@ -309,7 +317,40 @@ export const catalogService = {
     const seenKeys = new Set();
     const cleanLower = clean.toLowerCase();
 
-    // 1. Search Supabase products table
+    // 1. Secure Serverless Multi-Catalog Search (/api/v1/products/lookup?search=...)
+    try {
+      const res = await fetch(`/api/v1/products/lookup?search=${encodeURIComponent(clean)}&limit=${limit}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.products)) {
+          for (const item of json.products) {
+            const key = String(item.barcode || item.code || item.id).trim().toLowerCase();
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              results.push({
+                id: item.id,
+                barcode: item.barcode,
+                code: item.code || item.sku || item.barcode,
+                name: item.name,
+                price: Number(item.price || 0),
+                priceWithVat: Number(item.priceWithVat || item.price_with_vat || item.price || 0),
+                supplierName: item.supplierName || item.supplier_name || 'Savemore',
+                brandName: item.brandName || item.brand_name || null,
+                unitName: item.unitName || item.unit_name || 'pc',
+                hasSerialNumbers: Boolean(item.hasSerialNumbers || item.has_serial_numbers),
+                imageUrl: item.imageUrl || item.image_url || null,
+                isVerified: item.isVerified !== false && item.is_verified !== false,
+                source: item.source || 'Server Catalog API'
+              });
+            }
+          }
+        }
+      }
+    } catch (apiErr) {
+      console.warn('Server search proxy notice:', apiErr.message);
+    }
+
+    // 2. Client-side Supabase products table fallback
     try {
       const { data: supaItems, error } = await supabase
         .from('products')
@@ -322,30 +363,31 @@ export const catalogService = {
         for (const item of supaItems) {
           if (item.name?.startsWith('[DELETED]') || item.barcode?.startsWith('__CONFIG_')) continue;
           const key = String(item.barcode || item.code || item.id).trim().toLowerCase();
-          seenKeys.add(key);
-
-          results.push({
-            id: item.id,
-            barcode: item.barcode,
-            code: item.code || item.barcode,
-            name: item.name,
-            price: Number(item.price || 0),
-            priceWithVat: Number(item.price_with_vat || item.price || 0),
-            supplierName: item.supplier_name || 'Savemore',
-            brandName: item.brand_name || null,
-            unitName: item.unit_name || 'pc',
-            hasSerialNumbers: item.has_serial_numbers || false,
-            imageUrl: item.image_url || null,
-            isVerified: item.is_verified !== false,
-            source: 'Supabase Database (Custom)'
-          });
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            results.push({
+              id: item.id,
+              barcode: item.barcode,
+              code: item.code || item.barcode,
+              name: item.name,
+              price: Number(item.price || 0),
+              priceWithVat: Number(item.price_with_vat || item.price || 0),
+              supplierName: item.supplier_name || 'Savemore',
+              brandName: item.brand_name || null,
+              unitName: item.unit_name || 'pc',
+              hasSerialNumbers: item.has_serial_numbers || false,
+              imageUrl: item.image_url || null,
+              isVerified: item.is_verified !== false,
+              source: 'Supabase Database (Custom)'
+            });
+          }
         }
       }
     } catch (e) {
       console.warn('Supabase product search warning:', e);
     }
 
-    // 2. Wholesale Verified Catalog Fallback (INITIAL_PRODUCTS)
+    // 3. Wholesale Verified Catalog Fallback (INITIAL_PRODUCTS)
     for (const mock of INITIAL_PRODUCTS) {
       const matchText = `${mock.name} ${mock.brand || ''} ${mock.category || ''} ${mock.sku || ''} ${mock.barcode || ''}`.toLowerCase();
       if (matchText.includes(cleanLower)) {
@@ -369,36 +411,6 @@ export const catalogService = {
           });
         }
       }
-    }
-
-    // 3. Live Product Catalog API Search (erply_products)
-    try {
-      const liveItems = await purchaseOrdersApi.searchProducts(clean, Math.min(limit, 30));
-      if (Array.isArray(liveItems)) {
-        for (const item of liveItems) {
-          const key = String(item.barcode || item.code || item.id).trim().toLowerCase();
-          if (!seenKeys.has(key)) {
-            seenKeys.add(key);
-            results.push({
-              id: item.id,
-              barcode: item.barcode,
-              code: item.code || item.sku,
-              name: item.name,
-              price: Number(item.price || 0),
-              priceWithVat: Number(item.priceWithVat || item.price_with_vat || 0),
-              supplierName: item.supplier || item.supplier_name || 'Savemore',
-              brandName: item.brand || item.brand_name || null,
-              unitName: item.unit_name || 'pc',
-              hasSerialNumbers: item.has_serial_numbers || false,
-              imageUrl: item.image_url || null,
-              isVerified: true,
-              source: 'ERPLY POS/ERP Catalog (Coworker API)'
-            });
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Live API product search warning:', e);
     }
 
     return results;

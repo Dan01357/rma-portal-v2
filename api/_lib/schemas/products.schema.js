@@ -35,6 +35,38 @@ export const CreateProductSchema = z.object({
 }).openapi('CreateProductRequest');
 
 export function registerProductRoutes(registry) {
+  // GET /api/v1/products/lookup (Public Serverless Proxy)
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/products/lookup',
+    summary: 'Public Barcode & Product Lookup Proxy',
+    description: 'Secure server-side product lookup proxy. Resolves barcodes across Supabase, ERPLY POS/ERP live catalog, and wholesale verified catalog without requiring client credentials.',
+    tags: ['Products & Catalog'],
+    request: {
+      query: z.object({
+        barcode: z.string().optional().openapi({ description: 'Barcode or SKU code to scan and resolve', example: '4800016644833' }),
+        search: z.string().optional().openapi({ description: 'Keyword search across product names and SKUs', example: 'Bonita' }),
+        limit: z.string().optional().openapi({ description: 'Maximum products to return', example: '25' })
+      })
+    },
+    responses: {
+      200: {
+        description: 'Lookup result',
+        content: {
+          'application/json': {
+            schema: z.object({
+              success: z.boolean().openapi({ example: true }),
+              found: z.boolean().optional().openapi({ example: true }),
+              source: z.string().optional().openapi({ example: 'erply_api' }),
+              product: ProductSchema.nullable().optional(),
+              products: z.array(ProductSchema).optional()
+            })
+          }
+        }
+      }
+    }
+  });
+
   // GET /api/v1/products
   registry.registerPath({
     method: 'get',
