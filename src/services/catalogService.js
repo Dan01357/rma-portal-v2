@@ -1,6 +1,7 @@
 import { supabase } from '../supabaseClient';
 import { INITIAL_PRODUCTS } from '../data/mockData';
 import { notificationService } from './notificationService';
+import { purchaseOrdersApi } from './purchaseOrdersApi';
 
 // Cross-tab broadcast channel for instant multi-device / multi-tab reactivity
 const syncChannel = typeof window !== 'undefined' && window.BroadcastChannel 
@@ -167,14 +168,16 @@ export const catalogService = {
 
   /**
    * Fast Barcode / SKU Lookup:
-   * PRIORITY 1: Look in our custom Supabase 'products' table (returns product name and reference image)
-   * PRIORITY 2: Look in Enterprise live API (erply_products)
+   * PRIORITY 1: Look in our custom Supabase 'products' table (returns product name and reference image, plus assigned AE)
+   * PRIORITY 2: Look in coworker's ERPLY POS/ERP live API (erply_products by ean_code)
+   * PRIORITY 3: Wholesale Verified Catalog Fallback
+   * If there is no ean_code, returns null (tantamount to uncatalogued item awaiting admin assignment)
    */
   async findProduct(barcodeOrQuery) {
     const clean = String(barcodeOrQuery || '').trim();
     if (!clean) return null;
 
-    // 1. SUPABASE LOOKUP (PRIORITY #1)
+    // 1. SUPABASE LOOKUP (PRIORITY #1 - Checks assigned barcode & AE in our database)
     try {
       let supaItem = null;
 
@@ -230,7 +233,34 @@ export const catalogService = {
       console.warn('Supabase lookup exception:', e.message);
     }
 
-    // 2. Wholesale Verified Catalog Fallback (Group 1 & 2 Products)
+    // 2. COWORKER'S ERPLY LIVE CATALOG API (PRIORITY #2: erply_products via ean_code)
+    try {
+      const poItem = await purchaseOrdersApi.findProductByBarcode(clean);
+      if (poItem) {
+        return {
+          id: poItem.id,
+          barcode: poItem.barcode || clean,
+          code: poItem.code || poItem.sku,
+          name: poItem.name,
+          price: Number(poItem.price || 0),
+          priceWithVat: Number(poItem.price_with_vat || poItem.priceWithVat || 0),
+          supplierName: poItem.supplier || poItem.supplier_name || 'Savemore',
+          brandName: poItem.brand || poItem.brand_name || null,
+          unitName: poItem.unit_name || 'pc',
+          hasSerialNumbers: poItem.has_serial_numbers || false,
+          imageUrl: poItem.image_url || null,
+          ae_name: null, // 1st time: AE not yet recorded in database
+          ae_email: null,
+          company: null,
+          isVerified: true,
+          source: 'ERPLY POS/ERP Catalog (Coworker API)'
+        };
+      }
+    } catch (e) {
+      console.warn('Live ERPLY API lookup notice:', e?.message || e);
+    }
+
+    // 3. Wholesale Verified Catalog Fallback (Group 1 & 2 Products)
     const mockItem = INITIAL_PRODUCTS.find(p => 
       p.barcode === clean || 
       (p.sku && p.sku.toLowerCase() === clean.toLowerCase())
@@ -260,6 +290,7 @@ export const catalogService = {
       };
     }
 
+    // If there is no ean_code stored or matched, treat as uncatalogued barcode to be assigned by admin
     return null;
   },
 
@@ -338,6 +369,36 @@ export const catalogService = {
           });
         }
       }
+    }
+
+    // 3. Live Product Catalog API Search (erply_products)
+    try {
+      const liveItems = await purchaseOrdersApi.searchProducts(clean, Math.min(limit, 30));
+      if (Array.isArray(liveItems)) {
+        for (const item of liveItems) {
+          const key = String(item.barcode || item.code || item.id).trim().toLowerCase();
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            results.push({
+              id: item.id,
+              barcode: item.barcode,
+              code: item.code || item.sku,
+              name: item.name,
+              price: Number(item.price || 0),
+              priceWithVat: Number(item.priceWithVat || item.price_with_vat || 0),
+              supplierName: item.supplier || item.supplier_name || 'Savemore',
+              brandName: item.brand || item.brand_name || null,
+              unitName: item.unit_name || 'pc',
+              hasSerialNumbers: item.has_serial_numbers || false,
+              imageUrl: item.image_url || null,
+              isVerified: true,
+              source: 'ERPLY POS/ERP Catalog (Coworker API)'
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Live API product search warning:', e);
     }
 
     return results;
@@ -675,17 +736,44 @@ export const catalogService = {
 
     const finalReport = insertedReport || reportRow;
 
-    // 2. Dispatch automated notification email ONLY if product already exists in database (isKnown)
-    // If it's an unknown barcode reported for the first time, email will be sent after admin verifies and assigns AE!
-    if (isKnown) {
-      const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
-      notificationService.sendRMANotification(finalReport, isTestActive).catch(err => {
-        console.warn('Background RMA report notification notice:', err.message);
-      });
-    }
+    // 2. Dispatch automated notification email RIGHT AWAY for every reported RMA!
+    // Rule:
+    // - 1st time reported: AE isn't recorded yet in the database, so email is sent right away excluding the AE.
+    // - 2nd time reported: AE is recorded in the database from admin assignment, so email is sent right away including the AE email.
+    const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
+    notificationService.sendRMANotification(finalReport, isTestActive).catch(err => {
+      console.warn('Background RMA report notification notice:', err.message);
+    });
 
-    // 3. If item is unknown, insert/upsert into Supabase products table as is_verified = false
-    if (!isKnown) {
+    // 3. Catalog database synchronization:
+    if (isKnown) {
+      // Auto-upsert into Supabase products table so the catalog retains the item and allows admin to assign an AE
+      try {
+        await supabase
+          .from('products')
+          .upsert([
+            {
+              barcode: cleanBarcode,
+              code: resolvedProduct.code || resolvedProduct.barcode || null,
+              name: resolvedProduct.name,
+              supplier_name: resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Savemore',
+              price: Number(resolvedProduct.price || 0),
+              price_with_vat: Number(resolvedProduct.price_with_vat || resolvedProduct.priceWithVat || resolvedProduct.price || 0),
+              brand_name: resolvedProduct.brand_name || resolvedProduct.brandName || null,
+              unit_name: resolvedProduct.unit_name || resolvedProduct.unitName || 'pc',
+              image_url: resolvedProduct.image_url || resolvedProduct.imageUrl || null,
+              ae_name: resolvedProduct.ae_name || resolvedProduct.aeName || null,
+              ae_email: resolvedProduct.ae_email || resolvedProduct.aeEmail || null,
+              company: resolvedProduct.company || null,
+              is_verified: true,
+              updated_at: new Date().toISOString()
+            }
+          ], { onConflict: 'barcode' });
+      } catch (err) {
+        console.warn('Catalog auto-sync notice:', err?.message || err);
+      }
+    } else {
+      // If item is completely uncatalogued (no ean_code found anywhere), store as unverified pending admin assignment
       const { error: prodError } = await supabase
         .from('products')
         .upsert([
@@ -820,6 +908,9 @@ export const catalogService = {
    * ADMIN ACTION: Fill in details for an unknown barcode, including optional product reference image.
    */
   async updateBarcodeDetails({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
+    const cleanBarcode = String(barcode || '').trim();
+    if (!cleanBarcode) throw new Error('Barcode is required to update details.');
+
     const updates = {
       code: code ? code.trim() : null,
       name: name ? name.trim() : 'Unknown Item',

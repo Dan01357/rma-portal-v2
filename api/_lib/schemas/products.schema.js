@@ -3,7 +3,8 @@ import { z, StandardErrorSchema, PaginationQuerySchema } from './common.js';
 export const ProductSchema = z.object({
   id: z.number().int().openapi({ example: 341 }),
   barcode: z.string().openapi({ example: '4800016644833' }),
-  code: z.string().nullable().optional().openapi({ example: 'OISHI-PRAWN-50G' }),
+  ean_code: z.string().nullable().optional().openapi({ description: 'Physical item barcode (EAN / UPC)', example: '4800016644833' }),
+  code: z.string().nullable().optional().openapi({ description: 'Internal SKU / Product Code', example: 'OISHI-PRAWN-50G' }),
   name: z.string().openapi({ example: 'Oishi Prawn Crackers 50g' }),
   price: z.number().default(0).openapi({ example: 24.50 }),
   price_with_vat: z.number().default(0).openapi({ example: 27.44 }),
@@ -11,6 +12,8 @@ export const ProductSchema = z.object({
   brand_name: z.string().nullable().optional().openapi({ example: 'Oishi' }),
   unit_name: z.string().default('pc').openapi({ example: 'pack' }),
   image_url: z.string().nullable().optional().openapi({ example: 'https://example.com/product.jpg' }),
+  ae_name: z.string().nullable().optional().openapi({ description: 'Assigned Customer Account Executive', example: 'Jaezelle Benito' }),
+  ae_email: z.string().nullable().optional().openapi({ description: 'Assigned Customer AE Email', example: 'jaezelle.benito@pingconmarketing.com' }),
   is_verified: z.boolean().default(true).openapi({ example: true }),
   created_at: z.string().datetime().optional(),
   updated_at: z.string().datetime().optional()
@@ -18,6 +21,7 @@ export const ProductSchema = z.object({
 
 export const CreateProductSchema = z.object({
   barcode: z.string().min(1, 'Barcode is required').openapi({ example: '4800016644833' }),
+  ean_code: z.string().optional().openapi({ example: '4800016644833' }),
   name: z.string().min(1, 'Product name is required').openapi({ example: 'Oishi Prawn Crackers 50g' }),
   code: z.string().optional().openapi({ example: 'P2678P' }),
   price: z.number().optional().default(0).openapi({ example: 24.50 }),
@@ -25,7 +29,9 @@ export const CreateProductSchema = z.object({
   supplier_name: z.string().optional().default('Savemore').openapi({ example: 'Liwayway Marketing' }),
   brand_name: z.string().optional().openapi({ example: 'Oishi' }),
   unit_name: z.string().optional().default('pc').openapi({ example: 'pack' }),
-  image_url: z.string().optional().openapi({ example: 'https://example.com/item.jpg' })
+  image_url: z.string().optional().openapi({ example: 'https://example.com/item.jpg' }),
+  ae_name: z.string().optional().openapi({ example: 'Jaezelle Benito' }),
+  ae_email: z.string().optional().openapi({ example: 'jaezelle.benito@pingconmarketing.com' })
 }).openapi('CreateProductRequest');
 
 export function registerProductRoutes(registry) {

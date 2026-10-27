@@ -56,21 +56,36 @@ const inferGroup = (name = '', brand = '') => {
 // Normalize API item to app standard format
 export const normalizeProduct = (item) => {
   if (!item) return null;
-  const code = item.code || item.sku || `SKU-${item.id}`;
-  const price = parseFloat(item.priceWithVat) || parseFloat(item.price) || 0;
+  const sku = item.code || item.sku || `SKU-${item.id}`;
+  // In coworker's API, ean_code stores the barcode values from the items, and code stores our SKU
+  const barcode = item.ean_code || item.code2 || item.barcode || sku;
+  const priceWithVat = parseFloat(item.priceWithVat) || parseFloat(item.price) || 0;
+  const netPrice = parseFloat(item.price) || (priceWithVat / 1.12);
 
   return {
-    id: String(item.id || code),
-    sku: code,
-    barcode: code,
+    id: String(item.id || sku),
+    sku: sku,
+    code: sku,
+    barcode: barcode,
+    ean_code: item.ean_code || null,
     name: item.name || '',
     brand: item.brandName || '',
-    supplier: item.supplierName || '',
-    unit_price: price,
+    brand_name: item.brandName || '',
+    supplier: item.supplierName || 'Savemore',
+    supplier_name: item.supplierName || 'Savemore',
+    unit_price: netPrice,
+    price: netPrice,
+    price_with_vat: priceWithVat,
+    priceWithVat: priceWithVat,
     case_pack: item.unitName ? `Per ${item.unitName}` : '1 pc',
+    unit_name: item.unitName || 'pc',
     image_url: item.imageUrl || item.image_url || null, // Strictly real images only, no fake/stock photos
     group: inferGroup(item.name || '', item.brandName || ''),
     requires_serial: Boolean(item.hasSerialNumbers),
+    has_serial_numbers: Boolean(item.hasSerialNumbers),
+    ae_name: null,
+    ae_email: null,
+    is_verified: true,
     source: 'erply_api',
     raw_data: item
   };
@@ -218,29 +233,29 @@ export const purchaseOrdersApi = {
 
     for (const code of codeCandidates) {
       try {
-        // 1. Direct equality lookup on code: ?code=...
-        const directUrl = `${BASE_URL}/data/erply_products?code=${encodeURIComponent(code)}&columns=id,code,code2,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
-        const res = await fetch(directUrl, {
+        // 1. FIRST PRIORITY: Direct equality lookup on ean_code (Manufacturer / Retail Barcode!): ?ean_code=...
+        const eanUrl = `${BASE_URL}/data/erply_products?ean_code=${encodeURIComponent(code)}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
+        const resEan = await fetch(eanUrl, {
           headers: {
             'X-API-Key': key,
             'Accept': 'application/json'
           }
         });
 
-        if (res.status === 401) {
+        if (resEan.status === 401) {
           markUnauthorized();
           return null;
         }
 
-        if (res.ok) {
-          const json = await res.json();
-          if (json.data && json.data.length > 0) {
-            return normalizeProduct(json.data[0]);
+        if (resEan.ok) {
+          const jsonEan = await resEan.json();
+          if (jsonEan.data && jsonEan.data.length > 0) {
+            return normalizeProduct(jsonEan.data[0]);
           }
         }
 
-        // 2. Direct equality lookup on code2 (Manufacturer EAN-13 / UPC on physical retail cartons!): ?code2=...
-        const code2Url = `${BASE_URL}/data/erply_products?code2=${encodeURIComponent(code)}&columns=id,code,code2,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
+        // 2. SECOND PRIORITY: Direct equality lookup on code2 (Secondary Barcode / UPC): ?code2=...
+        const code2Url = `${BASE_URL}/data/erply_products?code2=${encodeURIComponent(code)}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
         const res2 = await fetch(code2Url, {
           headers: {
             'X-API-Key': key,
@@ -259,12 +274,33 @@ export const purchaseOrdersApi = {
             return normalizeProduct(json2.data[0]);
           }
         }
+
+        // 3. THIRD PRIORITY: Direct equality lookup on code (Internal SKU): ?code=...
+        const directUrl = `${BASE_URL}/data/erply_products?code=${encodeURIComponent(code)}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
+        const res = await fetch(directUrl, {
+          headers: {
+            'X-API-Key': key,
+            'Accept': 'application/json'
+          }
+        });
+
+        if (res.status === 401) {
+          markUnauthorized();
+          return null;
+        }
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data && json.data.length > 0) {
+            return normalizeProduct(json.data[0]);
+          }
+        }
       } catch (err) {
         // Quiet catch
       }
     }
 
-    // If not found by direct code or code2 equality, it is not in the live database.
+    // If not found by direct ean_code, code2, or code equality, it is not in the live database.
     return null;
   },
 
@@ -274,6 +310,7 @@ export const purchaseOrdersApi = {
    */
   async searchProducts(query, limit = 250) {
     if (!query || query.trim().length === 0) return [];
+    const trimmed = query.trim();
 
     let key = getApiKey();
     if (!key || key === 'pk_live_po_cloud_db_2026_dev_key' || isApiUnauthorized) {
@@ -293,7 +330,7 @@ export const purchaseOrdersApi = {
 
     for (const term of variations) {
       try {
-        const url = `${BASE_URL}/data/erply_products?search=${encodeURIComponent(term)}&per_page=${limit}&columns=id,code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
+        const url = `${BASE_URL}/data/erply_products?search=${encodeURIComponent(term)}&per_page=${limit}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
         const res = await fetch(url, {
           headers: {
             'X-API-Key': key,

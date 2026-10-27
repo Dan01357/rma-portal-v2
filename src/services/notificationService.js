@@ -222,6 +222,17 @@ export const notificationService = {
                   <div class="col-label">Supplier / Brand:</div>
                   <div class="col-val">${report.supplier_name || report.supplierName || 'Savemore'}</div>
                 </div>
+                ${(report.ae_name || report.ae_email) ? `
+                <div class="row">
+                  <div class="col-label">Customer AE:</div>
+                  <div class="col-val" style="color: #1e40af; font-weight: 800;">
+                    ${report.ae_name || 'Assigned AE'} ${report.ae_email ? `<span style="font-family: monospace; font-size: 11px; font-weight: 600; color: #475569;">(${report.ae_email})</span>` : ''}
+                  </div>
+                </div>` : `
+                <div class="row">
+                  <div class="col-label">Customer AE:</div>
+                  <div class="col-val" style="color: #94a3b8; font-style: italic;">Pending Admin Assignment (1st Intake)</div>
+                </div>`}
               </div>
             </div>
 
