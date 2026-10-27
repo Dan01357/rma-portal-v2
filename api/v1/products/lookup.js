@@ -1,6 +1,6 @@
 import { supabase } from '../../_lib/supabase.js';
 import { sendJson, setCorsHeaders } from '../../_lib/auth.js';
-import { INITIAL_PRODUCTS } from '../../../src/data/mockData.js';
+import { INITIAL_PRODUCTS } from '../../_lib/mockProducts.js';
 
 /**
  * Retrieve the Laravel Cloud API Key:
