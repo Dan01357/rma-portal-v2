@@ -78,13 +78,25 @@ export default function QuickRMAActionModal({
     setIsSavingTriage(true);
     try {
       const inspectorName = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
+      const existingAudit = Array.isArray(report.audit_trail) ? [...report.audit_trail] : [];
+      const newAuditEvent = {
+        timestamp: new Date().toISOString(),
+        stage: 'TRIAGE',
+        actor: inspectorName,
+        condition_grade: conditionGrade,
+        disposition: disposition,
+        warehouse_location: warehouseLocation.trim().toUpperCase() || null,
+        note: `Physical triage completed by ${inspectorName}`
+      };
+
       const updates = {
         condition_grade: conditionGrade,
         disposition: disposition,
         warehouse_location: warehouseLocation.trim().toUpperCase() || null,
         status: rmaStatus,
         inspected_by: inspectorName,
-        inspected_at: new Date().toISOString()
+        inspected_at: new Date().toISOString(),
+        audit_trail: [...existingAudit, newAuditEvent]
       };
 
       const { data, error } = await supabase

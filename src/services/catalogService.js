@@ -652,7 +652,13 @@ export const catalogService = {
       reported_by: `${reporterName.trim()} (${reporterContact.trim()})`,
       ae_name: isKnown ? (resolvedProduct.ae_name || resolvedProduct.aeName || null) : null,
       ae_email: isKnown ? (resolvedProduct.ae_email || resolvedProduct.aeEmail || null) : null,
-      company: isKnown ? (resolvedProduct.company || null) : null
+      company: isKnown ? (resolvedProduct.company || null) : null,
+      condition_grade: 'B - Damaged Packaging Only',
+      disposition: 'Pending Triage',
+      warehouse_location: null,
+      inspected_by: null,
+      inspected_at: null,
+      audit_trail: []
     };
 
     // 1. Insert into rma_reports
