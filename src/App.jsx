@@ -1139,6 +1139,8 @@ export default function App() {
     }
   };
 
+  const fetchReports = refreshAllData;
+
   const showToast = (text, type = 'success') => {
     setToastMessage({ text, type });
     setTimeout(() => setToastMessage(null), 5000);
@@ -1705,11 +1707,11 @@ export default function App() {
                     Live Auto-Sync
                   </span>
                   <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
-                    {currentUser.role === 'super_admin' ? '👑 Super Admin' : currentUser.role}
+                    {currentUser?.role === 'super_admin' ? '👑 Super Admin' : (currentUser?.role || 'Staff')}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Logged in as <strong className="text-slate-800 dark:text-slate-200">{currentUser.name}</strong> • {currentUser.email}
+                  Logged in as <strong className="text-slate-800 dark:text-slate-200">{currentUser?.name || 'Authorized Staff'}</strong> • {currentUser?.email || 'Portal Access'}
                 </p>
               </div>
 
@@ -1890,10 +1892,10 @@ export default function App() {
               {/* Metric 5: Staff Directory */}
               <div 
                 onClick={() => {
-                  if (currentUser.role === 'super_admin') setIsEmployeeModalOpen(true);
+                  if (currentUser?.role === 'super_admin') setIsEmployeeModalOpen(true);
                 }}
                 className={`col-span-2 sm:col-span-1 bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm ${
-                  currentUser.role === 'super_admin' ? 'cursor-pointer hover:shadow-md hover:border-purple-300 dark:hover:border-purple-700' : ''
+                  currentUser?.role === 'super_admin' ? 'cursor-pointer hover:shadow-md hover:border-purple-300 dark:hover:border-purple-700' : ''
                 } border-slate-200 dark:border-slate-800`}
               >
                 <div className="flex items-center justify-between text-purple-600 dark:text-purple-400 mb-1.5 sm:mb-2">
@@ -1986,7 +1988,7 @@ export default function App() {
                 <span>Pending Queue ({pendingBarcodesList.length})</span>
               </button>
 
-              {currentUser.role === 'super_admin' && (
+              {currentUser?.role === 'super_admin' && (
                 <button
                   type="button"
                   onClick={() => setIsEmployeeModalOpen(true)}
@@ -2902,7 +2904,7 @@ export default function App() {
               <SupplierClaimsTab
                 reportsList={recentReportsList}
                 currentUser={currentUser}
-                onRefresh={fetchReports}
+                onRefresh={refreshAllData}
               />
             )}
 
