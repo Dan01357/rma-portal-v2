@@ -1,5 +1,34 @@
 import { z, StandardErrorSchema, PaginationQuerySchema } from './common.js';
 
+export const RMAStatusEnum = z.enum([
+  'draft',
+  'received_at_dock',
+  'under_inspection',
+  'pending_finance_approval',
+  'credit_memo_issued',
+  'closed',
+  'rejected',
+  'pending',
+  'pending_admin_details',
+  'resolved',
+  'logged'
+]);
+
+export const RMAConditionGradeEnum = z.enum([
+  'A - Like New / Resellable',
+  'B - Damaged Packaging Only',
+  'C - Defective / Parts Only',
+  'D - Total Loss / Scrap'
+]);
+
+export const RMADispositionEnum = z.enum([
+  'Pending Triage',
+  'Restock to Inventory',
+  'Return to Vendor (RTV)',
+  'Quarantine',
+  'Scrap / Dispose'
+]);
+
 export const RMAReportSchema = z.object({
   id: z.number().int().openapi({ example: 1042 }),
   rma_number: z.string().openapi({ example: 'RMA-20261026-8941' }),
@@ -11,7 +40,12 @@ export const RMAReportSchema = z.object({
   price: z.number().default(0).openapi({ example: 24.50 }),
   price_with_vat: z.number().default(0).openapi({ example: 27.44 }),
   unit_name: z.string().default('pc').openapi({ example: 'pack' }),
-  status: z.enum(['pending', 'pending_admin_details', 'resolved', 'logged']).default('pending').openapi({ example: 'pending' }),
+  status: RMAStatusEnum.default('received_at_dock').openapi({ example: 'received_at_dock' }),
+  condition_grade: RMAConditionGradeEnum.default('B - Damaged Packaging Only').openapi({ example: 'B - Damaged Packaging Only' }),
+  disposition: RMADispositionEnum.default('Pending Triage').openapi({ example: 'Pending Triage' }),
+  warehouse_location: z.string().nullable().optional().openapi({ example: 'RACK-03-BIN-A' }),
+  inspected_by: z.string().nullable().optional().openapi({ example: 'Warehouse Lead' }),
+  inspected_at: z.string().datetime().nullable().optional().openapi({ example: '2026-10-26T15:00:00.000Z' }),
   reason: z.string().default('Damaged Box / Crushed Packaging').openapi({ example: 'Damaged Box / Crushed Packaging' }),
   explanation: z.string().nullable().optional().openapi({ example: 'Crushed box during delivery transport.' }),
   photos: z.array(z.string()).default([]).openapi({ example: ['https://example.com/damage-photo-1.jpg'] }),
@@ -31,6 +65,11 @@ export const CreateRMAReportSchema = z.object({
   price: z.number().optional().default(0).openapi({ example: 24.50 }),
   price_with_vat: z.number().optional().default(0).openapi({ example: 27.44 }),
   unit_name: z.string().optional().default('pc').openapi({ example: 'pack' }),
+  status: RMAStatusEnum.optional().default('received_at_dock').openapi({ example: 'received_at_dock' }),
+  condition_grade: RMAConditionGradeEnum.optional().default('B - Damaged Packaging Only').openapi({ example: 'B - Damaged Packaging Only' }),
+  disposition: RMADispositionEnum.optional().default('Pending Triage').openapi({ example: 'Pending Triage' }),
+  warehouse_location: z.string().optional().openapi({ example: 'RACK-03-BIN-A' }),
+  inspected_by: z.string().optional().openapi({ example: 'Warehouse Lead' }),
   reason: z.string().optional().default('Damaged Box / Crushed Packaging').openapi({ example: 'Damaged Box / Crushed Packaging' }),
   explanation: z.string().optional().openapi({ example: 'Crushed box during unloading' }),
   photos: z.array(z.string().url()).optional().default([]).openapi({ example: ['https://example.com/box1.jpg'] }),
@@ -40,7 +79,11 @@ export const CreateRMAReportSchema = z.object({
 }).openapi('CreateRMAReportRequest');
 
 export const UpdateRMAReportSchema = z.object({
-  status: z.enum(['pending', 'pending_admin_details', 'resolved', 'logged']).optional().openapi({ example: 'resolved' }),
+  status: RMAStatusEnum.optional().openapi({ example: 'under_inspection' }),
+  condition_grade: RMAConditionGradeEnum.optional().openapi({ example: 'A - Like New / Resellable' }),
+  disposition: RMADispositionEnum.optional().openapi({ example: 'Restock to Inventory' }),
+  warehouse_location: z.string().optional().openapi({ example: 'RACK-03-BIN-A' }),
+  inspected_by: z.string().optional().openapi({ example: 'Supervisor Danilo' }),
   quantity: z.number().int().min(1).optional().openapi({ example: 3 }),
   notes: z.string().optional().openapi({ example: 'Inspection verified by supervisor' }),
   explanation: z.string().optional().openapi({ example: 'Replacement voucher issued' }),

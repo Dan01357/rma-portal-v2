@@ -57,7 +57,8 @@ export default async function handler(req, res) {
 
       const allowedFields = [
         'status', 'notes', 'explanation', 'price', 'price_with_vat',
-        'code', 'name', 'supplier_name', 'unit_name', 'quantity', 'ae_name', 'ae_email'
+        'code', 'name', 'supplier_name', 'unit_name', 'quantity', 'ae_name', 'ae_email',
+        'condition_grade', 'disposition', 'warehouse_location', 'inspected_by', 'inspected_at'
       ];
 
       const updateData = {};

@@ -36,6 +36,8 @@ export default function CreditMemosTab({
 }) {
   const canManageCreditMemos = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
   const [searchQuery, setSearchQuery] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [sortField, setSortField] = useState('credit_issued_at');
   const [sortDirection, setSortDirection] = useState('desc');
   const [currentPage, setCurrentPage] = useState(1);
@@ -72,7 +74,7 @@ export default function CreditMemosTab({
     };
   }, [creditMemosList]);
 
-  // Filter & sort (Divisions removed completely)
+  // Filter & sort (with date range support)
   const processedMemos = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     let list = creditMemosList.filter(item => {
@@ -88,6 +90,17 @@ export default function CreditMemosTab({
         );
         if (!matches) return false;
       }
+
+      if (dateFrom) {
+        const itemDate = new Date(item.credit_issued_at || item.created_at || 0).toISOString().slice(0, 10);
+        if (itemDate < dateFrom) return false;
+      }
+
+      if (dateTo) {
+        const itemDate = new Date(item.credit_issued_at || item.created_at || 0).toISOString().slice(0, 10);
+        if (itemDate > dateTo) return false;
+      }
+
       return true;
     });
 
@@ -201,45 +214,54 @@ export default function CreditMemosTab({
     const headers = [
       'Credit Memo #',
       'RMA #',
+      'Issue Date',
+      'Supplier / Vendor',
       'Barcode',
-      'Product Name',
+      'Product Description',
       'Quantity',
       'Unit',
-      'Unit Price (PHP)',
+      'Net Unit Price (PHP)',
+      '12% VAT Amount (PHP)',
+      'Total Credited Amount (PHP)',
       'Gross Amount (PHP)',
       'Pull Out Ref',
       'Pull Out Date',
-      'Credit Amount (PHP)',
-      'Credit Issued By',
-      'Issued At',
-      'Supplier',
+      'Issued By',
       'Customer AE'
     ];
 
-    const rows = processedMemos.map(m => [
-      `"${m.credit_memo_number || ''}"`,
-      `"${m.rma_number || ''}"`,
-      `"${m.barcode || ''}"`,
-      `"${(m.product_name || '').replace(/"/g, '""')}"`,
-      m.quantity || 1,
-      `"${m.unit_name || 'pc'}"`,
-      (Number(m.unit_price) || 0).toFixed(2),
-      (Number(m.amount) || 0).toFixed(2),
-      `"${(m.pull_out_ref || '').replace(/"/g, '""')}"`,
-      `"${m.pull_out_date || ''}"`,
-      (Number(m.credit_amount) || Number(m.amount) || 0).toFixed(2),
-      `"${(m.credit_issued_by || '').replace(/"/g, '""')}"`,
-      `"${m.credit_issued_at ? new Date(m.credit_issued_at).toLocaleString() : ''}"`,
-      `"${(m.supplier_name || '').replace(/"/g, '""')}"`,
-      `"${(m.customer_ae_name || '').replace(/"/g, '""')}"`
-    ]);
+    const rows = processedMemos.map(m => {
+      const totalAmt = Number(m.credit_amount) || Number(m.amount) || 0;
+      const netPrice = totalAmt / 1.12;
+      const vatAmt = totalAmt - netPrice;
+      const dateStr = m.credit_issued_at ? new Date(m.credit_issued_at).toISOString().slice(0, 10) : '';
+
+      return [
+        `"${m.credit_memo_number || ''}"`,
+        `"${m.rma_number || ''}"`,
+        `"${dateStr}"`,
+        `"${(m.supplier_name || 'Savemore').replace(/"/g, '""')}"`,
+        `"${m.barcode || ''}"`,
+        `"${(m.product_name || '').replace(/"/g, '""')}"`,
+        m.quantity || 1,
+        `"${m.unit_name || 'pc'}"`,
+        (Number(m.unit_price) || (netPrice / (m.quantity || 1))).toFixed(2),
+        vatAmt.toFixed(2),
+        totalAmt.toFixed(2),
+        (Number(m.amount) || 0).toFixed(2),
+        `"${(m.pull_out_ref || '').replace(/"/g, '""')}"`,
+        `"${m.pull_out_date || ''}"`,
+        `"${(m.credit_issued_by || '').replace(/"/g, '""')}"`,
+        `"${(m.customer_ae_name || '').replace(/"/g, '""')}"`
+      ];
+    });
 
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `Finance_Credit_Memos_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `Finance_Credit_Memos_${dateFrom || 'all'}_to_${dateTo || new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -353,9 +375,9 @@ export default function CreditMemosTab({
           </div>
         </div>
 
-        {/* Search Toolbar (Divisions dropdown completely removed) */}
+        {/* Search & Date Range Toolbar */}
         <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-3.5 space-y-2.5">
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-col md:flex-row md:items-center gap-2.5">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
               <input
@@ -375,17 +397,62 @@ export default function CreditMemosTab({
                     setSearchQuery('');
                     setCurrentPage(1);
                   }}
-                  className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 p-0.5"
+                  className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
+
+            {/* Custom Date Range Filter */}
+            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2.5 py-1 rounded-xl text-xs">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">From:</span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => {
+                  setDateFrom(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="bg-transparent text-slate-900 dark:text-white font-mono text-xs focus:outline-none cursor-pointer"
+                title="Filter credit memos from date"
+              />
+              <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">To:</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => {
+                  setDateTo(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="bg-transparent text-slate-900 dark:text-white font-mono text-xs focus:outline-none cursor-pointer"
+                title="Filter credit memos to date"
+              />
+            </div>
+
+            {(searchQuery || dateFrom || dateTo) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setDateFrom('');
+                  setDateTo('');
+                  setCurrentPage(1);
+                }}
+                className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset</span>
+              </button>
+            )}
           </div>
 
           <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
             <span>
               Showing <strong className="text-slate-900 dark:text-white font-bold">{processedMemos.length}</strong> of {creditMemosList.length} credit memos
+              {(searchQuery || dateFrom || dateTo) && (
+                <span className="text-emerald-600 dark:text-emerald-400 font-bold ml-1.5">• Date / search filters active</span>
+              )}
             </span>
             <span className="text-slate-400">
               Click column headers to sort (<strong className="text-slate-700 dark:text-slate-300 capitalize">{sortField}</strong> {sortDirection === 'asc' ? '▲' : '▼'})

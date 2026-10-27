@@ -43,7 +43,9 @@ import {
   Receipt,
   Printer,
   QrCode,
-  Download
+  Download,
+  Building2,
+  Layers
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
@@ -59,6 +61,9 @@ import EmployeeManagementModal from './components/EmployeeManagementModal';
 import SavedProductsTab from './components/SavedProductsTab';
 import SettingsTab from './components/SettingsTab';
 import CreditMemosTab from './components/CreditMemosTab';
+import SupplierClaimsTab from './components/SupplierClaimsTab';
+import ThermalBoxLabelModal from './components/ThermalBoxLabelModal';
+import { exportRMAReportsToCSV } from './utils/exportCsv';
 import CreditMemoModal from './components/CreditMemoModal';
 import CreditMemoVoucherModal from './components/CreditMemoVoucherModal';
 import ProductEditModal from './components/ProductEditModal';
@@ -723,6 +728,11 @@ export default function App() {
   const [reportsSearchQuery, setReportsSearchQuery] = useState('');
   const [reportsReasonFilter, setReportsReasonFilter] = useState('all');
   const [reportsStatusFilter, setReportsStatusFilter] = useState('all');
+  const [reportsDispositionFilter, setReportsDispositionFilter] = useState('all');
+  const [reportsConditionGradeFilter, setReportsConditionGradeFilter] = useState('all');
+  const [reportsDateFrom, setReportsDateFrom] = useState('');
+  const [reportsDateTo, setReportsDateTo] = useState('');
+  const [thermalPrintReport, setThermalPrintReport] = useState(null);
   const [reportsSortField, setReportsSortField] = useState('id');
   const [reportsSortDirection, setReportsSortDirection] = useState('desc');
   const [reportsCurrentPage, setReportsCurrentPage] = useState(1);
@@ -768,6 +778,10 @@ export default function App() {
     setReportsSearchQuery('');
     setReportsReasonFilter('all');
     setReportsStatusFilter('all');
+    setReportsDispositionFilter('all');
+    setReportsConditionGradeFilter('all');
+    setReportsDateFrom('');
+    setReportsDateTo('');
     setReportsCurrentPage(1);
     setSelectedReportIds(new Set());
   };
@@ -784,7 +798,8 @@ export default function App() {
           (item.name || '').toLowerCase().includes(q) ||
           (item.reporter_name || item.reported_by || '').toLowerCase().includes(q) ||
           (item.reporter_contact || '').toLowerCase().includes(q) ||
-          (item.reason || '').toLowerCase().includes(q)
+          (item.reason || '').toLowerCase().includes(q) ||
+          (item.warehouse_location || '').toLowerCase().includes(q)
         );
         if (!matches) return false;
       }
@@ -795,6 +810,29 @@ export default function App() {
 
       if (reportsStatusFilter === 'logged' && item.status === 'pending_admin_details') return false;
       if (reportsStatusFilter === 'unknown' && item.status !== 'pending_admin_details') return false;
+
+      // Disposition filter
+      if (reportsDispositionFilter !== 'all') {
+        const itemDisp = item.disposition || 'Pending Triage';
+        if (itemDisp.toLowerCase() !== reportsDispositionFilter.toLowerCase()) return false;
+      }
+
+      // Condition Grade filter
+      if (reportsConditionGradeFilter !== 'all') {
+        const itemGrade = item.condition_grade || 'Unassessed';
+        if (!itemGrade.toLowerCase().startsWith(reportsConditionGradeFilter.toLowerCase().charAt(0))) return false;
+      }
+
+      // Date Range filters
+      if (reportsDateFrom) {
+        const itemDate = new Date(item.created_at || 0).toISOString().slice(0, 10);
+        if (itemDate < reportsDateFrom) return false;
+      }
+
+      if (reportsDateTo) {
+        const itemDate = new Date(item.created_at || 0).toISOString().slice(0, 10);
+        if (itemDate > reportsDateTo) return false;
+      }
 
       return true;
     });
@@ -845,7 +883,18 @@ export default function App() {
     });
 
     return list;
-  }, [recentReportsList, reportsSearchQuery, reportsReasonFilter, reportsStatusFilter, reportsSortField, reportsSortDirection]);
+  }, [
+    recentReportsList,
+    reportsSearchQuery,
+    reportsReasonFilter,
+    reportsStatusFilter,
+    reportsDispositionFilter,
+    reportsConditionGradeFilter,
+    reportsDateFrom,
+    reportsDateTo,
+    reportsSortField,
+    reportsSortDirection
+  ]);
 
   // Paginated Return Reports Slice
   const paginatedReports = React.useMemo(() => {
@@ -1900,6 +1949,19 @@ export default function App() {
                 <span>Credit Memos ({creditMemosList.length})</span>
               </button>
 
+              <button
+                type="button"
+                onClick={() => setAdminActiveTab('supplier_claims')}
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                  adminActiveTab === 'supplier_claims'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Building2 className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                <span>Supplier Claims (RTV)</span>
+              </button>
+
               {currentUser?.role === 'super_admin' && (
                 <button
                   type="button"
@@ -2007,10 +2069,20 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setIsReportsModalOpen(true)}
-                      className="px-3.5 py-2 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold rounded-xl text-xs flex items-center gap-1 transition-colors shrink-0"
+                      className="px-3.5 py-2 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold rounded-xl text-xs flex items-center gap-1 transition-colors shrink-0 cursor-pointer"
                     >
                       <span>Full Audit Log</span>
                       <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => exportRMAReportsToCSV(processedReports)}
+                      className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
+                      title="Export filtered reports to CSV with financial & triage data"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Export CSV</span>
                     </button>
                   </div>
                 </div>
@@ -2028,7 +2100,7 @@ export default function App() {
                           setReportsSearchQuery(e.target.value);
                           setReportsCurrentPage(1);
                         }}
-                        placeholder="Search by SN (#), RMA #, barcode, item name, reporter, or reason..."
+                        placeholder="Search by SN (#), RMA #, barcode, item name, reporter, or bin location..."
                         className="w-full pl-10 pr-9 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600 transition-all"
                       />
                       {reportsSearchQuery && (
@@ -2060,6 +2132,22 @@ export default function App() {
                       ))}
                     </select>
 
+                    {/* Condition Grade Filter Dropdown */}
+                    <select
+                      value={reportsConditionGradeFilter}
+                      onChange={(e) => {
+                        setReportsConditionGradeFilter(e.target.value);
+                        setReportsCurrentPage(1);
+                      }}
+                      className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer"
+                    >
+                      <option value="all">All Grades</option>
+                      <option value="A">Grade A - Like New</option>
+                      <option value="B">Grade B - Damaged Pkg</option>
+                      <option value="C">Grade C - Defective / Parts</option>
+                      <option value="D">Grade D - Total Loss / Scrap</option>
+                    </select>
+
                     {/* Status Filter Dropdown */}
                     <select
                       value={reportsStatusFilter}
@@ -2074,12 +2162,38 @@ export default function App() {
                       <option value="unknown">Unknown Barcode</option>
                     </select>
 
+                    {/* Date Range Picker */}
+                    <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2.5 py-1 rounded-xl text-xs">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">From:</span>
+                      <input
+                        type="date"
+                        value={reportsDateFrom}
+                        onChange={(e) => {
+                          setReportsDateFrom(e.target.value);
+                          setReportsCurrentPage(1);
+                        }}
+                        className="bg-transparent text-slate-900 dark:text-white font-mono text-xs focus:outline-none cursor-pointer"
+                        title="Filter records from date"
+                      />
+                      <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">To:</span>
+                      <input
+                        type="date"
+                        value={reportsDateTo}
+                        onChange={(e) => {
+                          setReportsDateTo(e.target.value);
+                          setReportsCurrentPage(1);
+                        }}
+                        className="bg-transparent text-slate-900 dark:text-white font-mono text-xs focus:outline-none cursor-pointer"
+                        title="Filter records to date"
+                      />
+                    </div>
+
                     {/* Reset Filters */}
-                    {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all') && (
+                    {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
                       <button
                         type="button"
                         onClick={resetReportsFilters}
-                        className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0"
+                        className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0 cursor-pointer"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         <span>Reset</span>
@@ -2087,11 +2201,46 @@ export default function App() {
                     )}
                   </div>
 
+                  {/* Quick-Filter Chips for Warehouse Disposition */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-2 border-t border-slate-200 dark:border-slate-700/80">
+                    <span className="text-[10px] uppercase font-black text-slate-400 shrink-0 mr-1 flex items-center gap-1">
+                      <Layers className="w-3 h-3 text-blue-500" />
+                      Disposition:
+                    </span>
+                    {[
+                      { id: 'all', label: 'All Dispositions' },
+                      { id: 'Pending Triage', label: 'Pending Triage' },
+                      { id: 'Restock to Inventory', label: 'Restock' },
+                      { id: 'Return to Vendor (RTV)', label: 'Return to Vendor (RTV)' },
+                      { id: 'Quarantine', label: 'Quarantine' },
+                      { id: 'Scrap / Dispose', label: 'Scrap / Dispose' }
+                    ].map(chip => {
+                      const isActive = reportsDispositionFilter.toLowerCase() === chip.id.toLowerCase();
+                      return (
+                        <button
+                          key={chip.id}
+                          type="button"
+                          onClick={() => {
+                            setReportsDispositionFilter(chip.id);
+                            setReportsCurrentPage(1);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-blue-600 text-white shadow-2xs font-black'
+                              : 'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          {chip.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
                   <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
                     <span>
                       Showing <strong className="text-slate-900 dark:text-white font-bold">{processedReports.length}</strong> of {recentReportsList.length} reports
-                      {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all') && (
-                        <span className="text-blue-600 dark:text-blue-400 font-bold ml-1.5">• Filter active</span>
+                      {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
+                        <span className="text-blue-600 dark:text-blue-400 font-bold ml-1.5">• Filters active</span>
                       )}
                     </span>
                     <span className="text-slate-400 dark:text-slate-500">
@@ -2347,7 +2496,7 @@ export default function App() {
                                   )}
                                 </td>
 
-                                {/* 8. Status */}
+                                {/* 8. Status & Triage */}
                                 <td className="py-3 px-3 text-center">
                                   <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
                                     isPendingUnknown
@@ -2356,6 +2505,18 @@ export default function App() {
                                   }`}>
                                     {isPendingUnknown ? 'Unknown' : 'Logged'}
                                   </span>
+                                  {item.disposition && item.disposition !== 'Pending Triage' && (
+                                    <div className="mt-1">
+                                      <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[8px] font-extrabold truncate inline-block max-w-[90px]">
+                                        {item.disposition}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {item.warehouse_location && (
+                                    <div className="text-[8px] font-mono font-bold text-slate-400 mt-0.5">
+                                      {item.warehouse_location}
+                                    </div>
+                                  )}
                                 </td>
 
                                 {/* 9. Date & GPS */}
@@ -2376,9 +2537,19 @@ export default function App() {
                                   )}
                                 </td>
 
-                                {/* 10. Actions: Assign SKU / Save Product, Credit Memo & Delete */}
+                                {/* 10. Actions: Assign SKU / Save Product, Credit Memo, Thermal Print & Delete */}
                                 <td className="py-2.5 px-3.5 text-center">
                                   <div className="flex items-center justify-center gap-1.5">
+                                    {/* Print 4x6 Thermal Box Label */}
+                                    <button
+                                      type="button"
+                                      onClick={() => setThermalPrintReport(item)}
+                                      className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                                      title="Print 4x6 inch Thermal Box Label"
+                                    >
+                                      <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
+                                    </button>
+
                                     {canEditProducts && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                                       <button
                                         type="button"
@@ -2726,7 +2897,16 @@ export default function App() {
               />
             )}
 
-            {/* TAB 4: SETTINGS & GOOGLE SMTP NOTIFICATION SERVICE (Super Admin Only) */}
+            {/* TAB 4: SUPPLIER RECOVERY / CHARGEBACK BATCHING (RTV CLAIMS) */}
+            {adminActiveTab === 'supplier_claims' && (
+              <SupplierClaimsTab
+                reportsList={recentReportsList}
+                currentUser={currentUser}
+                onRefresh={fetchReports}
+              />
+            )}
+
+            {/* TAB 5: SETTINGS & GOOGLE SMTP NOTIFICATION SERVICE (Super Admin Only) */}
             {adminActiveTab === 'settings' && currentUser?.role === 'super_admin' && (
               <SettingsTab
                 isTestMode={isTestMode}
@@ -3051,6 +3231,15 @@ export default function App() {
         isOpen={isPortalAccessQrOpen}
         onClose={() => setIsPortalAccessQrOpen(false)}
       />
+
+      {/* 4x6" Thermal Box Label Generator Modal */}
+      {thermalPrintReport && (
+        <ThermalBoxLabelModal
+          isOpen={Boolean(thermalPrintReport)}
+          onClose={() => setThermalPrintReport(null)}
+          report={thermalPrintReport}
+        />
+      )}
 
     </div>
   );

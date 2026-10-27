@@ -21,10 +21,16 @@ import {
   Sparkles,
   RefreshCw,
   Clock,
-  ArrowRight
+  ArrowRight,
+  Layers,
+  MapPin,
+  Tag,
+  Shield
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
+import ThermalBoxLabelModal from './ThermalBoxLabelModal';
+import RMATimelineAudit from './RMATimelineAudit';
 
 const QUICK_AUTH_STORAGE_KEY = 'rma_quick_auth_admin';
 
@@ -47,6 +53,62 @@ export default function QuickRMAActionModal({
   const [report, setReport] = useState(null);
   const [isLoadingReport, setIsLoadingReport] = useState(false);
   const [reportError, setReportError] = useState(null);
+
+  // Enterprise Warehouse Triage & Disposition State
+  const [conditionGrade, setConditionGrade] = useState('B - Damaged Packaging Only');
+  const [disposition, setDisposition] = useState('Pending Triage');
+  const [warehouseLocation, setWarehouseLocation] = useState('');
+  const [rmaStatus, setRmaStatus] = useState('received_at_dock');
+  const [isSavingTriage, setIsSavingTriage] = useState(false);
+  const [triageSavedSuccess, setTriageSavedSuccess] = useState(false);
+  const [isThermalLabelOpen, setIsThermalLabelOpen] = useState(false);
+
+  // Synchronize triage inputs when report loads or updates
+  useEffect(() => {
+    if (report) {
+      setConditionGrade(report.condition_grade || 'B - Damaged Packaging Only');
+      setDisposition(report.disposition || 'Pending Triage');
+      setWarehouseLocation(report.warehouse_location || '');
+      setRmaStatus(report.status || 'received_at_dock');
+    }
+  }, [report]);
+
+  const handleSaveTriage = async () => {
+    if (!report) return;
+    setIsSavingTriage(true);
+    try {
+      const inspectorName = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
+      const updates = {
+        condition_grade: conditionGrade,
+        disposition: disposition,
+        warehouse_location: warehouseLocation.trim().toUpperCase() || null,
+        status: rmaStatus,
+        inspected_by: inspectorName,
+        inspected_at: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase
+        .from('rma_reports')
+        .update(updates)
+        .eq('id', report.id)
+        .select('*')
+        .single();
+
+      if (error) {
+        alert(`Failed to save warehouse triage: ${error.message}`);
+      } else {
+        setReport(data || { ...report, ...updates });
+        setTriageSavedSuccess(true);
+        setTimeout(() => setTriageSavedSuccess(false), 3000);
+        if (onRefresh) onRefresh();
+        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'triage-updated', reportId: report.id } }));
+      }
+    } catch (err) {
+      alert(`Error updating triage: ${err.message}`);
+    } finally {
+      setIsSavingTriage(false);
+    }
+  };
 
   // Authentication & Verification State
   const [verifiedAdmin, setVerifiedAdmin] = useState(null);
@@ -312,6 +374,15 @@ export default function QuickRMAActionModal({
   const existingMemo = report
     ? creditMemosList.find(m => m.rma_number === report.rma_number || m.report_id === report.id)
     : null;
+
+  // Enterprise Multi-Tier Financial Threshold Rule:
+  // If total claim exceeds ₱10,000, Super Admin authorization is required to activate Credit Memo button
+  const itemQty = Number(report?.quantity) || 1;
+  const itemUnitPrice = Number(report?.price_with_vat) || Number(report?.price) || Number(matchedProduct?.price_with_vat) || Number(matchedProduct?.price) || 0;
+  const totalClaimValue = itemQty * itemUnitPrice;
+  const isHighValueClaim = totalClaimValue > 10000;
+  const isSuperAdmin = (verifiedAdmin?.role === 'super_admin' || currentUser?.role === 'super_admin');
+  const canIssueCreditMemo = !isHighValueClaim || isSuperAdmin;
 
   // Photos
   const photoList = report?.photo_urls 
@@ -600,7 +671,142 @@ export default function QuickRMAActionModal({
                 </button>
               </div>
 
-              {/* ACTION 1: ASSIGN SKU & SAVE TO CATALOG */}
+              {/* ENTERPRISE ACTION 1: PHYSICAL DISPOSITION & WAREHOUSE TRIAGE MODULE */}
+              <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-3">
+                <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300">
+                      <Layers className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <span>Warehouse Triage & Physical Disposition</span>
+                      </h5>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Assign condition grade, quarantine status, and physical rack/bin location.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsThermalLabelOpen(true)}
+                    className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
+                    title="Print 4x6 inch thermal sticker label"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Print 4x6" Label</span>
+                  </button>
+                </div>
+
+                {triageSavedSuccess && (
+                  <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 rounded-xl text-xs font-bold text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Warehouse triage & location saved successfully!</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                  {/* Condition Grade */}
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      Condition Grade
+                    </label>
+                    <select
+                      value={conditionGrade}
+                      onChange={(e) => setConditionGrade(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
+                    >
+                      <option value="A - Like New / Resellable">A - Like New / Resellable</option>
+                      <option value="B - Damaged Packaging Only">B - Damaged Packaging Only</option>
+                      <option value="C - Defective / Parts Only">C - Defective / Parts Only</option>
+                      <option value="D - Total Loss / Scrap">D - Total Loss / Scrap</option>
+                    </select>
+                  </div>
+
+                  {/* Disposition */}
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      Warehouse Disposition
+                    </label>
+                    <select
+                      value={disposition}
+                      onChange={(e) => setDisposition(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
+                    >
+                      <option value="Pending Triage">Pending Triage</option>
+                      <option value="Restock to Inventory">Restock to Inventory</option>
+                      <option value="Return to Vendor (RTV)">Return to Vendor (RTV)</option>
+                      <option value="Quarantine">Quarantine</option>
+                      <option value="Scrap / Dispose">Scrap / Dispose</option>
+                    </select>
+                  </div>
+
+                  {/* Warehouse Location (Bin / Rack) */}
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      Warehouse Rack / Bin Location
+                    </label>
+                    <div className="relative">
+                      <MapPin className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                      <input
+                        type="text"
+                        value={warehouseLocation}
+                        onChange={(e) => setWarehouseLocation(e.target.value)}
+                        placeholder="e.g. RACK-03-BIN-A"
+                        className="w-full pl-8 pr-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-mono text-xs font-bold text-slate-900 dark:text-white uppercase placeholder:normal-case placeholder-slate-400 focus:outline-none focus:border-blue-600"
+                      />
+                    </div>
+                  </div>
+
+                  {/* RMA Lifecycle Status */}
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                      Lifecycle Stage
+                    </label>
+                    <select
+                      value={rmaStatus}
+                      onChange={(e) => setRmaStatus(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
+                    >
+                      <option value="draft">Draft / Intake</option>
+                      <option value="received_at_dock">Received at Dock</option>
+                      <option value="under_inspection">Under Inspection</option>
+                      <option value="pending_finance_approval">Pending Finance Approval</option>
+                      <option value="credit_memo_issued">Credit Memo Issued</option>
+                      <option value="closed">Closed / Restocked</option>
+                      <option value="rejected">Rejected / Invalid Claim</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[10px] text-slate-400">
+                    Inspected by: <strong className="text-slate-700 dark:text-slate-300">{report.inspected_by || verifiedAdmin?.name || 'Staff'}</strong>
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveTriage}
+                    disabled={isSavingTriage}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {isSavingTriage ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Save Physical Triage</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* ENTERPRISE ACTION 2: ASSIGN SKU & SAVE TO CATALOG */}
               <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-2.5">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2">
@@ -658,7 +864,7 @@ export default function QuickRMAActionModal({
                 )}
               </div>
 
-              {/* ACTION 2: FINANCE CREDIT MEMO */}
+              {/* ENTERPRISE ACTION 3: FINANCE CREDIT MEMO WITH FINANCIAL SAFEGUARD */}
               <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-2.5">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2">
@@ -672,7 +878,7 @@ export default function QuickRMAActionModal({
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">
                         {existingMemo
                           ? `₱${Number(existingMemo.credit_amount || existingMemo.amount || 0).toFixed(2)} credited by ${existingMemo.credit_issued_by || 'Finance'}`
-                          : 'Issue an accounting credit memo to deduct this return from customer invoices.'}
+                          : `Total Claim: ₱${totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${itemQty} unit${itemQty > 1 ? 's' : ''})`}
                       </p>
                     </div>
                   </div>
@@ -680,24 +886,67 @@ export default function QuickRMAActionModal({
                   <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0 ${
                     existingMemo
                       ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
-                      : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                      : isHighValueClaim
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                        : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
                   }`}>
-                    {existingMemo ? 'Issued' : 'Unbilled'}
+                    {existingMemo ? 'Issued' : isHighValueClaim ? 'High-Value Claim' : 'Standard Claim'}
                   </span>
                 </div>
+
+                {/* Financial Safety Rule Notice (> ₱10,000) */}
+                {isHighValueClaim && !existingMemo && (
+                  <div className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+                    isSuperAdmin 
+                      ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+                      : 'bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200'
+                  }`}>
+                    {isSuperAdmin ? (
+                      <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    )}
+                    <div className="space-y-0.5">
+                      <div className="font-black">
+                        {isSuperAdmin 
+                          ? `👑 Super Admin Approved (> ₱10,000 Claim)`
+                          : `🔒 Financial Safety Lock (Claim > ₱10,000)`}
+                      </div>
+                      <p className="text-[11px] opacity-90">
+                        {isSuperAdmin
+                          ? `Authorized by ${verifiedAdmin?.name || currentUser?.name} (Super Admin). Credit Memo issuance enabled.`
+                          : `Total claim is ₱${totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}, exceeding the ₱10,000 threshold. Only a Super Admin can issue this credit memo.`}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {!existingMemo ? (
                   <button
                     type="button"
+                    disabled={!canIssueCreditMemo}
                     onClick={() => {
-                      if (onOpenCreditMemo && report) {
+                      if (canIssueCreditMemo && onOpenCreditMemo && report) {
                         onOpenCreditMemo(report);
                       }
                     }}
-                    className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+                    className={`w-full py-2.5 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all ${
+                      canIssueCreditMemo
+                        ? 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white cursor-pointer'
+                        : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
+                    }`}
                   >
-                    <Receipt className="w-4 h-4" />
-                    <span>+ Issue Credit Memo</span>
+                    {canIssueCreditMemo ? (
+                      <>
+                        <Receipt className="w-4 h-4" />
+                        <span>+ Issue Credit Memo</span>
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="w-4 h-4 text-amber-500" />
+                        <span>Locked: Super Admin Approval Required</span>
+                      </>
+                    )}
                   </button>
                 ) : (
                   <div className="grid grid-cols-2 gap-2 pt-1">
@@ -721,6 +970,11 @@ export default function QuickRMAActionModal({
                   </div>
                 )}
               </div>
+
+              {/* ENTERPRISE AUDIT TRAIL & LIFECYCLE TIMELINE */}
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
+                <RMATimelineAudit report={report} creditMemosList={creditMemosList} />
+              </div>
             </div>
           )}
 
@@ -741,6 +995,15 @@ export default function QuickRMAActionModal({
         </div>
 
       </div>
+
+      {/* 4x6" Thermal Box Label Modal */}
+      {isThermalLabelOpen && report && (
+        <ThermalBoxLabelModal
+          isOpen={isThermalLabelOpen}
+          onClose={() => setIsThermalLabelOpen(false)}
+          report={report}
+        />
+      )}
     </div>
   );
 }

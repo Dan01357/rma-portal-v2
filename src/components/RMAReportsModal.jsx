@@ -22,10 +22,12 @@ import {
   ArrowDown,
   Trash2,
   Receipt,
-  QrCode
+  QrCode,
+  Download
 } from 'lucide-react';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
+import { exportRMAReportsToCSV } from '../utils/exportCsv';
 
 export default function RMAReportsModal({ 
   isOpen, 
@@ -304,6 +306,16 @@ export default function RMAReportsModal({
                 <span>Cards View</span>
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={() => exportRMAReportsToCSV(processedReports)}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
+              title="Export filtered reports to CSV"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export CSV</span>
+            </button>
 
             <button
               onClick={onClose}
