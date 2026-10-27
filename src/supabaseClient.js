@@ -111,14 +111,9 @@ export const rmaApi = {
 
     // 1. Secure Serverless Proxy (/api/v1/products/lookup)
     try {
-      let res = await fetch(`/api/v1/products/lookup?barcode=${encodeURIComponent(cleanBarcode)}`, {
+      const res = await fetch(`/api/v1/products/lookup?barcode=${encodeURIComponent(cleanBarcode)}`, {
         headers: { 'Accept': 'application/json' }
       });
-      if (!res.ok) {
-        res = await fetch(`/api/v1/lookup?barcode=${encodeURIComponent(cleanBarcode)}`, {
-          headers: { 'Accept': 'application/json' }
-        });
-      }
       if (res && res.ok) {
         const json = await res.json();
         if (json.success && json.found && json.product) {
