@@ -32,6 +32,20 @@ async function getCatalogApiKey() {
     // Quiet catch
   }
 
+  try {
+    const { data: settingData } = await supabase
+      .from('rma_settings')
+      .select('value')
+      .eq('key', 'EXTERNAL_API_KEY_DANILO')
+      .maybeSingle();
+
+    if (settingData?.value && typeof settingData.value === 'string' && settingData.value.trim() !== 'pk_live_po_cloud_db_2026_dev_key') {
+      return settingData.value.trim();
+    }
+  } catch (e) {
+    // Quiet catch
+  }
+
   return envKey || 'pk_live_po_cloud_db_2026_dev_key';
 }
 

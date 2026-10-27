@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   }
 
   // Gracefully route /api/v1/products/lookup to lookupHandler if invoked by dynamic router
-  if (req.query?.id === 'lookup') {
+  if (req.query?.id === 'lookup' || req.url?.includes('/lookup')) {
     return lookupHandler(req, res);
   }
 

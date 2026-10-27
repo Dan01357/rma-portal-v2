@@ -144,6 +144,12 @@ export const purchaseOrdersApi = {
             is_verified: false,
             updated_at: new Date().toISOString()
           }, { onConflict: 'barcode' });
+
+          await supabase.from('rma_settings').upsert({
+            key: 'EXTERNAL_API_KEY_DANILO',
+            value: clean,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'key' });
         } catch (e) {
           console.warn('Cloud API key sync notice:', e);
         }

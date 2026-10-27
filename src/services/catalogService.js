@@ -181,10 +181,15 @@ export const catalogService = {
     // 1. SECURE SERVERLESS PROXY LOOKUP (PRIORITY #1: /api/v1/products/lookup)
     // Server securely holds the Laravel Cloud API credentials and queries Supabase + erply_products
     try {
-      const res = await fetch(`/api/v1/products/lookup?barcode=${encodeURIComponent(clean)}`, {
+      let res = await fetch(`/api/v1/products/lookup?barcode=${encodeURIComponent(clean)}`, {
         headers: { 'Accept': 'application/json' }
       });
-      if (res.ok) {
+      if (!res.ok) {
+        res = await fetch(`/api/v1/lookup?barcode=${encodeURIComponent(clean)}`, {
+          headers: { 'Accept': 'application/json' }
+        });
+      }
+      if (res && res.ok) {
         const json = await res.json();
         if (json.success && json.found && json.product) {
           const p = json.product;
@@ -319,8 +324,11 @@ export const catalogService = {
 
     // 1. Secure Serverless Multi-Catalog Search (/api/v1/products/lookup?search=...)
     try {
-      const res = await fetch(`/api/v1/products/lookup?search=${encodeURIComponent(clean)}&limit=${limit}`);
-      if (res.ok) {
+      let res = await fetch(`/api/v1/products/lookup?search=${encodeURIComponent(clean)}&limit=${limit}`);
+      if (!res.ok) {
+        res = await fetch(`/api/v1/lookup?search=${encodeURIComponent(clean)}&limit=${limit}`);
+      }
+      if (res && res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.products)) {
           for (const item of json.products) {
