@@ -13,6 +13,7 @@
  *    - CC: [Customer AE Company Email, mgan@a2z2go.net, marketing@a2z2go.net, azgan@a2z2go.net, jaezelle.benito@pingconmarketing.com]
  */
 import { supabase } from '../supabaseClient';
+import { authService } from './authService';
 
 const DEFAULT_RECIPIENTS = {
   toEmail: 'azgodev@gmail.com',
@@ -297,9 +298,13 @@ export const notificationService = {
   async sendRMANotification(report, isTestMode = false) {
     if (!report) return { success: false, error: 'No report data provided' };
 
+    const currentUser = typeof window !== 'undefined' ? authService.getCurrentUser() : null;
+    const isSuperAdmin = currentUser?.role === 'super_admin';
     const testActive = Boolean(
-      isTestMode || 
-      (typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true')
+      isSuperAdmin && (
+        isTestMode || 
+        (typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true')
+      )
     );
 
     try {
@@ -477,9 +482,13 @@ export const notificationService = {
   async sendProductUpdateNotification({ product, isNew = false, editorName = 'Admin' }, isTestMode = false) {
     if (!product) return { success: false, error: 'No product data' };
 
+    const currentUser = typeof window !== 'undefined' ? authService.getCurrentUser() : null;
+    const isSuperAdmin = currentUser?.role === 'super_admin';
     const testActive = Boolean(
-      isTestMode || 
-      (typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true')
+      isSuperAdmin && (
+        isTestMode || 
+        (typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true')
+      )
     );
 
     try {

@@ -415,8 +415,11 @@ export default function SettingsTab({
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="space-y-1">
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-bold text-slate-900 dark:text-white">Simulation / Test Mode Toggle</h2>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                👑 Super Admin Exclusive
+              </span>
               {isTestMode ? (
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300 border border-amber-300 dark:border-amber-500/40">
                   ACTIVE
@@ -428,7 +431,7 @@ export default function SettingsTab({
               )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xl">
-              When ON, all test emails will be safely dispatched exclusively to <code className="text-amber-600 dark:text-amber-300 font-mono">finance2@keysysincorporated.com</code> with <code className="text-amber-600 dark:text-amber-300 font-mono">Test - </code> in the subject so you can inspect Sent and Inbox without notifying live recipients.
+              When ON, test emails are safely sent exclusively to <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">finance2@keysysincorporated.com</code> with <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">Test - </code> in the subject. <strong>This setting is strictly restricted to Super Admin; all other staff roles and public intake users operate permanently in Live Mode.</strong>
             </p>
           </div>
 
