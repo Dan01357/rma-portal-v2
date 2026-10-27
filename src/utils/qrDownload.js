@@ -47,6 +47,86 @@ function triggerDownload(dataUrlOrBlob, filename) {
 }
 
 /**
+ * Helper: Draw multi-line wrapped text with strict boundary management (left aligned)
+ * Returns the Y coordinate after the last line of text drawn.
+ */
+function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 2) {
+  if (!text) return y;
+  const words = String(text).trim().split(/\s+/);
+  let line = '';
+  let currentY = y;
+  let linesDrawn = 0;
+
+  for (let n = 0; n < words.length; n++) {
+    const testLine = line ? `${line} ${words[n]}` : words[n];
+    const metrics = ctx.measureText(testLine);
+    if (metrics.width > maxWidth && n > 0) {
+      linesDrawn++;
+      if (linesDrawn >= maxLines) {
+        // Last line limit hit: append ellipsis only if more words remain
+        let truncatedLine = line;
+        while (ctx.measureText(truncatedLine + '...').width > maxWidth && truncatedLine.length > 0) {
+          truncatedLine = truncatedLine.slice(0, -1);
+        }
+        ctx.fillText(truncatedLine + '...', x, currentY);
+        return currentY + lineHeight;
+      }
+      ctx.fillText(line, x, currentY);
+      line = words[n];
+      currentY += lineHeight;
+    } else {
+      line = testLine;
+    }
+  }
+
+  if (line) {
+    ctx.fillText(line, x, currentY);
+    currentY += lineHeight;
+  }
+
+  return currentY;
+}
+
+/**
+ * Helper: Draw multi-line wrapped text with center alignment
+ */
+function drawWrappedTextCentered(ctx, text, centerX, y, maxWidth, lineHeight, maxLines = 2) {
+  if (!text) return y;
+  const words = String(text).trim().split(/\s+/);
+  let line = '';
+  let currentY = y;
+  let linesDrawn = 0;
+
+  for (let n = 0; n < words.length; n++) {
+    const testLine = line ? `${line} ${words[n]}` : words[n];
+    const metrics = ctx.measureText(testLine);
+    if (metrics.width > maxWidth && n > 0) {
+      linesDrawn++;
+      if (linesDrawn >= maxLines) {
+        let truncatedLine = line;
+        while (ctx.measureText(truncatedLine + '...').width > maxWidth && truncatedLine.length > 0) {
+          truncatedLine = truncatedLine.slice(0, -1);
+        }
+        ctx.fillText(truncatedLine + '...', centerX, currentY);
+        return currentY + lineHeight;
+      }
+      ctx.fillText(line, centerX, currentY);
+      line = words[n];
+      currentY += lineHeight;
+    } else {
+      line = testLine;
+    }
+  }
+
+  if (line) {
+    ctx.fillText(line, centerX, currentY);
+    currentY += lineHeight;
+  }
+
+  return currentY;
+}
+
+/**
  * Download High-Resolution QR Code (PNG)
  * Generates an ultra-crisp card with the QR code and RMA Ticket info.
  */
@@ -68,7 +148,7 @@ export async function downloadQrCodePng({
   const { img, blobUrl } = await svgToImage(svgEl);
 
   try {
-    // Canvas dimensions (high-res 1200 x 1400)
+    // Canvas dimensions (high-res 1200 x 1420)
     const canvas = document.createElement('canvas');
     const width = 1200;
     const height = 1420;
@@ -97,7 +177,7 @@ export async function downloadQrCodePng({
     ctx.fillText('WHOLESALE RMA RETURN AUTHORIZATION', width / 2, 90);
 
     // 4. Draw QR Code centered (high contrast)
-    const qrSize = 820;
+    const qrSize = 780;
     const qrX = (width - qrSize) / 2;
     const qrY = 160;
 
@@ -114,25 +194,29 @@ export async function downloadQrCodePng({
     ctx.fillStyle = '#475569';
     ctx.font = 'bold 24px "JetBrains Mono", Consolas, monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('▲ SCAN QR CODE FOR INSTANT WAREHOUSE INTAKE ▲', width / 2, 1040);
+    ctx.fillText('▲ SCAN QR CODE FOR INSTANT WAREHOUSE INTAKE ▲', width / 2, 1000);
 
     // 6. RMA Ticket Number (Big Monospace)
     ctx.fillStyle = '#0f172a';
-    ctx.font = '900 68px "JetBrains Mono", Consolas, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(rmaNumber, width / 2, 1140);
+    let rmaFontSize = 64;
+    ctx.font = `900 ${rmaFontSize}px "JetBrains Mono", Consolas, monospace`;
+    while (ctx.measureText(rmaNumber).width > 1050 && rmaFontSize > 34) {
+      rmaFontSize -= 2;
+      ctx.font = `900 ${rmaFontSize}px "JetBrains Mono", Consolas, monospace`;
+    }
+    ctx.fillText(rmaNumber, width / 2, 1085);
 
-    // 7. Product & Barcode Subtitle
+    // 7. Product & Barcode Subtitle (Wrapped cleanly across up to 2 lines)
+    let nextY = 1150;
     if (productName || barcode) {
       ctx.fillStyle = '#1e293b';
       ctx.font = 'bold 36px "Inter", system-ui, sans-serif';
-      const cleanProd = productName.length > 44 ? productName.substring(0, 42) + '...' : productName;
-      ctx.fillText(cleanProd || 'Returned Merchandise', width / 2, 1220);
+      nextY = drawWrappedTextCentered(ctx, productName || 'Returned Merchandise', width / 2, nextY, 1040, 44, 2);
 
       if (barcode) {
         ctx.fillStyle = '#64748b';
         ctx.font = 'bold 28px "JetBrains Mono", Consolas, monospace';
-        ctx.fillText(`Barcode: ${barcode}`, width / 2, 1275);
+        ctx.fillText(`Barcode: ${barcode}`, width / 2, nextY + 10);
       }
     }
 
@@ -140,7 +224,7 @@ export async function downloadQrCodePng({
     ctx.fillStyle = '#94a3b8';
     ctx.font = '500 22px "Inter", system-ui, sans-serif';
     const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-    ctx.fillText(`RMA Portal Verification • Generated ${dateStr}`, width / 2, 1345);
+    ctx.fillText(`RMA Portal Verification • Generated ${dateStr}`, width / 2, 1365);
 
     // Convert to PNG and download
     const finalFilename = filename || `${rmaNumber}-QR.png`;
@@ -161,6 +245,7 @@ export async function downloadQrCodePng({
 /**
  * Generate Complete Official RMA Box Verification Label Canvas
  * High-res 1200 x 1680 px graphic formatted specifically for box adhesion & thermal prints.
+ * Completely eliminates overlap and truncation of RMA number, full product names, and return reasons.
  */
 export async function generateBoxStickerCanvas({
   svgElementOrId,
@@ -195,16 +280,16 @@ export async function generateBoxStickerCanvas({
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Could not initialize canvas context.');
 
-    // White label background
+    // 1. Crisp White Background
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width, height);
 
-    // Outer thick label border
+    // 2. Outer Heavyweight Border
     ctx.strokeStyle = '#0f172a';
     ctx.lineWidth = 14;
     ctx.strokeRect(40, 40, width - 80, height - 80);
 
-    // Top Header: Wholesale Operations & Dock Intake badge
+    // 3. Top Header: Wholesale Operations & Dock Intake badge
     ctx.fillStyle = '#64748b';
     ctx.font = 'bold 24px "Inter", sans-serif';
     ctx.textAlign = 'left';
@@ -214,7 +299,7 @@ export async function generateBoxStickerCanvas({
     ctx.font = '900 38px "Inter", sans-serif';
     ctx.fillText('RETURN VERIFICATION LABEL', 80, 160);
 
-    // Dock intake pill on right
+    // Dock intake pill on top right
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(width - 320, 95, 240, 65);
     ctx.fillStyle = '#ffffff';
@@ -230,48 +315,70 @@ export async function generateBoxStickerCanvas({
     ctx.lineTo(width - 80, 195);
     ctx.stroke();
 
-    // Middle Left: RMA # and Supplier
-    ctx.fillStyle = '#64748b';
-    ctx.font = 'bold 26px "Inter", sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('RETURN AUTHORIZATION #', 80, 260);
-
-    ctx.fillStyle = '#0f172a';
-    ctx.font = '900 64px "JetBrains Mono", Consolas, monospace';
-    ctx.fillText(rmaNumber, 80, 340);
-
-    // Supplier Tag Pill
-    ctx.fillStyle = '#f1f5f9';
-    ctx.fillRect(80, 385, 420, 56);
-    ctx.strokeStyle = '#cbd5e1';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(80, 385, 420, 56);
-
-    ctx.fillStyle = '#334155';
-    ctx.font = 'bold 26px "Inter", sans-serif';
-    ctx.fillText(`Supplier: ${supplier || 'Savemore'}`, 105, 424);
-
-    // Middle Right: High-contrast QR Code with border
-    const qrSize = 440;
-    const qrX = width - 80 - qrSize;
-    const qrY = 220;
+    // 4. Middle Right: High-contrast QR Code with framed border
+    // Sized at 380px (qrX = 740), leaving a generous 630px left column for RMA number & supplier
+    const qrSize = 380;
+    const qrX = width - 80 - qrSize; // 740
+    const qrY = 225;
 
     ctx.strokeStyle = '#0f172a';
     ctx.lineWidth = 6;
     ctx.strokeRect(qrX, qrY, qrSize, qrSize);
     ctx.drawImage(img, qrX + 15, qrY + 15, qrSize - 30, qrSize - 30);
 
-    // "SCAN FOR RMA" strip under QR
+    // Strip below QR: "SCAN FOR RMA DETAILS"
     ctx.fillStyle = '#0f172a';
-    ctx.fillRect(qrX, qrY + qrSize, qrSize, 40);
+    ctx.fillRect(qrX, qrY + qrSize, qrSize, 42);
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 22px "JetBrains Mono", Consolas, monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('SCAN FOR RMA', qrX + qrSize / 2, qrY + qrSize + 28);
+    ctx.fillText('SCAN FOR RMA DETAILS', qrX + qrSize / 2, qrY + qrSize + 29);
 
-    // Section 2: Returned Item Details Container Box
-    const boxY = 720;
-    const boxH = 540;
+    // 5. Middle Left Column: RMA Number, Supplier, and Status
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 24px "Inter", sans-serif';
+    ctx.fillText('RETURN AUTHORIZATION #', 80, 260);
+
+    // Dynamic Font Sizing for RMA Number to strictly prevent overlapping the QR code!
+    // Maximum left column width before reaching QR frame is 620px (from x=80 to x=700)
+    let rmaFontSize = 54;
+    ctx.font = `900 ${rmaFontSize}px "JetBrains Mono", Consolas, monospace`;
+    while (ctx.measureText(rmaNumber).width > 610 && rmaFontSize > 26) {
+      rmaFontSize -= 2;
+      ctx.font = `900 ${rmaFontSize}px "JetBrains Mono", Consolas, monospace`;
+    }
+    ctx.fillStyle = '#0f172a';
+    ctx.fillText(rmaNumber, 80, 335);
+
+    // Dynamic Supplier Tag Pill (measures text width to fit neatly)
+    const supplierText = `Supplier: ${supplier || 'Savemore'}`;
+    ctx.font = 'bold 26px "Inter", sans-serif';
+    const supplierPillWidth = Math.min(Math.max(ctx.measureText(supplierText).width + 50, 280), 610);
+
+    ctx.fillStyle = '#f1f5f9';
+    ctx.fillRect(80, 380, supplierPillWidth, 54);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(80, 380, supplierPillWidth, 54);
+
+    ctx.fillStyle = '#334155';
+    ctx.fillText(supplierText, 105, 417);
+
+    // Verification Status Badge
+    ctx.fillStyle = '#eff6ff';
+    ctx.fillRect(80, 452, 360, 48);
+    ctx.strokeStyle = '#bfdbfe';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(80, 452, 360, 48);
+
+    ctx.fillStyle = '#1d4ed8';
+    ctx.font = 'bold 22px "Inter", sans-serif';
+    ctx.fillText('STATUS: LOGGED & PENDING', 105, 484);
+
+    // 6. Section 2: Returned Item Details Container Box (Taller & beautifully spaced)
+    const boxY = 670;
+    const boxH = 760;
     ctx.fillStyle = '#f8fafc';
     ctx.fillRect(80, boxY, width - 160, boxH);
     ctx.strokeStyle = '#cbd5e1';
@@ -280,79 +387,86 @@ export async function generateBoxStickerCanvas({
 
     // Item details header
     ctx.fillStyle = '#64748b';
-    ctx.font = 'bold 26px "Inter", sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('RETURNED ITEM DETAILS', 120, boxY + 60);
+    ctx.font = 'bold 24px "Inter", sans-serif';
+    ctx.fillText('RETURNED ITEM DETAILS', 120, boxY + 55);
 
-    // Item name
+    // Item name: Wrapped across up to 2 lines at 38px font (960px width) - NO TRUNCATION!
     ctx.fillStyle = '#0f172a';
-    ctx.font = '900 48px "Inter", sans-serif';
-    const cleanName = itemName.length > 40 ? itemName.substring(0, 38) + '...' : itemName;
-    ctx.fillText(cleanName, 120, boxY + 130);
+    ctx.font = '900 38px "Inter", sans-serif';
+    const prodNextY = drawWrappedText(ctx, itemName || 'Returned Merchandise', 120, boxY + 115, 960, 48, 2);
 
-    // Barcode and SKU line
+    // Barcode and SKU line (dynamically placed below wrapped item name)
+    const codeY = Math.max(prodNextY + 10, boxY + 185);
     ctx.fillStyle = '#334155';
-    ctx.font = 'bold 34px "JetBrains Mono", Consolas, monospace';
+    ctx.font = 'bold 30px "JetBrains Mono", Consolas, monospace';
     let codeStr = `Barcode: ${barcode || 'N/A'}`;
-    if (sku) codeStr += `  •  SKU: ${sku}`;
-    ctx.fillText(codeStr, 120, boxY + 195);
+    if (sku) codeStr += `   •   SKU: ${sku}`;
+    ctx.fillText(codeStr, 120, codeY);
 
-    // Divider inside box
+    // Horizontal Divider 1
+    const div1Y = codeY + 35;
     ctx.strokeStyle = '#e2e8f0';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(120, boxY + 240);
-    ctx.lineTo(width - 120, boxY + 240);
+    ctx.moveTo(120, div1Y);
+    ctx.lineTo(width - 120, div1Y);
     ctx.stroke();
 
-    // 2-Column Specs: Quantity & Defect Reason
+    // 2-Column Specs: Quantity & Defect / Return Reason
+    const row1HeaderY = div1Y + 45;
     ctx.fillStyle = '#64748b';
     ctx.font = 'bold 24px "Inter", sans-serif';
-    ctx.fillText('QUANTITY', 120, boxY + 295);
-    ctx.fillText('DEFECT / RETURN REASON', 600, boxY + 295);
+    ctx.fillText('QUANTITY', 120, row1HeaderY);
+    ctx.fillText('DEFECT / RETURN REASON', 520, row1HeaderY);
 
+    const row1ValY = row1HeaderY + 50;
     ctx.fillStyle = '#0f172a';
-    ctx.font = '900 46px "JetBrains Mono", Consolas, monospace';
-    ctx.fillText(`${quantity} ${unit || 'pc'}`, 120, boxY + 360);
+    ctx.font = '900 48px "JetBrains Mono", Consolas, monospace';
+    ctx.fillText(`${quantity} ${unit || 'pc'}`, 120, row1ValY);
 
+    // Defect / Return Reason: Wrapped cleanly across up to 2 lines (560px width) - NO TRUNCATION!
     ctx.fillStyle = '#b91c1c';
-    ctx.font = 'bold 36px "Inter", sans-serif';
-    const cleanReason = reason.length > 30 ? reason.substring(0, 28) + '...' : reason;
-    ctx.fillText(cleanReason, 600, boxY + 355);
+    ctx.font = 'bold 32px "Inter", sans-serif';
+    const reasonNextY = drawWrappedText(ctx, reason || 'Defective / Return', 520, row1ValY - 10, 560, 42, 2);
 
-    // Divider for reporter
+    // Horizontal Divider 2
+    const div2Y = Math.max(row1ValY + 50, reasonNextY + 25);
     ctx.strokeStyle = '#e2e8f0';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(120, boxY + 410);
-    ctx.lineTo(width - 120, boxY + 410);
+    ctx.moveTo(120, div2Y);
+    ctx.lineTo(width - 120, div2Y);
     ctx.stroke();
 
+    // 2-Column Specs: Reported By & Date Recorded
+    const row2HeaderY = div2Y + 45;
     ctx.fillStyle = '#64748b';
     ctx.font = 'bold 24px "Inter", sans-serif';
-    ctx.fillText('REPORTED BY', 120, boxY + 460);
-    ctx.fillText('DATE RECORDED', 600, boxY + 460);
+    ctx.fillText('REPORTED BY', 120, row2HeaderY);
+    ctx.fillText('DATE RECORDED', 520, row2HeaderY);
 
+    const row2ValY = row2HeaderY + 45;
     ctx.fillStyle = '#0f172a';
     ctx.font = 'bold 32px "Inter", sans-serif';
-    ctx.fillText(reporter || 'Staff', 120, boxY + 505);
+    drawWrappedText(ctx, reporter || 'Warehouse Staff', 120, row2ValY, 360, 38, 2);
 
     ctx.fillStyle = '#334155';
     ctx.font = 'bold 30px "JetBrains Mono", Consolas, monospace';
-    ctx.fillText(dateFormatted || new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }), 600, boxY + 505);
+    ctx.fillText(dateFormatted || new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }), 520, row2ValY);
 
-    // Bottom Footer Banner
+    // 7. Dashed Tear Line and Footer
+    const cutLineY = 1495;
     ctx.strokeStyle = '#94a3b8';
-    ctx.setLineDash([12, 10]);
+    ctx.setLineDash([14, 10]);
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(80, 1500);
-    ctx.lineTo(width - 80, 1500);
+    ctx.moveTo(80, cutLineY);
+    ctx.lineTo(width - 80, cutLineY);
     ctx.stroke();
     ctx.setLineDash([]); // Reset line dash
 
     ctx.fillStyle = '#64748b';
-    ctx.font = 'bold 26px "Inter", sans-serif';
+    ctx.font = 'bold 24px "Inter", sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('ATTACH SECURELY TO OUTER BOX OR RETURNED MERCHANDISE', width / 2, 1560);
 

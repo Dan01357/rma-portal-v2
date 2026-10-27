@@ -2,6 +2,28 @@ import { supabase } from '../supabaseClient';
 import { INITIAL_PRODUCTS } from '../data/mockData';
 import { notificationService } from './notificationService';
 import { purchaseOrdersApi } from './purchaseOrdersApi';
+import { authService } from './authService';
+
+/**
+ * Safe test mode resolution:
+ * Strictly restricted to Super Admin.
+ * Anonymous reporters, store workers, and non-super-admins are ALWAYS Live.
+ */
+function isSuperAdminTestModeActive() {
+  if (typeof window === 'undefined') return false;
+  try {
+    const user = authService.getCurrentUser();
+    if (user?.role !== 'super_admin') {
+      try {
+        localStorage.setItem('rma_portal_test_mode', 'false');
+      } catch (e) {}
+      return false;
+    }
+    return localStorage.getItem('rma_portal_test_mode') === 'true';
+  } catch (e) {
+    return false;
+  }
+}
 
 // Cross-tab broadcast channel for instant multi-device / multi-tab reactivity
 const syncChannel = typeof window !== 'undefined' && window.BroadcastChannel 
@@ -758,9 +780,9 @@ export const catalogService = {
 
     // 2. Dispatch automated notification email RIGHT AWAY for every reported RMA!
     // Rule:
-    // - 1st time reported: AE isn't recorded yet in the database, so email is sent right away excluding the AE.
-    // - 2nd time reported: AE is recorded in the database from admin assignment, so email is sent right away including the AE email.
-    const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
+    // - Test Mode is strictly accessible ONLY if user is logged in as Super Admin.
+    // - For all anonymous public reporters or non-super-admins, submissions are ALWAYS Live.
+    const isTestActive = isSuperAdminTestModeActive();
     notificationService.sendRMANotification(finalReport, isTestActive).catch(err => {
       console.warn('Background RMA report notification notice:', err.message);
     });
@@ -1009,7 +1031,7 @@ export const catalogService = {
     // 4. Automated RMA Alert dispatch: alert AE & configured TO/CC recipients for the newly verified RMA report(s)
     if (pendingReportsToNotify.length > 0) {
       try {
-        const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
+        const isTestActive = isSuperAdminTestModeActive();
         for (const rep of pendingReportsToNotify) {
           const enrichedReport = {
             ...rep,

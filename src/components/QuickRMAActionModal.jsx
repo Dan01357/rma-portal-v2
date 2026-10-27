@@ -129,9 +129,11 @@ export default function QuickRMAActionModal({
   const [authError, setAuthError] = useState(null);
   const [authSuccessMsg, setAuthSuccessMsg] = useState(null);
 
-  // Sandbox Test Mode State (mirrors admin website toggle)
+  // Sandbox Test Mode State: Strictly restricted to Super Admin
   const [isTestMode, setIsTestMode] = useState(() => {
     try {
+      const user = authService.getCurrentUser();
+      if (user?.role !== 'super_admin') return false;
       return typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
     } catch (e) {
       return false;
@@ -141,7 +143,12 @@ export default function QuickRMAActionModal({
   useEffect(() => {
     const handleStorage = () => {
       try {
-        setIsTestMode(localStorage.getItem('rma_portal_test_mode') === 'true');
+        const user = authService.getCurrentUser();
+        if (user?.role === 'super_admin') {
+          setIsTestMode(localStorage.getItem('rma_portal_test_mode') === 'true');
+        } else {
+          setIsTestMode(false);
+        }
       } catch (e) {}
     };
     window.addEventListener('storage', handleStorage);
@@ -151,18 +158,6 @@ export default function QuickRMAActionModal({
       window.removeEventListener('rma-data-changed', handleStorage);
     };
   }, []);
-
-  const toggleTestMode = () => {
-    setIsTestMode(prev => {
-      const next = !prev;
-      try {
-        localStorage.setItem('rma_portal_test_mode', String(next));
-        window.dispatchEvent(new Event('storage'));
-        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'test-mode-toggled', isTestMode: next } }));
-      } catch (e) {}
-      return next;
-    });
-  };
 
   // Check if current logged-in user is already admin or super admin
   useEffect(() => {

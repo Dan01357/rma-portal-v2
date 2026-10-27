@@ -45,7 +45,10 @@ import {
   QrCode,
   Download,
   Building2,
-  Layers
+  Layers,
+  FlaskConical,
+  ToggleRight,
+  ToggleLeft
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
@@ -1333,6 +1336,66 @@ export default function App() {
               </div>
             </div>
 
+            {/* Super Admin Status & Sandbox Control Banner on Public Portal:
+                Only displayed if the active user is an authenticated Super Admin.
+                If not logged in as Super Admin, this banner is invisible and submissions are permanently Live. */}
+            {currentUser?.role === 'super_admin' && (
+              <div className={`p-3 sm:p-3.5 rounded-2xl border transition-all text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+                isTestMode
+                  ? 'bg-amber-500/10 dark:bg-amber-950/40 border-amber-500/40 text-amber-900 dark:text-amber-200'
+                  : 'bg-emerald-500/10 dark:bg-emerald-950/40 border-emerald-500/40 text-emerald-900 dark:text-emerald-200'
+              }`}>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className={`p-2 rounded-xl shrink-0 shadow-xs ${
+                    isTestMode ? 'bg-amber-500 text-slate-950 font-black' : 'bg-emerald-600 text-white'
+                  }`}>
+                    {isTestMode ? <FlaskConical className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+                  </div>
+                  <div className="min-w-0 space-y-0.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <strong className="font-black text-xs">
+                        {isTestMode ? '🧪 Super Admin Sandbox Active' : '🟢 Live Delivery Mode Active'}
+                      </strong>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white/70 dark:bg-slate-900/70 border border-current/20 font-bold">
+                        {currentUser.name || 'Danilo Alvaro (Super Admin)'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] opacity-85 leading-snug">
+                      {isTestMode 
+                        ? 'Test emails routed safely to finance2@keysysincorporated.com' 
+                        : 'Official return reports will be sent directly to supplier & Assigned AEs'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-stretch sm:self-center justify-end shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-current/10">
+                  <button
+                    type="button"
+                    onClick={toggleTestMode}
+                    className={`touch-target px-3 py-1.5 rounded-xl font-black text-xs transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 ${
+                      isTestMode
+                        ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
+                        : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700'
+                    }`}
+                    title="Toggle Test / Sandbox Mode"
+                  >
+                    {isTestMode ? <ToggleRight className="w-4 h-4 text-slate-950" /> : <ToggleLeft className="w-4 h-4 text-slate-400" />}
+                    <span>{isTestMode ? 'Test Mode: ON' : 'Test Mode: OFF'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => navigateTo('/admin')}
+                    className="touch-target px-3 py-1.5 rounded-xl text-xs font-bold bg-white/80 hover:bg-white dark:bg-slate-800/90 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 shadow-2xs transition-all cursor-pointer active:scale-95 flex items-center gap-1"
+                    title="Return to Admin Dashboard"
+                  >
+                    <span>Admin Portal</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Fluid Header Typography */}
             <div className="text-center space-y-1.5 pb-1">
               <h1 className="text-fluid-title font-black text-slate-900 dark:text-white tracking-tight">
@@ -1415,35 +1478,43 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Action Buttons: Download QR, Print Sticker, Report Another */}
+                {/* Action Buttons: Save Sticker (PNG), Print Sticker, Report Another */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                   <button
                     type="button"
                     onClick={async () => {
                       try {
-                        await downloadQrCodePng({
+                        await downloadBoxStickerPng({
                           svgElementOrId: 'filed-report-qr-svg',
                           rmaNumber: submitSuccessReport.rmaNumber,
-                          productName: submitSuccessReport.productName,
-                          barcode: submitSuccessReport.barcode
+                          supplier: submitSuccessReport.supplier || submitSuccessReport.supplier_name || 'Warehouse',
+                          itemName: submitSuccessReport.productName || submitSuccessReport.name || 'Returned Merchandise',
+                          barcode: submitSuccessReport.barcode,
+                          sku: submitSuccessReport.sku || submitSuccessReport.code || '',
+                          quantity: submitSuccessReport.quantity || 1,
+                          unit: submitSuccessReport.unit_name || submitSuccessReport.unit || 'pc',
+                          reason: submitSuccessReport.reason || 'Defective / Return',
+                          reporter: submitSuccessReport.reporter_name || submitSuccessReport.reporter || 'Staff',
+                          dateFormatted: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
                         });
-                        showToast(`QR Code for ${submitSuccessReport.rmaNumber} downloaded!`, 'success');
+                        showToast(`Official Box Sticker for ${submitSuccessReport.rmaNumber} downloaded!`, 'success');
                       } catch (err) {
-                        console.error('Failed to download QR code:', err);
-                        showToast('Failed to download QR image.', 'warning');
+                        console.error('Failed to download sticker:', err);
+                        showToast('Failed to download sticker image.', 'warning');
                       }
                     }}
                     className="touch-target w-full py-3 px-3 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white font-extrabold text-xs rounded-2xl shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                    title="Download high-resolution QR code PNG to your device"
+                    title="Download high-resolution official RMA Box Verification Sticker PNG"
                   >
                     <Download className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Download QR</span>
+                    <span>Save Sticker (PNG)</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setQrModalReport(submitSuccessReport)}
                     className="touch-target w-full py-3 px-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-2xl shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                    title="Open print preview and sticker formatting options"
                   >
                     <Printer className="w-4 h-4 shrink-0" />
                     <span>Print Box Sticker</span>
