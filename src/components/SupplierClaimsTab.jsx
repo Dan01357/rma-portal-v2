@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Building2, 
   Receipt, 
@@ -19,14 +19,34 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
-  RotateCcw
+  RotateCcw,
+  ClipboardCheck,
+  Package,
+  Trash2,
+  QrCode,
+  Image as ImageIcon,
+  X,
+  MapPin
 } from 'lucide-react';
 import { exportRMAReportsToCSV } from '../utils/exportCsv';
+import TablePagination from './TablePagination';
+import ImageLightboxModal from './ImageLightboxModal';
 
 export default function SupplierClaimsTab({
   reportsList = [],
+  creditMemosList = [],
+  savedProductsList = [],
   currentUser,
-  onRefresh
+  onRefresh,
+  onInspectReport,
+  onEditProduct,
+  onOpenCreditMemo,
+  onViewCreditMemoVoucher,
+  onPrintThermal,
+  onOpenStickerModal,
+  onViewPhoto,
+  onRequestDeleteReport,
+  onRequestBulkDeleteReports
 }) {
   const [selectedSupplier, setSelectedSupplier] = useState('All');
   const [dispositionFilter, setDispositionFilter] = useState('All');
@@ -35,6 +55,13 @@ export default function SupplierClaimsTab({
   const [sortDirection, setSortDirection] = useState('desc');
   const [selectedRmaIds, setSelectedRmaIds] = useState(new Set());
   const [activeClaimBatch, setActiveClaimBatch] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [localLightboxPhoto, setLocalLightboxPhoto] = useState(null);
+
+  // Role permissions
+  const canDeleteReports = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
+  const canEditProducts = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
 
   // Extract unique suppliers from reports
   const suppliers = useMemo(() => {
@@ -45,6 +72,11 @@ export default function SupplierClaimsTab({
     });
     return ['All', ...Array.from(set).sort()];
   }, [reportsList]);
+
+  // Reset pagination on filter or sort change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedSupplier, dispositionFilter, searchTerm, sortField, sortDirection]);
 
   // Handle column sorting
   const handleSort = (field) => {
@@ -122,6 +154,12 @@ export default function SupplierClaimsTab({
     return list;
   }, [reportsList, selectedSupplier, dispositionFilter, searchTerm, sortField, sortDirection]);
 
+  // Paginated Slice
+  const paginatedCandidates = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return rtvCandidates.slice(start, start + pageSize);
+  }, [rtvCandidates, currentPage, pageSize]);
+
   // Calculate totals of selected items
   const selectedItems = useMemo(() => {
     return rtvCandidates.filter(r => selectedRmaIds.has(r.id || r.rma_number));
@@ -148,11 +186,56 @@ export default function SupplierClaimsTab({
     });
   };
 
+  const isAllPageSelected = paginatedCandidates.length > 0 && paginatedCandidates.every(r => selectedRmaIds.has(r.id || r.rma_number));
+
   const handleSelectAll = () => {
     if (selectedRmaIds.size === rtvCandidates.length && rtvCandidates.length > 0) {
       setSelectedRmaIds(new Set());
     } else {
       setSelectedRmaIds(new Set(rtvCandidates.map(r => r.id || r.rma_number)));
+    }
+  };
+
+  const handleClearSelection = () => {
+    setSelectedRmaIds(new Set());
+  };
+
+  // Helper to safely extract photo URLs
+  const getPhotos = (report) => {
+    if (!report?.photos) return [];
+    if (Array.isArray(report.photos)) return report.photos.filter(Boolean);
+    if (typeof report.photos === 'string') {
+      try {
+        const parsed = JSON.parse(report.photos);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean);
+      } catch (e) {
+        return [report.photos];
+      }
+    }
+    return [];
+  };
+
+  const handleOpenPhotoPreview = (report) => {
+    const photos = getPhotos(report);
+    if (!photos.length) return;
+    const photoObj = {
+      images: photos,
+      initialIndex: 0,
+      url: photos[0],
+      title: report.name || `Return ${report.rma_number}`,
+      subtitle: `RMA #${report.rma_number} • Supplier: ${report.supplier_name || 'Savemore'} • ${report.reason || 'Damaged'}`
+    };
+    if (onViewPhoto) {
+      onViewPhoto(photoObj);
+    } else {
+      setLocalLightboxPhoto(photoObj);
+    }
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedItems.length === 0) return;
+    if (onRequestBulkDeleteReports) {
+      onRequestBulkDeleteReports(selectedItems);
     }
   };
 
@@ -302,7 +385,7 @@ export default function SupplierClaimsTab({
             )}
           </div>
 
-          {/* Search Bar */}
+          {/* Search Bar with Clear Button */}
           <div className="relative min-w-[240px]">
             <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
             <input
@@ -310,14 +393,24 @@ export default function SupplierClaimsTab({
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search RMA#, product, SKU..."
-              className="w-full pl-8 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-amber-600"
+              className="w-full pl-8 pr-8 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-amber-600"
             />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                title="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Selection Bar */}
-        <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-          <div className="flex items-center gap-3">
+        {/* Selection & Bulk Actions Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 text-xs">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={handleSelectAll}
@@ -326,16 +419,42 @@ export default function SupplierClaimsTab({
               {selectedRmaIds.size === rtvCandidates.length && rtvCandidates.length > 0 ? 'Deselect All' : `Select All (${rtvCandidates.length})`}
             </button>
             {selectedRmaIds.size > 0 && (
-              <span className="font-bold text-slate-700 dark:text-slate-300">
-                {selectedRmaIds.size} item{selectedRmaIds.size > 1 ? 's' : ''} selected • <strong>₱{totalClaimAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-700 dark:text-slate-300 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-lg border border-amber-200 dark:border-amber-900">
+                  {selectedRmaIds.size} item{selectedRmaIds.size > 1 ? 's' : ''} selected • <strong>₱{totalClaimAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                </span>
+
+                {/* Bulk Delete Button */}
+                {canDeleteReports && onRequestBulkDeleteReports && (
+                  <button
+                    type="button"
+                    onClick={handleBulkDelete}
+                    className="px-3 py-1 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/70 dark:hover:bg-rose-900/70 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                    title="Delete selected RMA return reports and remove proof images"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Selected ({selectedRmaIds.size})</span>
+                  </button>
+                )}
+
+                {/* Generate Debit Claim Button in selection bar */}
+                <button
+                  type="button"
+                  onClick={handleGenerateBatchClaim}
+                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                  title="Generate RTV Debit Claim Voucher for selected items"
+                >
+                  <Receipt className="w-3.5 h-3.5" />
+                  <span>Generate RTV Claim</span>
+                </button>
+              </div>
             )}
           </div>
 
           <button
             type="button"
             onClick={() => exportRMAReportsToCSV(selectedItems.length > 0 ? selectedItems : rtvCandidates)}
-            className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-white flex items-center gap-1 font-bold cursor-pointer"
+            className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-white flex items-center gap-1 font-bold cursor-pointer ml-auto"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Export RTV CSV</span>
@@ -346,22 +465,46 @@ export default function SupplierClaimsTab({
       {/* RTV Items Table */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
         {rtvCandidates.length === 0 ? (
-          <div className="p-8 text-center text-xs text-slate-400">
-            No return merchandise matching the selected filters.
+          <div className="p-12 text-center text-xs text-slate-400 space-y-2">
+            <Building2 className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-700" />
+            <p className="font-semibold text-slate-600 dark:text-slate-400">No return merchandise matching the selected filters.</p>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedSupplier('All');
+                  setDispositionFilter('All');
+                  setSearchTerm('');
+                  setSelectedRmaIds(new Set());
+                }}
+                className="text-amber-600 hover:underline font-bold text-xs"
+              >
+                Clear all filters
+              </button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800 select-none">
                 <tr>
+                  {/* Select All Checkbox */}
                   <th className="p-3 w-10 text-center">
                     <input
                       type="checkbox"
-                      checked={selectedRmaIds.size === rtvCandidates.length && rtvCandidates.length > 0}
+                      checked={isAllPageSelected}
                       onChange={handleSelectAll}
                       className="rounded-md border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                      title="Select all on this page"
                     />
                   </th>
+
+                  {/* Photo Column */}
+                  <th className="p-3 text-center w-12" title="Proof Photo">
+                    <ImageIcon className="w-4 h-4 mx-auto text-slate-400" />
+                  </th>
+
+                  {/* RMA Identifier */}
                   <th 
                     onClick={() => handleSort('rma_number')}
                     className="p-3 cursor-pointer hover:text-amber-600 transition-colors group"
@@ -373,6 +516,8 @@ export default function SupplierClaimsTab({
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
                     </div>
                   </th>
+
+                  {/* Vendor / Supplier */}
                   <th 
                     onClick={() => handleSort('supplier_name')}
                     className="p-3 cursor-pointer hover:text-amber-600 transition-colors group"
@@ -384,6 +529,8 @@ export default function SupplierClaimsTab({
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
                     </div>
                   </th>
+
+                  {/* Product Description & SKU */}
                   <th 
                     onClick={() => handleSort('name')}
                     className="p-3 cursor-pointer hover:text-amber-600 transition-colors group"
@@ -395,6 +542,8 @@ export default function SupplierClaimsTab({
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
                     </div>
                   </th>
+
+                  {/* Triage Disposition */}
                   <th 
                     onClick={() => handleSort('disposition')}
                     className="p-3 cursor-pointer hover:text-amber-600 transition-colors group"
@@ -406,6 +555,8 @@ export default function SupplierClaimsTab({
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
                     </div>
                   </th>
+
+                  {/* Qty */}
                   <th 
                     onClick={() => handleSort('quantity')}
                     className="p-3 text-right cursor-pointer hover:text-amber-600 transition-colors group"
@@ -417,6 +568,8 @@ export default function SupplierClaimsTab({
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
                     </div>
                   </th>
+
+                  {/* Unit Price */}
                   <th 
                     onClick={() => handleSort('price')}
                     className="p-3 text-right cursor-pointer hover:text-amber-600 transition-colors group"
@@ -428,6 +581,8 @@ export default function SupplierClaimsTab({
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
                     </div>
                   </th>
+
+                  {/* Total Claim */}
                   <th 
                     onClick={() => handleSort('total')}
                     className="p-3 text-right cursor-pointer hover:text-amber-600 transition-colors group"
@@ -439,15 +594,21 @@ export default function SupplierClaimsTab({
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
                     </div>
                   </th>
+
+                  {/* Actions Column */}
+                  <th className="p-3 text-center font-bold">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {rtvCandidates.map((r) => {
+                {paginatedCandidates.map((r) => {
                   const id = r.id || r.rma_number;
                   const isSelected = selectedRmaIds.has(id);
                   const qty = Number(r.quantity || 1);
                   const price = Number(r.price_with_vat || r.price || 0);
                   const total = qty * price;
+                  const photos = getPhotos(r);
 
                   return (
                     <tr 
@@ -457,50 +618,209 @@ export default function SupplierClaimsTab({
                         isSelected ? 'bg-amber-50/60 dark:bg-amber-950/20' : ''
                       }`}
                     >
+                      {/* Checkbox */}
                       <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => handleToggleSelect(id)}
-                          className="rounded-md border-slate-300 text-amber-600 focus:ring-amber-500"
+                          className="rounded-md border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
                         />
                       </td>
+
+                      {/* Photo Thumbnail */}
+                      <td className="p-2 text-center" onClick={(e) => e.stopPropagation()}>
+                        {photos.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenPhotoPreview(r)}
+                            className="relative w-9 h-9 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:scale-105 transition-all shadow-2xs cursor-zoom-in"
+                            title="Click to view full-size photo"
+                          >
+                            <img 
+                              src={photos[0]} 
+                              alt="Proof" 
+                              className="w-full h-full object-cover" 
+                            />
+                            {photos.length > 1 && (
+                              <span className="absolute bottom-0 right-0 bg-black/70 text-white text-[8px] font-black px-1 rounded-tl">
+                                +{photos.length - 1}
+                              </span>
+                            )}
+                          </button>
+                        ) : (
+                          <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
+                            <ImageIcon className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                      </td>
+
+                      {/* RMA Identifier */}
                       <td className="p-3">
                         <div className="font-mono font-black text-slate-900 dark:text-white">
                           {r.rma_number}
                         </div>
-                        <div className="text-[10px] text-slate-400">
-                          {r.created_at ? new Date(r.created_at).toLocaleDateString() : ''}
+                        <div className="text-[10px] text-slate-400 flex items-center gap-1.5 flex-wrap">
+                          <span>{r.created_at ? new Date(r.created_at).toLocaleDateString() : ''}</span>
+                          {r.gps_latitude && r.gps_longitude && (
+                            <a
+                              href={`https://www.google.com/maps?q=${r.gps_latitude},${r.gps_longitude}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 font-bold"
+                              title="View GPS Location on Google Maps"
+                            >
+                              <MapPin className="w-2.5 h-2.5 text-rose-500" />
+                              <span>Map</span>
+                            </a>
+                          )}
                         </div>
                       </td>
+
+                      {/* Vendor / Supplier */}
                       <td className="p-3 font-semibold text-slate-700 dark:text-slate-300">
                         {r.supplier_name || 'Savemore'}
                       </td>
+
+                      {/* Product Description & SKU */}
                       <td className="p-3">
-                        <div className="font-bold text-slate-900 dark:text-white truncate max-w-xs">
+                        <div className="font-bold text-slate-900 dark:text-white truncate max-w-xs" title={r.name}>
                           {r.name}
                         </div>
                         <div className="text-[10px] font-mono text-slate-400">
-                          SKU: {r.code || r.sku || 'Unassigned'} • BC: {r.barcode}
+                          SKU: <strong className="text-slate-600 dark:text-slate-300">{r.code || r.sku || 'Unassigned'}</strong> • BC: {r.barcode}
                         </div>
                       </td>
+
+                      {/* Triage Disposition */}
                       <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                        <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${
                           r.disposition === 'Return to Vendor (RTV)'
-                            ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                            ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800'
+                            : r.disposition === 'Restock to Inventory'
+                            ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800'
+                            : r.disposition === 'Quarantine'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800'
+                            : r.disposition === 'Scrap / Dispose'
+                            ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950 dark:text-rose-300'
+                            : 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
                         }`}>
                           {r.disposition || 'Pending Triage'}
                         </span>
                       </td>
+
+                      {/* Qty */}
                       <td className="p-3 text-right font-mono font-bold text-slate-900 dark:text-white">
                         {qty} {r.unit_name || 'pc'}
                       </td>
+
+                      {/* Unit Price */}
                       <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">
                         ₱{price.toFixed(2)}
                       </td>
+
+                      {/* Total Claim */}
                       <td className="p-3 text-right font-mono font-black text-amber-700 dark:text-amber-400">
                         ₱{total.toFixed(2)}
+                      </td>
+
+                      {/* Actions Column */}
+                      <td className="p-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                          {/* 1. Inspect / Triage */}
+                          {onInspectReport && (
+                            <button
+                              type="button"
+                              onClick={() => onInspectReport(r)}
+                              className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                              title={`Inspect, triage condition grade, and assign rack/bin for ${r.rma_number}`}
+                            >
+                              <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                              <span>Inspect / Triage</span>
+                            </button>
+                          )}
+
+                          {/* 2. Assign SKU (if not verified in savedProductsList) */}
+                          {canEditProducts && onEditProduct && !savedProductsList?.some(p => p.barcode && String(p.barcode) === String(r.barcode)) && (
+                            <button
+                              type="button"
+                              onClick={() => onEditProduct(r)}
+                              className="px-2 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                              title={`Assign official SKU and save "${r.name || r.barcode}" to Products catalog`}
+                            >
+                              <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                              <span>Assign SKU</span>
+                            </button>
+                          )}
+
+                          {/* 3. Credit Memo Voucher or + Credit Memo */}
+                          {(() => {
+                            const existingMemo = creditMemosList?.find(m => m.rma_number === r.rma_number || m.report_id === r.id);
+                            if (existingMemo && onViewCreditMemoVoucher) {
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => onViewCreditMemoVoucher(existingMemo)}
+                                  className="px-2 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                  title={`View Official Credit Memo Voucher: ${existingMemo.credit_memo_number}`}
+                                >
+                                  <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                  <span>CM Voucher</span>
+                                </button>
+                              );
+                            }
+                            if (canEditProducts && onOpenCreditMemo) {
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenCreditMemo(r)}
+                                  className="px-2 py-1 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                  title="Issue Finance Credit Memo for this Return"
+                                >
+                                  <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                  <span>+ CM</span>
+                                </button>
+                              );
+                            }
+                            return null;
+                          })()}
+
+                          {/* 4. Thermal Box Label / QR Sticker */}
+                          {onPrintThermal && (
+                            <button
+                              type="button"
+                              onClick={() => onPrintThermal(r)}
+                              className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                              title="Print 4x6 inch Thermal Box Label"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
+                          {onOpenStickerModal && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenStickerModal(r)}
+                              className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                              title="Print RMA QR Box Sticker"
+                            >
+                              <QrCode className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
+                          {/* 5. Delete Report */}
+                          {canDeleteReports && onRequestDeleteReport && (
+                            <button
+                              type="button"
+                              onClick={() => onRequestDeleteReport(r.id, r.rma_number, r)}
+                              className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
+                              title={`Delete RMA #${r.rma_number} and remove stored proof photos`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -509,7 +829,34 @@ export default function SupplierClaimsTab({
             </table>
           </div>
         )}
+
+        {/* Table Pagination Component */}
+        <TablePagination
+          currentPage={currentPage}
+          totalItems={rtvCandidates.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setCurrentPage(1);
+          }}
+          pageSizeOptions={[10, 25, 50, 100]}
+          itemLabel="claim items"
+        />
       </div>
+
+      {/* Lightbox Modal (Fallback if onViewPhoto is not supplied) */}
+      {localLightboxPhoto && (
+        <ImageLightboxModal
+          isOpen={Boolean(localLightboxPhoto)}
+          imageUrl={localLightboxPhoto?.url}
+          images={localLightboxPhoto?.images || [localLightboxPhoto.url]}
+          initialIndex={localLightboxPhoto?.initialIndex || 0}
+          title={localLightboxPhoto?.title}
+          subtitle={localLightboxPhoto?.subtitle}
+          onClose={() => setLocalLightboxPhoto(null)}
+        />
+      )}
 
       {/* FORMAL RTV DEBIT CLAIM VOUCHER MODAL */}
       {activeClaimBatch && (

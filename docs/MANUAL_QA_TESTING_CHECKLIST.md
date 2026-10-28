@@ -521,7 +521,20 @@ Each test scenario defines:
   * **Location**: Supplier Claims (RTV) Tab
   * **Expected Behavior**:
     1. Search filter, Supplier dropdown, and Triage Disposition dropdown filter claims table.
-    2. Table headers (RMA #, Vendor, Product & SKU, Disposition, Qty, Unit Price, Total Claim) are clickable and sort ascending/descending with arrow indicators.
+#### 8.4.10 Supplier Claims (RTV) Full Actions & Deletion Suite
+- [ ] **TC-RTV-ACT-01 (Table Actions, Deletion & Pagination)**
+  * **Location**: Supplier Claims (RTV) Tab
+  * **Action**: View claims table and perform actions on candidate rows.
+  * **Expected Behavior**:
+    1. Table displays **Proof Photo** column with thumbnail preview. Clicking thumbnail opens full-screen image lightbox.
+    2. Table displays dedicated **Actions** column with:
+       - **Inspect / Triage** (amber button) to grade condition, update disposition, and assign rack/bin.
+       - **Assign SKU** (blue button) when the item barcode has not yet been registered in catalog.
+       - **+ CM / CM Voucher** (green button) to view or issue credit memos.
+       - **Print 4x6 Thermal Label** / **QR Sticker** buttons.
+       - **Delete Report** (rose trash button) to delete report and purge photos from Google Drive & Supabase storage.
+    3. Multi-row selection activates **Bulk Delete** (`Delete Selected (N)`) button alongside **Generate RTV Claim**.
+    4. Table pagination (`TablePagination`) operates smoothly with 10, 25, 50, 100 rows per page.
 
 ---
 
