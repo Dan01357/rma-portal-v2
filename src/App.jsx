@@ -3219,19 +3219,8 @@ export default function App() {
             {adminActiveTab === 'supplier_claims' && (
               <SupplierClaimsTab
                 reportsList={recentReportsList}
-                creditMemosList={creditMemosList}
-                savedProductsList={savedProductsList}
                 currentUser={currentUser}
                 onRefresh={refreshAllData}
-                onInspectReport={(report) => {
-                  setQuickRmaNumber(report.rma_number);
-                  setIsQuickRmaModalOpen(true);
-                }}
-                onEditProduct={handleEditProductFromReport}
-                onOpenCreditMemo={handleOpenCreditMemoForReport}
-                onViewCreditMemoVoucher={handleViewCreditMemoVoucher}
-                onPrintThermal={setThermalPrintReport}
-                onOpenStickerModal={(report) => setQrModalReport(report)}
                 onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
                 onRequestDeleteReport={requestDeleteReport}
                 onRequestBulkDeleteReports={requestBulkDeleteReports}

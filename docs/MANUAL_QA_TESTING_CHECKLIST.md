@@ -521,20 +521,45 @@ Each test scenario defines:
   * **Location**: Supplier Claims (RTV) Tab
   * **Expected Behavior**:
     1. Search filter, Supplier dropdown, and Triage Disposition dropdown filter claims table.
-#### 8.4.10 Supplier Claims (RTV) Full Actions & Deletion Suite
-- [ ] **TC-RTV-ACT-01 (Table Actions, Deletion & Pagination)**
+#### 8.4.10 Supplier Claims (RTV) Streamlined Actions, Database Persistence & Sequential RTV ID Suite
+- [ ] **TC-RTV-ACT-02 (Streamlined Actions & Individual Debit Claim Generation)**
   * **Location**: Supplier Claims (RTV) Tab
-  * **Action**: View claims table and perform actions on candidate rows.
+  * **Action**: View claims table rows.
   * **Expected Behavior**:
-    1. Table displays **Proof Photo** column with thumbnail preview. Clicking thumbnail opens full-screen image lightbox.
-    2. Table displays dedicated **Actions** column with:
-       - **Inspect / Triage** (amber button) to grade condition, update disposition, and assign rack/bin.
-       - **Assign SKU** (blue button) when the item barcode has not yet been registered in catalog.
-       - **+ CM / CM Voucher** (green button) to view or issue credit memos.
-       - **Print 4x6 Thermal Label** / **QR Sticker** buttons.
-       - **Delete Report** (rose trash button) to delete report and purge photos from Google Drive & Supabase storage.
-    3. Multi-row selection activates **Bulk Delete** (`Delete Selected (N)`) button alongside **Generate RTV Claim**.
-    4. Table pagination (`TablePagination`) operates smoothly with 10, 25, 50, 100 rows per page.
+    1. Unnecessary buttons (**Inspect / Triage**, **CM Voucher**, **RMA QR display / Print 4x6 Label**, and **Assign SKU**) are completely removed from the table rows.
+    2. Each row displays an individual Debit Claim action:
+       - Displays amber **"+ Debit Claim"** button if no debit claim has been generated for that RMA report yet.
+       - Displays emerald **"RTV Voucher"** button if a claim has already been logged.
+    3. Dedicated **Delete** (rose trash icon) button is retained per row for authorized users, purging proof photos from Google Drive & Supabase storage upon deletion.
+
+- [ ] **TC-RTV-DB-01 (Supplier Claim Database Persistence & RMA Report Sync)**
+  * **Location**: Supplier Claims (RTV) Tab -> Generate Claim (Individual or Batch)
+  * **Action**: Click "+ Debit Claim" or batch "Generate Claim".
+  * **Expected Behavior**:
+    1. Claim record is persisted to the database (`rma_settings` fallback store + `public.supplier_claims` table) with claim number, vendor, item list, totals, and preparer.
+    2. Each associated `rma_reports` record has its disposition automatically set to `"Return to Vendor (RTV)"`.
+    3. Report notes are tagged with `[RTV: {claim_number}]` and an audit event (`RTV Debit Claim Generated`) is logged in `audit_trail`.
+    4. Claim and voucher data persist across browser restarts, page reloads, and across different user accounts.
+
+- [ ] **TC-RTV-ID-01 (RTV ID Sequential Format: RTV-YYYY-XXXX-RAND)**
+  * **Action**: Inspect the generated RTV Claim ID in modal and voucher.
+  * **Expected Behavior**:
+    1. Format strictly matches `RTV-{YYYY}-{SEQUENCE}-{ALPHANUMERIC}` (e.g. `RTV-2026-0001-HY67`).
+    2. Prefix is `RTV`.
+    3. Year matches current year (e.g. `2026`).
+    4. Sequence is a 4-digit strictly increasing number (`0001`, `0002`, `0003`, ...).
+    5. Suffix is a 4-character uppercase alphanumeric string (e.g. `HY67`, `8K9P`).
+
+- [ ] **TC-RTV-SEL-01 (Multi-Select Operations: Print, Delete, and Same-Supplier Batch Claims)**
+  * **Location**: Supplier Claims (RTV) Tab -> Multi-Select Checkboxes
+  * **Action**: Select one or more rows via checkboxes.
+  * **Expected Behavior**:
+    1. Selection bar appears with count and actions strictly limited to:
+       - **Generate Claim (N)**: Validates that all selected items belong strictly to the **same supplier**. If items from different suppliers are selected, blocks generation with warning alert: `Selected items belong to multiple suppliers (...). A debit claim must bundle items for a single supplier.`
+       - **Print Vouchers**: Prints RTV vouchers for all selected items.
+       - **Delete Selected (N)**: Bulk deletes selected RMA reports and cleans up proof photos from Google Drive and Supabase storage.
+       - **Deselect All**: Clears selection state.
+
 
 ---
 

@@ -6,44 +6,25 @@ import {
   AlertTriangle, 
   Printer, 
   Download, 
-  FileText, 
   Search, 
-  Filter, 
-  Check, 
-  ArrowRight,
-  ShieldCheck,
-  PackageCheck,
-  Calendar,
-  Layers,
-  Sparkles,
+  RotateCcw, 
+  Trash2, 
+  Image as ImageIcon, 
+  X, 
+  MapPin,
   ArrowUp,
   ArrowDown,
-  ArrowUpDown,
-  RotateCcw,
-  ClipboardCheck,
-  Package,
-  Trash2,
-  QrCode,
-  Image as ImageIcon,
-  X,
-  MapPin
+  ArrowUpDown
 } from 'lucide-react';
 import { exportRMAReportsToCSV } from '../utils/exportCsv';
 import TablePagination from './TablePagination';
 import ImageLightboxModal from './ImageLightboxModal';
+import { supplierClaimService } from '../services/supplierClaimService';
 
 export default function SupplierClaimsTab({
   reportsList = [],
-  creditMemosList = [],
-  savedProductsList = [],
   currentUser,
   onRefresh,
-  onInspectReport,
-  onEditProduct,
-  onOpenCreditMemo,
-  onViewCreditMemoVoucher,
-  onPrintThermal,
-  onOpenStickerModal,
   onViewPhoto,
   onRequestDeleteReport,
   onRequestBulkDeleteReports
@@ -58,10 +39,22 @@ export default function SupplierClaimsTab({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [localLightboxPhoto, setLocalLightboxPhoto] = useState(null);
+  const [savedClaims, setSavedClaims] = useState([]);
+  const [isSavingClaim, setIsSavingClaim] = useState(false);
 
   // Role permissions
   const canDeleteReports = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
-  const canEditProducts = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
+
+  // Load saved supplier debit claims from database
+  useEffect(() => {
+    let isMounted = true;
+    supplierClaimService.getClaims().then(claims => {
+      if (isMounted && Array.isArray(claims)) {
+        setSavedClaims(claims);
+      }
+    });
+    return () => { isMounted = false; };
+  }, [reportsList]);
 
   // Extract unique suppliers from reports
   const suppliers = useMemo(() => {
@@ -200,6 +193,16 @@ export default function SupplierClaimsTab({
     setSelectedRmaIds(new Set());
   };
 
+  // Helper to extract user clean name (roles removed, Danilo Alvaro excluded as requested)
+  const getCleanUserName = (user) => {
+    const raw = user?.name || 'Warehouse Staff';
+    let clean = raw.replace(/\s*\([^)]*\)/g, '').trim();
+    if (!clean || clean.toLowerCase().includes('danilo alvaro')) {
+      clean = 'Warehouse Staff';
+    }
+    return clean;
+  };
+
   // Helper to safely extract photo URLs
   const getPhotos = (report) => {
     if (!report?.photos) return [];
@@ -232,49 +235,190 @@ export default function SupplierClaimsTab({
     }
   };
 
-  const handleBulkDelete = () => {
-    if (selectedItems.length === 0) return;
-    if (onRequestBulkDeleteReports) {
-      onRequestBulkDeleteReports(selectedItems);
+  // Look up if a report already has a generated RTV Claim
+  const getClaimForReport = (report) => {
+    if (!report) return null;
+    const rma = report.rma_number;
+    
+    // 1. Search in saved claims items
+    const found = savedClaims.find(c => 
+      Array.isArray(c.items) && c.items.some(i => i.rma_number === rma)
+    );
+    if (found) return found;
+
+    // 2. Search in report's notes tag [RTV: RTV-YYYY-XXXX-RAND]
+    const notes = String(report.notes || '');
+    const m = notes.match(/\[RTV:\s*([^\]]+)\]/i);
+    if (m && m[1]) {
+      const claimNum = m[1].trim();
+      return {
+        claimNumber: claimNum,
+        claim_number: claimNum,
+        supplierName: report.supplier_name || 'Savemore',
+        supplier_name: report.supplier_name || 'Savemore',
+        generatedBy: 'Warehouse Staff',
+        createdAt: report.created_at,
+        items: [report],
+        totalQuantity: Number(report.quantity) || 1,
+        totalClaimAmount: (Number(report.quantity) || 1) * Number(report.price_with_vat || report.price || 0)
+      };
     }
+
+    // 3. Search in report's audit_trail
+    const audit = Array.isArray(report.audit_trail) ? report.audit_trail : [];
+    const rtvAudit = audit.find(a => a.rtv_number || a.action === 'RTV_CLAIM_GENERATED');
+    if (rtvAudit && rtvAudit.rtv_number) {
+      return {
+        claimNumber: rtvAudit.rtv_number,
+        claim_number: rtvAudit.rtv_number,
+        supplierName: report.supplier_name || 'Savemore',
+        supplier_name: report.supplier_name || 'Savemore',
+        generatedBy: rtvAudit.generated_by || 'Warehouse Staff',
+        createdAt: rtvAudit.timestamp || report.created_at,
+        items: [report],
+        totalQuantity: Number(report.quantity) || 1,
+        totalClaimAmount: (Number(report.quantity) || 1) * Number(report.price_with_vat || report.price || 0)
+      };
+    }
+
+    return null;
   };
 
-  const handleGenerateBatchClaim = () => {
+  /**
+   * INDIVIDUAL ACTION: GENERATE DEBIT CLAIM FOR SINGLE ITEM
+   */
+  const handleGenerateSingleClaim = async (item) => {
+    if (!item) return;
+    const supplierName = (item.supplier_name || 'Savemore').trim();
+    const cleanGeneratedBy = getCleanUserName(currentUser);
+    const claimNumber = supplierClaimService.generateRtvId(savedClaims);
+    const qty = Number(item.quantity) || 1;
+    const price = Number(item.price_with_vat || item.price || 0);
+
+    const newClaim = {
+      claimNumber,
+      claim_number: claimNumber,
+      supplierName,
+      supplier_name: supplierName,
+      createdAt: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      generatedBy: cleanGeneratedBy,
+      generated_by: cleanGeneratedBy,
+      items: [item],
+      totalQuantity: qty,
+      totalClaimAmount: qty * price
+    };
+
+    setIsSavingClaim(true);
+    try {
+      await supplierClaimService.saveClaim(newClaim);
+      setSavedClaims(prev => [newClaim, ...prev.filter(c => (c.claim_number || c.claimNumber) !== claimNumber)]);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.warn('Error saving single claim to database:', err);
+    } finally {
+      setIsSavingClaim(false);
+    }
+
+    setActiveClaimBatch(newClaim);
+  };
+
+  /**
+   * BATCH ACTION: GENERATE DEBIT CLAIM FOR MULTIPLE ITEMS FROM SAME SUPPLIER
+   */
+  const handleGenerateBatchClaim = async () => {
     if (selectedItems.length === 0) {
       alert('Please select at least 1 RMA item to bundle into a supplier claim.');
       return;
     }
 
-    // Enforce that all bundled items belong to a single vendor
+    // Enforce that all bundled items belong strictly to the SAME supplier
     const suppliersInBatch = [...new Set(selectedItems.map(i => (i.supplier_name || 'Savemore').trim()))];
     if (suppliersInBatch.length > 1) {
-      alert(`You have selected items across ${suppliersInBatch.length} different suppliers (${suppliersInBatch.join(', ')}).\n\nAn official Supplier Debit Claim (RTV) voucher must be issued to a single vendor.\n\nPlease select "${suppliersInBatch[0]}" from the Supplier dropdown to batch claims for that vendor.`);
+      alert(`You have selected items across ${suppliersInBatch.length} different suppliers (${suppliersInBatch.join(', ')}).\n\nAn official Supplier Debit Claim (RTV) voucher must be issued to a SINGLE vendor.\n\nPlease select items from the same supplier, or filter by "${suppliersInBatch[0]}" to generate a consolidated claim.`);
       return;
     }
 
     const supplierName = suppliersInBatch[0] || (selectedSupplier !== 'All' ? selectedSupplier : 'Savemore');
-    const cleanSup = supplierName.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const rand = Math.floor(100 + Math.random() * 900);
-    const claimNumber = `RTV-${cleanSup}-${dateStr}-${rand}`;
+    const cleanGeneratedBy = getCleanUserName(currentUser);
+    const claimNumber = supplierClaimService.generateRtvId(savedClaims);
 
-    // Clean user name (strip parenthetical roles like "(Admin)", e.g. "Elisa (Admin)" -> "Elisa")
-    // For Logistics/Warehouse debit claim, Danilo Alvaro Jr. is excluded as requested
-    const rawName = currentUser?.name || 'Warehouse Staff';
-    let cleanGeneratedBy = rawName.replace(/\s*\([^)]*\)/g, '').trim();
-    if (!cleanGeneratedBy || cleanGeneratedBy.toLowerCase().includes('danilo alvaro')) {
-      cleanGeneratedBy = 'Warehouse Staff';
-    }
-
-    setActiveClaimBatch({
+    const newClaim = {
       claimNumber,
+      claim_number: claimNumber,
       supplierName,
+      supplier_name: supplierName,
       createdAt: new Date().toISOString(),
+      created_at: new Date().toISOString(),
       generatedBy: cleanGeneratedBy,
+      generated_by: cleanGeneratedBy,
       items: selectedItems,
       totalQuantity,
       totalClaimAmount
-    });
+    };
+
+    setIsSavingClaim(true);
+    try {
+      await supplierClaimService.saveClaim(newClaim);
+      setSavedClaims(prev => [newClaim, ...prev.filter(c => (c.claim_number || c.claimNumber) !== claimNumber)]);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.warn('Error saving batch claim to database:', err);
+    } finally {
+      setIsSavingClaim(false);
+    }
+
+    setActiveClaimBatch(newClaim);
+  };
+
+  /**
+   * BATCH ACTION: PRINT VOUCHERS FOR SELECTED ITEMS
+   */
+  const handlePrintSelectedVouchers = () => {
+    if (selectedItems.length === 0) return;
+
+    const suppliersInBatch = [...new Set(selectedItems.map(i => (i.supplier_name || 'Savemore').trim()))];
+    if (suppliersInBatch.length > 1) {
+      alert(`You have selected items across ${suppliersInBatch.length} different suppliers (${suppliersInBatch.join(', ')}).\n\nTo print a consolidated RTV voucher, please select items from a single supplier.`);
+      return;
+    }
+
+    const supplierName = suppliersInBatch[0];
+    const cleanGeneratedBy = getCleanUserName(currentUser);
+    
+    // Look up if a claim was already created for these items, or create temporary print preview
+    let existingClaim = savedClaims.find(c => 
+      c.supplier_name === supplierName && Array.isArray(c.items) && selectedItems.some(si => c.items.some(ci => ci.rma_number === si.rma_number))
+    );
+
+    if (!existingClaim) {
+      const claimNumber = supplierClaimService.generateRtvId(savedClaims);
+      existingClaim = {
+        claimNumber,
+        claim_number: claimNumber,
+        supplierName,
+        createdAt: new Date().toISOString(),
+        generatedBy: cleanGeneratedBy,
+        items: selectedItems,
+        totalQuantity,
+        totalClaimAmount
+      };
+    }
+
+    setActiveClaimBatch(existingClaim);
+    setTimeout(() => {
+      window.print();
+    }, 400);
+  };
+
+  /**
+   * BATCH ACTION: DELETE SELECTED REPORTS
+   */
+  const handleBulkDelete = () => {
+    if (selectedItems.length === 0) return;
+    if (onRequestBulkDeleteReports) {
+      onRequestBulkDeleteReports(selectedItems);
+    }
   };
 
   const handlePrintClaimVoucher = () => {
@@ -300,7 +444,7 @@ export default function SupplierClaimsTab({
               </span>
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Bundle damaged/defective merchandise by vendor to issue consolidated <strong>Return to Vendor (RTV) Debit Claims</strong>.
+              Bundle damaged/defective merchandise by vendor to issue consolidated <strong>Return to Vendor (RTV) Debit Claims</strong>. All claims are automatically synced to database.
             </p>
           </div>
         </div>
@@ -309,7 +453,8 @@ export default function SupplierClaimsTab({
           <button
             type="button"
             onClick={handleGenerateBatchClaim}
-            className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-lg shadow-amber-600/20 transition-all cursor-pointer active:scale-95 shrink-0"
+            disabled={isSavingClaim}
+            className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-lg shadow-amber-600/20 transition-all cursor-pointer active:scale-95 shrink-0"
           >
             <Receipt className="w-4 h-4" />
             <span>Generate Debit Claim ({selectedItems.length} items • ₱{totalClaimAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })})</span>
@@ -408,9 +553,9 @@ export default function SupplierClaimsTab({
           </div>
         </div>
 
-        {/* Selection & Bulk Actions Bar */}
+        {/* Selection & Multi-Select Toolbar (Printing, Deleting, or Debit Claim for same suppliers) */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 text-xs">
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
               onClick={handleSelectAll}
@@ -418,34 +563,55 @@ export default function SupplierClaimsTab({
             >
               {selectedRmaIds.size === rtvCandidates.length && rtvCandidates.length > 0 ? 'Deselect All' : `Select All (${rtvCandidates.length})`}
             </button>
+
             {selectedRmaIds.size > 0 && (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="font-bold text-slate-700 dark:text-slate-300 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-lg border border-amber-200 dark:border-amber-900">
-                  {selectedRmaIds.size} item{selectedRmaIds.size > 1 ? 's' : ''} selected • <strong>₱{totalClaimAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                  {selectedRmaIds.size} selected • ₱{totalClaimAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </span>
 
-                {/* Bulk Delete Button */}
+                {/* 1. Debit Claim for Same Suppliers */}
+                <button
+                  type="button"
+                  onClick={handleGenerateBatchClaim}
+                  disabled={isSavingClaim}
+                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-lg text-xs font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                  title="Generate consolidated RTV Claim for selected items from same supplier"
+                >
+                  <Receipt className="w-3.5 h-3.5" />
+                  <span>Generate Claim ({selectedRmaIds.size})</span>
+                </button>
+
+                {/* 2. Print Vouchers for Selected Items */}
+                <button
+                  type="button"
+                  onClick={handlePrintSelectedVouchers}
+                  className="px-3 py-1 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                  title="Print RTV claim vouchers for selected items"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Vouchers</span>
+                </button>
+
+                {/* 3. Delete Selected */}
                 {canDeleteReports && onRequestBulkDeleteReports && (
                   <button
                     type="button"
                     onClick={handleBulkDelete}
                     className="px-3 py-1 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/70 dark:hover:bg-rose-900/70 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                    title="Delete selected RMA return reports and remove proof images"
+                    title="Permanently delete selected records and remove proof images"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>Delete Selected ({selectedRmaIds.size})</span>
                   </button>
                 )}
 
-                {/* Generate Debit Claim Button in selection bar */}
                 <button
                   type="button"
-                  onClick={handleGenerateBatchClaim}
-                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                  title="Generate RTV Debit Claim Voucher for selected items"
+                  onClick={handleClearSelection}
+                  className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold ml-1 cursor-pointer"
                 >
-                  <Receipt className="w-3.5 h-3.5" />
-                  <span>Generate RTV Claim</span>
+                  Clear
                 </button>
               </div>
             )}
@@ -609,6 +775,7 @@ export default function SupplierClaimsTab({
                   const price = Number(r.price_with_vat || r.price || 0);
                   const total = qty * price;
                   const photos = getPhotos(r);
+                  const existingClaim = getClaimForReport(r);
 
                   return (
                     <tr 
@@ -725,91 +892,34 @@ export default function SupplierClaimsTab({
                         ₱{total.toFixed(2)}
                       </td>
 
-                      {/* Actions Column */}
+                      {/* Actions Column: Individual Debit Claim & Delete Only */}
                       <td className="p-2.5 text-center" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                          {/* 1. Inspect / Triage */}
-                          {onInspectReport && (
+                          {/* Individual Action for Debit Claim Generation or Viewing */}
+                          {existingClaim ? (
                             <button
                               type="button"
-                              onClick={() => onInspectReport(r)}
-                              className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                              title={`Inspect, triage condition grade, and assign rack/bin for ${r.rma_number}`}
+                              onClick={() => setActiveClaimBatch(existingClaim)}
+                              className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                              title={`View Official RTV Debit Claim Voucher: ${existingClaim.claimNumber || existingClaim.claim_number}`}
                             >
-                              <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                              <span>Inspect / Triage</span>
+                              <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                              <span>RTV Voucher</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleGenerateSingleClaim(r)}
+                              disabled={isSavingClaim}
+                              className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                              title={`Generate RTV Debit Claim Voucher for ${r.rma_number}`}
+                            >
+                              <Receipt className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                              <span>+ Debit Claim</span>
                             </button>
                           )}
 
-                          {/* 2. Assign SKU (if not verified in savedProductsList) */}
-                          {canEditProducts && onEditProduct && !savedProductsList?.some(p => p.barcode && String(p.barcode) === String(r.barcode)) && (
-                            <button
-                              type="button"
-                              onClick={() => onEditProduct(r)}
-                              className="px-2 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                              title={`Assign official SKU and save "${r.name || r.barcode}" to Products catalog`}
-                            >
-                              <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                              <span>Assign SKU</span>
-                            </button>
-                          )}
-
-                          {/* 3. Credit Memo Voucher or + Credit Memo */}
-                          {(() => {
-                            const existingMemo = creditMemosList?.find(m => m.rma_number === r.rma_number || m.report_id === r.id);
-                            if (existingMemo && onViewCreditMemoVoucher) {
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => onViewCreditMemoVoucher(existingMemo)}
-                                  className="px-2 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                  title={`View Official Credit Memo Voucher: ${existingMemo.credit_memo_number}`}
-                                >
-                                  <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                  <span>CM Voucher</span>
-                                </button>
-                              );
-                            }
-                            if (canEditProducts && onOpenCreditMemo) {
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => onOpenCreditMemo(r)}
-                                  className="px-2 py-1 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                  title="Issue Finance Credit Memo for this Return"
-                                >
-                                  <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                  <span>+ CM</span>
-                                </button>
-                              );
-                            }
-                            return null;
-                          })()}
-
-                          {/* 4. Thermal Box Label / QR Sticker */}
-                          {onPrintThermal && (
-                            <button
-                              type="button"
-                              onClick={() => onPrintThermal(r)}
-                              className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                              title="Print 4x6 inch Thermal Box Label"
-                            >
-                              <Printer className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-
-                          {onOpenStickerModal && (
-                            <button
-                              type="button"
-                              onClick={() => onOpenStickerModal(r)}
-                              className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                              title="Print RMA QR Box Sticker"
-                            >
-                              <QrCode className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-
-                          {/* 5. Delete Report */}
+                          {/* Delete Report */}
                           {canDeleteReports && onRequestDeleteReport && (
                             <button
                               type="button"
@@ -870,6 +980,9 @@ export default function SupplierClaimsTab({
                 <h3 className="text-sm font-black text-slate-900 dark:text-white">
                   Supplier Debit Claim Voucher (RTV)
                 </h3>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                  Synced to Database
+                </span>
               </div>
               <button
                 type="button"
@@ -893,16 +1006,16 @@ export default function SupplierClaimsTab({
                     SUPPLIER DEBIT CLAIM VOUCHER
                   </h2>
                   <div className="text-xs text-slate-600 mt-1">
-                    Vendor / Counterparty: <strong>{activeClaimBatch.supplierName}</strong>
+                    Vendor / Counterparty: <strong>{activeClaimBatch.supplierName || activeClaimBatch.supplier_name}</strong>
                   </div>
                 </div>
 
                 <div className="text-right">
                   <div className="font-mono text-sm font-black text-black bg-slate-100 px-2 py-1 border border-black inline-block">
-                    {activeClaimBatch.claimNumber}
+                    {activeClaimBatch.claimNumber || activeClaimBatch.claim_number}
                   </div>
                   <div className="text-[10px] text-slate-500 mt-1">
-                    Date: {new Date(activeClaimBatch.createdAt).toLocaleDateString()}
+                    Date: {new Date(activeClaimBatch.createdAt || activeClaimBatch.created_at).toLocaleDateString()}
                   </div>
                 </div>
               </div>
@@ -911,43 +1024,43 @@ export default function SupplierClaimsTab({
               <div className="grid grid-cols-3 gap-3 p-3 bg-slate-50 border border-black rounded-lg">
                 <div>
                   <div className="text-[9px] font-black uppercase text-slate-500">TOTAL BUNDLED ITEMS</div>
-                  <div className="text-base font-black text-black">{activeClaimBatch.items.length} Lines</div>
+                  <div className="text-base font-black text-black">{activeClaimBatch.items?.length || 1} Lines</div>
                 </div>
                 <div>
                   <div className="text-[9px] font-black uppercase text-slate-500">TOTAL RETURNED UNITS</div>
-                  <div className="text-base font-black text-black">{activeClaimBatch.totalQuantity} Units</div>
+                  <div className="text-base font-black text-black">{activeClaimBatch.totalQuantity || activeClaimBatch.total_quantity} Units</div>
                 </div>
                 <div>
                   <div className="text-[9px] font-black uppercase text-slate-500">TOTAL CLAIM AMOUNT</div>
-                  <div className="text-base font-black text-amber-800">
-                    ₱{activeClaimBatch.totalClaimAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  <div className="text-base font-black text-amber-600 font-mono">
+                    ₱{Number(activeClaimBatch.totalClaimAmount || activeClaimBatch.total_claim_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </div>
                 </div>
               </div>
 
-              {/* Itemized Table */}
+              {/* Items Table */}
               <div className="border border-black rounded-lg overflow-hidden">
                 <table className="w-full text-left text-[11px]">
-                  <thead className="bg-slate-100 text-black font-black border-b border-black">
+                  <thead className="bg-slate-100 border-b border-black font-bold uppercase text-[10px]">
                     <tr>
                       <th className="p-2">RMA #</th>
                       <th className="p-2">Barcode / SKU</th>
                       <th className="p-2">Description</th>
-                      <th className="p-2 text-right">Qty</th>
+                      <th className="p-2 text-center">Qty</th>
                       <th className="p-2 text-right">Price</th>
                       <th className="p-2 text-right">Total</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
-                    {activeClaimBatch.items.map((item, idx) => {
-                      const qty = Number(item.quantity || 1);
+                    {(activeClaimBatch.items || []).map((item, idx) => {
+                      const qty = Number(item.quantity) || 1;
                       const price = Number(item.price_with_vat || item.price || 0);
                       return (
                         <tr key={idx}>
                           <td className="p-2 font-mono font-bold">{item.rma_number}</td>
-                          <td className="p-2 font-mono">{item.code || item.barcode}</td>
-                          <td className="p-2">{item.name}</td>
-                          <td className="p-2 text-right font-mono font-bold">{qty}</td>
+                          <td className="p-2 font-mono">{item.code || item.sku || item.barcode}</td>
+                          <td className="p-2 font-semibold">{item.name}</td>
+                          <td className="p-2 text-center font-mono">{qty} {item.unit_name || 'pc'}</td>
                           <td className="p-2 text-right font-mono">₱{price.toFixed(2)}</td>
                           <td className="p-2 text-right font-mono font-bold">₱{(qty * price).toFixed(2)}</td>
                         </tr>
@@ -964,8 +1077,8 @@ export default function SupplierClaimsTab({
                   <div className="font-bold pt-1 uppercase">Prepared By (Logistics / Warehouse)</div>
                   <input
                     type="text"
-                    value={activeClaimBatch.generatedBy || ''}
-                    onChange={(e) => setActiveClaimBatch(prev => ({ ...prev, generatedBy: e.target.value }))}
+                    value={activeClaimBatch.generatedBy || activeClaimBatch.generated_by || ''}
+                    onChange={(e) => setActiveClaimBatch(prev => ({ ...prev, generatedBy: e.target.value, generated_by: e.target.value }))}
                     className="text-center font-semibold text-slate-800 dark:text-slate-100 print:text-black w-full bg-transparent border-none focus:outline-none focus:ring-1 focus:ring-brand-500 rounded text-[11px] px-1"
                     title="Click to edit name if needed"
                   />
@@ -973,7 +1086,7 @@ export default function SupplierClaimsTab({
                 <div>
                   <div className="border-b border-black pb-8"></div>
                   <div className="font-bold pt-1 uppercase">Supplier Acknowledgement / Driver Signature</div>
-                  <div className="text-slate-500">Signature Over Printed Name & Date</div>
+                  <div className="text-slate-500 print:text-black">Signature Over Printed Name & Date</div>
                 </div>
               </div>
 
