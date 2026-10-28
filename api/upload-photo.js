@@ -151,7 +151,7 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
   let query = `mimeType = 'application/vnd.google-apps.folder' and name = '${folderName}' and '${parentFolderId}' in parents and trashed = false`;
 
   const searchRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
       signal,
@@ -251,7 +251,7 @@ export default async function handler(req, res) {
     if (!targetFolderId) {
       try {
         const searchShared = await fetch(
-          `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Wholesale RMA Photos' or name = '" + yearMonth + "') and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+          `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Wholesale RMA Photos' or name = '" + yearMonth + "') and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
           {
             headers: { Authorization: `Bearer ${accessToken}` },
             signal: controller.signal
