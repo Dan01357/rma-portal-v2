@@ -48,7 +48,8 @@ import {
   Layers,
   FlaskConical,
   ToggleRight,
-  ToggleLeft
+  ToggleLeft,
+  ClipboardCheck
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
@@ -2466,11 +2467,17 @@ export default function App() {
                             return (
                               <tr 
                                 key={item.id || item.rma_number} 
-                                className={`transition-colors ${
+                                onClick={(e) => {
+                                  if (e.target.closest('input, button, a')) return;
+                                  setQuickRmaNumber(item.rma_number);
+                                  setIsQuickRmaModalOpen(true);
+                                }}
+                                className={`transition-colors cursor-pointer ${
                                   isSelected 
                                     ? 'bg-blue-50/80 dark:bg-blue-950/50' 
-                                    : 'hover:bg-blue-50/30 dark:hover:bg-slate-800/50'
+                                    : 'hover:bg-blue-50/50 dark:hover:bg-slate-800/60'
                                 }`}
+                                title={`Click row to inspect & triage RMA #${item.rma_number}`}
                               >
                                 {/* Row Selection Checkbox */}
                                 <td className="py-3 px-3 text-center">
@@ -2492,7 +2499,17 @@ export default function App() {
                                 {/* 2. RMA # + QR Sticker Button */}
                                 <td className="py-3 px-3.5 font-mono font-bold text-blue-700 dark:text-blue-400">
                                   <div className="flex items-center gap-1.5">
-                                    <span>{item.rma_number}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setQuickRmaNumber(item.rma_number);
+                                        setIsQuickRmaModalOpen(true);
+                                      }}
+                                      className="font-mono font-bold text-blue-700 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-200 hover:underline text-left cursor-pointer"
+                                      title={`Inspect, triage, and process RMA #${item.rma_number}`}
+                                    >
+                                      {item.rma_number}
+                                    </button>
                                     <button
                                       type="button"
                                       onClick={() => setQrModalReport({ ...item, name: resolvedName })}
@@ -2616,6 +2633,20 @@ export default function App() {
                                       title="Print 4x6 inch Thermal Box Label"
                                     >
                                       <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
+                                    </button>
+
+                                    {/* Inspect & Triage Physical Return */}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setQuickRmaNumber(item.rma_number);
+                                        setIsQuickRmaModalOpen(true);
+                                      }}
+                                      className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                      title={`Inspect, triage condition grade, and assign rack/bin location for ${item.rma_number}`}
+                                    >
+                                      <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                                      <span>Inspect / Triage</span>
                                     </button>
 
                                     {canEditProducts && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
@@ -2772,9 +2803,17 @@ export default function App() {
                                   <span className="font-mono font-black text-xs text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg">
                                     SN #{item.id}
                                   </span>
-                                  <span className="font-mono font-black text-blue-700 dark:text-blue-400 text-sm">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setQuickRmaNumber(item.rma_number);
+                                      setIsQuickRmaModalOpen(true);
+                                    }}
+                                    className="font-mono font-black text-blue-700 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-200 hover:underline text-sm cursor-pointer"
+                                    title={`Inspect & Triage RMA #${item.rma_number}`}
+                                  >
                                     {item.rma_number}
-                                  </span>
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => setQrModalReport({ ...item, name: resolvedName })}
@@ -2793,6 +2832,30 @@ export default function App() {
                                 </div>
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">
+                                {/* Print 4x6 Thermal Box Label */}
+                                <button
+                                  type="button"
+                                  onClick={() => setThermalPrintReport(item)}
+                                  className="p-1 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                                  title="Print 4x6 inch Thermal Box Label"
+                                >
+                                  <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
+                                </button>
+
+                                {/* Inspect & Triage Physical Return */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setQuickRmaNumber(item.rma_number);
+                                    setIsQuickRmaModalOpen(true);
+                                  }}
+                                  className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                  title={`Inspect condition and set warehouse disposition for ${item.rma_number}`}
+                                >
+                                  <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                                  <span>Triage</span>
+                                </button>
+
                                 {canEditProducts && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                                   <button
                                     type="button"
@@ -3265,7 +3328,16 @@ export default function App() {
           setQrModalReport(rep);
         }}
         onOpenLightbox={setLightboxPhoto}
-        onRefresh={refreshAllData}
+        onRefresh={(updated) => {
+          if (updated && (updated.id || updated.rma_number)) {
+            setRecentReportsList(prev => prev.map(r => 
+              (r.id === updated.id || (r.rma_number && r.rma_number === updated.rma_number)) 
+                ? { ...r, ...updated } 
+                : r
+            ));
+          }
+          refreshAllData();
+        }}
       />
 
       {/* Toast Alert Notification */}
@@ -3306,6 +3378,7 @@ export default function App() {
           isOpen={Boolean(thermalPrintReport)}
           onClose={() => setThermalPrintReport(null)}
           report={thermalPrintReport}
+          currentUser={currentUser}
         />
       )}
 

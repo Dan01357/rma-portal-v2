@@ -13,6 +13,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import { supabase } from '../supabaseClient';
 
 /**
  * Generates pseudo-Code128 SVG Barcode pattern based on string input
@@ -68,7 +69,8 @@ function SimpleBarcodeSVG({ value, height = 48 }) {
 export default function ThermalBoxLabelModal({
   isOpen,
   onClose,
-  report
+  report,
+  currentUser
 }) {
   const printAreaRef = useRef(null);
 
@@ -91,7 +93,25 @@ export default function ThermalBoxLabelModal({
     day: 'numeric'
   }) : new Date().toLocaleDateString();
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
+    try {
+      if (report?.id) {
+        const actor = currentUser?.name || 'Warehouse Staff';
+        const existingAudit = Array.isArray(report.audit_trail) ? [...report.audit_trail] : [];
+        const newEvent = {
+          timestamp: new Date().toISOString(),
+          stage: 'THERMAL_PRINT',
+          actor,
+          note: `4x6" Thermal Box Label printed by ${actor}`
+        };
+        await supabase
+          .from('rma_reports')
+          .update({ audit_trail: [...existingAudit, newEvent] })
+          .eq('id', report.id);
+      }
+    } catch (e) {
+      console.warn('Audit print event notice:', e);
+    }
     window.print();
   };
 

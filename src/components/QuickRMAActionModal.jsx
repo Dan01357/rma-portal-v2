@@ -109,11 +109,12 @@ export default function QuickRMAActionModal({
       if (error) {
         alert(`Failed to save warehouse triage: ${error.message}`);
       } else {
-        setReport(data || { ...report, ...updates });
+        const updatedReport = data || { ...report, ...updates };
+        setReport(updatedReport);
         setTriageSavedSuccess(true);
         setTimeout(() => setTriageSavedSuccess(false), 3000);
-        if (onRefresh) onRefresh();
-        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'triage-updated', reportId: report.id } }));
+        if (onRefresh) onRefresh(updatedReport);
+        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'triage-updated', reportId: report.id, report: updatedReport } }));
       }
     } catch (err) {
       alert(`Error updating triage: ${err.message}`);
@@ -981,6 +982,7 @@ export default function QuickRMAActionModal({
           isOpen={isThermalLabelOpen}
           onClose={() => setIsThermalLabelOpen(false)}
           report={report}
+          currentUser={verifiedAdmin || currentUser}
         />
       )}
     </div>

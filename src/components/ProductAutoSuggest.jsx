@@ -137,33 +137,52 @@ export default function ProductAutoSuggest({
             isCatalog: true
           }));
 
-        // 2. Query live database API (erply_products)
+        // 2. Query live database API (via unified catalogService serverless proxy & purchaseOrdersApi)
         let apiMatches = [];
         try {
-          const remoteResults = await purchaseOrdersApi.searchProducts(query, 30);
-          if (Array.isArray(remoteResults)) {
-            apiMatches = remoteResults.map(item => {
-              const basePrice = item.unit_price ? Number(item.unit_price) : 0;
-              const pVat = item.raw_data?.priceWithVat 
-                ? Number(item.raw_data.priceWithVat).toFixed(2)
-                : (basePrice ? (basePrice * 1.12).toFixed(2) : '0.00');
+          const remoteResults = await catalogService.searchAllProducts(query, 30);
+          if (Array.isArray(remoteResults) && remoteResults.length > 0) {
+            apiMatches = remoteResults.map(item => ({
+              id: item.id || item.code || item.sku,
+              name: item.name || '',
+              code: item.code || item.sku || '',
+              sku: item.code || item.sku || '',
+              barcode: item.barcode || '',
+              supplierName: item.supplierName || item.supplier_name || '',
+              price: Number(item.price || 0),
+              priceWithVat: Number(item.priceWithVat || item.price_with_vat || (item.price ? item.price * 1.12 : 0)).toFixed(2),
+              unitName: item.unitName || item.unit_name || 'pc',
+              imageUrl: item.imageUrl || item.image_url || '',
+              brandName: item.brandName || item.brand_name || '',
+              source: item.source || 'Catalog API',
+              isCatalog: false
+            }));
+          } else {
+            const fallbackResults = await purchaseOrdersApi.searchProducts(query, 30);
+            if (Array.isArray(fallbackResults)) {
+              apiMatches = fallbackResults.map(item => {
+                const basePrice = item.unit_price ? Number(item.unit_price) : 0;
+                const pVat = item.raw_data?.priceWithVat 
+                  ? Number(item.raw_data.priceWithVat).toFixed(2)
+                  : (basePrice ? (basePrice * 1.12).toFixed(2) : '0.00');
 
-              return {
-                id: item.id || item.sku,
-                name: item.name || '',
-                code: item.sku || item.barcode || '',
-                sku: item.sku || '',
-                barcode: item.barcode || '',
-                supplierName: item.supplier || item.raw_data?.supplierName || '',
-                price: Number(basePrice.toFixed(2)),
-                priceWithVat: pVat,
-                unitName: item.raw_data?.unitName || 'pc',
-                imageUrl: item.image_url || item.imageUrl || '',
-                brandName: item.brand || item.raw_data?.brandName || '',
-                source: 'Erply Catalog',
-                isCatalog: false
-              };
-            });
+                return {
+                  id: item.id || item.sku,
+                  name: item.name || '',
+                  code: item.sku || item.barcode || '',
+                  sku: item.sku || '',
+                  barcode: item.barcode || '',
+                  supplierName: item.supplier || item.raw_data?.supplierName || '',
+                  price: Number(basePrice.toFixed(2)),
+                  priceWithVat: pVat,
+                  unitName: item.raw_data?.unitName || 'pc',
+                  imageUrl: item.image_url || item.imageUrl || '',
+                  brandName: item.brand || item.raw_data?.brandName || '',
+                  source: 'Erply Catalog',
+                  isCatalog: false
+                };
+              });
+            }
           }
         } catch (apiErr) {
           console.warn('[ProductAutoSuggest] API query notice:', apiErr.message);
