@@ -18,7 +18,7 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
   const [selectedTicketId, setSelectedTicketId] = useState(null);
   const [creditMemoNo, setCreditMemoNo] = useState('');
   const [creditAmount, setCreditAmount] = useState('');
-  const [issuedBy, setIssuedBy] = useState('Danilo Alvaro (Finance Lead)');
+  const [issuedBy, setIssuedBy] = useState('Analiza B. Benoza');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
 
@@ -316,7 +316,7 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
                   onChange={(e) => setIssuedBy(e.target.value)}
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
                 >
-                  <option value="Danilo Alvaro (Finance Lead)">Danilo Alvaro (Finance Lead)</option>
+                  <option value="Analiza B. Benoza">Analiza B. Benoza (Finance Head)</option>
                   <option value="Finance Accounting Lead (A2Z2Go)">Finance Accounting Lead (A2Z2Go)</option>
                   <option value="Billing Specialist (Pingcon Marketing)">Billing Specialist (Pingcon Marketing)</option>
                 </select>

@@ -471,14 +471,57 @@ Each test scenario defines:
   * **Action**: Inspect unit input in each modal.
   * **Expected Behavior**: All unit inputs are strict `<select>` dropdowns offering only `"pc"` or `"case"`. Free-text typos are impossible. Default is `"pc"`. If a recognized barcode has `"case"` in catalog, the dropdown automatically selects `"case"`.
 
-#### 8.4.6 Dynamic Lifecycle Timeline Actor Binding
-- [ ] **TC-AUD-01 (Logged-in User as Timeline Actor)**
-  * **Location**: Quick RMA Action Modal -> Lifecycle Timeline Audit Trail & Credit Memo Voucher
-  * **Action**: Log in as Danilo Alvaro, open an RMA, and issue a credit memo or review milestones.
+#### 8.4.6 Official Signatures & Voucher Issuer Enforcement
+- [ ] **TC-CM-BEN-01 (Credit Memo Finance Head Strictly Analiza B. Benoza)**
+  * **Location**: Finance Credit Memo Voucher (`CreditMemoVoucherModal`) & Credit Memo Forms
+  * **Action**: Generate and preview any Finance Credit Memorandum Voucher.
   * **Expected Behavior**:
-    1. Milestone 4 (Finance Credit Memo) strictly records Actor as `Danilo Alvaro` (or whoever is authenticated).
-    2. Hardcoded fallback to `Analiza B. Benoza` is eliminated.
-    3. Credit Memo Voucher displays the logged-in user as the issuer.
+    1. Finance Head signature block strictly displays **Analiza B. Benoza** (never Danilo Alvaro Jr.).
+    2. Role displays cleanly as `Finance Head`.
+    3. Danilo Alvaro Jr. is never included on official accounting credit memo vouchers.
+
+- [ ] **TC-RTV-PREP-01 (Supplier Claims Prepared By Pure Name Without Role)**
+  * **Location**: Supplier Claims & RTV Chargeback Batching Voucher (`SupplierClaimsTab`)
+  * **Action**: Generate a Supplier Debit Claim Voucher while logged in as any employee (e.g., `Elisa (Admin)` or warehouse staff).
+  * **Expected Behavior**:
+    1. `PREPARED BY (LOGISTICS / WAREHOUSE)` displays the active user's pure name without parenthetical roles (e.g. `Elisa`, not `Elisa (Admin)`).
+    2. Danilo Alvaro Jr. is never printed as Logistics/Warehouse preparer (defaults to active warehouse staff).
+    3. The Prepared By field is also directly editable prior to printing.
+
+#### 8.4.7 Barcode Lock & Catalog Protection
+- [ ] **TC-BC-LOCK-01 (Read-Only Barcode When Assigning SKU)**
+  * **Location**: Catalog / Pending Barcodes -> Edit / Assign SKU Modal (`ProductEditModal`)
+  * **Action**: Open an existing barcode to assign SKU or update catalog details.
+  * **Expected Behavior**:
+    1. Barcode input field is locked and strictly non-editable (`readOnly` / `disabled`).
+    2. A lock icon and tooltip clearly indicate the barcode is permanently fixed to prevent accidental corruption.
+    3. SKU, Product Name, Category, Unit, and Price remain freely editable.
+
+#### 8.4.8 Supplier Claims (RTV) Multi-Vendor Validation & Dropdown Filter
+- [ ] **TC-RTV-VEND-01 (Single Vendor RTV Bundling Enforcement)**
+  * **Location**: Supplier Claims (RTV) Tab
+  * **Action**: Attempt to generate an RTV claim voucher while items from multiple different suppliers (e.g. Suysing and Walter Mart) are selected.
+  * **Expected Behavior**:
+    1. System warns user that an RTV debit claim must belong to a single vendor.
+    2. Prevents misattributing Suysing returns under a Walter Mart voucher (`RTV-WALTERMA-...`).
+- [ ] **TC-RTV-SUP-01 (Supplier Clean Dropdown Filter)**
+  * **Location**: Supplier Claims (RTV) Tab
+  * **Action**: View supplier filter on desktop and mobile.
+  * **Expected Behavior**:
+    1. Horizontal pill buttons are replaced with a clean `<select>` dropdown menu with supplier item counts.
+    2. Easily accommodates large directories of 50+ vendors without cluttering the screen.
+
+#### 8.4.9 Filtering & Column Sorting in Credit Memos & Supplier Claims
+- [ ] **TC-CM-SORT-01 (Credit Memos Table Filtering & Sorting)**
+  * **Location**: Credit Memos Tab
+  * **Expected Behavior**:
+    1. Search filter, Supplier `<select>` dropdown, and Date Range filters filter rows reactively.
+    2. Table headers (CM #, RMA, Product, Qty, Gross, Pull Out Ref, Credit Amount, Issued By) are clickable and sort ascending/descending with arrow indicators.
+- [ ] **TC-RTV-SORT-01 (Supplier Claims Table Filtering & Sorting)**
+  * **Location**: Supplier Claims (RTV) Tab
+  * **Expected Behavior**:
+    1. Search filter, Supplier dropdown, and Triage Disposition dropdown filter claims table.
+    2. Table headers (RMA #, Vendor, Product & SKU, Disposition, Qty, Unit Price, Total Claim) are clickable and sort ascending/descending with arrow indicators.
 
 ---
 

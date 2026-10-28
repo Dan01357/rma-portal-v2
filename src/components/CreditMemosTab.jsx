@@ -36,6 +36,7 @@ export default function CreditMemosTab({
 }) {
   const canManageCreditMemos = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
   const [searchQuery, setSearchQuery] = useState('');
+  const [supplierFilter, setSupplierFilter] = useState('All');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sortField, setSortField] = useState('credit_issued_at');
@@ -43,6 +44,16 @@ export default function CreditMemosTab({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [selectedMemoNumbers, setSelectedMemoNumbers] = useState(new Set());
+
+  // Extract unique suppliers from credit memos
+  const suppliers = useMemo(() => {
+    const set = new Set();
+    creditMemosList.forEach(m => {
+      const sup = (m.supplier_name || 'Savemore').trim();
+      if (sup) set.add(sup);
+    });
+    return ['All', ...Array.from(set).sort()];
+  }, [creditMemosList]);
 
   // Automatically prune orphan credit memo selection numbers whenever creditMemosList updates
   useEffect(() => {
@@ -78,6 +89,11 @@ export default function CreditMemosTab({
   const processedMemos = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     let list = creditMemosList.filter(item => {
+      if (supplierFilter !== 'All') {
+        const itemSup = (item.supplier_name || 'Savemore').toLowerCase();
+        if (itemSup !== supplierFilter.toLowerCase()) return false;
+      }
+
       if (q) {
         const matches = (
           (item.credit_memo_number || '').toLowerCase().includes(q) ||
@@ -111,6 +127,14 @@ export default function CreditMemosTab({
           valA = String(a.credit_memo_number || '').toLowerCase();
           valB = String(b.credit_memo_number || '').toLowerCase();
           break;
+        case 'rma_number':
+          valA = String(a.rma_number || '').toLowerCase();
+          valB = String(b.rma_number || '').toLowerCase();
+          break;
+        case 'supplier_name':
+          valA = String(a.supplier_name || '').toLowerCase();
+          valB = String(b.supplier_name || '').toLowerCase();
+          break;
         case 'credit_amount':
           valA = Number(a.credit_amount || 0);
           valB = Number(b.credit_amount || 0);
@@ -118,6 +142,18 @@ export default function CreditMemosTab({
         case 'quantity':
           valA = Number(a.quantity || 0);
           valB = Number(b.quantity || 0);
+          break;
+        case 'gross_amount':
+          valA = Number(a.amount || 0);
+          valB = Number(b.amount || 0);
+          break;
+        case 'pull_out_ref':
+          valA = String(a.pull_out_ref || '').toLowerCase();
+          valB = String(b.pull_out_ref || '').toLowerCase();
+          break;
+        case 'credit_issued_by':
+          valA = String(a.credit_issued_by || '').toLowerCase();
+          valB = String(b.credit_issued_by || '').toLowerCase();
           break;
         case 'product_name':
           valA = String(a.product_name || '').toLowerCase();
@@ -136,7 +172,7 @@ export default function CreditMemosTab({
     });
 
     return list;
-  }, [creditMemosList, searchQuery, sortField, sortDirection]);
+  }, [creditMemosList, searchQuery, supplierFilter, dateFrom, dateTo, sortField, sortDirection]);
 
   // Paginated slice
   const paginatedMemos = useMemo(() => {
@@ -378,6 +414,28 @@ export default function CreditMemosTab({
         {/* Search & Date Range Toolbar */}
         <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-3.5 space-y-2.5">
           <div className="flex flex-col md:flex-row md:items-center gap-2.5">
+            {/* Supplier Filter Dropdown */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <label className="text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0">
+                Supplier:
+              </label>
+              <select
+                value={supplierFilter}
+                onChange={(e) => {
+                  setSupplierFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 cursor-pointer shadow-2xs max-w-[180px]"
+                title="Filter by Supplier"
+              >
+                {suppliers.map(sup => (
+                  <option key={sup} value={sup}>
+                    {sup === 'All' ? 'All Suppliers' : sup}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
               <input
@@ -405,7 +463,7 @@ export default function CreditMemosTab({
             </div>
 
             {/* Custom Date Range Filter */}
-            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2.5 py-1 rounded-xl text-xs">
+            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2.5 py-1 rounded-xl text-xs shrink-0">
               <span className="text-[10px] font-bold text-slate-400 uppercase">From:</span>
               <input
                 type="date"
@@ -430,11 +488,12 @@ export default function CreditMemosTab({
               />
             </div>
 
-            {(searchQuery || dateFrom || dateTo) && (
+            {(searchQuery || dateFrom || dateTo || supplierFilter !== 'All') && (
               <button
                 type="button"
                 onClick={() => {
                   setSearchQuery('');
+                  setSupplierFilter('All');
                   setDateFrom('');
                   setDateTo('');
                   setCurrentPage(1);
@@ -560,7 +619,17 @@ export default function CreditMemosTab({
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
                       </div>
                     </th>
-                    <th className="py-3 px-3.5 font-bold">RMA Return Ticket</th>
+                    <th 
+                      onClick={() => handleSort('rma_number')}
+                      className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>RMA & Supplier</span>
+                        {sortField === 'rma_number' || sortField === 'supplier_name' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                        ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
+                      </div>
+                    </th>
                     <th 
                       onClick={() => handleSort('product_name')}
                       className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
@@ -576,10 +645,35 @@ export default function CreditMemosTab({
                       onClick={() => handleSort('quantity')}
                       className="py-3 px-3 font-bold text-center cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
-                      <span>Quantity</span>
+                      <div className="flex items-center justify-center gap-1">
+                        <span>Quantity</span>
+                        {sortField === 'quantity' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                        ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
+                      </div>
                     </th>
-                    <th className="py-3 px-3 text-right font-bold">Gross Amount</th>
-                    <th className="py-3 px-3.5 font-bold">Pull Out Reference</th>
+                    <th 
+                      onClick={() => handleSort('gross_amount')}
+                      className="py-3 px-3 text-right font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        <span>Gross Amount</span>
+                        {sortField === 'gross_amount' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                        ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
+                      </div>
+                    </th>
+                    <th 
+                      onClick={() => handleSort('pull_out_ref')}
+                      className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Pull Out Reference</span>
+                        {sortField === 'pull_out_ref' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                        ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
+                      </div>
+                    </th>
                     <th 
                       onClick={() => handleSort('credit_amount')}
                       className="py-3 px-3.5 font-black text-right cursor-pointer select-none hover:text-emerald-600 transition-colors"
@@ -591,7 +685,17 @@ export default function CreditMemosTab({
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
                       </div>
                     </th>
-                    <th className="py-3 px-3.5 font-bold">Credit Issued By</th>
+                    <th 
+                      onClick={() => handleSort('credit_issued_by')}
+                      className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Credit Issued By</span>
+                        {sortField === 'credit_issued_by' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                        ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
+                      </div>
+                    </th>
                     <th className="py-3 px-3 text-center font-bold">Actions</th>
                   </tr>
                 </thead>

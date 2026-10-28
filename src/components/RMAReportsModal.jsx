@@ -837,7 +837,7 @@ export default function RMAReportsModal({
                             {canDeleteReports && (
                               <button
                                 type="button"
-                                onClick={() => onDeleteReport && onDeleteReport(item.id, item.rma_number)}
+                                onClick={() => onDeleteReport && onDeleteReport(item.id, item.rma_number, item)}
                                 className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer"
                                 title={`Delete RMA #${item.rma_number}`}
                               >
@@ -1026,7 +1026,7 @@ export default function RMAReportsModal({
                         {canDeleteReports && (
                           <button
                             type="button"
-                            onClick={() => onDeleteReport && onDeleteReport(item.id, item.rma_number)}
+                            onClick={() => onDeleteReport && onDeleteReport(item.id, item.rma_number, item)}
                             className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 dark:hover:bg-rose-900/50 rounded-xl transition-colors"
                             title={`Delete RMA #${item.rma_number}`}
                           >

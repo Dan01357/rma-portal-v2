@@ -245,13 +245,24 @@ export const catalogService = {
     if (!imageUrl || typeof imageUrl !== 'string') return;
     try {
       // 1. Google Drive deletion (via serverless API endpoint)
-      const isGdrive = imageUrl.includes('drive.google.com') || imageUrl.includes('googleusercontent.com');
+      const isGdrive = imageUrl.includes('drive.google.com') || 
+                       imageUrl.includes('googleusercontent.com') ||
+                       imageUrl.startsWith('RMA_') ||
+                       imageUrl.endsWith('.webp');
+
       if (isGdrive) {
-        await fetch('/api/upload-photo', {
+        const res = await fetch(`/api/upload-photo?fileUrl=${encodeURIComponent(imageUrl)}`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fileUrl: imageUrl })
-        }).catch(e => console.warn('[Google Drive Delete Notice]:', e.message));
+        }).catch(e => {
+          console.warn('[Google Drive Delete Network Notice]:', e.message);
+          return null;
+        });
+
+        if (res && res.ok) {
+          console.log('[Google Drive] Image deletion confirmed for:', imageUrl);
+        }
         return;
       }
 
@@ -261,6 +272,7 @@ export const catalogService = {
         if (parts[1]) {
           const storagePath = decodeURIComponent(parts[1].split('?')[0]);
           await supabase.storage.from('rma-photos').remove([storagePath]);
+          console.log('[Supabase Storage] Image deleted:', storagePath);
         }
       }
     } catch (err) {
@@ -269,11 +281,53 @@ export const catalogService = {
   },
 
   /**
-   * Delete multiple stored image URLs in parallel
+   * Delete multiple stored image URLs in batch
    */
   async deleteStoredImages(imageUrls) {
     if (!Array.isArray(imageUrls) || imageUrls.length === 0) return;
-    await Promise.allSettled(imageUrls.map(url => this.deleteStoredImage(url)));
+    const cleanList = imageUrls.filter(u => u && typeof u === 'string');
+    if (cleanList.length === 0) return;
+
+    // Separate Google Drive vs Supabase Storage
+    const gdriveUrls = [];
+    const supabasePaths = [];
+
+    cleanList.forEach(url => {
+      if (url.includes('/rma-photos/')) {
+        const parts = url.split('/rma-photos/');
+        if (parts[1]) {
+          supabasePaths.push(decodeURIComponent(parts[1].split('?')[0]));
+        }
+      } else {
+        gdriveUrls.push(url);
+      }
+    });
+
+    const tasks = [];
+
+    // Batch delete Supabase images in 1 call
+    if (supabasePaths.length > 0) {
+      tasks.push(
+        supabase.storage.from('rma-photos').remove(supabasePaths).catch(e => {
+          console.warn('[Supabase Batch Delete Notice]:', e.message);
+        })
+      );
+    }
+
+    // Batch delete Google Drive photos in 1 call to /api/upload-photo
+    if (gdriveUrls.length > 0) {
+      tasks.push(
+        fetch('/api/upload-photo', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileUrls: gdriveUrls })
+        }).catch(e => {
+          console.warn('[Google Drive Batch Delete Notice]:', e.message);
+        })
+      );
+    }
+
+    await Promise.allSettled(tasks);
   },
 
   /**
@@ -740,7 +794,7 @@ export const catalogService = {
 
     // Clean up stored image from Google Drive / Supabase
     if (imageToDelete) {
-      this.deleteStoredImage(imageToDelete);
+      await this.deleteStoredImage(imageToDelete);
     }
 
     this.notifyChange('product-deleted', { id, barcode, name });
@@ -776,11 +830,26 @@ export const catalogService = {
       .map(p => p.image_url || p.imageUrl)
       .filter(Boolean);
     if (allImages.length > 0) {
-      this.deleteStoredImages(allImages);
+      await this.deleteStoredImages(allImages);
     }
 
     this.notifyChange('products-bulk-deleted', { count: productsList.length });
     return { success: true, count: productsList.length };
+  },
+
+  /**
+   * GENERATE UNIQUE RMA NUMBER INSTANTLY
+   * Format: "RMA-YYYY-XXXX-RAND" (e.g. RMA-2026-0001-A14R)
+   */
+  generateRMANumber(seqHint) {
+    const currentYear = new Date().getFullYear();
+    const seqStr = String(seqHint || Math.floor(1000 + Math.random() * 9000)).padStart(4, '0');
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let randomSuffix = '';
+    for (let i = 0; i < 4; i++) {
+      randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return `RMA-${currentYear}-${seqStr}-${randomSuffix}`;
   },
 
   /**
@@ -790,6 +859,7 @@ export const catalogService = {
    * - Accurate GPS ONLY: Filters out inaccurate desktop IP geolocation (> 150m accuracy is left blank)
    */
   async submitReport({ 
+    rmaNumber: explicitRmaNumber = null,
     barcode, 
     product, 
     quantity = 1, 
@@ -812,48 +882,51 @@ export const catalogService = {
       throw new Error('Your contact info (phone number or email) is required.');
     }
 
-    // Format: "RMA-YYYY-XXXX-RAND" (e.g. RMA-2026-0001-A14R)
-    // RMA + Current Year + Serial Number of this RMA - Random unique alphanumeric
-    let nextSeq = 1;
-    try {
-      const { data: latestRows } = await supabase
-        .from('rma_reports')
-        .select('id, rma_number')
-        .order('id', { ascending: false })
-        .limit(10);
+    let rmaNumber = explicitRmaNumber;
+    if (!rmaNumber) {
+      // Format: "RMA-YYYY-XXXX-RAND" (e.g. RMA-2026-0001-A14R)
+      // RMA + Current Year + Serial Number of this RMA - Random unique alphanumeric
+      let nextSeq = 1;
+      try {
+        const { data: latestRows } = await supabase
+          .from('rma_reports')
+          .select('id, rma_number')
+          .order('id', { ascending: false })
+          .limit(10);
 
-      let maxNum = 0;
-      if (latestRows && latestRows.length > 0) {
-        for (const row of latestRows) {
-          if (row.id && !isNaN(Number(row.id))) {
-            maxNum = Math.max(maxNum, Number(row.id));
-          }
-          if (row.rma_number) {
-            const m = String(row.rma_number).match(/RMA-\d{4}-(\d+)-/i);
-            if (m && m[1]) {
-              maxNum = Math.max(maxNum, parseInt(m[1], 10));
+        let maxNum = 0;
+        if (latestRows && latestRows.length > 0) {
+          for (const row of latestRows) {
+            if (row.id && !isNaN(Number(row.id))) {
+              maxNum = Math.max(maxNum, Number(row.id));
+            }
+            if (row.rma_number) {
+              const m = String(row.rma_number).match(/RMA-\d{4}-(\d+)-/i);
+              if (m && m[1]) {
+                maxNum = Math.max(maxNum, parseInt(m[1], 10));
+              }
             }
           }
         }
+        if (maxNum > 0) {
+          nextSeq = maxNum + 1;
+        } else {
+          const { count } = await supabase.from('rma_reports').select('id', { count: 'exact', head: true });
+          nextSeq = (count || 0) + 1;
+        }
+      } catch (e) {
+        nextSeq = 1;
       }
-      if (maxNum > 0) {
-        nextSeq = maxNum + 1;
-      } else {
-        const { count } = await supabase.from('rma_reports').select('id', { count: 'exact', head: true });
-        nextSeq = (count || 0) + 1;
-      }
-    } catch (e) {
-      nextSeq = 1;
-    }
 
-    const currentYear = new Date().getFullYear();
-    const seqStr = String(nextSeq).padStart(4, '0');
-    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-    let randomSuffix = '';
-    for (let i = 0; i < 4; i++) {
-      randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
+      const currentYear = new Date().getFullYear();
+      const seqStr = String(nextSeq).padStart(4, '0');
+      const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+      let randomSuffix = '';
+      for (let i = 0; i < 4; i++) {
+        randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      rmaNumber = `RMA-${currentYear}-${seqStr}-${randomSuffix}`;
     }
-    const rmaNumber = `RMA-${currentYear}-${seqStr}-${randomSuffix}`;
 
     // Auto-resolve product from database if not passed in or still pending client-side detection
     let resolvedProduct = product;
@@ -1211,12 +1284,17 @@ export const catalogService = {
   /**
    * Delete an RMA report (with robust hard-delete, soft-delete fallback, and proof photo cleanup)
    */
-  async deleteReport(id, rmaNumber) {
+  async deleteReport(id, rmaNumber, explicitPhotos = null) {
     if (!id && !rmaNumber) return false;
     try {
       // First find barcode and proof photos to clean up storage and unverified products
       let barcodeToCheck = null;
       let photosToDelete = [];
+
+      if (explicitPhotos && Array.isArray(explicitPhotos) && explicitPhotos.length > 0) {
+        photosToDelete = explicitPhotos;
+      }
+
       try {
         let findQ = supabase.from('rma_reports').select('barcode, photos').limit(1);
         if (id) findQ = findQ.eq('id', id);
@@ -1224,7 +1302,7 @@ export const catalogService = {
         const { data: found } = await findQ;
         if (found && found.length > 0) {
           barcodeToCheck = found[0].barcode;
-          if (found[0].photos) {
+          if (photosToDelete.length === 0 && found[0].photos) {
             photosToDelete = Array.isArray(found[0].photos) 
               ? found[0].photos 
               : (typeof found[0].photos === 'string' ? JSON.parse(found[0].photos || '[]') : []);
@@ -1272,7 +1350,7 @@ export const catalogService = {
 
       // Permanently delete associated proof photos from Google Drive & Supabase Storage
       if (photosToDelete.length > 0) {
-        this.deleteStoredImages(photosToDelete);
+        await this.deleteStoredImages(photosToDelete);
       }
 
       this.notifyChange('report-deleted', { id, rmaNumber });
@@ -1322,7 +1400,7 @@ export const catalogService = {
 
       // Delete all stored photos in parallel
       if (allPhotos.length > 0) {
-        this.deleteStoredImages(allPhotos);
+        await this.deleteStoredImages(allPhotos);
       }
 
       this.notifyChange('reports-bulk-deleted', { count: reportsList.length });

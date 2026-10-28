@@ -440,7 +440,7 @@ export const INITIAL_TICKETS = [
     pull_out_confirmed: true,
     credit_memo_no: 'CM-2026-0145',
     credit_amount: 10080.00,
-    credit_issued_by: 'Danilo Alvaro (Finance Lead)',
+    credit_issued_by: 'Analiza B. Benoza',
     credit_issued_date: '2026-10-18T16:00:00Z',
     supplier_po_no: 'PO-RET-2026-079',
     buffer_days_left: 0,

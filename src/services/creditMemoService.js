@@ -193,8 +193,8 @@ export const creditMemoService = {
       credit_amount: creditAmount,
       pull_out_ref: pullOutRef,
       pull_out_date: pullOutDate,
-      credit_issued_by: memoData.credit_issued_by || authService.getCurrentUser()?.name || 'Authorized Finance Officer',
-      credit_issued_by_email: memoData.credit_issued_by_email || authService.getCurrentUser()?.email || 'finance2@keysysincorporated.com',
+      credit_issued_by: memoData.credit_issued_by || 'Analiza B. Benoza',
+      credit_issued_by_email: memoData.credit_issued_by_email || 'analiza@savemore.com',
       credit_issued_at: new Date().toISOString(),
       notes: memoData.notes ? memoData.notes.trim() : '',
       status: 'issued'

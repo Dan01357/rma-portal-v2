@@ -238,8 +238,8 @@ export default function CreditMemoModal({
         pull_out_ref: pullOutRef.trim() || 'Warehouse Pull-Out',
         pull_out_date: pullOutDate,
         credit_amount: Number(finalCredit.toFixed(2)),
-        credit_issued_by: currentUser?.name || authService.getCurrentUser()?.name || 'Authorized Finance Officer',
-        credit_issued_by_email: currentUser?.email || authService.getCurrentUser()?.email || 'finance2@keysysincorporated.com',
+        credit_issued_by: 'Analiza B. Benoza',
+        credit_issued_by_email: 'analiza@savemore.com',
         notes: notes.trim()
       };
 
@@ -552,15 +552,15 @@ export default function CreditMemoModal({
                 </div>
                 <div className="min-w-0">
                   <div className="font-bold text-slate-900 dark:text-white truncate">
-                    Authorized Officer: <strong className="text-purple-700 dark:text-purple-300">{currentUser?.name || authService.getCurrentUser()?.name || 'Authorized Finance Officer'}</strong>
+                    Finance Head: <strong className="text-purple-700 dark:text-purple-300">Analiza B. Benoza</strong>
                   </div>
                   <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    {currentUser?.email || authService.getCurrentUser()?.email || 'finance2@keysysincorporated.com'} • Active Session
+                    Head of Finance & Accounting • Official Credit Approval
                   </div>
                 </div>
               </div>
               <span className="text-[10px] font-black px-2 py-1 bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 rounded-lg shrink-0 uppercase">
-                Authorized Finance
+                Finance Head
               </span>
             </div>
 

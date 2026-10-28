@@ -213,41 +213,101 @@ export default async function handler(req, res) {
     }
 
     try {
-      let fileId = req.query?.fileId || req.body?.fileId;
-      const fileUrl = req.query?.fileUrl || req.body?.fileUrl;
-
-      if (!fileId && fileUrl && typeof fileUrl === 'string') {
-        const idMatch = fileUrl.match(/\/d\/([a-zA-Z0-9_-]+)/) || fileUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-        if (idMatch && idMatch[1]) {
-          fileId = idMatch[1];
-        }
+      // 1. Robust body & query parsing (handling strings, objects, query params)
+      let parsedBody = req.body;
+      if (typeof parsedBody === 'string') {
+        try { parsedBody = JSON.parse(parsedBody); } catch (e) {}
       }
 
-      if (!fileId) {
-        return res.status(400).json({ success: false, error: 'Missing fileId or fileUrl for deletion' });
+      const rawUrlsOrIds = [];
+      if (req.query?.fileId) rawUrlsOrIds.push(req.query.fileId);
+      if (req.query?.fileUrl) rawUrlsOrIds.push(req.query.fileUrl);
+      if (parsedBody?.fileId) rawUrlsOrIds.push(parsedBody.fileId);
+      if (parsedBody?.fileUrl) rawUrlsOrIds.push(parsedBody.fileUrl);
+      if (Array.isArray(parsedBody?.fileIds)) rawUrlsOrIds.push(...parsedBody.fileIds);
+      if (Array.isArray(parsedBody?.fileUrls)) rawUrlsOrIds.push(...parsedBody.fileUrls);
+      if (Array.isArray(parsedBody?.urls)) rawUrlsOrIds.push(...parsedBody.urls);
+
+      if (rawUrlsOrIds.length === 0) {
+        return res.status(400).json({ success: false, error: 'Missing fileId, fileUrl, or fileUrls for deletion' });
       }
 
       const accessToken = await getGoogleAccessToken(creds);
-      const delRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
-        {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      );
+      const deletedIds = [];
+      const failed = [];
 
-      if (delRes.status === 204 || delRes.ok) {
-        console.log(`[Google Drive] Photo successfully deleted: ${fileId}`);
-        return res.status(200).json({ success: true, deleted: fileId });
-      } else {
-        const errText = await delRes.text();
-        console.warn(`[Google Drive Delete Notice]: ${fileId} - ${errText}`);
-        return res.status(200).json({ success: false, error: errText });
+      for (const item of rawUrlsOrIds) {
+        if (!item || typeof item !== 'string') continue;
+        let fileId = null;
+
+        // Try extracting Google Drive File ID from URL
+        const idMatch = item.match(/\/d\/([a-zA-Z0-9_-]+)/) || 
+                        item.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+                        item.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+        
+        if (idMatch && idMatch[1]) {
+          fileId = idMatch[1];
+        } else if (/^[a-zA-Z0-9_-]{25,50}$/.test(item)) {
+          // Direct fileId passed
+          fileId = item;
+        } else {
+          // Attempt filename search in Google Drive as fallback
+          const filename = item.split('/').pop()?.split('?')[0];
+          if (filename && filename.length > 5) {
+            try {
+              const searchQ = `name = '${filename}' and trashed = false`;
+              const sRes = await fetch(
+                `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(searchQ)}&fields=files(id,name)&pageSize=5&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+                { headers: { Authorization: `Bearer ${accessToken}` } }
+              );
+              if (sRes.ok) {
+                const sJson = await sRes.json();
+                if (sJson.files && sJson.files.length > 0) {
+                  fileId = sJson.files[0].id;
+                }
+              }
+            } catch (searchErr) {
+              console.warn('[Google Drive File Search Notice]:', searchErr.message);
+            }
+          }
+        }
+
+        if (!fileId) {
+          failed.push({ item, reason: 'Could not extract or locate Google Drive File ID' });
+          continue;
+        }
+
+        try {
+          const delRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
+            {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${accessToken}` },
+            }
+          );
+
+          if (delRes.status === 204 || delRes.ok) {
+            console.log(`[Google Drive] Photo successfully deleted: ${fileId}`);
+            deletedIds.push(fileId);
+          } else {
+            const errText = await delRes.text();
+            console.warn(`[Google Drive Delete Notice]: ${fileId} - ${errText}`);
+            failed.push({ fileId, error: errText });
+          }
+        } catch (itemErr) {
+          console.warn(`[Google Drive Delete Error for ${fileId}]:`, itemErr.message);
+          failed.push({ fileId, error: itemErr.message });
+        }
       }
+
+      return res.status(200).json({
+        success: deletedIds.length > 0 || failed.length === 0,
+        deletedCount: deletedIds.length,
+        deletedIds,
+        failed
+      });
     } catch (delErr) {
-      console.warn('[Google Drive Delete Exception]:', delErr.message);
+      console.warn('[Google Drive Delete Global Exception]:', delErr.message);
       return res.status(200).json({ success: false, error: delErr.message });
     }
   }
