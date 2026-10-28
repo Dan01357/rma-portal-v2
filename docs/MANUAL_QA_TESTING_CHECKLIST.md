@@ -56,6 +56,12 @@ Each test scenario defines:
   * **Expected Behavior**: Blue spinner shows briefly; product card appears below displaying product name, image, supplier (*Bonita Mills Inc.*), net price (₱68.50), and VAT price (₱76.72).
   * **Edge Case**: Scan an uncatalogued barcode (e.g., `4809999888877`). System displays amber `Uncatalogued Barcode` notice, allowing submission to proceed as `pending_admin_details`.
 
+- [ ] **TC-PUB-04B (Anonymous Coworker Live Catalog Fallback)**
+  * **Location**: Section 1: `PRODUCT BARCODE / QR CODE`
+  * **Action**: In an incognito / unauthenticated window, scan or type barcode `4801234165512` (*Mr. Muscle Toilet Bowl Cleaner Citrus Scent 500mL x1*).
+  * **Expected Behavior**: Recognizes product name, supplier (*Monheim Distributors, Inc.*), net price (₱92.31), and VAT price (₱103.39) from coworker's live ERP API without requiring an admin login.
+  * **Edge Case**: Verifies `purchaseOrdersApi.loadApiKeyFromCloud()` automatically retrieves `EXTERNAL_API_KEY_DANILO` from Supabase `rma_settings`.
+
 - [ ] **TC-PUB-05 (Mobile Camera Scanner Modal)**
   * **Location**: Button **"Scan with Phone Camera"**
   * **Action**: Click button.
@@ -132,6 +138,12 @@ Each test scenario defines:
     3. Defect reason wraps cleanly across 2 lines (up to 560px width).
     4. Dashed cut line and footer instructions are crisp and legible.
 
+- [ ] **TC-PUB-09 (Uncatalogued Return Catalog Isolation)**
+  * **Location**: Public Portal (`/`) -> Submission
+  * **Action**: Submit an uncatalogued barcode return (e.g. barcode `999123`).
+  * **Expected Behavior**: Return is saved to `public.rma_reports`, but **DOES NOT** insert an `Unidentified Item` row into `public.products`.
+  * **Verification**: Query `public.products` in Supabase; table remains clean and only contains verified catalog SKUs.
+
 ---
 
 ## Section 2: Admin Top Nav, Global Controls & KPI Cards
@@ -160,6 +172,12 @@ Each test scenario defines:
     4. **Finance Credit Memos**: Count of issued credit memos.
     5. **Supplier Claims (RTV)**: Count of vendor debit claims.
   * **Expected Behavior**: Numbers accurately match `rma_reports`, `products`, and `credit_memos` database rows.
+
+- [ ] **TC-NAV-05 (Instant Cross-Tab Logout Synchronization)**
+  * **Location**: Global Application State
+  * **Action**: Open `https://rma-portal-v2.vercel.app/admin` in Tab A (authenticated). Open the same URL in Tab B. Click **"Logout"** in Tab A.
+  * **Expected Behavior**: Tab A logs out and resets URL to `/`. Tab B **instantly** receives the `BroadcastChannel('rma_auth_bus')` event, resets to `/`, clears all session modals, and destroys all cached admin tokens.
+  * **Edge Case**: Copy the previous logged-in `/admin` URL and paste into a new browser tab; verifies the user remains unauthenticated and is prompted with the login gate.
 
 ---
 
@@ -374,6 +392,30 @@ Each test scenario defines:
 - [ ] **TC-MOD-04 (Super Admin Role Protection)**
   * **Action**: Attempt to delete the last active Super Admin account.
   * **Expected Behavior**: System strictly blocks deletion with alert: `Cannot delete primary Super Admin account.`
+
+### 8.3 Return Authorization QR Code & Quick Actions Modal
+- [ ] **TC-MOD-05 (RMA QR Scan Protected 2-Step OTP Gate)**
+  * **Location**: Visiting `/?rma=[RMA_NUMBER]` or scanning RMA Box QR code on mobile camera
+  * **Action**: Open an RMA quick processing URL while unauthenticated.
+  * **Expected Behavior**:
+    1. Report summary card loads and displays RMA details.
+    2. Quick Actions controls are locked behind **Admin Verification Required** gate.
+    3. Step 1: User types company email. System checks if account is an active `admin` or `super_admin`. Unrecognized or public customer emails are blocked with `Access Denied`.
+    4. Step 2: System dispatches genuine 6-digit OTP code to employee email.
+    5. User enters 6-digit OTP code and clicks **"Verify & Unlock"**.
+    6. Triage and Quick Actions unlock exclusively for that session.
+  * **Security Check**: Verify `localStorage` is **never** used to persist quick auth across tabs or browser restarts.
+
+- [ ] **TC-MOD-06 (Re-opening Quick Actions from Box Sticker Modal)**
+  * **Location**: Return QR Box Sticker Modal -> Quick Actions button
+  * **Action**:
+    1. Submit an RMA return.
+    2. Click **"Print Box Sticker"**.
+    3. Click **"Quick Actions"**.
+    4. Click **"X"** to close.
+    5. Click **"Print Box Sticker"** again.
+    6. Click **"Quick Actions"** again.
+  * **Expected Behavior**: Modal re-opens smoothly with zero console errors or `TypeError: Cannot read properties of null (reading 'inspected_by')` crashes. All report fields load safely.
 
 ---
 

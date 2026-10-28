@@ -28,6 +28,7 @@ import confetti from 'canvas-confetti';
 import ScannerModal from './ScannerModal';
 import { AE_ROSTERS } from '../data/mockData';
 import { rmaApi } from '../supabaseClient';
+import { catalogService } from '../services/catalogService';
 import { generateTicketId, playBeep, formatPeso, generateAiDiagnosis } from '../utils/rmaHelpers';
 
 export default function SubmitRMATab({ 
@@ -135,9 +136,9 @@ export default function SubmitRMATab({
         return;
       }
 
-      // 1. Live ERPLY API lookup
+      // 1. Live ERPLY API & Multi-Tier Catalog Lookup
       try {
-        matched = await rmaApi.findProductByBarcode(cleanCode);
+        matched = await catalogService.findProduct(cleanCode);
       } catch (err) {
         console.warn('Live barcode lookup failed:', err);
       }

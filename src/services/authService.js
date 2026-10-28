@@ -182,6 +182,11 @@ const DEFAULT_EMPLOYEES = [
   }
 ];
 
+// Cross-tab broadcast channel for instantaneous authentication synchronization
+const authChannel = typeof window !== 'undefined' && window.BroadcastChannel 
+  ? new BroadcastChannel('rma_auth_bus') 
+  : null;
+
 export const authService = {
   getHrApiKey() {
     return localStorage.getItem(HR_API_KEY_STORAGE) || import.meta.env.VITE_HR_API_KEY || '';
@@ -201,17 +206,64 @@ export const authService = {
     }
   },
 
+  /**
+   * Complete, secure logout across all local caches and broadcast to all open tabs
+   */
   async logout() {
     try {
       localStorage.removeItem(AUTH_STORAGE_KEY);
+      localStorage.removeItem('rma_portal_admin_session');
       localStorage.removeItem('rma_admin_session_v2');
-      sessionStorage.removeItem('rma_login_pending_email');
-      sessionStorage.removeItem('rma_admin_session_v2');
+      localStorage.removeItem('rma_quick_auth_admin');
+      
+      sessionStorage.removeItem(AUTH_STORAGE_KEY);
       sessionStorage.removeItem('rma_portal_admin_session');
-      await supabase.auth.signOut({ scope: 'local' });
+      sessionStorage.removeItem('rma_admin_session_v2');
+      sessionStorage.removeItem('rma_quick_auth_admin');
+      sessionStorage.removeItem('rma_login_pending_email');
+      
+      // Clear any cached OTPs
+      try {
+        Object.keys(sessionStorage).forEach(k => {
+          if (k.startsWith('otp_')) sessionStorage.removeItem(k);
+        });
+      } catch (e) {}
+
+      // Broadcast logout across all tabs immediately
+      try {
+        authChannel?.postMessage({ type: 'LOGOUT', timestamp: Date.now() });
+        localStorage.setItem('rma_logout_sync', String(Date.now()));
+      } catch (e) {}
+
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
     } catch (e) {
       console.warn('Supabase auth signOut notice:', e);
     }
+  },
+
+  /**
+   * Listen for logout or session changes across tabs
+   */
+  onAuthChange(callback) {
+    if (typeof window === 'undefined') return () => {};
+    
+    const handleBroadcast = (e) => {
+      if (e.data?.type === 'LOGOUT') callback({ type: 'LOGOUT' });
+    };
+
+    const handleStorage = (e) => {
+      if (e.key === 'rma_logout_sync' || (e.key === AUTH_STORAGE_KEY && !e.newValue)) {
+        callback({ type: 'LOGOUT' });
+      }
+    };
+
+    authChannel?.addEventListener('message', handleBroadcast);
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      authChannel?.removeEventListener('message', handleBroadcast);
+      window.removeEventListener('storage', handleStorage);
+    };
   },
 
   /**

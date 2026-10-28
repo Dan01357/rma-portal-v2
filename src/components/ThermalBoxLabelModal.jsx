@@ -76,18 +76,18 @@ export default function ThermalBoxLabelModal({
 
   if (!isOpen || !report) return null;
 
-  const rmaNumber = report.rma_number || 'RMA-PENDING';
-  const barcode = report.barcode || 'N/A';
-  const sku = report.code || report.sku || 'UNASSIGNED';
-  const name = report.name || 'Returned Merchandise';
-  const quantity = report.quantity || 1;
-  const unit = report.unit_name || 'pc';
-  const supplier = report.supplier_name || 'Wholesale Distribution';
-  const location = report.warehouse_location || 'DOCK-INTAKE';
-  const grade = report.condition_grade || 'B - Damaged Packaging Only';
-  const disposition = report.disposition || 'Pending Triage';
-  const inspectedBy = report.inspected_by || report.reported_by || 'Warehouse Dock';
-  const createdDate = report.created_at ? new Date(report.created_at).toLocaleDateString('en-US', {
+  const rmaNumber = report?.rma_number || report?.rmaNumber || 'RMA-PENDING';
+  const barcode = report?.barcode || 'N/A';
+  const sku = report?.code || report?.sku || 'UNASSIGNED';
+  const name = report?.name || report?.productName || 'Returned Merchandise';
+  const quantity = report?.quantity || 1;
+  const unit = report?.unit_name || report?.unit || 'pc';
+  const supplier = report?.supplier_name || report?.supplier || 'Wholesale Distribution';
+  const location = report?.warehouse_location || 'DOCK-INTAKE';
+  const grade = report?.condition_grade || 'B - Damaged Packaging Only';
+  const disposition = report?.disposition || 'Pending Triage';
+  const inspectedBy = report?.inspected_by || report?.reported_by || 'Warehouse Dock';
+  const createdDate = report?.created_at ? new Date(report.created_at).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric'

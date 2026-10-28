@@ -278,13 +278,53 @@ export const catalogService = {
             isVerified: p.isVerified !== false && p.is_verified !== false,
             source: json.source === 'database' ? 'Supabase Database (Yours)' : (json.source === 'erply_api' ? 'ERPLY POS/ERP Catalog (Live API)' : 'Wholesale Master Catalog')
           };
-        } else if (json.success && !json.found) {
-          // Explicitly confirmed not found in database or live catalog
-          return null;
         }
       }
     } catch (apiErr) {
       console.warn('Server lookup proxy unavailable (falling back to client DB):', apiErr.message);
+    }
+
+    // 2. Direct Coworker Live Catalog Fallback via purchaseOrdersApi (erply_products)
+    try {
+      const liveProduct = await purchaseOrdersApi.findProductByBarcode(clean);
+      if (liveProduct) {
+        // Cache into Supabase products table asynchronously so subsequent searches are instant
+        try {
+          supabase.from('products').upsert([{
+            barcode: liveProduct.barcode || clean,
+            code: liveProduct.code || liveProduct.sku || clean,
+            name: liveProduct.name,
+            supplier_name: liveProduct.supplier || liveProduct.supplier_name || 'Savemore',
+            price: Number(liveProduct.price || liveProduct.unit_price || 0),
+            price_with_vat: Number(liveProduct.price_with_vat || liveProduct.priceWithVat || 0),
+            brand_name: liveProduct.brand || liveProduct.brand_name || null,
+            unit_name: liveProduct.unit_name || 'pc',
+            is_verified: true,
+            updated_at: new Date().toISOString()
+          }], { onConflict: 'barcode' }).then(() => {}).catch(() => {});
+        } catch (cErr) {}
+
+        return {
+          id: liveProduct.id,
+          barcode: liveProduct.barcode || clean,
+          code: liveProduct.code || liveProduct.sku || clean,
+          name: liveProduct.name,
+          price: Number(liveProduct.price || liveProduct.unit_price || 0),
+          priceWithVat: Number(liveProduct.price_with_vat || liveProduct.priceWithVat || 0),
+          supplierName: liveProduct.supplier || liveProduct.supplier_name || 'Savemore',
+          brandName: liveProduct.brand || liveProduct.brand_name || null,
+          unitName: liveProduct.unit_name || 'pc',
+          hasSerialNumbers: Boolean(liveProduct.requires_serial || liveProduct.has_serial_numbers),
+          imageUrl: liveProduct.image_url || null,
+          ae_name: liveProduct.ae_name || null,
+          ae_email: liveProduct.ae_email || null,
+          company: liveProduct.company || null,
+          isVerified: true,
+          source: 'ERPLY POS/ERP Catalog (Live API)'
+        };
+      }
+    } catch (poErr) {
+      console.warn('purchaseOrdersApi lookup fallback notice:', poErr?.message || poErr);
     }
 
     // 2. Direct Supabase Fallback (if serverless API endpoint was offline or in local client dev)
@@ -856,28 +896,9 @@ export const catalogService = {
       } catch (err) {
         console.warn('Catalog auto-sync notice:', err?.message || err);
       }
-    } else {
-      // If item is completely uncatalogued (no ean_code found anywhere), store as unverified pending admin assignment
-      const { error: prodError } = await supabase
-        .from('products')
-        .upsert([
-          {
-            barcode: cleanBarcode,
-            code: null,
-            name: `Unidentified Item (${cleanBarcode})`,
-            supplier_name: 'Pending Assignment',
-            price: 0,
-            price_with_vat: 0,
-            unit_name: 'pc',
-            is_verified: false,
-            updated_at: new Date().toISOString()
-          }
-        ], { onConflict: 'barcode' });
-
-      if (prodError) {
-        console.warn('Unknown barcode catalog upsert notice:', prodError.message);
-      }
     }
+    // Note: If item is uncatalogued, we DO NOT insert into products database.
+    // Uncatalogued returns remain strictly within rma_reports until an admin manually assigns an SKU.
 
     // Trigger instant real-time notification
     this.notifyChange('report-submitted', { report: finalReport });

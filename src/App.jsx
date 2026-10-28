@@ -96,20 +96,9 @@ export default function App() {
     return path === '/admin' || path.startsWith('/admin/') || hash === '#/admin' || window.location.search.includes('admin=true');
   });
 
-  // Authenticated Admin User (with fallback to quick action admin session)
+  // Authenticated Admin User (Strictly from verified authService session)
   const [currentUser, setCurrentUser] = useState(() => {
-    const fromAuth = authService.getCurrentUser();
-    if (fromAuth) return fromAuth;
-    try {
-      const quick = typeof window !== 'undefined' ? (sessionStorage.getItem('rma_quick_auth_admin') || localStorage.getItem('rma_quick_auth_admin')) : null;
-      if (quick) {
-        const parsed = JSON.parse(quick);
-        if (parsed && (parsed.role === 'super_admin' || parsed.role === 'admin')) {
-          return parsed;
-        }
-      }
-    } catch (e) {}
-    return null;
+    return authService.getCurrentUser();
   });
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
@@ -288,6 +277,24 @@ export default function App() {
       }
     };
     checkSession();
+
+    // Listen for cross-tab logout events
+    const unsubscribeAuth = authService.onAuthChange((event) => {
+      if (event?.type === 'LOGOUT') {
+        setCurrentUser(null);
+        setIsAdminView(false);
+        setIsLoginModalOpen(false);
+        setIsQuickRmaModalOpen(false);
+        setQuickRmaNumber(null);
+        if (typeof window !== 'undefined') {
+          window.history.replaceState({}, '', '/');
+        }
+      }
+    });
+
+    return () => {
+      unsubscribeAuth();
+    };
   }, []);
 
   const navigateTo = (path) => {
@@ -308,8 +315,12 @@ export default function App() {
     setCurrentUser(null);
     setIsAdminView(false);
     setIsLoginModalOpen(false);
+    setIsQuickRmaModalOpen(false);
+    setQuickRmaNumber(null);
     sessionStorage.removeItem('rma_login_pending_email');
-    navigateTo('/');
+    if (typeof window !== 'undefined') {
+      window.history.replaceState({}, '', '/');
+    }
     showToast('Logged out of admin dashboard.', 'success');
   };
 

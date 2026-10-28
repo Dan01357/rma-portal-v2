@@ -25,7 +25,9 @@ import {
   Layers,
   MapPin,
   Tag,
-  Shield
+  Shield,
+  KeyRound,
+  ArrowLeft
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
@@ -125,7 +127,10 @@ export default function QuickRMAActionModal({
 
   // Authentication & Verification State
   const [verifiedAdmin, setVerifiedAdmin] = useState(null);
+  const [authStep, setAuthStep] = useState('email'); // 'email' | 'otp'
   const [emailInput, setEmailInput] = useState('');
+  const [otpInput, setOtpInput] = useState('');
+  const [countdown, setCountdown] = useState(0);
   const [isVerifying, setIsVerifying] = useState(false);
   const [authError, setAuthError] = useState(null);
   const [authSuccessMsg, setAuthSuccessMsg] = useState(null);
@@ -169,21 +174,30 @@ export default function QuickRMAActionModal({
       return;
     }
 
-    // Check session or local storage cache for verified admin
+    // Check session storage cache for verified admin in THIS tab only (never localStorage)
     try {
-      const cached = sessionStorage.getItem(QUICK_AUTH_STORAGE_KEY) || localStorage.getItem(QUICK_AUTH_STORAGE_KEY);
+      const cached = sessionStorage.getItem(QUICK_AUTH_STORAGE_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed && (parsed.role === 'super_admin' || parsed.role === 'admin')) {
           setVerifiedAdmin(parsed);
-          if (onAdminVerified) onAdminVerified(parsed);
           return;
         }
       }
     } catch (e) {}
 
     setVerifiedAdmin(null);
+    setAuthStep('email');
+    setOtpInput('');
   }, [isOpen, currentUser]);
+
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = setInterval(() => {
+      setCountdown(prev => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [countdown]);
 
   // 1. Primary fetch when modal opens or rmaNumber changes
   useEffect(() => {
@@ -268,9 +282,9 @@ export default function QuickRMAActionModal({
     }
   }, [isOpen, rmaNumber, recentReportsList]);
 
-  // Verification Form Submit
-  const handleVerifyEmail = async (e) => {
-    e.preventDefault();
+  // Step 1: Request OTP for authorized company admin
+  const handleRequestOtp = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
     const cleanEmail = emailInput.trim().toLowerCase();
     setAuthError(null);
     setAuthSuccessMsg(null);
@@ -280,83 +294,82 @@ export default function QuickRMAActionModal({
       return;
     }
 
+    if (countdown > 0) return;
+
     setIsVerifying(true);
 
     try {
-      // 1. Check Supabase admin_users
-      let emp = null;
-      try {
-        const { data, error } = await supabase
-          .from('admin_users')
-          .select('*')
-          .ilike('email', cleanEmail)
-          .limit(1);
-
-        if (!error && data && data.length > 0) {
-          emp = data[0];
-        }
-      } catch (dbErr) {
-        console.warn('Supabase user lookup warning:', dbErr);
-      }
-
-      // 2. Check designated admins directory
-      const defaultAdminList = [
-        { name: 'Danilo Alvaro Jr. (Super Admin)', email: 'finance2@keysysincorporated.com', role: 'super_admin', is_active: true, department: 'Finance Systems / IT' },
-        { name: 'Alleli F. Almaida', email: 'alleli.almaida@ph.keysys.com', role: 'admin', is_active: true, department: 'Finance' },
-        { name: 'Analiza B. Benosa', email: 'finance@a2z2go.net', role: 'admin', is_active: true, department: 'Finance' },
-        { name: 'Glencel O. Azogue', email: 'accountspayable@keysysincorporated.com', role: 'admin', is_active: true, department: 'Accounts Payable' },
-        { name: 'Jarmen A. Cachero', email: 'finance4@keysysincorporated.com', role: 'admin', is_active: true, department: 'Finance Systems' },
-        { name: 'Mark John A. Aquino', email: 'mark.aquino@a2z2go.net', role: 'admin', is_active: true, department: 'A2Z2GO Procurement' },
-        { name: 'Ralph Raven A. Alido', email: 'ralph.alido@a2z2go.net', role: 'admin', is_active: true, department: 'A2Z2GO Operations' },
-        { name: 'Mary T. Gan', email: 'mgan@pingconmarketing.com', role: 'admin', is_active: true, department: 'Executive Management' }
-      ];
-
-      const designatedAdmin = defaultAdminList.find(e => e.email.toLowerCase() === cleanEmail);
-      if (designatedAdmin) {
-        emp = {
-          ...(emp || {}),
-          ...designatedAdmin,
-          role: designatedAdmin.role
-        };
-      }
+      // 1. Verify that email belongs to an active employee
+      const employees = await authService.getEmployees();
+      const emp = employees.find(e => e.email?.toLowerCase() === cleanEmail);
 
       if (!emp) {
-        setAuthError(`Access Denied: "${cleanEmail}" is not recognized as an authorized company account. Customer and public access is restricted.`);
-        setIsVerifying(false);
-        return;
+        throw new Error(`Access Denied: "${cleanEmail}" is not recognized as an authorized company account. Public customers and unverified users cannot access Quick Actions.`);
       }
 
       if (emp.is_active === false) {
-        setAuthError(`Access Denied: The employee account (${cleanEmail}) is marked as Resigned or Inactive.`);
-        setIsVerifying(false);
-        return;
+        throw new Error(`Access Denied: The employee account (${cleanEmail}) is marked as Resigned or Inactive.`);
       }
 
       if (emp.role !== 'super_admin' && emp.role !== 'admin') {
-        setAuthError(`Permission Restricted: Account "${cleanEmail}" has role "${emp.role}". Only Admin and Super Admin roles can assign SKUs and issue Credit Memos.`);
-        setIsVerifying(false);
-        return;
+        throw new Error(`Permission Restricted: Account "${cleanEmail}" has role "${emp.role}". Only Admin and Super Admin roles can operate Return Quick Actions.`);
       }
 
-      // Successful verification!
-      const verified = {
-        name: emp.name || emp.full_name || 'Admin',
-        email: cleanEmail,
-        role: emp.role,
-        department: emp.department || 'Finance'
-      };
-
-      setVerifiedAdmin(verified);
-      sessionStorage.setItem(QUICK_AUTH_STORAGE_KEY, JSON.stringify(verified));
-      try {
-        localStorage.setItem(QUICK_AUTH_STORAGE_KEY, JSON.stringify(verified));
-      } catch (e) {}
-      if (onAdminVerified) {
-        onAdminVerified(verified);
+      // 2. Request OTP via authService
+      const res = await authService.requestOtp(cleanEmail);
+      setAuthStep('otp');
+      setCountdown(60);
+      setAuthSuccessMsg(`Verification code sent to ${cleanEmail}. Please enter the 6-digit OTP code below.`);
+      if (res?.rateLimited) {
+        setAuthError(res.message);
       }
-      setAuthSuccessMsg(`Welcome, ${verified.name}! Admin Quick Actions unlocked.`);
     } catch (err) {
-      setAuthError(`Verification error: ${err.message}`);
+      setAuthError(err.message || 'Failed to dispatch OTP code. Please check your email.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  // Step 2: Verify 6-digit OTP Code
+  const handleVerifyOtp = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const cleanEmail = emailInput.trim().toLowerCase();
+    const cleanOtp = otpInput.trim();
+    setAuthError(null);
+
+    if (!cleanOtp) {
+      setAuthError('Please enter the 6-digit OTP code.');
+      return;
+    }
+
+    setIsVerifying(true);
+
+    try {
+      const res = await authService.verifyOtp(cleanEmail, cleanOtp);
+      if (res?.success && res.user) {
+        if (res.user.role !== 'admin' && res.user.role !== 'super_admin') {
+          throw new Error('Access Denied: Only Admin and Super Admin roles can access Quick Actions.');
+        }
+
+        const verified = {
+          id: res.user.id,
+          name: res.user.name,
+          email: res.user.email,
+          role: res.user.role,
+          department: res.user.department || 'Finance'
+        };
+
+        setVerifiedAdmin(verified);
+        sessionStorage.setItem(QUICK_AUTH_STORAGE_KEY, JSON.stringify(verified));
+        setAuthSuccessMsg(`Welcome, ${verified.name}! Admin Quick Actions unlocked.`);
+        if (onAdminVerified) {
+          onAdminVerified(verified);
+        }
+      } else {
+        throw new Error('Verification failed. Please check the code.');
+      }
+    } catch (err) {
+      setAuthError(err.message || 'Invalid or expired OTP code.');
     } finally {
       setIsVerifying(false);
     }
@@ -365,7 +378,8 @@ export default function QuickRMAActionModal({
   const handleSwitchAccount = () => {
     setVerifiedAdmin(null);
     sessionStorage.removeItem(QUICK_AUTH_STORAGE_KEY);
-    setEmailInput('');
+    setAuthStep('email');
+    setOtpInput('');
     setAuthError(null);
     setAuthSuccessMsg(null);
   };
@@ -373,14 +387,14 @@ export default function QuickRMAActionModal({
   if (!isOpen) return null;
 
   // Derive catalog & memo status for this report
-  const cleanBarcode = report?.barcode ? String(report.barcode).trim() : '';
+  const cleanBarcode = String(report?.barcode || '').trim();
   const matchedProduct = cleanBarcode 
     ? savedProductsList.find(p => p.barcode && String(p.barcode).trim() === cleanBarcode) 
     : null;
   const isSavedInProducts = Boolean(matchedProduct && matchedProduct.is_verified !== false);
 
   const existingMemo = report
-    ? creditMemosList.find(m => m.rma_number === report.rma_number || m.report_id === report.id)
+    ? creditMemosList.find(m => m.rma_number === report?.rma_number || String(m.report_id) === String(report?.id))
     : null;
 
   // Enterprise Multi-Tier Financial Threshold Rule:
@@ -571,8 +585,8 @@ export default function QuickRMAActionModal({
             </div>
           )}
 
-          {/* 4. Access Control Gate: Email Verification for Admin / Super Admin */}
-          {!verifiedAdmin ? (
+          {/* 4. Access Control Gate: Email OTP Verification for Admin / Super Admin */}
+          {report && !verifiedAdmin && (
             <div className="p-4 sm:p-5 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-slate-800 dark:to-slate-800/90 border-2 border-amber-300 dark:border-amber-700 rounded-3xl shadow-sm space-y-3.5">
               <div className="flex items-start gap-3">
                 <div className="p-2.5 bg-amber-500 text-white rounded-2xl shadow-xs shrink-0">
@@ -582,11 +596,11 @@ export default function QuickRMAActionModal({
                   <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
                     <span>Admin Verification Required</span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 font-bold">
-                      Protected Action
+                      Protected Gate
                     </span>
                   </h4>
                   <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
-                    Customers cannot edit or issue credit memos. Enter your active company employee email to unlock Quick Actions for this return.
+                    Only authorized Admin & Super Admin staff can operate Return Quick Actions. Enter your company email to receive a 6-digit OTP verification code.
                   </p>
                 </div>
               </div>
@@ -598,41 +612,111 @@ export default function QuickRMAActionModal({
                 </div>
               )}
 
-              <form onSubmit={handleVerifyEmail} className="space-y-2.5">
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                  <input
-                    type="email"
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="Enter company email (e.g. finance2@keysysincorporated.com)"
-                    className="w-full pl-10 pr-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600 transition-all"
-                    required
-                    autoFocus
-                  />
+              {authSuccessMsg && (
+                <div className="p-3 bg-emerald-100 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 rounded-xl text-xs font-semibold text-emerald-800 dark:text-emerald-200 flex items-start gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <span>{authSuccessMsg}</span>
                 </div>
+              )}
 
-                <button
-                  type="submit"
-                  disabled={isVerifying}
-                  className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  {isVerifying ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Verifying Role Permissions...</span>
-                    </>
-                  ) : (
-                    <>
-                      <ShieldCheck className="w-4 h-4" />
-                      <span>Verify Email & Unlock Quick Actions</span>
-                    </>
-                  )}
-                </button>
-              </form>
+              {authStep === 'email' ? (
+                <form onSubmit={handleRequestOtp} className="space-y-2.5">
+                  <div className="relative">
+                    <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                    <input
+                      type="email"
+                      value={emailInput}
+                      onChange={(e) => setEmailInput(e.target.value)}
+                      placeholder="Enter company email (e.g. finance2@keysysincorporated.com)"
+                      className="w-full pl-10 pr-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600 transition-all"
+                      required
+                      autoFocus
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isVerifying || countdown > 0}
+                    className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {isVerifying ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Sending Security OTP...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>Send 6-Digit OTP to Email</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleVerifyOtp} className="space-y-3">
+                  <div className="p-3 bg-white/70 dark:bg-slate-900/70 border border-amber-200 dark:border-amber-800/60 rounded-xl flex items-center justify-between text-xs">
+                    <div className="truncate font-mono text-slate-700 dark:text-slate-300">
+                      Code sent to: <strong>{emailInput}</strong>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAuthStep('email')}
+                      className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline font-bold shrink-0 ml-2 cursor-pointer flex items-center gap-1"
+                    >
+                      <ArrowLeft className="w-3 h-3" />
+                      <span>Change</span>
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={otpInput}
+                      onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
+                      placeholder="Enter 6-Digit OTP (e.g. 123456)"
+                      className="w-full pl-10 pr-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-center font-mono tracking-widest text-sm font-black text-slate-900 dark:text-white placeholder:tracking-normal placeholder:font-normal placeholder:text-xs focus:outline-none focus:border-blue-600 transition-all"
+                      required
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={isVerifying || otpInput.trim().length < 6}
+                      className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                    >
+                      {isVerifying ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Verifying OTP...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck className="w-4 h-4" />
+                          <span>Verify & Unlock</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={countdown > 0 || isVerifying}
+                      onClick={handleRequestOtp}
+                      className="px-3 py-2.5 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      {countdown > 0 ? `Resend (${countdown}s)` : 'Resend OTP'}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
-          ) : (
-            /* 5. Authenticated Admin Actions Bar */
+          )}
+
+          {/* 5. Authenticated Admin Actions Bar (Strictly requires verifiedAdmin AND loaded report) */}
+          {report && verifiedAdmin && (
             <div className="space-y-3">
               {/* Verified Admin Strip */}
               <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex items-center justify-between text-xs">
@@ -762,7 +846,7 @@ export default function QuickRMAActionModal({
 
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-[10px] text-slate-400">
-                    Inspected by: <strong className="text-slate-700 dark:text-slate-300">{report.inspected_by || verifiedAdmin?.name || 'Staff'}</strong>
+                    Inspected by: <strong className="text-slate-700 dark:text-slate-300">{report?.inspected_by || verifiedAdmin?.name || 'Staff'}</strong>
                   </span>
 
                   <button

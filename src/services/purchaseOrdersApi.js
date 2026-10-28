@@ -105,6 +105,22 @@ export const purchaseOrdersApi = {
     }
 
     try {
+      // 1. Primary: Check rma_settings table where Admin stores the key
+      const { data: settingData } = await supabase
+        .from('rma_settings')
+        .select('value')
+        .eq('key', 'EXTERNAL_API_KEY_DANILO')
+        .maybeSingle();
+
+      if (settingData?.value && typeof settingData.value === 'string' && settingData.value.trim() && settingData.value.trim() !== 'pk_live_po_cloud_db_2026_dev_key') {
+        const cloudKey = settingData.value.trim();
+        localStorage.setItem('EXTERNAL_API_KEY_DANILO', cloudKey);
+        localStorage.setItem('rma_po_api_key', cloudKey);
+        clearUnauthorized();
+        return cloudKey;
+      }
+
+      // 2. Secondary: Check products table __CONFIG_PO_API_KEY__
       const { data } = await supabase
         .from('products')
         .select('code')

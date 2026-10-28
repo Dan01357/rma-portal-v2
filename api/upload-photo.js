@@ -11,17 +11,21 @@ let tokenExpiresAt = 0;
  * Extracts Google Service Account credentials from environment variables
  */
 function getGoogleCredentials() {
+  let clientEmail = null;
+  let privateKey = null;
+  let folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || null;
+  let impersonateUser = process.env.GOOGLE_DRIVE_IMPERSONATE_USER || process.env.GOOGLE_WORKSPACE_USER || null;
+
   // Option 1: Direct JSON string in GOOGLE_SERVICE_ACCOUNT_KEY or GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON
   const jsonStr = process.env.GOOGLE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON;
   if (jsonStr) {
     try {
       const parsed = JSON.parse(jsonStr);
       if (parsed.client_email && parsed.private_key) {
-        return {
-          clientEmail: parsed.client_email,
-          privateKey: parsed.private_key.replace(/\\n/g, '\n'),
-          folderId: process.env.GOOGLE_DRIVE_FOLDER_ID || parsed.folder_id || null,
-        };
+        clientEmail = parsed.client_email;
+        privateKey = parsed.private_key.replace(/\\n/g, '\n');
+        if (!folderId) folderId = parsed.folder_id || null;
+        if (!impersonateUser) impersonateUser = parsed.impersonate_user || null;
       }
     } catch (e) {
       console.warn('[Google Drive Auth] Failed to parse service account JSON:', e.message);
@@ -29,14 +33,14 @@ function getGoogleCredentials() {
   }
 
   // Option 2: Individual env vars
-  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || process.env.GOOGLE_DRIVE_CLIENT_EMAIL;
-  let privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || process.env.GOOGLE_DRIVE_PRIVATE_KEY;
-  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || null;
+  if (!clientEmail || !privateKey) {
+    clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || process.env.GOOGLE_DRIVE_CLIENT_EMAIL;
+    privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || process.env.GOOGLE_DRIVE_PRIVATE_KEY;
+  }
 
   if (clientEmail && privateKey) {
-    // Clean formatted private key
     privateKey = privateKey.replace(/\\n/g, '\n');
-    return { clientEmail, privateKey, folderId };
+    return { clientEmail, privateKey, folderId, impersonateUser };
   }
 
   return null;
@@ -44,8 +48,9 @@ function getGoogleCredentials() {
 
 /**
  * Generates an OAuth2 JWT assertion for Google APIs (RS256)
+ * Supports optional user impersonation (domain-wide delegation) if configured.
  */
-function createGoogleJwtAssertion(clientEmail, privateKey) {
+function createGoogleJwtAssertion(clientEmail, privateKey, impersonateUser = null) {
   const header = {
     alg: 'RS256',
     typ: 'JWT',
@@ -54,11 +59,16 @@ function createGoogleJwtAssertion(clientEmail, privateKey) {
   const now = Math.floor(Date.now() / 1000);
   const claimSet = {
     iss: clientEmail,
-    scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive',
+    scope: 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/drive.file',
     aud: 'https://oauth2.googleapis.com/token',
     exp: now + 3600,
     iat: now,
   };
+
+  // If user delegation configured, set sub
+  if (impersonateUser) {
+    claimSet.sub = impersonateUser;
+  }
 
   const encodeBase64Url = (obj) =>
     Buffer.from(JSON.stringify(obj))
@@ -90,18 +100,35 @@ async function getGoogleAccessToken(creds, signal) {
     return cachedToken;
   }
 
-  const assertion = createGoogleJwtAssertion(creds.clientEmail, creds.privateKey);
-  const body = new URLSearchParams({
+  // Try with impersonateUser first if set, fallback to direct service account if unauthorized
+  let assertion = createGoogleJwtAssertion(creds.clientEmail, creds.privateKey, creds.impersonateUser);
+  let body = new URLSearchParams({
     grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
     assertion,
   });
 
-  const res = await fetch('https://oauth2.googleapis.com/token', {
+  let res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
     signal,
   });
+
+  if (!res.ok && creds.impersonateUser) {
+    // If impersonation failed (e.g. domain delegation not configured in admin.google.com), retry as pure service account
+    console.warn('[Google Drive Auth] Impersonation failed, retrying without sub claim...');
+    assertion = createGoogleJwtAssertion(creds.clientEmail, creds.privateKey, null);
+    body = new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion,
+    });
+    res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal,
+    });
+  }
 
   if (!res.ok) {
     const errText = await res.text();
@@ -116,15 +143,15 @@ async function getGoogleAccessToken(creds, signal) {
 
 /**
  * Finds or creates a Google Drive folder by name inside a parent folder
+ * Passing supportsAllDrives=true and includeItemsFromAllDrives=true for Shared Drives.
  */
 async function findOrCreateFolder(folderName, parentFolderId, accessToken, signal) {
-  let query = `mimeType = 'application/vnd.google-apps.folder' and name = '${folderName}' and trashed = false`;
-  if (parentFolderId) {
-    query += ` and '${parentFolderId}' in parents`;
-  }
+  if (!parentFolderId) return null;
+
+  let query = `mimeType = 'application/vnd.google-apps.folder' and name = '${folderName}' and '${parentFolderId}' in parents and trashed = false`;
 
   const searchRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=1`,
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
       signal,
@@ -138,14 +165,14 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
     }
   }
 
-  // Create folder
+  // Create subfolder inside parent
   const meta = {
     name: folderName,
     mimeType: 'application/vnd.google-apps.folder',
-    parents: parentFolderId ? [parentFolderId] : undefined,
+    parents: [parentFolderId],
   };
 
-  const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+  const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -157,12 +184,12 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
 
   if (!createRes.ok) {
     const errText = await createRes.text();
-    console.warn(`[Google Drive] Folder creation notice: ${errText}`);
-    return parentFolderId || null;
+    console.warn(`[Google Drive] Subfolder creation notice: ${errText}`);
+    return parentFolderId;
   }
 
   const created = await createRes.json();
-  return created.id;
+  return created.id || parentFolderId;
 }
 
 /**
@@ -213,17 +240,70 @@ export default async function handler(req, res) {
   try {
     const accessToken = await getGoogleAccessToken(creds, controller.signal);
 
-    // 3. Resolve folder hierarchy: "Wholesale RMA Photos" / "YYYY-MM"
+    // 3. Resolve target folder in Google Drive
+    // If GOOGLE_DRIVE_FOLDER_ID is provided, organize into monthly subfolder inside it, or upload directly to it
     const now = new Date();
     const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     
-    let rootFolderId = creds.folderId;
-    if (!rootFolderId) {
-      rootFolderId = await findOrCreateFolder('Wholesale RMA Photos', null, accessToken, controller.signal);
-    }
-    const targetFolderId = await findOrCreateFolder(yearMonth, rootFolderId, accessToken, controller.signal);
+    let targetFolderId = creds.folderId;
 
-    // 4. Construct Multipart Upload to Drive v3
+    // If folderId is not specified, attempt to auto-discover "Wholesale RMA Photos" or current monthly folder across all accessible shared drives
+    if (!targetFolderId) {
+      try {
+        const searchShared = await fetch(
+          `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Wholesale RMA Photos' or name = '" + yearMonth + "') and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            signal: controller.signal
+          }
+        );
+        if (searchShared.ok) {
+          const sData = await searchShared.json();
+          if (sData.files && sData.files.length > 0) {
+            targetFolderId = sData.files[0].id;
+          }
+        }
+      } catch (sErr) {
+        console.warn('[Google Drive] Auto-discovery notice:', sErr.message);
+      }
+    }
+
+    if (targetFolderId) {
+      try {
+        // Check if target folder is already named after the current month
+        const infoRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${targetFolderId}?fields=id,name&supportsAllDrives=true`,
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            signal: controller.signal
+          }
+        );
+        let isAlreadyMonthly = false;
+        if (infoRes.ok) {
+          const info = await infoRes.json();
+          if (info.name === yearMonth || info.name.includes(yearMonth)) {
+            isAlreadyMonthly = true;
+          }
+        }
+
+        if (!isAlreadyMonthly) {
+          const subfolderId = await findOrCreateFolder(yearMonth, targetFolderId, accessToken, controller.signal);
+          if (subfolderId) targetFolderId = subfolderId;
+        }
+      } catch (fErr) {
+        console.warn('[Google Drive] Monthly subfolder check notice, uploading to target folder:', fErr.message);
+      }
+    }
+
+    if (!targetFolderId) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_TARGET_FOLDER',
+        message: 'Google Drive Service Account requires GOOGLE_DRIVE_FOLDER_ID or a shared folder ("Wholesale RMA Photos") to store files without quota limits.'
+      });
+    }
+
+    // 4. Construct Multipart Upload to Drive v3 with supportsAllDrives=true
     const safeName = fileName || `RMA_${rmaNumber}_${Date.now()}.webp`;
     const boundary = `----RmaPhotoBoundary${Date.now()}`;
 
@@ -242,7 +322,7 @@ export default async function handler(req, res) {
     const multipartBody = bodyParts.join('');
 
     const uploadRes = await fetch(
-      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,webViewLink',
       {
         method: 'POST',
         headers: {
@@ -269,7 +349,7 @@ export default async function handler(req, res) {
 
     // 5. Grant public read permission so the photo can be rendered directly in web portals & emails
     try {
-      await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
+      await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions?supportsAllDrives=true`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
