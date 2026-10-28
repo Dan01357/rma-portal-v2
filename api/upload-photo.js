@@ -6,6 +6,7 @@ import { setCorsHeaders } from './_lib/auth.js';
  */
 let cachedToken = null;
 let tokenExpiresAt = 0;
+let cachedMonthlyFolder = { yearMonth: '', folderId: '' };
 
 /**
  * Extracts Google Service Account credentials from environment variables
@@ -204,6 +205,53 @@ export default async function handler(req, res) {
     return res.status(204).end();
   }
 
+  // Handle DELETE request to remove stored proof photos from Google Drive
+  if (req.method === 'DELETE') {
+    const creds = getGoogleCredentials();
+    if (!creds) {
+      return res.status(200).json({ success: false, message: 'Google Drive credentials not configured' });
+    }
+
+    try {
+      let fileId = req.query?.fileId || req.body?.fileId;
+      const fileUrl = req.query?.fileUrl || req.body?.fileUrl;
+
+      if (!fileId && fileUrl && typeof fileUrl === 'string') {
+        const idMatch = fileUrl.match(/\/d\/([a-zA-Z0-9_-]+)/) || fileUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+        if (idMatch && idMatch[1]) {
+          fileId = idMatch[1];
+        }
+      }
+
+      if (!fileId) {
+        return res.status(400).json({ success: false, error: 'Missing fileId or fileUrl for deletion' });
+      }
+
+      const accessToken = await getGoogleAccessToken(creds);
+      const delRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
+        {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      if (delRes.status === 204 || delRes.ok) {
+        console.log(`[Google Drive] Photo successfully deleted: ${fileId}`);
+        return res.status(200).json({ success: true, deleted: fileId });
+      } else {
+        const errText = await delRes.text();
+        console.warn(`[Google Drive Delete Notice]: ${fileId} - ${errText}`);
+        return res.status(200).json({ success: false, error: errText });
+      }
+    } catch (delErr) {
+      console.warn('[Google Drive Delete Exception]:', delErr.message);
+      return res.status(200).json({ success: false, error: delErr.message });
+    }
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, error: 'METHOD_NOT_ALLOWED' });
   }
@@ -240,58 +288,65 @@ export default async function handler(req, res) {
   try {
     const accessToken = await getGoogleAccessToken(creds, controller.signal);
 
-    // 3. Resolve target folder in Google Drive
-    // If GOOGLE_DRIVE_FOLDER_ID is provided, organize into monthly subfolder inside it, or upload directly to it
+    // 3. Resolve target folder in Google Drive with warm cache
     const now = new Date();
     const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     
     let targetFolderId = creds.folderId;
 
-    // If folderId is not specified, attempt to auto-discover "Wholesale RMA Photos" or current monthly folder across all accessible shared drives
-    if (!targetFolderId) {
-      try {
-        const searchShared = await fetch(
-          `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Wholesale RMA Photos' or name = '" + yearMonth + "') and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
-          {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            signal: controller.signal
+    if (cachedMonthlyFolder.yearMonth === yearMonth && cachedMonthlyFolder.folderId) {
+      targetFolderId = cachedMonthlyFolder.folderId;
+    } else {
+      // If folderId is not specified, attempt to auto-discover "Wholesale RMA Photos"
+      if (!targetFolderId) {
+        try {
+          const searchShared = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Wholesale RMA Photos' or name = '" + yearMonth + "') and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+            {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              signal: controller.signal
+            }
+          );
+          if (searchShared.ok) {
+            const sData = await searchShared.json();
+            if (sData.files && sData.files.length > 0) {
+              targetFolderId = sData.files[0].id;
+            }
           }
-        );
-        if (searchShared.ok) {
-          const sData = await searchShared.json();
-          if (sData.files && sData.files.length > 0) {
-            targetFolderId = sData.files[0].id;
-          }
+        } catch (sErr) {
+          console.warn('[Google Drive] Auto-discovery notice:', sErr.message);
         }
-      } catch (sErr) {
-        console.warn('[Google Drive] Auto-discovery notice:', sErr.message);
       }
-    }
 
-    if (targetFolderId) {
-      try {
-        // Check if target folder is already named after the current month
-        const infoRes = await fetch(
-          `https://www.googleapis.com/drive/v3/files/${targetFolderId}?fields=id,name&supportsAllDrives=true`,
-          {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            signal: controller.signal
+      if (targetFolderId) {
+        try {
+          // Check if target folder is already named after the current month
+          const infoRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${targetFolderId}?fields=id,name&supportsAllDrives=true`,
+            {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              signal: controller.signal
+            }
+          );
+          let isAlreadyMonthly = false;
+          if (infoRes.ok) {
+            const info = await infoRes.json();
+            if (info.name === yearMonth || info.name.includes(yearMonth)) {
+              isAlreadyMonthly = true;
+            }
           }
-        );
-        let isAlreadyMonthly = false;
-        if (infoRes.ok) {
-          const info = await infoRes.json();
-          if (info.name === yearMonth || info.name.includes(yearMonth)) {
-            isAlreadyMonthly = true;
-          }
-        }
 
-        if (!isAlreadyMonthly) {
-          const subfolderId = await findOrCreateFolder(yearMonth, targetFolderId, accessToken, controller.signal);
-          if (subfolderId) targetFolderId = subfolderId;
+          if (!isAlreadyMonthly) {
+            const subfolderId = await findOrCreateFolder(yearMonth, targetFolderId, accessToken, controller.signal);
+            if (subfolderId) targetFolderId = subfolderId;
+          }
+        } catch (fErr) {
+          console.warn('[Google Drive] Monthly subfolder check notice, uploading to target folder:', fErr.message);
         }
-      } catch (fErr) {
-        console.warn('[Google Drive] Monthly subfolder check notice, uploading to target folder:', fErr.message);
+      }
+
+      if (targetFolderId) {
+        cachedMonthlyFolder = { yearMonth, folderId: targetFolderId };
       }
     }
 

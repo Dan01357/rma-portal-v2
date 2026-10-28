@@ -88,6 +88,36 @@ const DEFECT_REASONS = [
   'Other Defect'
 ];
 
+/**
+ * Universal Lifecycle Stage Formatter & Color Resolver
+ */
+function formatLifecycleStage(status) {
+  if (!status) return { label: 'Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
+  const s = String(status).toLowerCase();
+  switch (s) {
+    case 'draft':
+      return { label: 'Draft / Intake', color: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
+    case 'pending':
+    case 'received_at_dock':
+      return { label: 'Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
+    case 'under_inspection':
+      return { label: 'Under Inspection', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800' };
+    case 'pending_finance_approval':
+      return { label: 'Pending Finance', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
+    case 'credit_memo_issued':
+      return { label: 'Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
+    case 'closed':
+    case 'restocked':
+      return { label: 'Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    case 'rejected':
+      return { label: 'Rejected / Invalid', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+    case 'pending_admin_details':
+      return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
+    default:
+      return { label: s.replace(/_/g, ' '), color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300' };
+  }
+}
+
 export default function App() {
   // ROUTE DETECTION: '/' (Public Reporter) vs '/admin' (Staff Admin Portal)
   const [isAdminView, setIsAdminView] = useState(() => {
@@ -748,6 +778,7 @@ export default function App() {
   const [detectedProduct, setDetectedProduct] = useState(null);
   const [isCheckingBarcode, setIsCheckingBarcode] = useState(false);
   const [quantity, setQuantity] = useState(1);
+  const [unitName, setUnitName] = useState('pc');
   const [selectedReason, setSelectedReason] = useState(DEFECT_REASONS[0]);
   const [explanation, setExplanation] = useState('');
   const [reporterName, setReporterName] = useState('');
@@ -851,8 +882,20 @@ export default function App() {
         if ((item.reason || '') !== reportsReasonFilter) return false;
       }
 
-      if (reportsStatusFilter === 'logged' && item.status === 'pending_admin_details') return false;
-      if (reportsStatusFilter === 'unknown' && item.status !== 'pending_admin_details') return false;
+      if (reportsStatusFilter !== 'all') {
+        if (reportsStatusFilter === 'logged') {
+          if (item.status === 'pending_admin_details') return false;
+        } else if (reportsStatusFilter === 'unknown') {
+          if (item.status !== 'pending_admin_details') return false;
+        } else {
+          const s = String(item.status || 'received_at_dock').toLowerCase();
+          if (reportsStatusFilter === 'received_at_dock') {
+            if (s !== 'pending' && s !== 'received_at_dock') return false;
+          } else if (s !== reportsStatusFilter.toLowerCase()) {
+            return false;
+          }
+        }
+      }
 
       // Disposition filter
       if (reportsDispositionFilter !== 'all') {
@@ -907,9 +950,22 @@ export default function App() {
           valA = String(a.reporter_name || a.reported_by || '').toLowerCase();
           valB = String(b.reporter_name || b.reported_by || '').toLowerCase();
           break;
-        case 'status':
+        case 'catalog_status':
           valA = a.status === 'pending_admin_details' ? 0 : 1;
           valB = b.status === 'pending_admin_details' ? 0 : 1;
+          break;
+        case 'status':
+        case 'lifecycle_stage':
+          valA = String(a.status || 'received_at_dock').toLowerCase();
+          valB = String(b.status || 'received_at_dock').toLowerCase();
+          break;
+        case 'disposition':
+          valA = String(a.disposition || 'Pending Triage').toLowerCase();
+          valB = String(b.disposition || 'Pending Triage').toLowerCase();
+          break;
+        case 'warehouse_location':
+          valA = String(a.warehouse_location || '').toLowerCase();
+          valB = String(b.warehouse_location || '').toLowerCase();
           break;
         case 'created_at':
           valA = new Date(a.created_at || 0).getTime();
@@ -1131,6 +1187,10 @@ export default function App() {
       try {
         const found = await catalogService.findProduct(clean);
         setDetectedProduct(found);
+        if (found?.unit_name || found?.unitName) {
+          const u = (found.unit_name || found.unitName).toLowerCase();
+          setUnitName(u.includes('case') ? 'case' : 'pc');
+        }
       } catch (e) {
         setDetectedProduct(null);
       } finally {
@@ -1248,20 +1308,17 @@ export default function App() {
     setIsSubmitting(true);
 
     try {
-      // 1. Upload photos (Google Drive Primary -> Supabase Storage Fallback)
-      const uploadedUrls = [];
-      for (const item of photoFiles) {
-        if (item.file) {
-          const url = await catalogService.uploadPhoto(item.file, cleanBarcode);
-          if (url) uploadedUrls.push(url);
-        }
-      }
+      // 1. Upload photos in parallel (Google Drive Primary -> Supabase Storage Fallback)
+      const uploadPromises = photoFiles
+        .filter(item => Boolean(item.file))
+        .map(item => catalogService.uploadPhoto(item.file, cleanBarcode));
+      const uploadedUrls = (await Promise.all(uploadPromises)).filter(Boolean);
 
       // 2. Submit report to Supabase
       const submitQty = Math.max(1, parseInt(quantity, 10) || 1);
       const res = await catalogService.submitReport({
         barcode: cleanBarcode,
-        product: detectedProduct,
+        product: detectedProduct ? { ...detectedProduct, unit_name: unitName } : null,
         quantity: submitQty,
         reporterName,
         reporterContact,
@@ -1271,7 +1328,9 @@ export default function App() {
         gps: gpsLocation.isAccurate ? gpsLocation : null
       });
 
-      // Show success screen with full report details for QR sticker generation
+      const finalUnit = unitName || detectedProduct?.unit_name || 'pc';
+
+      // 3. Show success screen with full report details for QR sticker generation INSTANTLY
       setSubmitSuccessReport({
         rma_number: res.rmaNumber,
         rmaNumber: res.rmaNumber,
@@ -1281,7 +1340,8 @@ export default function App() {
         code: detectedProduct?.code || '',
         sku: detectedProduct?.code || '',
         quantity: submitQty,
-        unit_name: detectedProduct?.unit_name || 'pc',
+        unit_name: finalUnit,
+        unit: finalUnit,
         supplier_name: detectedProduct?.supplier_name || 'Warehouse',
         supplier: detectedProduct?.supplier_name || 'Warehouse',
         reason: selectedReason,
@@ -1295,17 +1355,25 @@ export default function App() {
       setBarcodeInput('');
       setDetectedProduct(null);
       setQuantity(1);
+      setUnitName('pc');
       setSelectedReason(DEFECT_REASONS[0]);
       setExplanation('');
       setPhotoFiles([]);
       setSelectedReportIds(new Set());
+      setIsSubmitting(false);
 
-      // Refresh data
-      refreshAllData();
+      // Optimistically add to recentReportsList
+      if (res.report) {
+        setRecentReportsList(prev => [res.report, ...prev.filter(r => r.rma_number !== res.rmaNumber)]);
+      }
+
+      // Background data refresh without blocking user's QR code screen
+      setTimeout(() => {
+        refreshAllData();
+      }, 50);
     } catch (err) {
       console.error('Report submission error:', err);
       showToast(err.message, 'warning');
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -1614,6 +1682,17 @@ export default function App() {
                         <Plus className="w-3.5 h-3.5" />
                       </button>
                     </div>
+
+                    {/* Unit Dropdown Selector: "pc" or "case" */}
+                    <select
+                      value={unitName}
+                      onChange={(e) => setUnitName(e.target.value)}
+                      className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer shadow-2xs h-[42px]"
+                      title="Select return unit (pc or case)"
+                    >
+                      <option value="pc">pc</option>
+                      <option value="case">case</option>
+                    </select>
                   </div>
 
                   {/* Recognized Product Banner (Shows name & reference image) */}
@@ -2237,9 +2316,15 @@ export default function App() {
                       }}
                       className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer"
                     >
-                      <option value="all">All Status</option>
-                      <option value="logged">Logged / Recognized</option>
-                      <option value="unknown">Unknown Barcode</option>
+                      <option value="all">All Status & Stages</option>
+                      <option value="received_at_dock">Received at Dock</option>
+                      <option value="under_inspection">Under Inspection</option>
+                      <option value="pending_finance_approval">Pending Finance Approval</option>
+                      <option value="credit_memo_issued">Credit Memo Issued</option>
+                      <option value="closed">Closed / Restocked</option>
+                      <option value="rejected">Rejected / Invalid Claim</option>
+                      <option value="logged">Catalog: Logged</option>
+                      <option value="unknown">Catalog: Unknown Barcode</option>
                     </select>
 
                     {/* Date Range Picker */}
@@ -2434,14 +2519,57 @@ export default function App() {
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
                             </th>
+                            {/* 8. Catalog Status Header */}
                             <th 
-                              onClick={() => handleReportsSort('status')}
+                              onClick={() => handleReportsSort('catalog_status')}
                               className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Status"
+                              title="Click to sort by Catalog Status"
                             >
                               <div className="flex items-center justify-center">
-                                <span>Status</span>
-                                {reportsSortField === 'status' ? (
+                                <span>Catalog Status</span>
+                                {reportsSortField === 'catalog_status' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
+
+                            {/* 9. Lifecycle Stage Header */}
+                            <th 
+                              onClick={() => handleReportsSort('lifecycle_stage')}
+                              className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by Lifecycle Stage"
+                            >
+                              <div className="flex items-center justify-center">
+                                <span>Lifecycle Stage</span>
+                                {reportsSortField === 'lifecycle_stage' || reportsSortField === 'status' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
+
+                            {/* 10. Disposition Header */}
+                            <th 
+                              onClick={() => handleReportsSort('disposition')}
+                              className="py-3 px-3.5 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by Disposition"
+                            >
+                              <div className="flex items-center justify-center">
+                                <span>Disposition</span>
+                                {reportsSortField === 'disposition' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
+
+                            {/* 11. Warehouse Location Header */}
+                            <th 
+                              onClick={() => handleReportsSort('warehouse_location')}
+                              className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by Warehouse Rack/Bin Location"
+                            >
+                              <div className="flex items-center justify-center">
+                                <span>Location</span>
+                                {reportsSortField === 'warehouse_location' ? (
                                   reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
@@ -2592,26 +2720,54 @@ export default function App() {
                                   )}
                                 </td>
 
-                                {/* 8. Status & Triage */}
-                                <td className="py-3 px-3 text-center">
-                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                                {/* 8. Catalog Status */}
+                                <td className="py-3 px-3 text-center whitespace-nowrap">
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider inline-block ${
                                     isPendingUnknown
                                       ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
                                       : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                                   }`}>
-                                    {isPendingUnknown ? 'Unknown' : 'Logged'}
+                                    {isPendingUnknown ? 'Pending SKU' : 'Logged'}
                                   </span>
-                                  {item.disposition && item.disposition !== 'Pending Triage' && (
-                                    <div className="mt-1">
-                                      <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[8px] font-extrabold truncate inline-block max-w-[90px]">
-                                        {item.disposition}
+                                </td>
+
+                                {/* 9. Lifecycle Stage */}
+                                <td className="py-3 px-3 text-center whitespace-nowrap">
+                                  {(() => {
+                                    const stageInfo = formatLifecycleStage(item.status);
+                                    return (
+                                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-block shadow-2xs ${stageInfo.color}`}>
+                                        {stageInfo.label}
                                       </span>
-                                    </div>
-                                  )}
-                                  {item.warehouse_location && (
-                                    <div className="text-[8px] font-mono font-bold text-slate-400 mt-0.5">
+                                    );
+                                  })()}
+                                </td>
+
+                                {/* 10. Disposition (Full text without truncation) */}
+                                <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                                  {(() => {
+                                    const disp = item.disposition || 'Pending Triage';
+                                    let color = 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
+                                    if (disp === 'Restock to Inventory') color = 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800';
+                                    else if (disp === 'Return to Vendor (RTV)') color = 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/70 dark:text-purple-300 dark:border-purple-800';
+                                    else if (disp === 'Quarantine') color = 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800';
+                                    else if (disp === 'Scrap / Dispose') color = 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800';
+                                    return (
+                                      <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${color}`}>
+                                        {disp}
+                                      </span>
+                                    );
+                                  })()}
+                                </td>
+
+                                {/* 11. Warehouse Rack/Bin Location */}
+                                <td className="py-3 px-3.5 text-center font-mono whitespace-nowrap">
+                                  {item.warehouse_location ? (
+                                    <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 text-[11px] font-extrabold inline-block shadow-2xs">
                                       {item.warehouse_location}
-                                    </div>
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-300 dark:text-slate-600 text-xs font-bold">—</span>
                                   )}
                                 </td>
 
@@ -3248,6 +3404,14 @@ export default function App() {
         reportsList={recentReportsList}
         creditMemosCount={creditMemosList?.length || 0}
         onSaved={(memo) => {
+          if (memo) {
+            setRecentReportsList(prev => prev.map(r => {
+              if (r.rma_number === memo.rma_number || String(r.id) === String(memo.report_id)) {
+                return { ...r, status: 'credit_memo_issued' };
+              }
+              return r;
+            }));
+          }
           refreshAllData();
           showToast(`Credit Memo ${memo.credit_memo_number} saved!`, 'success');
           restoreQuickRmaIfPending();

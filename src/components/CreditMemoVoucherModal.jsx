@@ -243,9 +243,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
               <div className="pt-6 sm:pt-7 border-t border-slate-200 grid grid-cols-3 gap-3 text-center text-xs">
                 <div className="space-y-1">
                   <div className="border-b border-slate-400 pb-1 font-bold text-slate-900 text-xs">
-                    {memo.credit_issued_by && !memo.credit_issued_by.includes('Danilo')
-                      ? memo.credit_issued_by
-                      : 'Analiza B. Benoza'}
+                    {memo.credit_issued_by || 'Finance Lead'}
                   </div>
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">
                     Finance Head

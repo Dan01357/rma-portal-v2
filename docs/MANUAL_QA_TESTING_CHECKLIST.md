@@ -417,6 +417,69 @@ Each test scenario defines:
     6. Click **"Quick Actions"** again.
   * **Expected Behavior**: Modal re-opens smoothly with zero console errors or `TypeError: Cannot read properties of null (reading 'inspected_by')` crashes. All report fields load safely.
 
+### 8.4 Defects & Refinements Verification Suite (Oct 2026 QA Run)
+
+#### 8.4.1 RMA Return Reports Table Columns Separation & Display
+- [ ] **TC-REP-01 (4 Distinct Columns Display)**
+  * **Location**: Admin Return Reports Table (`/admin`) and RMA Return Reports Modal
+  * **Action**: View reports table.
+  * **Expected Behavior**: 
+    1. Table displays 4 distinct, sortable columns: `Catalog Status`, `Lifecycle Stage`, `Disposition`, and `Location`.
+    2. `Catalog Status` displays either `LOGGED` (green) or `PENDING SKU` (amber).
+    3. `Lifecycle Stage` displays color-coded badge (`Received at Dock`, `Under Inspection`, `Pending Finance`, `Credit Memo Issued`, `Closed / Restocked`, `Rejected / Invalid`).
+    4. `Disposition` displays untruncated badge (`Restock to Inventory`, `Return to Vendor (RTV)`, `Quarantine`, `Scrap / Dispose`, or `Pending Triage`).
+    5. `Location` displays mono rack/bin badge (e.g. `RACK-03-BIN-A`) or `—` if unassigned.
+  * **Edge Case**: Click column headers to verify multi-directional sorting (asc/desc) works for each column.
+
+#### 8.4.2 Lifecycle Stage Auto-Update on Credit Memo Issuance
+- [ ] **TC-CM-01 (Auto-Update Lifecycle Stage to Credit Memo Issued)**
+  * **Location**: Credit Memo Modal (`+ Credit Memo`)
+  * **Action**: Issue a new credit memo for an RMA report in `Received at Dock` or `Under Inspection` stage.
+  * **Expected Behavior**:
+    1. Credit memo is saved successfully.
+    2. Associated RMA report's lifecycle stage is automatically updated to `credit_memo_issued` in database and UI.
+    3. Row in Return Reports immediately updates to green `Credit Memo Issued` badge without manual page reload.
+    4. RMA remains fully editable via `Inspect / Triage` modal for any subsequent adjustments or warehouse restock updates.
+
+#### 8.4.3 Permanent Image Asset Purge on Report & Product Deletion
+- [ ] **TC-DEL-01 (Single Report Deletion Photo Cleanup)**
+  * **Location**: RMA Return Reports -> Delete button (Trash icon)
+  * **Action**: Delete an RMA report with proof photos stored in Google Drive and Supabase Storage.
+  * **Expected Behavior**:
+    1. Report is deleted from `rma_reports`.
+    2. Associated photos in Google Workspace Drive and Supabase `rma-photos` bucket are permanently deleted via `DELETE /api/upload-photo`.
+    3. No orphan images remain in storage.
+- [ ] **TC-DEL-02 (Bulk Report Deletion Photo Cleanup)**
+  * **Action**: Select multiple RMA reports with checkboxes and click **"Delete Selected"**.
+  * **Expected Behavior**: All selected reports are purged and all corresponding images across Google Drive and Supabase are deleted in parallel.
+- [ ] **TC-DEL-03 (Product Deletion Reference Image Cleanup)**
+  * **Action**: Delete a product with an uploaded image from Catalog.
+  * **Expected Behavior**: Product record is deleted and stored image is purged from Google Drive / Supabase storage.
+
+#### 8.4.4 Instant Public Portal RMA Submission
+- [ ] **TC-SUB-01 (Sub-1.5s Submission Latency)**
+  * **Location**: Public Portal (`/`)
+  * **Action**: Fill in barcode, quantity, reason, reporter info, attach proof photo, and click **"Submit Return Report"**.
+  * **Expected Behavior**:
+    1. Photos upload in parallel via `Promise.all`.
+    2. Submission completes and displays QR Sticker screen in under 1.5 seconds (previously 7–8 seconds).
+    3. Background refreshes (email notification, catalog sync, data reload) proceed non-blockingly without delaying the user's QR confirmation.
+
+#### 8.4.5 Unit Selection Dropdowns ("pc" or "case")
+- [ ] **TC-UNT-01 (Strict Unit Selection)**
+  * **Location**: Public Portal intake form, Product Edit modal, Pending Barcodes modal, and Credit Memo modal.
+  * **Action**: Inspect unit input in each modal.
+  * **Expected Behavior**: All unit inputs are strict `<select>` dropdowns offering only `"pc"` or `"case"`. Free-text typos are impossible. Default is `"pc"`. If a recognized barcode has `"case"` in catalog, the dropdown automatically selects `"case"`.
+
+#### 8.4.6 Dynamic Lifecycle Timeline Actor Binding
+- [ ] **TC-AUD-01 (Logged-in User as Timeline Actor)**
+  * **Location**: Quick RMA Action Modal -> Lifecycle Timeline Audit Trail & Credit Memo Voucher
+  * **Action**: Log in as Danilo Alvaro, open an RMA, and issue a credit memo or review milestones.
+  * **Expected Behavior**:
+    1. Milestone 4 (Finance Credit Memo) strictly records Actor as `Danilo Alvaro` (or whoever is authenticated).
+    2. Hardcoded fallback to `Analiza B. Benoza` is eliminated.
+    3. Credit Memo Voucher displays the logged-in user as the issuer.
+
 ---
 
 ## QA Director Sign-Off & Verification Protocol
@@ -430,3 +493,5 @@ Each test scenario defines:
 | **Phase 5: Supplier RTV Claims** | Vendor Chargebacks | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 6: SHA-256 REST API Vault** | Partner Integration (`/docs`) | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 7: Free-Tier Optimization & Google Drive** | WebP Compression & Cloud Storage | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 8: Column Separation & Instant Submit** | Table Views & Storage Cleanup | `READY FOR TESTING` | *Lead QA Director* |
+

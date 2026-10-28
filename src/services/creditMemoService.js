@@ -1,4 +1,5 @@
 import { supabase } from '../supabaseClient';
+import { authService } from './authService';
 
 const CREDIT_MEMOS_STORAGE_KEY = 'rma_portal_credit_memos_v2';
 
@@ -192,8 +193,8 @@ export const creditMemoService = {
       credit_amount: creditAmount,
       pull_out_ref: pullOutRef,
       pull_out_date: pullOutDate,
-      credit_issued_by: memoData.credit_issued_by || 'Analiza B. Benoza (Finance Head)',
-      credit_issued_by_email: memoData.credit_issued_by_email || 'finance@a2z2go.net',
+      credit_issued_by: memoData.credit_issued_by || authService.getCurrentUser()?.name || 'Authorized Finance Officer',
+      credit_issued_by_email: memoData.credit_issued_by_email || authService.getCurrentUser()?.email || 'finance2@keysysincorporated.com',
       credit_issued_at: new Date().toISOString(),
       notes: memoData.notes ? memoData.notes.trim() : '',
       status: 'issued'
@@ -221,19 +222,25 @@ export const creditMemoService = {
       console.warn('credit_memos insert catch:', e);
     }
 
-    // 2. Also update rma_reports status to 'credit_memo_issued' and store backup in notes
-    if (memoData.rma_number) {
+    // 2. Also update rma_reports lifecycle stage to 'credit_memo_issued' and store backup in notes
+    if (memoData.rma_number || memoData.report_id) {
       try {
-        const { error: rmaErr } = await supabase
+        let rmaUpdateQ = supabase
           .from('rma_reports')
           .update({
             notes: JSON.stringify(newMemo),
             status: 'credit_memo_issued'
-          })
-          .eq('rma_number', memoData.rma_number);
+          });
+
+        if (memoData.rma_number) {
+          rmaUpdateQ = rmaUpdateQ.eq('rma_number', memoData.rma_number);
+        } else if (memoData.report_id) {
+          rmaUpdateQ = rmaUpdateQ.eq('id', memoData.report_id);
+        }
+
+        const { error: rmaErr } = await rmaUpdateQ;
 
         if (!rmaErr && !dbSuccess) {
-          // If credit_memos table didn't succeed but rma_reports updated, still mark dbSuccess
           dbSuccess = true;
         }
       } catch (e) {

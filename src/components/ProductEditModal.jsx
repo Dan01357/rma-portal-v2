@@ -589,13 +589,14 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Unit
                 </label>
-                <input
-                  type="text"
-                  value={unitName}
+                <select
+                  value={unitName || 'pc'}
                   onChange={(e) => setUnitName(e.target.value)}
-                  placeholder="pc, box, case..."
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
-                />
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer"
+                >
+                  <option value="pc">pc</option>
+                  <option value="case">case</option>
+                </select>
               </div>
             </div>
 

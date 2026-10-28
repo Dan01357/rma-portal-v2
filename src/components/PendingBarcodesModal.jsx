@@ -719,13 +719,14 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                 </div>
                 <div>
                   <label className="block text-slate-600 dark:text-slate-400 mb-1">Unit</label>
-                  <input
-                    type="text"
-                    placeholder="pc, box, unit"
-                    value={formData.unitName}
+                  <select
+                    value={formData.unitName || 'pc'}
                     onChange={(e) => setFormData({ ...formData, unitName: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
-                  />
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer"
+                  >
+                    <option value="pc">pc</option>
+                    <option value="case">case</option>
+                  </select>
                 </div>
               </div>
             </div>

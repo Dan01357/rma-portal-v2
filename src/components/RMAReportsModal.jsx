@@ -29,6 +29,36 @@ import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import { exportRMAReportsToCSV } from '../utils/exportCsv';
 
+/**
+ * Universal Lifecycle Stage Formatter & Color Resolver
+ */
+function formatLifecycleStage(status) {
+  if (!status) return { label: 'Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
+  const s = String(status).toLowerCase();
+  switch (s) {
+    case 'draft':
+      return { label: 'Draft / Intake', color: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
+    case 'pending':
+    case 'received_at_dock':
+      return { label: 'Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
+    case 'under_inspection':
+      return { label: 'Under Inspection', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800' };
+    case 'pending_finance_approval':
+      return { label: 'Pending Finance', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
+    case 'credit_memo_issued':
+      return { label: 'Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
+    case 'closed':
+    case 'restocked':
+      return { label: 'Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    case 'rejected':
+      return { label: 'Rejected / Invalid', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+    case 'pending_admin_details':
+      return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
+    default:
+      return { label: s.replace(/_/g, ' '), color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300' };
+  }
+}
+
 export default function RMAReportsModal({ 
   isOpen, 
   onClose, 
@@ -134,8 +164,20 @@ export default function RMAReportsModal({
         return false;
       }
 
-      if (statusFilter === 'logged' && item.status === 'pending_admin_details') return false;
-      if (statusFilter === 'unknown' && item.status !== 'pending_admin_details') return false;
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'logged') {
+          if (item.status === 'pending_admin_details') return false;
+        } else if (statusFilter === 'unknown') {
+          if (item.status !== 'pending_admin_details') return false;
+        } else {
+          const s = String(item.status || 'received_at_dock').toLowerCase();
+          if (statusFilter === 'received_at_dock') {
+            if (s !== 'pending' && s !== 'received_at_dock') return false;
+          } else if (s !== statusFilter.toLowerCase()) {
+            return false;
+          }
+        }
+      }
 
       return true;
     });
@@ -167,9 +209,22 @@ export default function RMAReportsModal({
           valA = String(a.reporter_name || a.reported_by || '').toLowerCase();
           valB = String(b.reporter_name || b.reported_by || '').toLowerCase();
           break;
-        case 'status':
+        case 'catalog_status':
           valA = a.status === 'pending_admin_details' ? 0 : 1;
           valB = b.status === 'pending_admin_details' ? 0 : 1;
+          break;
+        case 'lifecycle_stage':
+        case 'status':
+          valA = String(a.status || 'received_at_dock').toLowerCase();
+          valB = String(b.status || 'received_at_dock').toLowerCase();
+          break;
+        case 'disposition':
+          valA = String(a.disposition || 'Pending Triage').toLowerCase();
+          valB = String(b.disposition || 'Pending Triage').toLowerCase();
+          break;
+        case 'warehouse_location':
+          valA = String(a.warehouse_location || '').toLowerCase();
+          valB = String(b.warehouse_location || '').toLowerCase();
           break;
         case 'created_at':
           valA = new Date(a.created_at || 0).getTime();
@@ -378,9 +433,15 @@ export default function RMAReportsModal({
                 }}
                 className="px-2.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-500 shadow-xs cursor-pointer"
               >
-                <option value="all">All Statuses</option>
-                <option value="logged">Logged in System</option>
-                <option value="unknown">Unknown Barcode</option>
+                <option value="all">All Status & Stages</option>
+                <option value="received_at_dock">Received at Dock</option>
+                <option value="under_inspection">Under Inspection</option>
+                <option value="pending_finance_approval">Pending Finance Approval</option>
+                <option value="credit_memo_issued">Credit Memo Issued</option>
+                <option value="closed">Closed / Restocked</option>
+                <option value="rejected">Rejected / Invalid Claim</option>
+                <option value="logged">Catalog: Logged</option>
+                <option value="unknown">Catalog: Unknown Barcode</option>
               </select>
 
               {hasActiveFilters && (
@@ -483,13 +544,51 @@ export default function RMAReportsModal({
                         {renderSortIndicator('reporter')}
                       </div>
                     </th>
+                    {/* 8. Catalog Status Header */}
                     <th 
-                      onClick={() => handleSort('status')}
+                      onClick={() => handleSort('catalog_status')}
                       className="py-3 px-3 text-center font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
+                      title="Sort by Catalog Status"
                     >
                       <div className="flex items-center justify-center">
-                        <span>Status</span>
-                        {renderSortIndicator('status')}
+                        <span>Catalog Status</span>
+                        {renderSortIndicator('catalog_status')}
+                      </div>
+                    </th>
+
+                    {/* 9. Lifecycle Stage Header */}
+                    <th 
+                      onClick={() => handleSort('lifecycle_stage')}
+                      className="py-3 px-3 text-center font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
+                      title="Sort by Lifecycle Stage"
+                    >
+                      <div className="flex items-center justify-center">
+                        <span>Lifecycle Stage</span>
+                        {renderSortIndicator('lifecycle_stage')}
+                      </div>
+                    </th>
+
+                    {/* 10. Disposition Header */}
+                    <th 
+                      onClick={() => handleSort('disposition')}
+                      className="py-3 px-3.5 text-center font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
+                      title="Sort by Disposition"
+                    >
+                      <div className="flex items-center justify-center">
+                        <span>Disposition</span>
+                        {renderSortIndicator('disposition')}
+                      </div>
+                    </th>
+
+                    {/* 11. Warehouse Location Header */}
+                    <th 
+                      onClick={() => handleSort('warehouse_location')}
+                      className="py-3 px-3 text-center font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
+                      title="Sort by Warehouse Rack/Bin Location"
+                    >
+                      <div className="flex items-center justify-center">
+                        <span>Location</span>
+                        {renderSortIndicator('warehouse_location')}
                       </div>
                     </th>
                     <th 
@@ -620,15 +719,55 @@ export default function RMAReportsModal({
                           )}
                         </td>
 
-                        {/* 8. Status */}
-                        <td className="py-3 px-3 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                        {/* 8. Catalog Status */}
+                        <td className="py-3 px-3 text-center whitespace-nowrap">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider inline-block ${
                             isPendingUnknown
                               ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
                               : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                           }`}>
-                            {isPendingUnknown ? 'Unknown' : 'Logged'}
+                            {isPendingUnknown ? 'Pending SKU' : 'Logged'}
                           </span>
+                        </td>
+
+                        {/* 9. Lifecycle Stage */}
+                        <td className="py-3 px-3 text-center whitespace-nowrap">
+                          {(() => {
+                            const stageInfo = formatLifecycleStage(item.status);
+                            return (
+                              <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-block shadow-2xs ${stageInfo.color}`}>
+                                {stageInfo.label}
+                              </span>
+                            );
+                          })()}
+                        </td>
+
+                        {/* 10. Disposition (Full text without truncation) */}
+                        <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                          {(() => {
+                            const disp = item.disposition || 'Pending Triage';
+                            let color = 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
+                            if (disp === 'Restock to Inventory') color = 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800';
+                            else if (disp === 'Return to Vendor (RTV)') color = 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/70 dark:text-purple-300 dark:border-purple-800';
+                            else if (disp === 'Quarantine') color = 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800';
+                            else if (disp === 'Scrap / Dispose') color = 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800';
+                            return (
+                              <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${color}`}>
+                                {disp}
+                              </span>
+                            );
+                          })()}
+                        </td>
+
+                        {/* 11. Warehouse Rack/Bin Location */}
+                        <td className="py-3 px-3.5 text-center font-mono whitespace-nowrap">
+                          {item.warehouse_location ? (
+                            <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 text-[11px] font-extrabold inline-block shadow-2xs">
+                              {item.warehouse_location}
+                            </span>
+                          ) : (
+                            <span className="text-slate-300 dark:text-slate-600 text-xs font-bold">—</span>
+                          )}
                         </td>
 
                         {/* 9. Date & GPS */}

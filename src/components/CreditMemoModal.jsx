@@ -17,6 +17,7 @@ import {
   Percent
 } from 'lucide-react';
 import { creditMemoService } from '../services/creditMemoService';
+import { authService } from '../services/authService';
 
 export default function CreditMemoModal({
   isOpen,
@@ -36,6 +37,7 @@ export default function CreditMemoModal({
 
   const [selectedReportId, setSelectedReportId] = useState('');
   const [quantity, setQuantity] = useState(1);
+  const [unitName, setUnitName] = useState('pc');
   const [unitPrice, setUnitPrice] = useState('0.00');
   const [amount, setAmount] = useState('0.00');
   const [pullOutRef, setPullOutRef] = useState('');
@@ -66,6 +68,7 @@ export default function CreditMemoModal({
     const gross = Number((qty * price).toFixed(2));
 
     setQuantity(qty);
+    setUnitName(rep.unit_name || rep.unit || 'pc');
     setUnitPrice(price.toFixed(2));
     setAmount(gross.toFixed(2));
     setCreditAmount(gross.toFixed(2));
@@ -100,6 +103,7 @@ export default function CreditMemoModal({
       if (isEditing && creditMemo) {
         setSelectedReportId(creditMemo.report_id || creditMemo.rma_number || '');
         setQuantity(creditMemo.quantity || 1);
+        setUnitName(creditMemo.unit_name || 'pc');
         setUnitPrice(Number(creditMemo.unit_price || 0).toFixed(2));
         setAmount(Number(creditMemo.amount || 0).toFixed(2));
         setPullOutRef(creditMemo.pull_out_ref || creditMemoService.generatePullOutReference(creditMemosCount));
@@ -228,14 +232,14 @@ export default function CreditMemoModal({
         customer_ae_name: target?.ae_name || target?.customer_ae_name || 'N/A',
         customer_ae_email: target?.ae_email || target?.customer_ae_email || '',
         quantity: finalQty,
-        unit_name: target?.unit_name || 'pc',
+        unit_name: unitName || target?.unit_name || 'pc',
         unit_price: Number(Number(unitPrice || 0).toFixed(2)),
         amount: Number(Number(amount || 0).toFixed(2)),
         pull_out_ref: pullOutRef.trim() || 'Warehouse Pull-Out',
         pull_out_date: pullOutDate,
         credit_amount: Number(finalCredit.toFixed(2)),
-        credit_issued_by: 'Analiza B. Benoza (Finance Head)',
-        credit_issued_by_email: 'finance@a2z2go.net',
+        credit_issued_by: currentUser?.name || authService.getCurrentUser()?.name || 'Authorized Finance Officer',
+        credit_issued_by_email: currentUser?.email || authService.getCurrentUser()?.email || 'finance2@keysysincorporated.com',
         notes: notes.trim()
       };
 
@@ -362,8 +366,8 @@ export default function CreditMemoModal({
 
           <form id="credit-memo-form" onSubmit={(e) => handleSubmit(e, false)} className="space-y-3.5 text-xs">
             
-            {/* ROW 1: Quantity, Unit Price, Amount */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* ROW 1: Quantity, Unit, Unit Price, Amount */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Quantity *
@@ -404,6 +408,20 @@ export default function CreditMemoModal({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Unit *
+                </label>
+                <select
+                  value={unitName}
+                  onChange={(e) => setUnitName(e.target.value)}
+                  className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer h-9"
+                >
+                  <option value="pc">pc</option>
+                  <option value="case">case</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Unit Price (₱ w/ VAT)
                 </label>
                 <input
@@ -414,7 +432,7 @@ export default function CreditMemoModal({
                   onChange={(e) => handleUnitPriceChange(e.target.value)}
                   onBlur={handleUnitPriceBlur}
                   placeholder="0.00"
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800 h-9"
                 />
               </div>
 
@@ -429,7 +447,7 @@ export default function CreditMemoModal({
                   onFocus={(e) => e.target.select()}
                   onChange={(e) => handleAmountChange(e.target.value)}
                   onBlur={handleAmountBlur}
-                  className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold font-mono text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600"
+                  className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold font-mono text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 h-9"
                 />
               </div>
             </div>
@@ -534,10 +552,10 @@ export default function CreditMemoModal({
                 </div>
                 <div className="min-w-0">
                   <div className="font-bold text-slate-900 dark:text-white truncate">
-                    Authorized Finance Head: <strong className="text-purple-700 dark:text-purple-300">Analiza B. Benoza</strong>
+                    Authorized Officer: <strong className="text-purple-700 dark:text-purple-300">{currentUser?.name || authService.getCurrentUser()?.name || 'Authorized Finance Officer'}</strong>
                   </div>
                   <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    finance@a2z2go.net • Finance Head
+                    {currentUser?.email || authService.getCurrentUser()?.email || 'finance2@keysysincorporated.com'} • Active Session
                   </div>
                 </div>
               </div>

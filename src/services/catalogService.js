@@ -239,6 +239,44 @@ export const catalogService = {
   },
 
   /**
+   * Permanently deletes a stored proof image from Google Workspace Drive or Supabase Storage
+   */
+  async deleteStoredImage(imageUrl) {
+    if (!imageUrl || typeof imageUrl !== 'string') return;
+    try {
+      // 1. Google Drive deletion (via serverless API endpoint)
+      const isGdrive = imageUrl.includes('drive.google.com') || imageUrl.includes('googleusercontent.com');
+      if (isGdrive) {
+        await fetch('/api/upload-photo', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileUrl: imageUrl })
+        }).catch(e => console.warn('[Google Drive Delete Notice]:', e.message));
+        return;
+      }
+
+      // 2. Supabase Storage deletion ('rma-photos' bucket)
+      if (imageUrl.includes('/rma-photos/')) {
+        const parts = imageUrl.split('/rma-photos/');
+        if (parts[1]) {
+          const storagePath = decodeURIComponent(parts[1].split('?')[0]);
+          await supabase.storage.from('rma-photos').remove([storagePath]);
+        }
+      }
+    } catch (err) {
+      console.warn('Delete stored image exception:', err.message);
+    }
+  },
+
+  /**
+   * Delete multiple stored image URLs in parallel
+   */
+  async deleteStoredImages(imageUrls) {
+    if (!Array.isArray(imageUrls) || imageUrls.length === 0) return;
+    await Promise.allSettled(imageUrls.map(url => this.deleteStoredImage(url)));
+  },
+
+  /**
    * Fast Barcode / SKU Lookup:
    * PRIORITY 1: Secure Serverless Proxy (/api/v1/products/lookup)
    *             Works across ANY mobile phone, dock scanner, or incognito browser without requiring client credentials.
@@ -651,11 +689,13 @@ export const catalogService = {
     let id = null;
     let barcode = null;
     let name = '';
+    let imageToDelete = null;
 
     if (typeof idOrProduct === 'object' && idOrProduct !== null) {
       id = idOrProduct.id || null;
       barcode = idOrProduct.barcode || null;
       name = idOrProduct.name || '';
+      imageToDelete = idOrProduct.image_url || idOrProduct.imageUrl || null;
     } else {
       id = idOrProduct || null;
       barcode = fallbackBarcode || null;
@@ -669,6 +709,17 @@ export const catalogService = {
     if (!id && !barcode) {
       console.warn('Delete called without id or barcode:', idOrProduct);
       return { success: true };
+    }
+
+    // Retrieve image if not passed in
+    if (!imageToDelete && (id || barcode)) {
+      try {
+        let q = supabase.from('products').select('image_url').limit(1);
+        if (id) q = q.eq('id', id);
+        else q = q.eq('barcode', barcode);
+        const { data: found } = await q;
+        if (found && found[0]?.image_url) imageToDelete = found[0].image_url;
+      } catch (e) {}
     }
 
     let deleteError = null;
@@ -685,6 +736,11 @@ export const catalogService = {
     if (deleteError) {
       console.error('Hard delete error from Supabase:', deleteError);
       throw new Error(`Database error deleting product: ${deleteError.message}`);
+    }
+
+    // Clean up stored image from Google Drive / Supabase
+    if (imageToDelete) {
+      this.deleteStoredImage(imageToDelete);
     }
 
     this.notifyChange('product-deleted', { id, barcode, name });
@@ -713,6 +769,14 @@ export const catalogService = {
     if (deleteError) {
       console.error('Error in deleteMultipleProducts:', deleteError);
       throw new Error(`Database error deleting products: ${deleteError.message}`);
+    }
+
+    // Clean up stored images from Google Drive / Supabase in parallel
+    const allImages = productsList
+      .map(p => p.image_url || p.imageUrl)
+      .filter(Boolean);
+    if (allImages.length > 0) {
+      this.deleteStoredImages(allImages);
     }
 
     this.notifyChange('products-bulk-deleted', { count: productsList.length });
@@ -869,33 +933,33 @@ export const catalogService = {
       console.warn('Background RMA report notification notice:', err.message);
     });
 
-    // 3. Catalog database synchronization:
+    // 3. Catalog database synchronization (asynchronous non-blocking to ensure instant submission):
     if (isKnown) {
       // Auto-upsert into Supabase products table so the catalog retains the item and allows admin to assign an AE
-      try {
-        await supabase
-          .from('products')
-          .upsert([
-            {
-              barcode: cleanBarcode,
-              code: resolvedProduct.code || resolvedProduct.barcode || null,
-              name: resolvedProduct.name,
-              supplier_name: resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Savemore',
-              price: Number(resolvedProduct.price || 0),
-              price_with_vat: Number(resolvedProduct.price_with_vat || resolvedProduct.priceWithVat || resolvedProduct.price || 0),
-              brand_name: resolvedProduct.brand_name || resolvedProduct.brandName || null,
-              unit_name: resolvedProduct.unit_name || resolvedProduct.unitName || 'pc',
-              image_url: resolvedProduct.image_url || resolvedProduct.imageUrl || null,
-              ae_name: resolvedProduct.ae_name || resolvedProduct.aeName || null,
-              ae_email: resolvedProduct.ae_email || resolvedProduct.aeEmail || null,
-              company: resolvedProduct.company || null,
-              is_verified: true,
-              updated_at: new Date().toISOString()
-            }
-          ], { onConflict: 'barcode' });
-      } catch (err) {
-        console.warn('Catalog auto-sync notice:', err?.message || err);
-      }
+      supabase
+        .from('products')
+        .upsert([
+          {
+            barcode: cleanBarcode,
+            code: resolvedProduct.code || resolvedProduct.barcode || null,
+            name: resolvedProduct.name,
+            supplier_name: resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Savemore',
+            price: Number(resolvedProduct.price || 0),
+            price_with_vat: Number(resolvedProduct.price_with_vat || resolvedProduct.priceWithVat || resolvedProduct.price || 0),
+            brand_name: resolvedProduct.brand_name || resolvedProduct.brandName || null,
+            unit_name: resolvedProduct.unit_name || resolvedProduct.unitName || 'pc',
+            image_url: resolvedProduct.image_url || resolvedProduct.imageUrl || null,
+            ae_name: resolvedProduct.ae_name || resolvedProduct.aeName || null,
+            ae_email: resolvedProduct.ae_email || resolvedProduct.aeEmail || null,
+            company: resolvedProduct.company || null,
+            is_verified: true,
+            updated_at: new Date().toISOString()
+          }
+        ], { onConflict: 'barcode' })
+        .then(() => {})
+        .catch(err => {
+          console.warn('Catalog auto-sync notice:', err?.message || err);
+        });
     }
     // Note: If item is uncatalogued, we DO NOT insert into products database.
     // Uncatalogued returns remain strictly within rma_reports until an admin manually assigns an SKU.
@@ -1145,19 +1209,27 @@ export const catalogService = {
   },
 
   /**
-   * Delete an RMA report (with robust hard-delete and soft-delete fallback)
+   * Delete an RMA report (with robust hard-delete, soft-delete fallback, and proof photo cleanup)
    */
   async deleteReport(id, rmaNumber) {
     if (!id && !rmaNumber) return false;
     try {
-      // First find barcode of report to check for orphan cleanup
+      // First find barcode and proof photos to clean up storage and unverified products
       let barcodeToCheck = null;
+      let photosToDelete = [];
       try {
-        let findQ = supabase.from('rma_reports').select('barcode').limit(1);
+        let findQ = supabase.from('rma_reports').select('barcode, photos').limit(1);
         if (id) findQ = findQ.eq('id', id);
         else findQ = findQ.eq('rma_number', rmaNumber);
         const { data: found } = await findQ;
-        if (found && found.length > 0) barcodeToCheck = found[0].barcode;
+        if (found && found.length > 0) {
+          barcodeToCheck = found[0].barcode;
+          if (found[0].photos) {
+            photosToDelete = Array.isArray(found[0].photos) 
+              ? found[0].photos 
+              : (typeof found[0].photos === 'string' ? JSON.parse(found[0].photos || '[]') : []);
+          }
+        }
       } catch (e) {}
 
       let query = supabase.from('rma_reports').delete();
@@ -1198,6 +1270,11 @@ export const catalogService = {
         } catch (e) {}
       }
 
+      // Permanently delete associated proof photos from Google Drive & Supabase Storage
+      if (photosToDelete.length > 0) {
+        this.deleteStoredImages(photosToDelete);
+      }
+
       this.notifyChange('report-deleted', { id, rmaNumber });
       return true;
     } catch (e) {
@@ -1207,13 +1284,22 @@ export const catalogService = {
   },
 
   /**
-   * ADMIN ACTION: Permanently delete multiple RMA reports in bulk
+   * ADMIN ACTION: Permanently delete multiple RMA reports in bulk and cleanup photos
    */
   async deleteMultipleReports(reportsList) {
     if (!Array.isArray(reportsList) || reportsList.length === 0) return { success: true, count: 0 };
     
     const ids = reportsList.map(r => r.id).filter(id => id !== undefined && id !== null);
     const rmaNumbers = reportsList.map(r => r.rma_number).filter(Boolean);
+
+    // Extract all photos across reports to delete from Google Drive / Supabase Storage
+    const allPhotos = [];
+    reportsList.forEach(r => {
+      const pList = Array.isArray(r.photos) 
+        ? r.photos 
+        : (typeof r.photos === 'string' ? JSON.parse(r.photos || '[]') : []);
+      allPhotos.push(...pList);
+    });
 
     try {
       let deleteError = null;
@@ -1232,6 +1318,11 @@ export const catalogService = {
         if (ids.length > 0) {
           await supabase.from('rma_reports').update({ status: 'deleted' }).in('id', ids);
         }
+      }
+
+      // Delete all stored photos in parallel
+      if (allPhotos.length > 0) {
+        this.deleteStoredImages(allPhotos);
       }
 
       this.notifyChange('reports-bulk-deleted', { count: reportsList.length });
