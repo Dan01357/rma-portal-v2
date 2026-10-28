@@ -29,8 +29,8 @@ export default defineConfig({
   </body>
 </html>`);
           }
-          if (req.url === '/api/openapi.json') {
-            const handler = (await import('./api/openapi.json.js')).default;
+          if (req.url === '/api/openapi.json' || req.url?.startsWith('/api/openapi.json')) {
+            const handler = (await import('./api/docs.js')).default;
             return handler(req, res);
           }
           next();

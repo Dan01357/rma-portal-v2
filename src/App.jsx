@@ -1237,11 +1237,11 @@ export default function App() {
     setIsSubmitting(true);
 
     try {
-      // 1. Upload photos to Supabase Storage
+      // 1. Upload photos (Google Drive Primary -> Supabase Storage Fallback)
       const uploadedUrls = [];
       for (const item of photoFiles) {
         if (item.file) {
-          const url = await catalogService.uploadPhoto(item.file);
+          const url = await catalogService.uploadPhoto(item.file, cleanBarcode);
           if (url) uploadedUrls.push(url);
         }
       }

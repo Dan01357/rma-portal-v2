@@ -231,32 +231,115 @@ export const rmaApi = {
     return updated.find(t => t.id === id);
   },
 
-  async uploadPhoto(file) {
-    const filename = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase.storage
-          .from('rma-defect-photos')
-          .upload(filename, file, { cacheControl: '3600', upsert: true });
+  async uploadPhoto(file, rmaNumber = 'GENERAL') {
+    if (!file) return null;
 
-        if (!error) {
-          const { data: publicData } = supabase.storage
-            .from('rma-defect-photos')
-            .getPublicUrl(filename);
-          return publicData.publicUrl;
-        }
-      } catch (e) {
-        console.warn('Supabase photo upload failed, converting to local preview:', e);
+    // Helper: Client-side WebP compression (1280px max, 0.7 quality)
+    const compress = (imgFile) => {
+      if (!imgFile || !imgFile.type?.startsWith('image/') || imgFile.type === 'image/svg+xml') {
+        return Promise.resolve(imgFile);
       }
-    }
+      return new Promise((resolve) => {
+        try {
+          const img = new Image();
+          const url = URL.createObjectURL(imgFile);
+          img.onload = () => {
+            URL.revokeObjectURL(url);
+            let { width, height } = img;
+            const maxDimension = 1280;
+            if (width > maxDimension || height > maxDimension) {
+              if (width > height) {
+                height = Math.round((height * maxDimension) / width);
+                width = maxDimension;
+              } else {
+                width = Math.round((width * maxDimension) / height);
+                height = maxDimension;
+              }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
 
-    // Base64 fallback for offline/local storage
-    return new Promise((resolve) => {
+            canvas.toBlob(
+              (blob) => {
+                if (blob) {
+                  const cleanBase = imgFile.name ? imgFile.name.replace(/\.[^.]+$/, '') : 'photo';
+                  resolve(new File([blob], `${cleanBase}.webp`, { type: 'image/webp', lastModified: Date.now() }));
+                } else {
+                  resolve(imgFile);
+                }
+              },
+              'image/webp',
+              0.7
+            );
+          };
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            resolve(imgFile);
+          };
+          img.src = url;
+        } catch (e) {
+          resolve(imgFile);
+        }
+      });
+    };
+
+    const toBase64 = (f) => new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        resolve(reader.result);
-      };
-      reader.readAsDataURL(file);
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(f);
     });
+
+    try {
+      const compressed = await compress(file);
+      const base64Data = await toBase64(compressed);
+
+      // 1. Primary: Google Drive serverless upload
+      try {
+        const gdriveRes = await fetch('/api/upload-photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileData: base64Data,
+            fileName: compressed.name || `photo_${Date.now()}.webp`,
+            mimeType: compressed.type || 'image/webp',
+            rmaNumber
+          })
+        });
+        if (gdriveRes.ok) {
+          const json = await gdriveRes.json();
+          if (json.success && (json.url || json.previewUrl)) {
+            return json.url || json.previewUrl;
+          }
+        }
+      } catch (gdriveErr) {
+        console.warn('Google Drive notice, falling back to Supabase:', gdriveErr.message);
+      }
+
+      // 2. Secondary: Supabase Storage
+      if (isSupabaseConfigured) {
+        try {
+          const filename = `reports/${Date.now()}-${compressed.name ? compressed.name.replace(/[^a-zA-Z0-9.-]/g, '_') : 'photo.webp'}`;
+          const { data, error } = await supabase.storage
+            .from('rma-photos')
+            .upload(filename, compressed, { cacheControl: '3600', upsert: true, contentType: compressed.type || 'image/webp' });
+
+          if (!error) {
+            const { data: publicData } = supabase.storage.from('rma-photos').getPublicUrl(filename);
+            return publicData.publicUrl;
+          }
+        } catch (e) {
+          console.warn('Supabase photo upload notice:', e.message);
+        }
+      }
+
+      // 3. Tertiary: Base64 data URL
+      return base64Data;
+    } catch (err) {
+      return toBase64(file);
+    }
   }
 };

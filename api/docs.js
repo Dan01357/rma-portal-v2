@@ -1,4 +1,27 @@
+import { setCorsHeaders } from './_lib/auth.js';
+import { generateCodeFirstOpenApiSpec } from './_lib/openapiRegistry.js';
+
 export default function handler(req, res) {
+  // Support returning raw OpenAPI 3.1 JSON
+  if (req.query?.format === 'json' || req.url?.includes('openapi.json')) {
+    setCorsHeaders(res, req);
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+    try {
+      const spec = generateCodeFirstOpenApiSpec();
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      return res.status(200).json(spec);
+    } catch (err) {
+      console.error('[OpenAPI Generator Error]:', err);
+      return res.status(500).json({
+        success: false,
+        error: 'OPENAPI_GENERATION_FAILED',
+        message: err.message
+      });
+    }
+  }
+
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
   const html = `<!doctype html>

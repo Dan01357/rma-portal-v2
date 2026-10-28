@@ -7,6 +7,14 @@
 
 ---
 
+> [!IMPORTANT]
+> ### 📜 LIVING DOCUMENTATION CONTRACT & QA PROTOCOL
+> 1. **Single Source of Truth**: This checklist (`docs/MANUAL_QA_TESTING_CHECKLIST.md`) is our binding contract for Quality Assurance.
+> 2. **Mandatory Simultaneous Update**: WHENEVER any developer, DevOps engineer, or AI assistant modifies, adds, or removes any UI button, modal, form input, or API endpoint in this project, they **MUST simultaneously update this document** with the corresponding test cases and checkboxes `[ ]`.
+> 3. **Free-Tier Protection**: All tests verify strict adherence to Vercel Hobby limits (12 serverless functions, 10s execution cap) and Supabase Free Tier quotas (1 GB storage, 500 MB database, connection pooling).
+
+---
+
 ## Document Structure & Legend
 Each test scenario defines:
 * **Location**: Specific screen, modal, or tab.
@@ -62,17 +70,33 @@ Each test scenario defines:
 
 ---
 
-### 1.3 Proof Photo Capture & Canvas Compression
-- [ ] **TC-PUB-07 (Proof Photo Upload & Compression)**
+### 1.3 Proof Photo Capture, WebP Compression & Google Drive Storage
+- [ ] **TC-PUB-07 (In-Browser Aggressive WebP Compression)**
   * **Location**: Section 2: `PROOF PHOTOS (REQUIRED)`
-  * **Action**: Upload a high-resolution 10MB JPG image.
-  * **Expected Behavior**: Canvas compressor reduces the image in-memory to $\le$ 1600px width. Thumbnail renders with a delete (`X`) icon and zoom button. Upload progress indicates success.
-  * **Edge Case**: Try to submit the form without any photos. Red validation alert displays: `At least 1 proof photo is required.` Submit button remains disabled or warns.
+  * **Action**: Upload a high-resolution 48MP / 10MB mobile phone camera JPG.
+  * **Expected Behavior**: Canvas compressor resizes the image to $\le$ 1280px max dimension and encodes it as `image/webp` at `0.7` quality. The payload is reduced by $>95\%$ to approximately 80KB–180KB, preventing Vercel 10s serverless timeout errors.
+  * **Edge Case**: Upload an image on a browser with canvas WebP disabled; verify automatic fallback to JPEG 0.7 without crashing.
+
+- [ ] **TC-PUB-07B (Google Workspace Drive Primary Photo Upload)**
+  * **Location**: Section 2: `PROOF PHOTOS (REQUIRED)` -> Submission workflow
+  * **Action**: Submit report with Google Service Account credentials configured.
+  * **Expected Behavior**: Photo is uploaded via `/api/upload-photo` directly into Google Workspace Drive (`keysysincorporated.com` / `pingconmarketing.com`) within dedicated directory `Wholesale RMA Photos/YYYY-MM/`. Public reader permission is granted, and resulting CDN preview URL (`https://lh3.googleusercontent.com/d/{fileId}`) is saved into `rma_reports.photos`.
+  * **Verification**: URL loads directly inside `<img>` tags without CORS errors or download redirects.
+
+- [ ] **TC-PUB-07C (Supabase Storage Secondary Fallback)**
+  * **Location**: Section 2: `PROOF PHOTOS (REQUIRED)` -> Submission workflow
+  * **Action**: Temporarily unset Google Drive credentials in environment.
+  * **Expected Behavior**: System automatically and gracefully falls back to Supabase Storage `rma-photos` bucket (`reports/[timestamp]_[filename].webp`). Submission succeeds seamlessly with zero errors shown to warehouse staff.
+
+- [ ] **TC-PUB-07D (Offline Base64 Tertiary Fallback)**
+  * **Location**: Section 2: `PROOF PHOTOS (REQUIRED)`
+  * **Action**: Disconnect network immediately after selecting photo and submit.
+  * **Expected Behavior**: Photo safely falls back to in-memory Base64 Data URL, ensuring warehouse staff never lose evidence during dock connectivity drops.
 
 - [ ] **TC-PUB-08 (Multi-Photo Lightbox Preview)**
   * **Location**: Uploaded photo thumbnail
   * **Action**: Upload 3 distinct photos, then click thumbnail 2.
-  * **Expected Behavior**: `ImageLightboxModal` opens displaying photo 2 with navigation arrows `<-` and `->`, zoom control, and subtitle `Photo 2 of 3`.
+  * **Expected Behavior**: `ImageLightboxModal` opens displaying photo 2 with navigation arrows `<-` and `->`, zoom control, and subtitle `Photo 2 of 3`. Supporting both Google Drive CDN URLs and Supabase storage URLs.
 
 ---
 
@@ -314,6 +338,21 @@ Each test scenario defines:
   * **Action**: Click link.
   * **Expected Behavior**: Opens `/docs` displaying modern Scalar interactive documentation generated from OpenAPI 3.1 specification.
 
+- [ ] **TC-SET-08 (Supabase Free-Tier Connection Pooling & Client Reuse Test)**
+  * **Location**: Serverless backend `api/_lib/supabase.js`
+  * **Action**: Rapidly trigger 20 consecutive health checks (`/api/v1/health`) and product queries (`/api/v1/products`).
+  * **Expected Behavior**: Client reuses connection agent cached on `globalThis._supabaseServerlessClient`. Zero `remaining connection slots are reserved for non-replication superuser connections` errors appear; connection pooling remains healthy and within free-tier threshold.
+
+- [ ] **TC-SET-09 (Database Free-Tier Indexing Verification Test)**
+  * **Location**: Supabase SQL Editor / `optimize_free_tier_indexes.sql`
+  * **Action**: Execute `EXPLAIN ANALYZE SELECT * FROM public.rma_reports WHERE rma_number = 'RMA-2026-0001-A14R' ORDER BY created_at DESC;`.
+  * **Expected Behavior**: Query plan executes via `Index Scan using idx_rma_reports_rma_number` with execution time $< 5\text{ms}$ (instead of sequential table scan), conserving free-tier database CPU quota.
+
+- [ ] **TC-SET-10 (Vercel 10s Serverless Execution Cap & WebP Timing Test)**
+  * **Location**: Mobile Intake photo submission `/api/upload-photo`
+  * **Action**: Trigger photo upload with client-side WebP compression.
+  * **Expected Behavior**: Execution completes within $\approx 250\text{ms}–800\text{ms}$, well below Vercel Hobby's 10-second timeout limit. If Google Drive network stalls, internal abort controller terminates cleanly at 7.5s and signals Supabase fallback.
+
 ---
 
 ## Section 8: Auxiliary Modals & Workflows
@@ -348,3 +387,4 @@ Each test scenario defines:
 | **Phase 4: Credit Memo ₱10K Rule** | Finance Accounting | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 5: Supplier RTV Claims** | Vendor Chargebacks | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 6: SHA-256 REST API Vault** | Partner Integration (`/docs`) | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 7: Free-Tier Optimization & Google Drive** | WebP Compression & Cloud Storage | `READY FOR TESTING` | *Lead QA Director* |

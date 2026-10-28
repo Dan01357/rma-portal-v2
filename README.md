@@ -70,3 +70,22 @@ npm run dev
 ```
 
 Open `http://localhost:5173` in your browser.
+
+---
+
+## 🛡️ Free-Tier Architecture & Safety Controls
+
+1. **Vercel Hobby 12-Function Hard Cap**: Strictly limited to 12 serverless functions in `api/`.
+2. **Aggressive Client WebP Compression**: Photos are downscaled to $\le$ 1280px at 0.7 quality in-browser via Canvas API (~80–180KB), eliminating Vercel 10s execution timeouts.
+3. **Google Workspace Drive Hybrid Photo Storage**: RMA proof photos upload directly to dedicated company Google Drive (`Wholesale RMA Photos/YYYY-MM/`) via service account OAuth2 JWT, conserving Supabase 1 GB storage.
+4. **Graceful Multi-Tier Redundancy**: Seamless automatic fallback to Supabase Storage `rma-photos` bucket and offline Base64 data URLs.
+5. **Database Indexing**: All query columns indexed via `optimize_free_tier_indexes.sql` to protect Supabase 500 MB quota and prevent connection spikes.
+
+---
+
+## 📜 Architectural Development Rule: "LIVING DOCUMENTATION CONTRACT"
+
+> [!IMPORTANT]
+> **Single Source of Truth**: [`docs/MANUAL_QA_TESTING_CHECKLIST.md`](file:///c:/Users/Danilo.Alvaro/Desktop/Finance%20Systems/rma-portal-v2/docs/MANUAL_QA_TESTING_CHECKLIST.md) is our binding Quality Assurance testing contract.
+> **Enforcement Rule**: WHENEVER any developer or AI assistant modifies, adds, or removes any UI button, modal, form input, or API endpoint in this project, they **MUST simultaneously update** `docs/MANUAL_QA_TESTING_CHECKLIST.md` with the new test cases and checkboxes `[ ]`.
+

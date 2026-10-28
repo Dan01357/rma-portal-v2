@@ -86,13 +86,14 @@ export const catalogService = {
   },
 
   /**
-   * Client-side image compression:
-   * Resizes large photos (like 48MP phone pictures) to max 1280px and compresses to high-quality JPEG.
-   * Shrinks 5MB-10MB uploads down to ~100KB-180KB (98% reduction), keeping Supabase Free Tier healthy for 6,000+ photos.
+   * Client-side image compression (Aggressive Free-Tier Optimization):
+   * Resizes large photos (like 48MP phone captures) to max 1280px and converts to WebP at quality 0.7.
+   * Shrinks 4MB-10MB mobile uploads down to ~80KB-180KB (>95% reduction),
+   * preventing Vercel 10s serverless timeouts and conserving storage.
    */
-  async compressImage(file, maxDimension = 1280, quality = 0.82) {
+  async compressImage(file, maxDimension = 1280, quality = 0.7) {
     if (!file || !file.type?.startsWith('image/')) return file;
-    if (file.type === 'image/svg+xml' || file.size < 120 * 1024) return file;
+    if (file.type === 'image/svg+xml') return file;
 
     return new Promise((resolve) => {
       try {
@@ -116,19 +117,37 @@ export const catalogService = {
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
 
+          // Attempt WebP encoding first (supported on all modern browsers)
+          const exportMime = 'image/webp';
           canvas.toBlob(
             (blob) => {
-              if (!blob || blob.size >= file.size) {
-                resolve(file);
-              } else {
-                const compressedFile = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
-                  type: 'image/jpeg',
+              if (blob) {
+                const cleanBaseName = file.name ? file.name.replace(/\.[^.]+$/, '') : 'rma_photo';
+                const compressedFile = new File([blob], `${cleanBaseName}.webp`, {
+                  type: 'image/webp',
                   lastModified: Date.now()
                 });
                 resolve(compressedFile);
+              } else {
+                // Fallback to JPEG if browser canvas fails WebP export
+                canvas.toBlob(
+                  (fallbackBlob) => {
+                    if (fallbackBlob) {
+                      const cleanBaseName = file.name ? file.name.replace(/\.[^.]+$/, '') : 'rma_photo';
+                      resolve(new File([fallbackBlob], `${cleanBaseName}.jpg`, {
+                        type: 'image/jpeg',
+                        lastModified: Date.now()
+                      }));
+                    } else {
+                      resolve(file);
+                    }
+                  },
+                  'image/jpeg',
+                  quality
+                );
               }
             },
-            'image/jpeg',
+            exportMime,
             quality
           );
         };
@@ -144,15 +163,44 @@ export const catalogService = {
   },
 
   /**
-   * Upload photo to Supabase Storage ('rma-photos' bucket)
-   * Automatically compresses images client-side before upload to conserve free-tier storage
-   * With automatic Base64 fallback if storage bucket is not configured
+   * Smart Hybrid Photo Upload:
+   * 1. Aggressively compresses photo to WebP (max 1280px, quality 0.7, ~80-180KB).
+   * 2. Primary: Uploads to Company Google Workspace Drive (/api/upload-photo) in dedicated folder.
+   * 3. Fallback: If Google Drive credentials are not yet set or offline, uploads to Supabase Storage ('rma-photos').
+   * 4. Tertiary Fallback: Offline Base64 Data URL so user never loses their submission.
    */
-  async uploadPhoto(file) {
+  async uploadPhoto(file, rmaNumber = 'GENERAL') {
     if (!file) return null;
     try {
-      const compressed = await this.compressImage(file);
-      const cleanName = compressed.name ? compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_') : 'photo.jpg';
+      // 1. Client-Side Aggressive WebP Compression
+      const compressed = await this.compressImage(file, 1280, 0.7);
+      const base64Data = await this.fileToBase64(compressed);
+
+      // 2. Primary: Attempt Google Workspace Drive upload via serverless integration
+      try {
+        const gdriveRes = await fetch('/api/upload-photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileData: base64Data,
+            fileName: compressed.name || `RMA_${rmaNumber}_${Date.now()}.webp`,
+            mimeType: compressed.type || 'image/webp',
+            rmaNumber
+          })
+        });
+
+        if (gdriveRes.ok) {
+          const gdriveJson = await gdriveRes.json();
+          if (gdriveJson.success && (gdriveJson.url || gdriveJson.previewUrl)) {
+            return gdriveJson.url || gdriveJson.previewUrl;
+          }
+        }
+      } catch (gdriveErr) {
+        console.warn('Google Drive photo upload notice (falling back to Supabase):', gdriveErr.message);
+      }
+
+      // 3. Secondary Fallback: Supabase Storage ('rma-photos' bucket)
+      const cleanName = compressed.name ? compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_') : 'photo.webp';
       const filePath = `reports/${Date.now()}-${Math.floor(Math.random() * 1000)}_${cleanName}`;
       
       const { data, error } = await supabase.storage
@@ -160,21 +208,23 @@ export const catalogService = {
         .upload(filePath, compressed, {
           cacheControl: '3600',
           upsert: true,
-          contentType: compressed.type || 'image/jpeg'
+          contentType: compressed.type || 'image/webp'
         });
 
-      if (error) {
-        console.warn('Storage upload notice (falling back to data URL):', error.message);
-        return await this.fileToBase64(compressed);
+      if (!error) {
+        const { data: publicUrlData } = supabase.storage
+          .from('rma-photos')
+          .getPublicUrl(filePath);
+
+        if (publicUrlData?.publicUrl) {
+          return publicUrlData.publicUrl;
+        }
       }
 
-      const { data: publicUrlData } = supabase.storage
-        .from('rma-photos')
-        .getPublicUrl(filePath);
-
-      return publicUrlData.publicUrl;
+      // 4. Tertiary Fallback: Base64 Data URL
+      return base64Data;
     } catch (err) {
-      console.warn('Storage exception (falling back to data URL):', err.message);
+      console.warn('Photo upload exception (falling back to data URL):', err.message);
       return await this.fileToBase64(file);
     }
   },

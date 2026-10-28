@@ -235,3 +235,31 @@ When answering prompts about this project in Google AI Studio:
 2. **Preserve Code-First Documentation**: Do not recommend modifying static JSON files for OpenAPI. All documentation is generated using Zod in `api/_lib/schemas/*.schema.js`.
 3. **Respect Security Standards**: Never expose plain secret keys in databases. Always use SHA-256 hashes for API key authentication and match client attribution in the audit logs.
 4. **Vercel Serverless Best Practices**: Keep serverless functions fast, avoid stateful background daemons, and ensure CORS headers use dynamic origin reflection.
+
+---
+
+## 9. Free-Tier Architecture & Living Documentation Contract
+
+### Free-Tier Operating Constraints:
+1. **Vercel Serverless Function Limit (Hobby Cap: 12 Functions)**:
+   - The project is strictly architected with **exactly 12 serverless endpoints** in `api/`:
+     `api/docs.js`, `api/send-email.js`, `api/upload-photo.js`, `api/v1/health.js`,
+     `api/v1/api-keys/index.js`, `api/v1/api-keys/[id].js`, `api/v1/credit-memos/index.js`, `api/v1/credit-memos/[id].js`,
+     `api/v1/products/index.js`, `api/v1/products/[id].js`, `api/v1/rma/index.js`, `api/v1/rma/[id].js`.
+   - Never add a 13th function file directly in `api/`. Auxiliary routes must use rewrites or existing handlers.
+2. **Vercel Serverless Execution Timeout (10-Second Hobby Cap)**:
+   - Proof photos are **NEVER** proxied uncompressed through serverless functions.
+   - All captures are aggressively compressed directly in the browser via Canvas API to WebP (1280px max dimension, quality 0.7), reducing 4MB–10MB phone uploads to ~80KB–180KB (>95% reduction).
+   - `/api/upload-photo` features an active 7.5s abort timeout guard.
+3. **Supabase 1 GB Storage Cap & Google Workspace Drive Hybrid Storage**:
+   - Primary: RMA proof photos upload directly to company Google Workspace Drive (`keysysincorporated.com` / `pingconmarketing.com`) in folder `Wholesale RMA Photos/YYYY-MM/` using zero-dependency OAuth2 JWT service account integration.
+   - Fallback: If Google Drive credentials are not configured, seamlessly falls back to Supabase Storage `rma-photos` bucket.
+   - Tertiary: Offline Base64 Data URL fallback.
+4. **Supabase 500 MB Database Quota & Connection Pooler**:
+   - All high-frequency query columns (`rma_number`, `barcode`, `supplier_name`, `status`, `created_at`) are indexed via `optimize_free_tier_indexes.sql` to eliminate sequential scans.
+   - Serverless functions use `api/_lib/supabase.js` with client caching on `globalThis._supabaseServerlessClient` for warm container connection reuse over HTTPS/REST. Direct DB connections must use Supavisor Transaction Pooler port `6543`.
+
+### Architectural Development Rule: "LIVING DOCUMENTATION CONTRACT"
+- **Single Source of Truth**: `docs/MANUAL_QA_TESTING_CHECKLIST.md` is our binding Quality Assurance contract.
+- **Mandatory Simultaneous Update**: WHENEVER any developer or AI assistant modifies, adds, or removes any UI button, modal, form input, or API endpoint in this project, they MUST simultaneously update `docs/MANUAL_QA_TESTING_CHECKLIST.md` with the corresponding test cases, location details, actions, expected behaviors, and checkable verification boxes `[ ]`.
+
