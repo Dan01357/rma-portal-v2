@@ -42,9 +42,13 @@ export function printIsolatedElement({
   iframe.style.visibility = 'hidden';
   document.body.appendChild(iframe);
 
-  // Collect existing stylesheets & fonts from main window
+  // Collect existing stylesheets & fonts from main window and sanitize @page rules
   const stylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-    .map(el => el.outerHTML)
+    .map(el => {
+      let html = el.outerHTML;
+      // Strip any conflicting global @page rules from parent styles
+      return html.replace(/@page\s*\{[^}]*\}/gi, '');
+    })
     .join('\n');
 
   const iframeDoc = iframe.contentWindow.document;
@@ -59,8 +63,8 @@ export function printIsolatedElement({
         ${stylesheets}
         <style>
           @page {
-            size: ${pageSize};
-            margin: 0;
+            size: ${pageSize} !important;
+            margin: 0 !important;
           }
           *, *::before, *::after {
             box-sizing: border-box !important;
@@ -79,6 +83,7 @@ export function printIsolatedElement({
           }
           body {
             display: flex !important;
+            flex-direction: column !important;
             align-items: center !important;
             justify-content: center !important;
             page-break-before: avoid !important;
@@ -90,21 +95,27 @@ export function printIsolatedElement({
             width: 100% !important;
             height: 100% !important;
             display: flex !important;
+            flex-direction: column !important;
             align-items: center !important;
             justify-content: center !important;
+            margin: 0 auto !important;
             padding: ${pageMargin} !important;
             box-sizing: border-box !important;
+            text-align: center !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
             overflow: hidden !important;
           }
           .isolated-print-card {
             margin: 0 auto !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
             box-shadow: none !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
             max-width: 100% !important;
-            max-height: 100% !important;
             box-sizing: border-box !important;
             transform-origin: center center !important;
             ${scale !== 1.0 ? `transform: scale(${scale}) !important;` : ''}

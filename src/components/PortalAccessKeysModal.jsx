@@ -277,27 +277,29 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
     const sizeConfig = {
       'a4': {
         pageSize: 'A4 portrait',
-        pageMargin: '0.4in',
+        pageMargin: '0.3in',
         scale: 1.0,
         customStyles: `
           #portal-poster-print-mount {
             width: 100% !important;
-            max-width: 190mm !important;
+            max-width: 180mm !important;
             box-shadow: none !important;
-            margin: auto !important;
+            margin: 0 auto !important;
+            box-sizing: border-box !important;
           }
         `
       },
       '4x6': {
         pageSize: '4in 6in',
-        pageMargin: '0.25in',
+        pageMargin: '0.2in',
         scale: 1.0,
         customStyles: `
           #portal-poster-print-mount {
-            width: 3.4in !important;
-            max-width: 3.4in !important;
+            width: 3.0in !important;
+            max-width: 3.0in !important;
             box-shadow: none !important;
-            margin: auto !important;
+            margin: 0 auto !important;
+            box-sizing: border-box !important;
           }
         `
       },
@@ -307,31 +309,33 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
         scale: 1.0,
         customStyles: `
           #portal-poster-print-mount {
-            width: 2.75in !important;
-            height: 2.75in !important;
-            max-width: 2.75in !important;
+            width: 2.15in !important;
+            max-width: 2.15in !important;
             box-shadow: none !important;
-            margin: auto !important;
+            margin: 0 auto !important;
             box-sizing: border-box !important;
+            border-width: 1.5px !important;
+            padding: 8px !important;
           }
         `
       },
       '2x2': {
         pageSize: '2in 2in',
-        pageMargin: '0.06in',
+        pageMargin: '0.05in',
         scale: 1.0,
         customStyles: `
           #portal-poster-print-mount {
-            width: 1.84in !important;
-            height: 1.84in !important;
-            max-width: 1.84in !important;
+            width: 1.45in !important;
+            max-width: 1.45in !important;
             box-shadow: none !important;
-            margin: auto !important;
+            margin: 0 auto !important;
             box-sizing: border-box !important;
+            border-width: 1.5px !important;
+            padding: 5px !important;
           }
         `
       }
-    }[printSize] || { pageSize: 'A4 portrait', pageMargin: '0.4in', scale: 1.0, customStyles: '' };
+    }[printSize] || { pageSize: 'A4 portrait', pageMargin: '0.3in', scale: 1.0, customStyles: '' };
 
     printIsolatedElement({
       elementId: 'portal-poster-print-mount',
@@ -957,27 +961,27 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
               {printSize === '4x6' && (
                 <div 
                   id="portal-poster-print-mount"
-                  className="bg-white text-black p-5 sm:p-6 rounded-2xl border-2 border-black shadow-md text-center font-sans space-y-3 w-[330px] mx-auto transition-all"
+                  className="bg-white text-black p-4 sm:p-5 rounded-2xl border-2 border-black shadow-md text-center font-sans space-y-2.5 w-[280px] mx-auto transition-all box-border"
                 >
                   {/* Header */}
-                  <div className="border-b-2 border-black pb-2 space-y-0.5">
+                  <div className="border-b-2 border-black pb-1.5 space-y-0.5">
                     <div className="text-[10px] font-black uppercase tracking-widest text-black">
                       {selectedProfile.type === 'internal_warehouse' ? 'WHOLESALE WAREHOUSE DOCK' : 'CUSTOMER RETURN INTAKE'}
                     </div>
-                    <h2 className="text-base sm:text-lg font-black text-black uppercase leading-tight">
+                    <h2 className="text-base font-black text-black uppercase leading-tight truncate">
                       {selectedProfile.name}
                     </h2>
-                    <p className="text-[10px] text-black font-medium">
+                    <p className="text-[10px] text-black font-semibold">
                       Scan with <strong>Google Lens</strong> or QR scanner app
                     </p>
                   </div>
 
                   {/* QR Code */}
-                  <div className="inline-block p-2 bg-white border-2 border-black rounded-xl">
+                  <div className="inline-block p-1.5 bg-white border-2 border-black rounded-xl">
                     <QRCodeSVG
                       id="station-qr-svg"
                       value={`${originUrl}/intake/${selectedProfile.access_slug}`}
-                      size={145}
+                      size={130}
                       level="H"
                       includeMargin={false}
                     />
@@ -985,14 +989,14 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
 
                   {/* Slug Pill */}
                   <div>
-                    <span className="bg-black text-white font-mono text-[10px] font-bold py-1 px-3 rounded-lg inline-block max-w-full truncate">
+                    <span className="bg-black text-white font-mono text-[9.5px] font-bold py-1 px-3 rounded-lg inline-block max-w-full truncate">
                       {originUrl.replace(/^https?:\/\//, '')}/intake/{selectedProfile.access_slug}
                     </span>
                   </div>
 
                   {/* Optional 6-Digit PIN on Sticker */}
                   {showPinOnPoster && (
-                    <div className="p-2 border-2 border-black rounded-xl bg-slate-50 space-y-0.5">
+                    <div className="p-1.5 border-2 border-black rounded-xl bg-slate-50 space-y-0.5">
                       <div className="text-[9px] font-black uppercase tracking-wider text-black">
                         Station 6-Digit Gatekeeper PIN
                       </div>
@@ -1003,7 +1007,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                   )}
 
                   {/* Numbered Instructions */}
-                  <div className="text-left text-[10px] space-y-1 text-black pt-2 border-t-2 border-black">
+                  <div className="text-left text-[9.5px] space-y-1 text-black pt-1.5 border-t-2 border-black font-medium">
                     <div><strong>1.</strong> Open <strong>Google Lens</strong> (or QR scanner) on phone.</div>
                     <div><strong>2.</strong> Point at QR code above &amp; tap link to launch portal.</div>
                     <div><strong>3.</strong> Enter 6-digit station PIN when prompted.</div>
@@ -1011,18 +1015,18 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                 </div>
               )}
 
-              {/* VARIANT 3: 3" x 3" MEDIUM LABEL (Zero Overflow, Compact Horizontal PIN) */}
+              {/* VARIANT 3: 3" x 3" MEDIUM LABEL (Zero Overflow, 100% Contained, No Cut-offs) */}
               {printSize === '3x3' && (
                 <div 
                   id="portal-poster-print-mount"
-                  className="bg-white text-black p-3.5 rounded-xl border-2 border-black shadow-md text-center font-sans space-y-2 w-[260px] mx-auto transition-all"
+                  className="bg-white text-black p-2 rounded-xl border-2 border-black shadow-md text-center font-sans space-y-1.5 w-[205px] mx-auto transition-all box-border"
                 >
                   {/* Header */}
-                  <div className="border-b border-black pb-1 space-y-0.5">
-                    <div className="text-[8px] font-black uppercase tracking-wider text-black">
+                  <div className="border-b border-black pb-0.5 space-y-0.5">
+                    <div className="text-[7.5px] font-black uppercase tracking-wider text-black">
                       {selectedProfile.type === 'internal_warehouse' ? 'WAREHOUSE DOCK' : 'CUSTOMER RETURN'}
                     </div>
-                    <h2 className="text-xs font-black text-black uppercase leading-tight truncate">
+                    <h2 className="text-[10.5px] font-black text-black uppercase leading-tight truncate">
                       {selectedProfile.name}
                     </h2>
                   </div>
@@ -1032,7 +1036,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                     <QRCodeSVG
                       id="station-qr-svg"
                       value={`${originUrl}/intake/${selectedProfile.access_slug}`}
-                      size={95}
+                      size={74}
                       level="H"
                       includeMargin={false}
                     />
@@ -1040,45 +1044,45 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
 
                   {/* Slug Pill */}
                   <div>
-                    <span className="bg-black text-white font-mono text-[9px] font-bold py-0.5 px-2 rounded-md inline-block max-w-full truncate">
+                    <span className="bg-black text-white font-mono text-[8px] font-bold py-0.5 px-2 rounded-md inline-block max-w-full truncate">
                       /{selectedProfile.access_slug}
                     </span>
                   </div>
 
                   {/* Compact Horizontal PIN Strip */}
                   {showPinOnPoster && (
-                    <div className="py-1 px-2.5 border border-black rounded-lg bg-slate-50 flex items-center justify-between text-black">
-                      <span className="text-[9px] font-black uppercase">STATION PIN</span>
-                      <span className="font-mono font-black text-sm tracking-wider">{selectedProfile.pin_code}</span>
+                    <div className="py-0.5 px-2 border border-black rounded-md bg-slate-50 flex items-center justify-between text-black">
+                      <span className="text-[8px] font-black uppercase tracking-wider">STATION PIN</span>
+                      <span className="font-mono font-black text-xs tracking-wider">{selectedProfile.pin_code}</span>
                     </div>
                   )}
 
                   {/* Concise 1-line Instruction */}
-                  <div className="text-[9px] font-bold text-black border-t border-black pt-1">
+                  <div className="text-[8px] font-bold text-black border-t border-black pt-0.5">
                     Scan with Google Lens to Return Item
                   </div>
                 </div>
               )}
 
-              {/* VARIANT 4: 2" x 2" SMALL ITEM TAG (Concise, Mini-Format for Loose/Unboxed Items) */}
+              {/* VARIANT 4: 2" x 2" SMALL ITEM TAG (Zero Overflow, Complete Display for Loose Items) */}
               {printSize === '2x2' && (
                 <div 
                   id="portal-poster-print-mount"
-                  className="bg-white text-black p-2 rounded-lg border-2 border-black shadow-sm text-center font-sans space-y-1.5 w-[180px] mx-auto transition-all"
+                  className="bg-white text-black p-1.5 rounded-lg border-2 border-black shadow-sm text-center font-sans space-y-1 w-[138px] mx-auto transition-all box-border"
                 >
                   {/* Title */}
                   <div className="border-b border-black pb-0.5">
-                    <h2 className="text-[10px] font-black text-black uppercase leading-tight truncate">
+                    <h2 className="text-[8.5px] font-black text-black uppercase leading-tight truncate">
                       {selectedProfile.name}
                     </h2>
                   </div>
 
                   {/* Mini QR Code */}
-                  <div className="inline-block p-1 bg-white border border-black rounded-md">
+                  <div className="inline-block p-0.5 bg-white border border-black rounded-md">
                     <QRCodeSVG
                       id="station-qr-svg"
                       value={`${originUrl}/intake/${selectedProfile.access_slug}`}
-                      size={72}
+                      size={52}
                       level="H"
                       includeMargin={false}
                     />
@@ -1086,14 +1090,14 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
 
                   {/* Inline PIN Pill */}
                   {showPinOnPoster && (
-                    <div className="py-0.5 px-1.5 bg-black text-white rounded text-[9px] font-mono font-black flex items-center justify-between">
-                      <span>PIN:</span>
-                      <span className="tracking-widest">{selectedProfile.pin_code}</span>
+                    <div className="py-0.5 px-1.5 bg-black text-white rounded text-[8px] font-mono font-black flex items-center justify-between">
+                      <span className="text-[7px] uppercase opacity-90">PIN:</span>
+                      <span className="tracking-wider">{selectedProfile.pin_code}</span>
                     </div>
                   )}
 
                   {/* Mini Scan Prompt */}
-                  <div className="text-[8px] font-extrabold uppercase text-black pt-0.5 border-t border-black">
+                  <div className="text-[7px] font-black uppercase text-black pt-0.5 border-t border-black">
                     Scan via Google Lens
                   </div>
                 </div>

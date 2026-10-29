@@ -123,14 +123,15 @@ export default function ThermalBoxLabelModal({
     const sizeConfig = {
       'a4': {
         pageSize: 'A4 portrait',
-        pageMargin: '0.4in',
+        pageMargin: '0.3in',
         scale: 1.0,
         customStyles: `
           #thermal-label-mount {
             width: 100% !important;
-            max-width: 185mm !important;
+            max-width: 180mm !important;
             box-shadow: none !important;
-            margin: auto !important;
+            margin: 0 auto !important;
+            box-sizing: border-box !important;
           }
         `
       },
@@ -140,39 +141,38 @@ export default function ThermalBoxLabelModal({
         scale: 1.0,
         customStyles: `
           #thermal-label-mount {
-            width: 3.4in !important;
-            max-width: 3.4in !important;
+            width: 3.0in !important;
+            max-width: 3.0in !important;
             box-shadow: none !important;
-            margin: auto !important;
+            margin: 0 auto !important;
+            box-sizing: border-box !important;
           }
         `
       },
       '3x3': {
         pageSize: '3in 3in',
         pageMargin: '0.1in',
-        scale: 0.95,
+        scale: 0.9,
         customStyles: `
           #thermal-label-mount {
-            width: 2.75in !important;
-            height: 2.75in !important;
-            max-width: 2.75in !important;
+            width: 2.15in !important;
+            max-width: 2.15in !important;
             box-shadow: none !important;
-            margin: auto !important;
+            margin: 0 auto !important;
             box-sizing: border-box !important;
           }
         `
       },
       '2x2': {
         pageSize: '2in 2in',
-        pageMargin: '0.06in',
-        scale: 0.88,
+        pageMargin: '0.05in',
+        scale: 0.75,
         customStyles: `
           #thermal-label-mount {
-            width: 1.84in !important;
-            height: 1.84in !important;
-            max-width: 1.84in !important;
+            width: 1.45in !important;
+            max-width: 1.45in !important;
             box-shadow: none !important;
-            margin: auto !important;
+            margin: 0 auto !important;
             box-sizing: border-box !important;
           }
         `
