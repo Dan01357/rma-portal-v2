@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { supabase } from '../supabaseClient';
+import { printIsolatedElement } from '../utils/printIsolatedElement';
 
 /**
  * Generates pseudo-Code128 SVG Barcode pattern based on string input
@@ -108,7 +109,7 @@ export default function ThermalBoxLabelModal({
           timestamp: new Date().toISOString(),
           stage: 'THERMAL_PRINT',
           actor,
-          note: `4x6" Thermal Box Label printed by ${actor}`
+          note: `${labelSize} Thermal Label printed by ${actor}`
         };
         await supabase
           .from('rma_reports')
@@ -118,16 +119,38 @@ export default function ThermalBoxLabelModal({
     } catch (e) {
       console.warn('Audit print event notice:', e);
     }
-    window.print();
+
+    const sizeConfig = {
+      'a4': { pageSize: 'A4 portrait', pageMargin: '0.4in', scale: 1.0 },
+      '4x6': { pageSize: '4in 6in', pageMargin: '0.15in', scale: 1.0 },
+      '3x3': { pageSize: '3in 3in', pageMargin: '0.08in', scale: 0.95 },
+      '2x2': { pageSize: '2in 2in', pageMargin: '0.04in', scale: 0.88 }
+    }[labelSize] || { pageSize: '4in 6in', pageMargin: '0.15in', scale: 1.0 };
+
+    printIsolatedElement({
+      elementId: 'thermal-label-mount',
+      documentTitle: `RMA-Label-${rmaNumber}`,
+      pageSize: sizeConfig.pageSize,
+      pageMargin: sizeConfig.pageMargin,
+      scale: sizeConfig.scale,
+      customStyles: `
+        #thermal-label-mount {
+          box-shadow: none !important;
+          margin: 0 auto !important;
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
+        }
+      `
+    });
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 md:p-8 overflow-y-auto animate-in fade-in duration-150">
       {/* Container */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 max-w-xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[95vh] animate-in zoom-in-95">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 max-w-xl w-full my-auto shadow-2xl overflow-hidden flex flex-col max-h-[88vh] animate-in zoom-in-95">
         
         {/* Header Bar */}
-        <div className="p-4 sm:px-6 bg-slate-50 dark:bg-slate-850 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
+        <div className="p-5 sm:px-7 bg-slate-50 dark:bg-slate-850 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 flex items-center justify-center font-black text-xs">
               <Printer className="w-4 h-4" />
@@ -157,7 +180,7 @@ export default function ThermalBoxLabelModal({
           <div 
             id="thermal-label-mount"
             ref={printAreaRef}
-            className={`bg-white text-black border-2 border-black rounded-lg shadow-md font-sans transition-all print:border-none print:shadow-none print:p-0 print:m-0 print:w-full ${
+            className={`bg-white text-black border-2 border-black rounded-lg shadow-md font-sans transition-all ${
               labelSize === '2x2' 
                 ? 'w-[200px] p-2.5 text-[10px] space-y-2' 
                 : labelSize === '3x3' 
@@ -301,38 +324,6 @@ export default function ThermalBoxLabelModal({
         </div>
 
       </div>
-
-      {/* Embedded Print Stylesheet for Dynamic Sizes */}
-      <style>{`
-        @media print {
-          body * {
-            visibility: hidden !important;
-          }
-          #thermal-label-mount, #thermal-label-mount * {
-            visibility: visible !important;
-          }
-          #thermal-label-mount {
-            position: fixed !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: ${labelSize === '2x2' ? '2in' : labelSize === '3x3' ? '3in' : labelSize === '4x6' ? '4in' : '100%'} !important;
-            max-width: ${labelSize === '2x2' ? '2in' : labelSize === '3x3' ? '3in' : labelSize === '4x6' ? '4in' : '100%'} !important;
-            height: ${labelSize === '2x2' ? '2in' : labelSize === '3x3' ? '3in' : labelSize === '4x6' ? '6in' : 'auto'} !important;
-            margin: 0 !important;
-            padding: ${labelSize === '2x2' ? '0.08in' : labelSize === '3x3' ? '0.12in' : labelSize === '4x6' ? '0.15in' : '0.4in'} !important;
-            border: 2px solid #000 !important;
-            box-shadow: none !important;
-            background: #fff !important;
-            color: #000 !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          @page {
-            size: ${labelSize === '2x2' ? '2in 2in' : labelSize === '3x3' ? '3in 3in' : labelSize === '4x6' ? '4in 6in' : 'portrait'};
-            margin: 0;
-          }
-        }
-      `}</style>
     </div>
   );
 }

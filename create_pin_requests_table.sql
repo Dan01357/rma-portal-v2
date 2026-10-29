@@ -56,3 +56,4 @@ USING (true);
 
 -- Optional: Comments for PostgREST schema introspection
 COMMENT ON TABLE public.pin_requests IS 'Log of 6-digit PIN requests submitted by external stores and warehouse personnel';
+

@@ -679,55 +679,102 @@ export async function printPortalPoster({
 }
 
 /**
- * Mount and print a high-resolution canvas element directly in browser.
- * Hides all modal dialog shells and backgrounds during print.
+ * Mount and print a high-resolution canvas element directly in an isolated iframe.
+ * Eliminates background page bleeding and guarantees exactly 1 page output.
  */
 export async function printHighResCanvas(canvas, documentTitle = 'Print Document') {
   if (typeof document === 'undefined') return;
 
-  let mount = document.getElementById('dedicated-print-mount');
-  if (!mount) {
-    mount = document.createElement('div');
-    mount.id = 'dedicated-print-mount';
-    document.body.appendChild(mount);
-  }
-
-  const originalTitle = document.title;
-  document.title = documentTitle;
-  document.body.classList.add('is-printing-highres');
-
   const dataUrl = canvas.toDataURL('image/png');
-  mount.innerHTML = `<img id="dedicated-print-image" src="${dataUrl}" alt="${documentTitle}" style="display:block;margin:0 auto;max-width:175mm;max-height:245mm;width:auto;height:auto;object-fit:contain;page-break-inside:avoid;break-inside:avoid;" />`;
 
-  const img = mount.querySelector('img');
+  // Remove existing print iframe if any
+  let iframe = document.getElementById('canvas-isolated-print-iframe');
+  if (iframe) iframe.remove();
 
-  const cleanup = () => {
-    document.body.classList.remove('is-printing-highres');
-    if (mount) mount.innerHTML = '';
-    document.title = originalTitle;
-    window.removeEventListener('afterprint', cleanup);
+  iframe = document.createElement('iframe');
+  iframe.id = 'canvas-isolated-print-iframe';
+  iframe.style.position = 'fixed';
+  iframe.style.top = '-9999px';
+  iframe.style.left = '-9999px';
+  iframe.style.width = '0px';
+  iframe.style.height = '0px';
+  iframe.style.border = '0';
+  iframe.style.visibility = 'hidden';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(`
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <title>${documentTitle}</title>
+        <style>
+          @page {
+            size: A4 portrait;
+            margin: 0;
+          }
+          *, *::before, *::after {
+            box-sizing: border-box !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            background: #ffffff !important;
+            overflow: hidden !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          img {
+            display: block !important;
+            margin: auto !important;
+            max-width: 180mm !important;
+            max-height: 255mm !important;
+            width: auto !important;
+            height: auto !important;
+            object-fit: contain !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+        </style>
+      </head>
+      <body>
+        <img src="${dataUrl}" alt="${documentTitle}" />
+      </body>
+    </html>
+  `);
+  doc.close();
+
+  const img = doc.querySelector('img');
+  const trigger = () => {
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } catch (e) {
+      console.warn('Canvas print error:', e);
+    } finally {
+      setTimeout(() => {
+        if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      }, 3000);
+    }
   };
 
-  window.addEventListener('afterprint', cleanup, { once: true });
-
-  await new Promise((resolve) => {
-    if (img && img.complete) {
-      resolve();
-    } else if (img) {
-      img.onload = () => resolve();
-      img.onerror = () => resolve();
-    } else {
-      resolve();
-    }
-  });
-
-  // Brief pause to ensure DOM update is painted
-  await new Promise((resolve) => setTimeout(resolve, 80));
-
-  window.print();
-
-  // Safety fallback cleanup in case afterprint does not fire
-  setTimeout(cleanup, 4000);
+  if (img && img.complete) {
+    setTimeout(trigger, 100);
+  } else if (img) {
+    img.onload = () => setTimeout(trigger, 100);
+    img.onerror = () => setTimeout(trigger, 100);
+  } else {
+    setTimeout(trigger, 150);
+  }
 }
 
 /**

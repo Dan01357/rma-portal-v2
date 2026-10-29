@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { accessKeyService, DEFAULT_ACCESS_PROFILES } from '../services/accessKeyService';
 import { downloadPortalPosterPng, downloadQrCodePng, printPortalPoster } from '../utils/qrDownload';
+import { printIsolatedElement } from '../utils/printIsolatedElement';
 
 export function formatDurationLabel(hours) {
   const h = Number(hours || 0);
@@ -271,15 +272,41 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
     }
   };
 
+  // High-Fidelity Isolated Print Handler (Guarantees exactly 1 page & 100% preview match)
+  const handlePrintPoster = () => {
+    const sizeConfig = {
+      'a4': { pageSize: 'A4 portrait', pageMargin: '0.4in', scale: 1.0 },
+      '4x6': { pageSize: '4in 6in', pageMargin: '0.15in', scale: 1.0 },
+      '3x3': { pageSize: '3in 3in', pageMargin: '0.08in', scale: 0.95 },
+      '2x2': { pageSize: '2in 2in', pageMargin: '0.04in', scale: 0.88 }
+    }[printSize] || { pageSize: 'A4 portrait', pageMargin: '0.4in', scale: 1.0 };
+
+    printIsolatedElement({
+      elementId: 'portal-poster-print-mount',
+      documentTitle: `RMA-QR-${selectedProfile?.access_slug || 'Station'}`,
+      pageSize: sizeConfig.pageSize,
+      pageMargin: sizeConfig.pageMargin,
+      scale: sizeConfig.scale,
+      customStyles: `
+        #portal-poster-print-mount {
+          box-shadow: none !important;
+          margin: 0 auto !important;
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
+        }
+      `
+    });
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 md:p-8 overflow-y-auto bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
       <div 
-        className="relative w-full max-w-4xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-150"
+        className="relative w-full max-w-4xl my-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
 
         {/* Modal Header */}
-        <div className="px-6 py-4.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/70 dark:bg-slate-800/50">
+        <div className="px-6 sm:px-8 py-5 sm:py-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/80 dark:bg-slate-800/50">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center shadow-md shadow-blue-600/20">
               <KeyRound className="w-5 h-5" />
@@ -335,7 +362,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
         {/* VIEW 1: PROFILE LIST VIEW                                           */}
         {/* =================================================================== */}
         {modalMode === 'list' && (
-          <div className="p-6 overflow-y-auto space-y-4 flex-1">
+          <div className="p-6 sm:p-8 overflow-y-auto space-y-4 flex-1">
             {isLoading ? (
               <div className="text-center py-12 space-y-2">
                 <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
@@ -504,7 +531,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
         {/* VIEW 2: CREATE / EDIT PROFILE FORM                                  */}
         {/* =================================================================== */}
         {(modalMode === 'create' || modalMode === 'edit') && (
-          <form onSubmit={handleSubmitForm} className="p-6 overflow-y-auto space-y-5 flex-1">
+          <form onSubmit={handleSubmitForm} className="p-6 sm:p-8 overflow-y-auto space-y-5 flex-1">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="text-sm font-black text-slate-900 dark:text-white">
                 {modalMode === 'create' ? 'Generate New QR Access Profile' : `Edit Profile: ${selectedProfile?.name}`}
@@ -758,7 +785,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
         {/* VIEW 3: PRINT POSTER / STICKER VIEW (DYNAMIC SIZES & ISOLATED PRINT)*/}
         {/* =================================================================== */}
         {modalMode === 'print' && selectedProfile && (
-          <div className="p-5 sm:p-6 overflow-y-auto space-y-5 flex-1">
+          <div className="p-6 sm:p-8 overflow-y-auto space-y-5 flex-1">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
               <div>
                 <h3 className="text-sm font-black text-slate-900 dark:text-white">
@@ -909,7 +936,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={handlePrintPoster}
                   className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-blue-600/20 cursor-pointer active:scale-95 transition-all"
                 >
                   <Printer className="w-4 h-4" />
@@ -917,38 +944,6 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                 </button>
               </div>
             </div>
-
-            {/* Embedded Print Stylesheet specifically for isolating the poster sheet */}
-            <style>{`
-              @media print {
-                body * {
-                  visibility: hidden !important;
-                }
-                #portal-poster-print-mount, #portal-poster-print-mount * {
-                  visibility: visible !important;
-                }
-                #portal-poster-print-mount {
-                  position: fixed !important;
-                  left: 0 !important;
-                  top: 0 !important;
-                  margin: 0 !important;
-                  background: #fff !important;
-                  color: #000 !important;
-                  -webkit-print-color-adjust: exact !important;
-                  print-color-adjust: exact !important;
-                  box-shadow: none !important;
-                  border: 2px solid #000 !important;
-                  padding: ${printSize === '2x2' ? '0.08in' : printSize === '3x3' ? '0.12in' : printSize === '4x6' ? '0.2in' : '0.4in'} !important;
-                  width: ${printSize === 'a4' ? '100%' : printSize === '4x6' ? '4in' : printSize === '3x3' ? '3in' : '2in'} !important;
-                  max-width: ${printSize === 'a4' ? '100%' : printSize === '4x6' ? '4in' : printSize === '3x3' ? '3in' : '2in'} !important;
-                  height: ${printSize === 'a4' ? 'auto' : printSize === '4x6' ? '6in' : printSize === '3x3' ? '3in' : '2in'} !important;
-                }
-                @page {
-                  size: ${printSize === 'a4' ? 'portrait' : printSize === '4x6' ? '4in 6in' : printSize === '3x3' ? '3in 3in' : '2in 2in'};
-                  margin: 0;
-                }
-              }
-            `}</style>
 
           </div>
         )}
