@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { accessKeyService } from '../services/accessKeyService';
 import { pinRequestService } from '../services/pinRequestService';
+import { formatCooldownLabel } from './PortalAccessKeysModal';
 
 export default function GatekeeperPinModal({
   isOpen,
@@ -512,7 +513,7 @@ export default function GatekeeperPinModal({
             <div className="flex items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono">
               <span className="truncate">Station: <strong>{profile?.name || currentSlug}</strong></span>
               <span>•</span>
-              <span>Cooldown: <strong>{cooldownInfo.cooldownDurationHours || profile?.cooldown_duration_hours || 6}h</strong></span>
+              <span>Cooldown: <strong>{formatCooldownLabel(cooldownInfo.cooldownDurationHours || profile?.cooldown_duration_hours || 6)}</strong></span>
             </div>
 
             {/* Actions: Refresh & Contact Support & Supervisor Override */}

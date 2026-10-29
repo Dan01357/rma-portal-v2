@@ -41,6 +41,18 @@ export function formatDurationLabel(hours) {
   return `${h.toFixed(1)} Hours (${totalMins}m)`;
 }
 
+export function formatCooldownLabel(hours) {
+  const h = Number(hours || 0);
+  if (h <= 0) return 'Disabled (0h)';
+  const totalMins = Math.round(h * 60);
+  if (totalMins < 60) return `${totalMins} Minutes`;
+  if (totalMins % 60 === 0) {
+    const hoursNum = totalMins / 60;
+    return `${hoursNum} Hour${hoursNum === 1 ? '' : 's'}`;
+  }
+  return `${h.toFixed(1)} Hours (${totalMins}m)`;
+}
+
 export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, onOpenPinRequests }) {
   const [profiles, setProfiles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -66,8 +78,9 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
   const [durationMode, setDurationMode] = useState('permanent');
   const [customDurationVal, setCustomDurationVal] = useState(2);
   const [customDurationUnit, setCustomDurationUnit] = useState('hrs');
-  // Cooldown Lockout Duration (Hours) for Anti-Fraud Lockout
+  // Cooldown Lockout Duration (Hours or Minutes) for Anti-Fraud Lockout
   const [cooldownDurationVal, setCooldownDurationVal] = useState(6);
+  const [cooldownDurationUnit, setCooldownDurationUnit] = useState('hrs');
 
   // Dynamic Print Sizes: 'a4' | '4x6' | '3x3' | '2x2'
   const [printSize, setPrintSize] = useState('a4');
@@ -165,6 +178,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
     setCustomDurationVal(2);
     setCustomDurationUnit('hrs');
     setCooldownDurationVal(6);
+    setCooldownDurationUnit('hrs');
     setFormError('');
     setModalMode('create');
   };
@@ -186,7 +200,18 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
       setCustomDurationVal(h);
       setCustomDurationUnit('hrs');
     }
-    setCooldownDurationVal(prof.cooldown_duration_hours !== undefined ? prof.cooldown_duration_hours : 6);
+
+    const cd = Number(prof.cooldown_duration_hours || 0);
+    if (cd <= 0) {
+      setCooldownDurationVal(0);
+      setCooldownDurationUnit('hrs');
+    } else if (cd * 60 < 60) {
+      setCooldownDurationVal(Math.round(cd * 60));
+      setCooldownDurationUnit('mins');
+    } else {
+      setCooldownDurationVal(cd);
+      setCooldownDurationUnit('hrs');
+    }
     setFormData({
       name: prof.name,
       type: prof.type,
@@ -250,7 +275,13 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
     }
 
     try {
-      const finalCooldown = formData.type === 'internal_warehouse' ? 0 : Number(cooldownDurationVal || 0);
+      let finalCooldown = 0;
+      if (formData.type === 'external_customer') {
+        const cdNum = parseFloat(cooldownDurationVal) || 0;
+        if (cdNum > 0) {
+          finalCooldown = cooldownDurationUnit === 'mins' ? cdNum / 60 : cdNum;
+        }
+      }
 
       if (modalMode === 'create') {
         await accessKeyService.createProfile({
@@ -543,7 +574,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                           <div className="flex items-center gap-1 font-bold text-slate-700 dark:text-slate-300 mt-0.5 truncate">
                             <ShieldAlert className="w-3 h-3 text-amber-500 shrink-0" />
                             <span className="truncate">
-                              {prof.type === 'internal_warehouse' ? 'Disabled' : prof.cooldown_duration_hours ? `${prof.cooldown_duration_hours}h Lockout` : 'Disabled'}
+                              {prof.type === 'internal_warehouse' ? 'Disabled' : formatCooldownLabel(prof.cooldown_duration_hours)}
                             </span>
                           </div>
                         </div>
@@ -859,10 +890,12 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                 <div className="flex items-center justify-between">
                   <label className="block text-xs font-black uppercase tracking-wider text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
                     <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Anti-Fraud Cooldown Period (Hours) *</span>
+                    <span>Anti-Fraud Cooldown Period *</span>
                   </label>
                   <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300">
-                    {Number(cooldownDurationVal) === 0 ? 'Disabled (Immediate Re-login)' : `${cooldownDurationVal} Hours Lockout`}
+                    {Number(cooldownDurationVal) === 0 
+                      ? 'Disabled (Immediate Re-login)' 
+                      : `${cooldownDurationVal} ${cooldownDurationUnit === 'mins' ? (Number(cooldownDurationVal) === 1 ? 'Minute' : 'Minutes') : (Number(cooldownDurationVal) === 1 ? 'Hour' : 'Hours')} Lockout`}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -873,32 +906,54 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                   <input
                     type="number"
                     min="0"
-                    max="720"
+                    max="10000"
                     value={cooldownDurationVal}
-                    onChange={(e) => setCooldownDurationVal(Math.max(0, parseInt(e.target.value, 10) || 0))}
-                    placeholder="e.g. 6"
+                    onChange={(e) => setCooldownDurationVal(e.target.value)}
+                    placeholder="Cooldown value"
                     className="w-28 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-black text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
                   />
-                  <span className="text-xs font-bold text-slate-600 dark:text-slate-300">Hours</span>
+
+                  <select
+                    value={cooldownDurationUnit}
+                    onChange={(e) => setCooldownDurationUnit(e.target.value)}
+                    className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-500 cursor-pointer"
+                  >
+                    <option value="mins">Minutes</option>
+                    <option value="hrs">Hours</option>
+                  </select>
+
+                  <span className="text-[11px] text-amber-800 dark:text-amber-300 font-bold ml-1 truncate">
+                    {Number(cooldownDurationVal) === 0
+                      ? '= 0 (Disabled - Immediate Re-login)'
+                      : `= ${cooldownDurationUnit === 'mins' 
+                          ? `${cooldownDurationVal} min${String(cooldownDurationVal) === '1' ? '' : 's'}` 
+                          : `${cooldownDurationVal} hour${String(cooldownDurationVal) === '1' ? '' : 's'} (${(parseFloat(cooldownDurationVal) || 0) * 60}m)`}`}
+                  </span>
                 </div>
 
                 {/* Quick Presets */}
                 <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-amber-200/60 dark:border-amber-900/60">
                   <span className="text-[10px] font-bold text-slate-400 uppercase">Presets:</span>
                   {[
-                    { label: '0h (Disabled)', val: 0 },
-                    { label: '2h', val: 2 },
-                    { label: '4h', val: 4 },
-                    { label: '6h (Default)', val: 6 },
-                    { label: '12h', val: 12 },
-                    { label: '24h', val: 24 }
+                    { label: '0 (Disabled)', val: 0, unit: 'hrs' },
+                    { label: '15m', val: 15, unit: 'mins' },
+                    { label: '30m', val: 30, unit: 'mins' },
+                    { label: '1h', val: 1, unit: 'hrs' },
+                    { label: '2h', val: 2, unit: 'hrs' },
+                    { label: '4h', val: 4, unit: 'hrs' },
+                    { label: '6h (Default)', val: 6, unit: 'hrs' },
+                    { label: '12h', val: 12, unit: 'hrs' },
+                    { label: '24h', val: 24, unit: 'hrs' }
                   ].map(p => (
                     <button
                       key={p.label}
                       type="button"
-                      onClick={() => setCooldownDurationVal(p.val)}
+                      onClick={() => {
+                        setCooldownDurationVal(p.val);
+                        setCooldownDurationUnit(p.unit);
+                      }}
                       className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
-                        Number(cooldownDurationVal) === p.val
+                        String(cooldownDurationVal) === String(p.val) && cooldownDurationUnit === p.unit
                           ? 'bg-amber-600 text-white border-amber-600'
                           : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-500'
                       }`}

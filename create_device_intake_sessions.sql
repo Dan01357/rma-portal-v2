@@ -15,8 +15,15 @@ BEGIN
       AND column_name = 'cooldown_duration_hours'
   ) THEN
     ALTER TABLE public.portal_access_keys 
-    ADD COLUMN cooldown_duration_hours integer DEFAULT 6;
+    ADD COLUMN cooldown_duration_hours numeric(10, 4) DEFAULT 6;
+  ELSE
+    ALTER TABLE public.portal_access_keys 
+    ALTER COLUMN cooldown_duration_hours TYPE numeric(10, 4);
   END IF;
+
+  -- Ensure session_duration_hours also supports fractional hours (minutes)
+  ALTER TABLE public.portal_access_keys 
+  ALTER COLUMN session_duration_hours TYPE numeric(10, 4);
 END $$;
 
 -- Update Customer Delivery Boxes default profile with 6-hour cooldown
@@ -55,3 +62,4 @@ GRANT ALL PRIVILEGES ON TABLE public.device_intake_sessions TO anon, authenticat
 DROP POLICY IF EXISTS "Allow anon full access device_intake_sessions" ON public.device_intake_sessions;
 CREATE POLICY "Allow anon full access device_intake_sessions" ON public.device_intake_sessions
   FOR ALL TO anon, authenticated, service_role USING (true) WITH CHECK (true);
+

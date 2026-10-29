@@ -241,8 +241,8 @@ export async function handleVerifyPin(req, res) {
     }
 
     // 4. STEP D: Create new session record
-    const durationHours = Math.max(0.1, Number(profile.session_duration_hours) || 2);
-    const cooldownHours = Math.max(0, Number(profile.cooldown_duration_hours !== undefined ? profile.cooldown_duration_hours : 6));
+    const durationHours = Math.max(0.01, parseFloat(profile.session_duration_hours) || 2);
+    const cooldownHours = Math.max(0, parseFloat(profile.cooldown_duration_hours !== undefined ? profile.cooldown_duration_hours : 6));
 
     const sessionExpiresAt = new Date(now.getTime() + (durationHours * 3600 * 1000));
     const cooldownUntil = new Date(sessionExpiresAt.getTime() + (cooldownHours * 3600 * 1000));
@@ -360,3 +360,4 @@ export async function handleClearCooldown(req, res) {
     });
   }
 }
+
