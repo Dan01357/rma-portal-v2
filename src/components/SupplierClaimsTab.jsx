@@ -448,18 +448,6 @@ export default function SupplierClaimsTab({
             </p>
           </div>
         </div>
-
-        {selectedItems.length > 0 && (
-          <button
-            type="button"
-            onClick={handleGenerateBatchClaim}
-            disabled={isSavingClaim}
-            className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-lg shadow-amber-600/20 transition-all cursor-pointer active:scale-95 shrink-0"
-          >
-            <Receipt className="w-4 h-4" />
-            <span>Generate Debit Claim ({selectedItems.length} items • ₱{totalClaimAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })})</span>
-          </button>
-        )}
       </div>
 
       {/* Filter Controls Bar (Dropdowns + Search) */}
@@ -553,7 +541,7 @@ export default function SupplierClaimsTab({
           </div>
         </div>
 
-        {/* Selection & Multi-Select Toolbar (Printing, Deleting, or Debit Claim for same suppliers) */}
+        {/* Selection & Multi-Select Toolbar (Printing or Deleting Only) */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 text-xs">
           <div className="flex flex-wrap items-center gap-2.5">
             <button
@@ -570,19 +558,7 @@ export default function SupplierClaimsTab({
                   {selectedRmaIds.size} selected • ₱{totalClaimAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </span>
 
-                {/* 1. Debit Claim for Same Suppliers */}
-                <button
-                  type="button"
-                  onClick={handleGenerateBatchClaim}
-                  disabled={isSavingClaim}
-                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-lg text-xs font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                  title="Generate consolidated RTV Claim for selected items from same supplier"
-                >
-                  <Receipt className="w-3.5 h-3.5" />
-                  <span>Generate Claim ({selectedRmaIds.size})</span>
-                </button>
-
-                {/* 2. Print Vouchers for Selected Items */}
+                {/* 1. Print Vouchers for Selected Items */}
                 <button
                   type="button"
                   onClick={handlePrintSelectedVouchers}
@@ -593,7 +569,7 @@ export default function SupplierClaimsTab({
                   <span>Print Vouchers</span>
                 </button>
 
-                {/* 3. Delete Selected */}
+                {/* 2. Delete Selected */}
                 {canDeleteReports && onRequestBulkDeleteReports && (
                   <button
                     type="button"

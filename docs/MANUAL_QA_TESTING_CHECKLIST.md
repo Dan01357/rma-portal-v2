@@ -550,15 +550,25 @@ Each test scenario defines:
     4. Sequence is a 4-digit strictly increasing number (`0001`, `0002`, `0003`, ...).
     5. Suffix is a 4-character uppercase alphanumeric string (e.g. `HY67`, `8K9P`).
 
-- [ ] **TC-RTV-SEL-01 (Multi-Select Operations: Print, Delete, and Same-Supplier Batch Claims)**
+- [ ] **TC-RTV-SEL-01 (Multi-Select Operations: Printing or Deleting Only)**
   * **Location**: Supplier Claims (RTV) Tab -> Multi-Select Checkboxes
-  * **Action**: Select one or more rows via checkboxes.
+  * **Action**: Select one or more rows or click **"Select All"**.
   * **Expected Behavior**:
-    1. Selection bar appears with count and actions strictly limited to:
-       - **Generate Claim (N)**: Validates that all selected items belong strictly to the **same supplier**. If items from different suppliers are selected, blocks generation with warning alert: `Selected items belong to multiple suppliers (...). A debit claim must bundle items for a single supplier.`
+    1. Selection bar appears with count badge and actions strictly limited to:
        - **Print Vouchers**: Prints RTV vouchers for all selected items.
        - **Delete Selected (N)**: Bulk deletes selected RMA reports and cleans up proof photos from Google Drive and Supabase storage.
-       - **Deselect All**: Clears selection state.
+       - **Deselect All / Clear**: Clears selection state.
+    2. The yellow/amber "Generate Claim" button is **excluded** from Select All, the top banner, and the selection toolbar to eliminate confusion and completely prevent doubling or re-generating vouchers for transactions that already have one.
+    3. Debit claim generation is handled strictly individually per row via amber **"+ Debit Claim"** (for unassigned claims) or emerald **"RTV Voucher"** (for reviewing already logged claims).
+
+- [ ] **TC-DEL-GD-01 (Google Drive Shared Drive Photo Deletion & Trash Fallback)**
+  * **Location**: RMA Reports / Supplier Claims Delete Action
+  * **Action**: Delete an RMA return report whose photos are stored in a Google Workspace Shared Drive.
+  * **Expected Behavior**:
+    1. System attempts permanent deletion via `DELETE /drive/v3/files/{id}?supportsAllDrives=true`.
+    2. If permanent deletion is rejected due to Shared Drive permissions (e.g. Service Account is Content Manager without Manager privileges), system automatically falls back to `PATCH` with `{"trashed": true}`.
+    3. File is moved to trash and removed from the active folder in Google Shared Drive.
+    4. Exact deletion status and hints are logged for full observability.
 
 
 ---

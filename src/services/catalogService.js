@@ -321,6 +321,17 @@ export const catalogService = {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fileUrls: gdriveUrls })
+        }).then(async res => {
+          if (res.ok) {
+            const data = await res.json().catch(() => null);
+            console.log('[Google Drive Photo Delete Result]:', data);
+            if (data?.failed && data.failed.length > 0) {
+              console.warn('[Google Drive Delete Incomplete Notice]:', data.failed);
+            }
+          } else {
+            const errText = await res.text().catch(() => '');
+            console.warn('[Google Drive Batch Delete Server Error]:', res.status, errText);
+          }
         }).catch(e => {
           console.warn('[Google Drive Batch Delete Notice]:', e.message);
         })
@@ -1296,17 +1307,32 @@ export const catalogService = {
       }
 
       try {
-        let findQ = supabase.from('rma_reports').select('barcode, photos').limit(1);
+        let findQ = supabase.from('rma_reports').select('barcode, photos, proof_photos, photo_url').limit(1);
         if (id) findQ = findQ.eq('id', id);
         else findQ = findQ.eq('rma_number', rmaNumber);
         const { data: found } = await findQ;
         if (found && found.length > 0) {
           barcodeToCheck = found[0].barcode;
-          if (photosToDelete.length === 0 && found[0].photos) {
-            photosToDelete = Array.isArray(found[0].photos) 
-              ? found[0].photos 
-              : (typeof found[0].photos === 'string' ? JSON.parse(found[0].photos || '[]') : []);
-          }
+          const foundItem = found[0];
+          const foundPhotos = [];
+          [foundItem.photos, foundItem.proof_photos, foundItem.photo_url].forEach(cand => {
+            if (!cand) return;
+            if (Array.isArray(cand)) foundPhotos.push(...cand);
+            else if (typeof cand === 'string') {
+              if (cand.startsWith('[') && cand.endsWith(']')) {
+                try {
+                  const parsed = JSON.parse(cand);
+                  if (Array.isArray(parsed)) foundPhotos.push(...parsed);
+                  else foundPhotos.push(cand);
+                } catch (e) {
+                  foundPhotos.push(cand);
+                }
+              } else {
+                foundPhotos.push(cand);
+              }
+            }
+          });
+          photosToDelete = [...new Set([...photosToDelete, ...foundPhotos])];
         }
       } catch (e) {}
 
@@ -1373,10 +1399,25 @@ export const catalogService = {
     // Extract all photos across reports to delete from Google Drive / Supabase Storage
     const allPhotos = [];
     reportsList.forEach(r => {
-      const pList = Array.isArray(r.photos) 
-        ? r.photos 
-        : (typeof r.photos === 'string' ? JSON.parse(r.photos || '[]') : []);
-      allPhotos.push(...pList);
+      const candidates = [r.photos, r.proof_photos, r.photo_url, r.image_url, r.photo];
+      candidates.forEach(cand => {
+        if (!cand) return;
+        if (Array.isArray(cand)) {
+          allPhotos.push(...cand);
+        } else if (typeof cand === 'string') {
+          if (cand.startsWith('[') && cand.endsWith(']')) {
+            try {
+              const parsed = JSON.parse(cand);
+              if (Array.isArray(parsed)) allPhotos.push(...parsed);
+              else allPhotos.push(cand);
+            } catch (e) {
+              allPhotos.push(cand);
+            }
+          } else {
+            allPhotos.push(cand);
+          }
+        }
+      });
     });
 
     try {

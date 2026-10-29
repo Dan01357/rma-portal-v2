@@ -241,18 +241,19 @@ export default async function handler(req, res) {
         let fileId = null;
 
         // Try extracting Google Drive File ID from URL
-        const idMatch = item.match(/\/d\/([a-zA-Z0-9_-]+)/) || 
-                        item.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
-                        item.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+        const cleanItem = String(item).trim();
+        const idMatch = cleanItem.match(/\/d\/([a-zA-Z0-9_-]+)/) || 
+                        cleanItem.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+                        cleanItem.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
         
         if (idMatch && idMatch[1]) {
-          fileId = idMatch[1];
-        } else if (/^[a-zA-Z0-9_-]{25,50}$/.test(item)) {
+          fileId = idMatch[1].split(/[?&=/]/)[0];
+        } else if (/^[a-zA-Z0-9_-]{20,55}$/.test(cleanItem)) {
           // Direct fileId passed
-          fileId = item;
+          fileId = cleanItem;
         } else {
           // Attempt filename search in Google Drive as fallback
-          const filename = item.split('/').pop()?.split('?')[0];
+          const filename = cleanItem.split('/').pop()?.split('?')[0];
           if (filename && filename.length > 5) {
             try {
               const searchQ = `name = '${filename}' and trashed = false`;
@@ -278,6 +279,7 @@ export default async function handler(req, res) {
         }
 
         try {
+          // Attempt 1: Permanent delete (supported if service account has Manager/Organizer role)
           const delRes = await fetch(
             `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
             {
@@ -287,13 +289,41 @@ export default async function handler(req, res) {
           );
 
           if (delRes.status === 204 || delRes.ok) {
-            console.log(`[Google Drive] Photo successfully deleted: ${fileId}`);
+            console.log(`[Google Drive] Photo permanently deleted: ${fileId}`);
             deletedIds.push(fileId);
-          } else {
-            const errText = await delRes.text();
-            console.warn(`[Google Drive Delete Notice]: ${fileId} - ${errText}`);
-            failed.push({ fileId, error: errText });
+            continue;
           }
+
+          const delErrText = await delRes.text();
+          console.warn(`[Google Drive Permanent Delete Notice for ${fileId}]: ${delErrText}. Attempting fallback to move file to trash...`);
+
+          // Attempt 2: Move file to trash (supported for Content Managers and Managers in Shared Drives)
+          const trashRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
+            {
+              method: 'PATCH',
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ trashed: true }),
+            }
+          );
+
+          if (trashRes.ok || trashRes.status === 200) {
+            console.log(`[Google Drive] Photo successfully moved to trash: ${fileId}`);
+            deletedIds.push(fileId);
+            continue;
+          }
+
+          const trashErrText = await trashRes.text();
+          console.warn(`[Google Drive Trash Fallback Notice for ${fileId}]: ${trashErrText}`);
+          failed.push({
+            fileId,
+            error: delErrText,
+            trashError: trashErrText,
+            hint: 'Ensure Google Service Account has "Content Manager" or "Manager" role in the Google Shared Drive members settings.'
+          });
         } catch (itemErr) {
           console.warn(`[Google Drive Delete Error for ${fileId}]:`, itemErr.message);
           failed.push({ fileId, error: itemErr.message });
