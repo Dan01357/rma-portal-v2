@@ -570,6 +570,14 @@ Each test scenario defines:
     3. File is moved to trash and removed from the active folder in Google Shared Drive.
     4. Exact deletion status and hints are logged for full observability.
 
+- [ ] **TC-BC-RACE-01 (Barcode Lookup Race Condition & Persistent Display)**
+  * **Location**: Public Portal (`/`) -> Barcode Input
+  * **Action**: Type or scan an existing barcode (e.g. `4801234165512`).
+  * **Expected Behavior**:
+    1. System queries the database and displays the recognized product card in green (`MH117P Mr. Muscle Toilet Bowl Cleaner...`).
+    2. The recognized product remains permanently displayed without disappearing or being overwritten by slower out-of-order responses from preceding keystrokes.
+    3. Accidental Enter keys from hardware scanners or keyboards do not prematurely submit or clear the form.
+
 
 ---
 

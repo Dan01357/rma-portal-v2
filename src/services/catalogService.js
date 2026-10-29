@@ -38,6 +38,13 @@ export const catalogService = {
    * Broadcast real-time change to all listeners and open tabs
    */
   notifyChange(type = 'data-updated', payload = {}) {
+    if (this._productLookupCache) {
+      if (payload?.barcode) {
+        this._productLookupCache.delete(String(payload.barcode).trim());
+      } else {
+        this._productLookupCache.clear();
+      }
+    }
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type, payload } }));
       try {
@@ -349,9 +356,16 @@ export const catalogService = {
    * PRIORITY 3: Wholesale Verified Catalog Fallback (Group 1 & 2 Products)
    * Returns null if uncatalogued, prompting the user with the unregistered barcode workflow.
    */
+  _productLookupCache: new Map(),
+
   async findProduct(barcodeOrQuery) {
     const clean = String(barcodeOrQuery || '').trim();
     if (!clean) return null;
+
+    // Fast-path: return cached lookup instantly if available
+    if (this._productLookupCache && this._productLookupCache.has(clean)) {
+      return this._productLookupCache.get(clean);
+    }
 
     // 1. SECURE SERVERLESS PROXY LOOKUP (PRIORITY #1: /api/v1/products/lookup)
     // Server securely holds the Laravel Cloud API credentials and queries Supabase + erply_products
@@ -363,7 +377,7 @@ export const catalogService = {
         const json = await res.json();
         if (json.success && json.found && json.product) {
           const p = json.product;
-          return {
+          const matchedProd = {
             id: p.id,
             barcode: p.barcode || clean,
             code: p.code || p.sku || clean,
@@ -381,6 +395,11 @@ export const catalogService = {
             isVerified: p.isVerified !== false && p.is_verified !== false,
             source: json.source === 'database' ? 'Supabase Database (Yours)' : (json.source === 'erply_api' ? 'ERPLY POS/ERP Catalog (Live API)' : 'Wholesale Master Catalog')
           };
+          if (this._productLookupCache) {
+            this._productLookupCache.set(clean, matchedProd);
+            if (matchedProd.barcode) this._productLookupCache.set(String(matchedProd.barcode).trim(), matchedProd);
+          }
+          return matchedProd;
         }
       }
     } catch (apiErr) {

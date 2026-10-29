@@ -1182,26 +1182,37 @@ export default function App() {
     const clean = barcodeInput.trim();
     if (!clean) {
       setDetectedProduct(null);
+      setIsCheckingBarcode(false);
       return;
     }
+
+    let isCurrent = true;
 
     const timer = setTimeout(async () => {
       setIsCheckingBarcode(true);
       try {
         const found = await catalogService.findProduct(clean);
+        // Guard against race conditions: only update if this request is still the active one
+        if (!isCurrent) return;
         setDetectedProduct(found);
         if (found?.unit_name || found?.unitName) {
           const u = (found.unit_name || found.unitName).toLowerCase();
           setUnitName(u.includes('case') ? 'case' : 'pc');
         }
       } catch (e) {
+        if (!isCurrent) return;
         setDetectedProduct(null);
       } finally {
-        setIsCheckingBarcode(false);
+        if (isCurrent) {
+          setIsCheckingBarcode(false);
+        }
       }
-    }, 400);
+    }, 300);
 
-    return () => clearTimeout(timer);
+    return () => {
+      isCurrent = false;
+      clearTimeout(timer);
+    };
   }, [barcodeInput]);
 
   // Accurate GPS Location capture (Filters out desktop IP geolocation with > 150m inaccuracies)
@@ -1655,7 +1666,12 @@ export default function App() {
                         type="text"
                         required
                         value={barcodeInput}
-                        onChange={(e) => setBarcodeInput(e.target.value)}
+                        onChange={(e) => setBarcodeInput(e.target.value.replace(/[\r\n]/g, ''))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                          }
+                        }}
                         placeholder="Or type barcode here..."
                         className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold font-mono text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
                       />
