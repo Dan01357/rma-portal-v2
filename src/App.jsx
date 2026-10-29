@@ -209,8 +209,10 @@ export default function App() {
   });
 
   const handleLockStation = () => {
+    const slug = gateSession?.slug || intakeSlug || 'dock';
     accessKeyService.clearSession();
     setGateSession(null);
+    setIntakeSlug(slug);
     showToast('Device locked. Enter 6-digit PIN to unlock station.', 'info');
   };
 
@@ -1475,25 +1477,36 @@ export default function App() {
         {!isAdminView && (
           <div className="space-y-4 animate-in fade-in duration-200">
             
-            {/* Responsive Top Bar with Badge, QR Poster Access & Theme Toggle */}
+            {/* Unified Clean Header: Station Details, Device Lock & Theme Control */}
             <div className="flex items-center justify-between gap-3 pt-1 pb-1">
-              <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 inline-block shadow-2xs">
-                Customer & Warehouse Returns
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAccessKeysModalOpen(true)}
-                  className="touch-target px-3 py-1.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 shadow-xs transition-colors flex items-center gap-1.5 text-xs font-bold cursor-pointer"
-                  title="Open Shareable QR Code & Warehouse Poster"
-                >
-                  <QrCode className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span className="hidden sm:inline">Portal QR & Poster</span>
-                </button>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 inline-block shadow-2xs truncate">
+                  {gateSession ? (gateSession.profileName || 'Station Active') : 'Customer & Warehouse Returns'}
+                </span>
+                {gateSession && (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold shrink-0">
+                    /{gateSession.slug}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {gateSession && (
+                  <button
+                    type="button"
+                    onClick={handleLockStation}
+                    className="touch-target px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                    title="Lock device and require 6-digit PIN"
+                  >
+                    <Lock className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Lock Device</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={toggleTheme}
-                  className="touch-target p-2 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white shadow-xs transition-colors cursor-pointer shrink-0"
+                  className="touch-target p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white shadow-xs transition-colors cursor-pointer shrink-0"
                   title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
                   aria-label="Toggle Theme"
                 >
@@ -1501,46 +1514,6 @@ export default function App() {
                 </button>
               </div>
             </div>
-
-            {/* Station Session Banner (Warehouse Dock or Customer Carton) */}
-            {gateSession && (
-              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-blue-200/90 dark:border-blue-900/60 shadow-xs text-xs animate-in fade-in duration-200">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`p-2.5 rounded-xl shrink-0 ${
-                    gateSession.type === 'internal_warehouse' 
-                      ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300' 
-                      : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300'
-                  }`}>
-                    {gateSession.type === 'internal_warehouse' ? <Building2 className="w-5 h-5" /> : <Package className="w-5 h-5" />}
-                  </div>
-                  <div className="min-w-0 space-y-0.5">
-                    <div className="font-black text-slate-900 dark:text-white truncate flex items-center gap-2">
-                      <span className="truncate">{gateSession.profileName || 'Active Intake Station'}</span>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold shrink-0">
-                        /{gateSession.slug}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 flex-wrap font-medium">
-                      <span>{gateSession.type === 'internal_warehouse' ? 'Internal Warehouse Dock' : 'Customer Box Repack'}</span>
-                      <span>•</span>
-                      <span className={gateSession.expiresAt ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-emerald-600 dark:text-emerald-400 font-bold'}>
-                        {gateSession.expiresAt 
-                          ? `Expires in ~${Math.max(1, Math.round((new Date(gateSession.expiresAt).getTime() - Date.now()) / (60 * 1000)))}m` 
-                          : 'Permanent Station (No Expiry)'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleLockStation}
-                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/40 text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 text-xs font-bold border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer shrink-0 ml-2"
-                  title="Lock device and require PIN code on next scan"
-                >
-                  Lock Device
-                </button>
-              </div>
-            )}
 
 
             {/* Super Admin Status & Sandbox Control Banner on Public Portal:
@@ -1755,8 +1728,9 @@ export default function App() {
                     <span>Scan with Phone Camera</span>
                   </button>
 
-                  <div className="flex items-center gap-2 pt-1">
-                    <div className="relative flex-1">
+                  <div className="space-y-2.5 pt-1">
+                    {/* Full-width Barcode Input Field */}
+                    <div className="relative w-full">
                       <Barcode className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                       <input
                         type="text"
@@ -1768,63 +1742,72 @@ export default function App() {
                             e.preventDefault();
                           }
                         }}
-                        placeholder="Or type barcode here..."
-                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold font-mono text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
+                        placeholder="Scan or type product barcode / SKU here..."
+                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold font-mono text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 transition-colors shadow-2xs"
                       />
                     </div>
 
-                    <div className="flex items-center border border-slate-300 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-800 px-1.5 py-1 focus-within:border-blue-600 focus-within:ring-1 focus-within:ring-blue-600 shadow-2xs">
-                      <button
-                        type="button"
-                        onClick={() => setQuantity(Math.max(1, (parseInt(quantity, 10) || 1) - 1))}
-                        className="p-1.5 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white cursor-pointer active:scale-95 transition-transform"
-                        title="Decrease quantity (-1)"
-                      >
-                        <Minus className="w-3.5 h-3.5" />
-                      </button>
-                      <input
-                        type="number"
-                        min="1"
-                        max="99999"
-                        value={quantity}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (val === '') {
-                            setQuantity('');
-                          } else {
-                            const parsed = parseInt(val, 10);
-                            if (!isNaN(parsed) && parsed >= 0) {
-                              setQuantity(parsed);
-                            }
-                          }
-                        }}
-                        onBlur={() => {
-                          const q = Math.max(1, parseInt(quantity, 10) || 1);
-                          setQuantity(q);
-                        }}
-                        className="w-12 text-center text-xs font-black text-slate-800 dark:text-slate-200 bg-transparent border-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        title="Directly enter return quantity"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setQuantity(Math.max(1, (parseInt(quantity, 10) || 0) + 1))}
-                        className="p-1.5 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white cursor-pointer active:scale-95 transition-transform"
-                        title="Increase quantity (+1)"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    {/* Quantity Stepper & Unit Selector on a spacious secondary row */}
+                    <div className="flex items-center justify-between gap-3 pt-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-600 dark:text-slate-400">Qty:</span>
+                        <div className="flex items-center border border-slate-300 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-800 px-1.5 py-1 focus-within:border-blue-600 shadow-2xs">
+                          <button
+                            type="button"
+                            onClick={() => setQuantity(Math.max(1, (parseInt(quantity, 10) || 1) - 1))}
+                            className="p-1.5 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white cursor-pointer active:scale-95 transition-transform"
+                            title="Decrease quantity (-1)"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            max="99999"
+                            value={quantity}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === '') {
+                                setQuantity('');
+                              } else {
+                                const parsed = parseInt(val, 10);
+                                if (!isNaN(parsed) && parsed >= 0) {
+                                  setQuantity(parsed);
+                                }
+                              }
+                            }}
+                            onBlur={() => {
+                              const q = Math.max(1, parseInt(quantity, 10) || 1);
+                              setQuantity(q);
+                            }}
+                            className="w-12 text-center text-xs font-black text-slate-800 dark:text-slate-200 bg-transparent border-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            title="Directly enter return quantity"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setQuantity(Math.max(1, (parseInt(quantity, 10) || 0) + 1))}
+                            className="p-1.5 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white cursor-pointer active:scale-95 transition-transform"
+                            title="Increase quantity (+1)"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
 
-                    {/* Unit Dropdown Selector: "pc" or "case" */}
-                    <select
-                      value={unitName}
-                      onChange={(e) => setUnitName(e.target.value)}
-                      className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer shadow-2xs h-[42px]"
-                      title="Select return unit (pc or case)"
-                    >
-                      <option value="pc">pc</option>
-                      <option value="case">case</option>
-                    </select>
+                      {/* Unit Dropdown Selector: "pc" or "case" */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-600 dark:text-slate-400">Unit:</span>
+                        <select
+                          value={unitName}
+                          onChange={(e) => setUnitName(e.target.value)}
+                          className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer shadow-2xs h-[38px]"
+                          title="Select return unit (pc or case)"
+                        >
+                          <option value="pc">pc (piece)</option>
+                          <option value="case">case (box)</option>
+                        </select>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Recognized Product Banner (Shows name & reference image) */}

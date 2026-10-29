@@ -43,10 +43,21 @@ export default function GatekeeperPinModal({
     useRef(null)
   ];
 
-  // 1. Fetch profile when slug changes or component mounts
+  // 1. Reset state whenever modal opens or closes
+  useEffect(() => {
+    if (isOpen) {
+      setIsVerifying(false);
+      setIsSuccess(false);
+      setPinDigits(['', '', '', '', '', '']);
+      setErrorMessage('');
+      setLockoutSeconds(0);
+    }
+  }, [isOpen]);
+
+  // 2. Fetch profile when slug changes or modal opens
   useEffect(() => {
     let isMounted = true;
-    if (!currentSlug) {
+    if (!isOpen || !currentSlug) {
       setProfile(null);
       setIsLoadingProfile(false);
       return;
@@ -61,14 +72,6 @@ export default function GatekeeperPinModal({
         if (!isMounted) return;
         setProfile(prof);
         setIsLoadingProfile(false);
-
-        // Check if device already has active session for this profile
-        if (prof && prof.is_active) {
-          const activeSession = accessKeyService.getActiveSession(prof.access_slug);
-          if (activeSession) {
-            onUnlock(activeSession);
-          }
-        }
       })
       .catch(() => {
         if (!isMounted) return;
@@ -77,7 +80,7 @@ export default function GatekeeperPinModal({
       });
 
     return () => { isMounted = false; };
-  }, [currentSlug, onUnlock]);
+  }, [isOpen, currentSlug]);
 
   // Auto-focus first PIN box on open
   useEffect(() => {
@@ -163,24 +166,34 @@ export default function GatekeeperPinModal({
     setIsVerifying(true);
     setErrorMessage('');
 
-    const res = await accessKeyService.verifyPin(profile.access_slug, pinString);
+    try {
+      const res = await accessKeyService.verifyPin(profile.access_slug, pinString);
 
-    if (res.success) {
-      setIsSuccess(true);
-      setTimeout(() => {
-        onUnlock(res.session);
-      }, 600);
-    } else {
-      setIsVerifying(false);
-      setIsShake(true);
-      setTimeout(() => setIsShake(false), 500);
+      if (res && res.success) {
+        setIsSuccess(true);
+        setTimeout(() => {
+          setIsVerifying(false);
+          setIsSuccess(false);
+          onUnlock(res.session);
+        }, 500);
+      } else {
+        setIsVerifying(false);
+        setIsShake(true);
+        setTimeout(() => setIsShake(false), 500);
 
-      if (res.error === 'LOCKED' || res.isLocked) {
-        setLockoutSeconds(res.secondsLeft || 30);
+        if (res && (res.error === 'LOCKED' || res.isLocked)) {
+          setLockoutSeconds(res.secondsLeft || 30);
+        }
+        setErrorMessage(res?.message || 'Incorrect PIN code. Please retry.');
+        setPinDigits(['', '', '', '', '', '']);
+        setTimeout(() => inputRefs[0]?.current?.focus(), 100);
       }
-      setErrorMessage(res.message || 'Incorrect PIN code. Please retry.');
+    } catch (err) {
+      console.error('PIN verification error:', err);
+      setIsVerifying(false);
+      setErrorMessage('Verification failed. Please retry.');
       setPinDigits(['', '', '', '', '', '']);
-      inputRefs[0]?.current?.focus();
+      setTimeout(() => inputRefs[0]?.current?.focus(), 100);
     }
   };
 
@@ -196,7 +209,11 @@ export default function GatekeeperPinModal({
       };
       const session = accessKeyService.createSession(target);
       setIsSuccess(true);
-      setTimeout(() => onUnlock(session), 400);
+      setTimeout(() => {
+        setIsVerifying(false);
+        setIsSuccess(false);
+        onUnlock(session);
+      }, 400);
     });
   };
 
@@ -335,13 +352,13 @@ export default function GatekeeperPinModal({
             
             {/* Header Icon & Badges */}
             <div className="space-y-3">
-              <div className="w-14 h-14 rounded-2xl bg-linear-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center mx-auto shadow-lg shadow-blue-500/25">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center mx-auto shadow-lg shadow-blue-600/30">
                 {isSuccess ? (
                   <CheckCircle2 className="w-7 h-7 text-white animate-in zoom-in" />
                 ) : profile.type === 'internal_warehouse' ? (
-                  <Building2 className="w-7 h-7" />
+                  <Building2 className="w-7 h-7 text-white" />
                 ) : (
-                  <Package className="w-7 h-7" />
+                  <Package className="w-7 h-7 text-white" />
                 )}
               </div>
 
@@ -467,3 +484,4 @@ export default function GatekeeperPinModal({
     </div>
   );
 }
+

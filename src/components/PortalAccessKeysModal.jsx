@@ -217,15 +217,11 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
 
   // Delete profile
   const handleDeleteProfile = async (prof) => {
-    if (prof.access_slug === 'dock' || prof.access_slug === 'returns') {
-      alert('Default system profiles cannot be deleted. You can deactivate them instead.');
-      return;
-    }
-    if (!window.confirm(`Permanently delete QR Access Profile "${prof.name}"?`)) return;
+    if (!window.confirm(`Permanently delete QR Access Profile "${prof.name}" (/${prof.access_slug})?\n\nDevices scanning this QR code will no longer be granted intake access.`)) return;
 
     try {
       await accessKeyService.deleteProfile(prof.access_slug);
-      loadProfiles();
+      await loadProfiles();
     } catch (err) {
       alert(err.message || 'Failed to delete');
     }
@@ -241,7 +237,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
         {/* Modal Header */}
         <div className="px-6 py-4.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/70 dark:bg-slate-800/50">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-linear-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center shadow-md shadow-blue-600/20">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center shadow-md shadow-blue-600/20">
               <KeyRound className="w-5 h-5" />
             </div>
             <div>
@@ -395,7 +391,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
                           <button
                             type="button"
                             onClick={() => handleOpenPrint(prof)}
-                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer text-xs font-bold"
                             title="Print official wall poster or delivery carton sticker"
                           >
                             <Printer className="w-3.5 h-3.5" />
@@ -405,11 +401,21 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
                           <button
                             type="button"
                             onClick={() => handleOpenEdit(prof)}
-                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer text-xs font-bold"
                             title="Change PIN or Session Expiry"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                             <span>Edit PIN</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteProfile(prof)}
+                            className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900 rounded-lg flex items-center gap-1 transition-colors cursor-pointer text-xs font-bold"
+                            title="Permanently Delete QR Profile"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Delete</span>
                           </button>
                         </div>
 
@@ -426,17 +432,6 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
                           >
                             <Power className="w-3.5 h-3.5" />
                           </button>
-
-                          {prof.access_slug !== 'dock' && prof.access_slug !== 'returns' && (
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteProfile(prof)}
-                              className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 border border-rose-200 dark:border-rose-900 transition-colors cursor-pointer"
-                              title="Delete QR Profile"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
                         </div>
                       </div>
 

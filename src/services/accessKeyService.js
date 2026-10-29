@@ -4,6 +4,28 @@ const STORAGE_KEY = 'rma_portal_access_keys_v2';
 const SETTINGS_KEY = 'portal_access_keys_store';
 const SESSION_KEY = 'rma_portal_gate_session';
 const ATTEMPTS_KEY = 'rma_gate_pin_attempts_';
+const DELETED_KEY = 'rma_deleted_access_slugs';
+
+function getDeletedSlugs() {
+  try {
+    const raw = localStorage.getItem(DELETED_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function addDeletedSlug(slug) {
+  if (!slug) return;
+  try {
+    const list = getDeletedSlugs();
+    const clean = String(slug).trim().toLowerCase();
+    if (!list.includes(clean)) {
+      list.push(clean);
+      localStorage.setItem(DELETED_KEY, JSON.stringify(list));
+    }
+  } catch {}
+}
 
 export const DEFAULT_ACCESS_PROFILES = [
   {
@@ -84,12 +106,22 @@ export const accessKeyService = {
 
     // Merge: Defaults -> LocalStorage -> Remote Supabase
     const profileMap = new Map();
-    DEFAULT_ACCESS_PROFILES.forEach(p => profileMap.set(p.access_slug.toLowerCase(), p));
+    const deletedSlugs = getDeletedSlugs();
+
+    DEFAULT_ACCESS_PROFILES.forEach(p => {
+      if (!deletedSlugs.includes(p.access_slug.toLowerCase())) {
+        profileMap.set(p.access_slug.toLowerCase(), p);
+      }
+    });
     localProfiles.forEach(p => {
-      if (p.access_slug) profileMap.set(p.access_slug.toLowerCase(), p);
+      if (p.access_slug && !deletedSlugs.includes(p.access_slug.toLowerCase())) {
+        profileMap.set(p.access_slug.toLowerCase(), p);
+      }
     });
     (remoteProfiles || []).forEach(p => {
-      if (p.access_slug) profileMap.set(p.access_slug.toLowerCase(), p);
+      if (p.access_slug && !deletedSlugs.includes(p.access_slug.toLowerCase())) {
+        profileMap.set(p.access_slug.toLowerCase(), p);
+      }
     });
 
     const merged = Array.from(profileMap.values()).sort((a, b) => {
@@ -226,21 +258,20 @@ export const accessKeyService = {
   },
 
   /**
-   * DELETE PROFILE (Protects default 'dock' and 'returns' from permanent loss)
+   * DELETE PROFILE (Permanently removes QR access profile and records tombstone)
    */
   async deleteProfile(idOrSlug) {
+    if (!idOrSlug) return false;
     const existing = await this.getProfiles();
-    const target = existing.find(p => p.id === idOrSlug || p.access_slug === idOrSlug);
-    if (!target) return;
+    const target = existing.find(p => p.id === idOrSlug || p.access_slug?.toLowerCase() === String(idOrSlug).toLowerCase());
+    if (!target) return false;
 
-    if (target.access_slug === 'dock' || target.access_slug === 'returns') {
-      // Don't fully destroy root defaults; deactivate or reset instead
-      return this.updateProfile(target.access_slug, { is_active: false });
-    }
+    // Record tombstone to prevent resurrection from default profiles
+    addDeletedSlug(target.access_slug);
 
-    const filtered = existing.filter(p => p.id !== idOrSlug && p.access_slug !== idOrSlug);
+    const filtered = existing.filter(p => p.id !== target.id && p.access_slug?.toLowerCase() !== target.access_slug.toLowerCase());
 
-    // 1. Try table
+    // 1. Delete from Supabase dedicated table
     try {
       await supabase.from('portal_access_keys').delete().eq('access_slug', target.access_slug);
     } catch (e) {}
@@ -254,9 +285,18 @@ export const accessKeyService = {
       });
     } catch (e) {}
 
+    // 3. Update localStorage
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
     } catch (e) {}
+
+    // 4. If current device session was for this slug, clear it
+    const active = this.getActiveSession();
+    if (active && active.slug?.toLowerCase() === target.access_slug.toLowerCase()) {
+      this.clearSession();
+    }
+
+    return true;
   },
 
   /**
@@ -405,3 +445,4 @@ export const accessKeyService = {
     }
   }
 };
+

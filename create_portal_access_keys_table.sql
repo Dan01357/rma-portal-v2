@@ -37,3 +37,4 @@ VALUES
   ('Main Warehouse Floor', 'internal_warehouse', 'dock', '123456', 0, true, 'System Default'),
   ('Customer Delivery Boxes', 'external_customer', 'returns', '654321', 2, true, 'System Default')
 ON CONFLICT (access_slug) DO NOTHING;
+
