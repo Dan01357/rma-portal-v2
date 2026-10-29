@@ -32,7 +32,61 @@ flowchart TD
 
 ---
 
-## Chapter 1: Physical Dock Arrival & Initial Intake
+## Chapter 1: Unified Role-Based QR Code & 6-Digit PIN Gatekeeper Engine
+
+To prevent unauthorized public submissions while maintaining rapid frictionless intake for physical warehouse staff and verified customer returns, the portal employs the **Unified Role-Based QR Code & 6-Digit PIN Gatekeeper Engine**.
+
+```mermaid
+flowchart TD
+    Scan["Physical Arrival:\nScan Wall Poster or Box Sticker\n(/intake/:slug)"] --> Lookup{"Profile Exists\n& is_active?"}
+    Lookup -- Inactive / Missing --> Block["Block Screen:\n'QR Code Inactive / Contact Supervisor'"]
+    Lookup -- Active --> CheckSession{"Valid Device Session\nCookie/Token Exists?"}
+    CheckSession -- Yes --> Form["Direct Unlock:\nLoad RMA Intake Scanner\nShow Station Banner"]
+    CheckSession -- No --> Pin["Mobile-First 6-Box PIN Prompt\nAuto-Advance & Auto-Verify"]
+    Pin -- 5 Incorrect Attempts --> Cooldown["30-Second Lockout Cooldown\nRate-Limit Brute Force Shield"]
+    Pin -- Correct PIN --> CreateSession{"Station Type?"}
+    CreateSession -- "internal_warehouse\n(Dock Station)" --> PermSession["Permanent Device Session\n(duration = 0, No Expiry)"]
+    CreateSession -- "external_customer\n(Carton Repack)" --> TempSession["Expiring Device Session\n(duration = 2 to 24 Hours)"]
+    PermSession --> Form
+    TempSession --> Form
+    Root["Direct URL Access (/)\nWithout Active Session"] --> Gate["Branded Gatekeeper Screen:\n'Please scan official QR code at dock or carton'\n(Admin Login Link)"]
+```
+
+### 1.1 Database Architecture (`public.portal_access_keys`)
+The security layer is backed by PostgreSQL table `public.portal_access_keys` in Supabase:
+- `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`: Globally unique identifier.
+- `name text NOT NULL`: Station identifier (e.g., "Main Warehouse Floor", "Customer Delivery Boxes").
+- `type text NOT NULL CHECK (type IN ('internal_warehouse', 'external_customer'))`: Role profile classification.
+- `access_slug text UNIQUE NOT NULL`: Routing slug for printable QR URLs (`https://rma-portal-v2.vercel.app/intake/:slug`).
+- `pin_code varchar(6) NOT NULL`: Secure 6-digit numeric PIN for station unlocking.
+- `session_duration_hours integer DEFAULT 0`: Session lifetime (`0` = Permanent / No Expiry for internal warehouse devices; `>0` e.g. 2, 4, 24 hours for customer devices).
+- `is_active boolean DEFAULT true`: Instant remote kill switch to deactivate lost posters or decommissioned boxes.
+- `created_by text`, `created_at timestamptz`, `updated_at timestamptz`: Audit timestamps and creator metadata.
+
+**Seed Profiles:**
+1. **Main Warehouse Floor**: `internal_warehouse`, Slug `/intake/dock`, PIN `123456`, Duration `0` (Permanent).
+2. **Customer Delivery Boxes**: `external_customer`, Slug `/intake/returns`, PIN `654321`, Duration `2` (2 Hours per device).
+
+### 1.2 Device Session Lifespan & Expiration Model
+- **Warehouse Floor Devices (`internal_warehouse`)**: Designed for shared company zebra handhelds, tablets, and dock workstations. Once the supervisor enters the 6-digit PIN (`123456`), the encrypted session token persists indefinitely in `localStorage`. Warehouse personnel can report hundreds of returns daily without repeated PIN interruptions.
+- **Customer Carton Scanners (`external_customer`)**: Designed for retail store repackers scanning QR stickers taped onto delivery boxes. When scanned, the customer enters the box PIN (`654321`) and receives a strict 2-hour session. Once 2 hours elapse, the session token automatically self-terminates, preventing unauthorized subsequent submissions from outside the store.
+
+### 1.3 Anti-Brute-Force Rate Limiting
+- The PIN input utilizes a 6-box auto-advancing, mobile-optimized component.
+- If an incorrect PIN is entered, the modal performs an error shake animation, clears the inputs, and decrements remaining attempts.
+- If 5 consecutive failures occur within 2 minutes, the engine locks the device for **30 seconds** with a visible countdown timer, neutralizing automated brute-force attacks.
+
+### 1.4 Admin QR Access Keys & PIN Manager UI
+Restricted strictly to authenticated `SUPER_ADMIN` and `ADMIN` personnel:
+- Accessible via **"QR Keys & PINs"** in the top navigation and tab bar.
+- **Dynamic Profile Creation**: "+ New QR Access Code" generates custom slugs and random 6-digit PINs.
+- **Instant PIN & Expiry Modification**: Administrators can change PINs or adjust expiry hours without reprinting posters.
+- **High-Resolution Poster & Sticker Printing**: Renders print-ready A4 or 4x6" sheets with the generated station QR code, instructions, and an optional PIN visibility toggle.
+- **1-Click Revocation**: Toggling status to `Inactive` immediately blocks all inbound scans from that profile.
+
+---
+
+## Chapter 2: Physical Dock Arrival & Initial Intake
 
 ### 1.1 Mobile & Desktop Scanning Workflow
 When a delivery truck, return pallet, or customer shipment arrives at the warehouse unloading bay, the receiving clerk or customer uses the responsive Public Intake Portal at `https://rma-portal-v2.vercel.app/`:

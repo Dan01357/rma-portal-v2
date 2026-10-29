@@ -25,7 +25,60 @@ Each test scenario defines:
 
 ---
 
-## Section 1: Public Intake Portal (`/`)
+## Section 1: Role-Based QR Code & 6-Digit PIN Gatekeeper Engine
+
+### 1.0 Gatekeeper Security & Station Authentication
+- [ ] **TC-GATE-01 (Direct Public URL Access Blocking)**
+  * **Location**: Public Root (`/`)
+  * **Action**: Open `https://rma-portal-v2.vercel.app/` in a clean incognito window without an active session token or slug.
+  * **Expected Behavior**: The intake scanner is strictly blocked by the Branded Gatekeeper overlay displaying: *"Please scan the official QR code located at the warehouse dock or on your product delivery carton to access the return intake system."* An **"Admin Staff Login"** link is accessible at the bottom.
+  * **Edge Case**: Verify direct URL navigation cannot bypass the lock overlay until valid credentials or station PIN are entered.
+
+- [ ] **TC-GATE-02 (Warehouse Dock QR Scan & Permanent 6-Digit PIN Entry)**
+  * **Location**: Dock Gateway URL (`/intake/dock` or `/?intake=dock`)
+  * **Action**: Scan dock QR code or visit `/intake/dock`. Input 6-digit numeric PIN `123456`.
+  * **Expected Behavior**: Real-time auto-advance across 6 PIN boxes; on the 6th digit, verification succeeds with green checkmark animation. A permanent session (`duration: 0`) is saved in `localStorage.rma_portal_gate_session`. The intake scanner unlocks and displays the station banner: `Main Warehouse Floor (/dock) • Permanent Dock`.
+  * **Edge Case**: Refresh the page or close and reopen the browser. Verify the device remains unlocked permanently without re-prompting for the PIN.
+
+- [ ] **TC-GATE-03 (Customer Box QR Scan & 2-Hour Session Expiration Lockout)**
+  * **Location**: Customer Repack Gateway URL (`/intake/returns` or `/?intake=returns`)
+  * **Action**: Scan customer box QR code or visit `/intake/returns`. Input 6-digit PIN `654321`.
+  * **Expected Behavior**: Session is created with `expiresAt = now + 2 hours`. Station banner indicates `Expires in ~120m`. The intake form unlocks.
+  * **Edge Case**: Fast-forward device time or modify `localStorage.rma_portal_gate_session.expiresAt` to a past timestamp and reload. The gatekeeper immediately revokes access, clears expired session, and re-locks to the PIN screen.
+
+- [ ] **TC-GATE-04 (Incorrect PIN Retry & Rate-Limit Cooldown)**
+  * **Location**: Gatekeeper PIN Modal (`/intake/dock` or `/intake/returns`)
+  * **Action**: Enter incorrect PIN (e.g., `000000`). Repeat 5 times consecutively.
+  * **Expected Behavior**: On incorrect entry, modal performs shake animation, clears PIN boxes, and displays: *"Incorrect 6-digit PIN. Please retry."* After 5 consecutive failures, brute-force protection triggers a 30-second lockout with countdown timer disabling input boxes.
+  * **Edge Case**: Attempting to type or submit during the 30-second cooldown is blocked until the timer reaches 0.
+
+- [ ] **TC-GATE-05 (Admin QR Code Generation & PIN Modification)**
+  * **Location**: Admin Dashboard -> **"QR Keys & PINs"** Modal (Restricted strictly to `SUPER_ADMIN` and `ADMIN`)
+  * **Action**:
+    1. Click **"+ New QR Access Code"**, enter Station Name (`North Logistics Bay`), Slug (`north-bay`), PIN (`987654`), Duration (`4` hours), and click **"Create Access Profile"**.
+    2. Click **"Edit PIN & Expiry"** on an existing profile, update PIN to `555123`, and save.
+  * **Expected Behavior**: New profile appears in the management list with slug `/intake/north-bay`. Profiles mutate Supabase `portal_access_keys` (or `rma_settings` fallback). Editing PIN takes effect immediately for subsequent scans.
+  * **Edge Case**: Attempting to access as non-admin (`inventory_staff` or unauthenticated) displays an **Access Restricted** security alert.
+
+- [ ] **TC-GATE-06 (Print Poster & Sticker Sheet with Optional PIN)**
+  * **Location**: QR Keys & PINs Manager -> Quick Action: **"Print Poster / Sticker"**
+  * **Action**: Open print preview for `dock` profile, toggle **"Include PIN Code on Poster"** checkbox, and click **"Print Poster (Sheet)"**.
+  * **Expected Behavior**: Generates high-resolution printable sheet with the exact station QR code (`https://rma-portal-v2.vercel.app/intake/dock`), official warehouse intake instructions, and optional large 6-digit PIN display.
+  * **Edge Case**: Unchecking the PIN toggle hides the PIN and replaces it with *"PIN Provided by Dock Supervisor"*.
+
+- [ ] **TC-GATE-07 (Revoke / Deactivate Profile)**
+  * **Location**: QR Keys & PINs Manager -> Status Toggle Switch
+  * **Action**: Click the status toggle switch on a profile to set `is_active: false`.
+  * **Expected Behavior**: Status badge updates to amber `Inactive`. Visiting that station slug displays: *"QR Code Inactive / Contact Supervisor"*, completely blocking intake submissions.
+
+- [ ] **TC-GATE-08 (QA Sandbox Quick Unlock in Test Mode)**
+  * **Location**: Gatekeeper Modal when `Test Mode: ON` is active in Super Admin
+  * **Action**: With test mode active, load `/`. Click **"Sandbox Quick Unlock (Warehouse Dock)"**.
+  * **Expected Behavior**: Instantly unlocks the portal for rapid QA testing without requiring manual PIN entry.
+
+---
+
+## Section 2: Public Intake Form Features
 
 ### 1.1 Super Admin Awareness Banner
 - [ ] **TC-PUB-01 (Unauthenticated User View)**

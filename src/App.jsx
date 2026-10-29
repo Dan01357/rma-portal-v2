@@ -49,7 +49,8 @@ import {
   FlaskConical,
   ToggleRight,
   ToggleLeft,
-  ClipboardCheck
+  ClipboardCheck,
+  KeyRound
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
@@ -77,6 +78,9 @@ import DeleteConfirmationModal from './components/DeleteConfirmationModal';
 import ReturnQRModal from './components/ReturnQRModal';
 import QuickRMAActionModal from './components/QuickRMAActionModal';
 import PortalAccessQRModal from './components/PortalAccessQRModal';
+import GatekeeperPinModal from './components/GatekeeperPinModal';
+import PortalAccessKeysModal from './components/PortalAccessKeysModal';
+import { accessKeyService } from './services/accessKeyService';
 import { QRCodeSVG } from 'qrcode.react';
 
 const DEFECT_REASONS = [
@@ -116,6 +120,36 @@ function formatLifecycleStage(status) {
     default:
       return { label: s.replace(/_/g, ' '), color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300' };
   }
+}
+
+
+/**
+ * Resolves the QR Intake slug from pathname, hash, or query parameters.
+ * Examples:
+ * - /intake/dock -> "dock"
+ * - /intake/returns -> "returns"
+ * - #/intake/dock -> "dock"
+ * - /?intake=dock -> "dock"
+ * - /?slug=dock -> "dock"
+ */
+function getIntakeSlugFromUrl() {
+  if (typeof window === 'undefined') return null;
+  const path = window.location.pathname.toLowerCase();
+  const hash = window.location.hash.toLowerCase();
+
+  const pathMatch = path.match(/^\/intake\/([^/?#]+)/i);
+  if (pathMatch && pathMatch[1]) return decodeURIComponent(pathMatch[1]);
+
+  const hashMatch = hash.match(/^#\/intake\/([^/?#]+)/i);
+  if (hashMatch && hashMatch[1]) return decodeURIComponent(hashMatch[1]);
+
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const paramSlug = params.get('intake') || params.get('slug');
+    if (paramSlug) return decodeURIComponent(paramSlug);
+  } catch {}
+
+  return null;
 }
 
 export default function App() {
@@ -165,6 +199,20 @@ export default function App() {
   const [quickRmaNumber, setQuickRmaNumber] = useState(null);
   const [pendingQuickRmaNumber, setPendingQuickRmaNumber] = useState(null);
   const [isPortalAccessQrOpen, setIsPortalAccessQrOpen] = useState(false);
+  const [isAccessKeysModalOpen, setIsAccessKeysModalOpen] = useState(false);
+
+  // Role-Based QR Code & 6-Digit PIN Gatekeeper Engine
+  const [intakeSlug, setIntakeSlug] = useState(() => getIntakeSlugFromUrl());
+  const [gateSession, setGateSession] = useState(() => {
+    const slug = getIntakeSlugFromUrl();
+    return accessKeyService.getActiveSession(slug);
+  });
+
+  const handleLockStation = () => {
+    accessKeyService.clearSession();
+    setGateSession(null);
+    showToast('Device locked. Enter 6-digit PIN to unlock station.', 'info');
+  };
 
   const restoreQuickRmaIfPending = () => {
     if (pendingQuickRmaNumber) {
@@ -227,6 +275,10 @@ export default function App() {
       const onAdmin = path === '/admin' || path.startsWith('/admin/') || hash === '#/admin' || window.location.search.includes('admin=true');
       setIsAdminView(onAdmin);
       
+      const newSlug = getIntakeSlugFromUrl();
+      setIntakeSlug(newSlug);
+      setGateSession(accessKeyService.getActiveSession(newSlug));
+
       // If entering /admin without an active session, open login gate
       if (onAdmin && !authService.getCurrentUser()) {
         setIsLoginModalOpen(true);
@@ -332,6 +384,9 @@ export default function App() {
     const onAdmin = path === '/admin' || path === '#/admin';
     setIsAdminView(onAdmin);
     setSelectedReportIds(new Set());
+    const nextSlug = getIntakeSlugFromUrl();
+    setIntakeSlug(nextSlug);
+    setGateSession(accessKeyService.getActiveSession(nextSlug));
     if (onAdmin && !currentUser) {
       setIsLoginModalOpen(true);
     }
@@ -1428,7 +1483,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsPortalAccessQrOpen(true)}
+                  onClick={() => setIsAccessKeysModalOpen(true)}
                   className="touch-target px-3 py-1.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 shadow-xs transition-colors flex items-center gap-1.5 text-xs font-bold cursor-pointer"
                   title="Open Shareable QR Code & Warehouse Poster"
                 >
@@ -1446,6 +1501,47 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            {/* Station Session Banner (Warehouse Dock or Customer Carton) */}
+            {gateSession && (
+              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-blue-200/90 dark:border-blue-900/60 shadow-xs text-xs animate-in fade-in duration-200">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`p-2.5 rounded-xl shrink-0 ${
+                    gateSession.type === 'internal_warehouse' 
+                      ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300' 
+                      : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300'
+                  }`}>
+                    {gateSession.type === 'internal_warehouse' ? <Building2 className="w-5 h-5" /> : <Package className="w-5 h-5" />}
+                  </div>
+                  <div className="min-w-0 space-y-0.5">
+                    <div className="font-black text-slate-900 dark:text-white truncate flex items-center gap-2">
+                      <span className="truncate">{gateSession.profileName || 'Active Intake Station'}</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold shrink-0">
+                        /{gateSession.slug}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 flex-wrap font-medium">
+                      <span>{gateSession.type === 'internal_warehouse' ? 'Internal Warehouse Dock' : 'Customer Box Repack'}</span>
+                      <span>•</span>
+                      <span className={gateSession.expiresAt ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-emerald-600 dark:text-emerald-400 font-bold'}>
+                        {gateSession.expiresAt 
+                          ? `Expires in ~${Math.max(1, Math.round((new Date(gateSession.expiresAt).getTime() - Date.now()) / (60 * 1000)))}m` 
+                          : 'Permanent Station (No Expiry)'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLockStation}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/40 text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 text-xs font-bold border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer shrink-0 ml-2"
+                  title="Lock device and require PIN code on next scan"
+                >
+                  Lock Device
+                </button>
+              </div>
+            )}
+
 
             {/* Super Admin Status & Sandbox Control Banner on Public Portal:
                 Only displayed if the active user is an authenticated Super Admin.
@@ -1976,12 +2072,12 @@ export default function App() {
 
                 <button
                   type="button"
-                  onClick={() => setIsPortalAccessQrOpen(true)}
+                  onClick={() => setIsAccessKeysModalOpen(true)}
                   className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
-                  title="Generate QR code and poster for users to report returns"
+                  title="Manage Role-Based QR Code & 6-Digit PIN Gatekeepers"
                 >
-                  <QrCode className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span>Scan to Report QR</span>
+                  <KeyRound className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>QR Keys & PINs</span>
                 </button>
 
                 <button
@@ -2144,6 +2240,18 @@ export default function App() {
                 <span>Credit Memos ({creditMemosList.length})</span>
               </button>
 
+
+              {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') && (
+                <button
+                  type="button"
+                  onClick={() => setIsAccessKeysModalOpen(true)}
+                  className="touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 text-blue-700 dark:text-blue-300 hover:bg-blue-100/60 dark:hover:bg-blue-950/40 transition-all cursor-pointer whitespace-nowrap shrink-0"
+                  title="Manage Role-Based QR Access Profiles & Gatekeeper PINs"
+                >
+                  <KeyRound className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span>QR Keys & PINs</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('supplier_claims')}
@@ -3248,7 +3356,7 @@ export default function App() {
               <SettingsTab
                 isTestMode={isTestMode}
                 onToggleTestMode={toggleTestMode}
-                onOpenPortalQr={() => setIsPortalAccessQrOpen(true)}
+                onOpenPortalQr={() => setIsAccessKeysModalOpen(true)}
                 currentUser={currentUser}
               />
             )}
@@ -3580,11 +3688,32 @@ export default function App() {
         isDeleting={isDeleteModalLoading}
       />
 
-      {/* Public Portal Access & Reporting Instructions QR Modal */}
-      <PortalAccessQRModal
-        isOpen={isPortalAccessQrOpen}
-        onClose={() => setIsPortalAccessQrOpen(false)}
+
+      {/* Role-Based QR Code & 6-Digit PIN Gatekeeper Screen (Active at root / or /intake/:slug when device is not unlocked) */}
+      <GatekeeperPinModal
+        isOpen={!isAdminView && !currentUser && !gateSession}
+        currentSlug={intakeSlug}
+        onUnlock={(session) => {
+          setGateSession(session);
+          showToast(`Station Unlocked: ${session.profileName || session.slug}`, 'success');
+        }}
+        onOpenAdminLogin={() => {
+          setIsAdminView(true);
+          setIsLoginModalOpen(true);
+        }}
+        isTestMode={isTestMode}
       />
+
+      {/* Admin QR Access Keys & 6-Digit PIN Manager Modal */}
+      <PortalAccessKeysModal
+        isOpen={isAccessKeysModalOpen || isPortalAccessQrOpen}
+        onClose={() => {
+          setIsAccessKeysModalOpen(false);
+          setIsPortalAccessQrOpen(false);
+        }}
+        currentUser={currentUser}
+      />
+
 
       {/* 4x6" Thermal Box Label Generator Modal */}
       {thermalPrintReport && (
