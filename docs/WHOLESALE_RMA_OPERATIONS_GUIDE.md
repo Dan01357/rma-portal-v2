@@ -355,3 +355,39 @@ To ensure dock staff and administrators can train without corrupting production 
    > `⚡ Super Admin Sandbox Active — Submissions will simulate without sending real emails or dispatching warehouse stock.`
 3. **Email Interception**: During test mode, email notifications are routed exclusively to `finance2@keysysincorporated.com` with a `[TEST SIMULATION]` subject prefix. Real customer and AE emails are completely blocked.
 4. **Dock Worker Protection**: Unauthenticated mobile phone scans and dock staff tablets are **100% locked to Live Mode**, ensuring real incoming customer returns are never misfiled as simulations.
+
+---
+
+## Chapter 8: Role-Based QR Gatekeeper & 6-Digit PIN Authorization Workflow
+
+To prevent unauthorized public access while simplifying return submission for approved customer supermarket branches and warehouse intake docks, the portal utilizes a role-based QR gatekeeper engine paired with an automated request and approval workflow.
+
+### 8.1 Station Architecture & Profile Types
+1. **Internal Warehouse Dock (`internal_warehouse`)**:
+   - Deployed on dock wall posters (e.g. `/intake/dock`).
+   - Default PIN: `123456`.
+   - Session duration: `0` (Permanent / No Expiry) so warehouse dock scanners remain permanently unlocked once authenticated.
+2. **External Customer Carton Stickers (`external_customer`)**:
+   - Printed dynamically on adhesive carton labels or packing slips (e.g. `/intake/returns`).
+   - Default PIN: `654321`.
+   - Session duration: Configurable (e.g. 2 hours, 4 hours, or custom minutes/hours) to ensure customer devices expire after return processing.
+
+### 8.2 Automated PIN Request & Approval Workflow
+When an external store reporter or driver scans a QR code without knowing the authorization PIN:
+1. **Scanner Prompt**: The user scans the QR code via Google Lens and lands on `/intake/:slug`.
+2. **Request Access Option**: Directly beneath the 6-digit PIN boxes, the user clicks *"Don't have the 6-digit PIN? Request Access Here"*.
+3. **Information Submission**: The reporter enters their work email, full name, supermarket/store location (e.g. *Savemore Market Branch 5*), and optional delivery notes.
+4. **Admin Queue Notification**: The request is instantly logged in `public.pin_requests`. Admin dashboards display a live notification badge: `PIN Requests (X pending)`.
+5. **One-Click Approval & SMTP Dispatch**:
+   - Admin opens the Pending PIN Requests Queue and clicks `[ Approve & Dispatch PIN ]` (or batches multiple requests via "Approve Selected").
+   - System fetches the active 6-digit PIN for that profile and sends a branded HTML email via Google SMTP (`api/send-email.js`).
+   - The email contains a prominent 6-digit PIN box, instructions, and a direct portal link.
+6. **PIN Reuse Protocol**:
+   - The store user enters the 6-digit PIN to unlock the intake form.
+   - For all future damaged returns under that QR profile, they **do not need to request access again**—the approved PIN remains valid.
+
+### 8.3 Sandbox Test Mode Bypass
+For rapid developer and QA testing:
+- When **Test Mode: ON** is active, submitting a PIN request immediately reveals the station's active 6-digit PIN on-screen in an amber sandbox banner with an *Auto-Fill PIN & Unlock Now* shortcut.
+- Dispatched emails in Test Mode are safely rerouted exclusively to `finance2@keysysincorporated.com`.
+

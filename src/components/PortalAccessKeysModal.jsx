@@ -21,7 +21,8 @@ import {
   ExternalLink,
   ShieldCheck,
   ShieldAlert,
-  Power
+  Power,
+  Mail
 } from 'lucide-react';
 import { accessKeyService, DEFAULT_ACCESS_PROFILES } from '../services/accessKeyService';
 import { downloadPortalPosterPng, downloadQrCodePng, printPortalPoster } from '../utils/qrDownload';
@@ -38,7 +39,7 @@ export function formatDurationLabel(hours) {
   return `${h.toFixed(1)} Hours (${totalMins}m)`;
 }
 
-export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) {
+export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, onOpenPinRequests }) {
   const [profiles, setProfiles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [copiedSlug, setCopiedSlug] = useState(null);
@@ -298,14 +299,27 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
 
           <div className="flex items-center gap-2">
             {modalMode === 'list' && (
-              <button
-                type="button"
-                onClick={handleOpenCreate}
-                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all cursor-pointer active:scale-95"
-              >
-                <Plus className="w-4 h-4" />
-                <span>New QR Access Code</span>
-              </button>
+              <>
+                {onOpenPinRequests && (
+                  <button
+                    type="button"
+                    onClick={onOpenPinRequests}
+                    className="px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                    title="View & Approve Pending Return Authorization PIN Requests"
+                  >
+                    <Mail className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    <span>PIN Requests</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleOpenCreate}
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all cursor-pointer active:scale-95"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>New QR Access Code</span>
+                </button>
+              </>
             )}
             <button
               type="button"

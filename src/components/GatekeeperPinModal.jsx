@@ -14,9 +14,18 @@ import {
   Sparkles,
   ArrowRight,
   RefreshCw,
-  HelpCircle
+  HelpCircle,
+  Mail,
+  User,
+  Building,
+  FileText,
+  Send,
+  X,
+  KeyRound,
+  Check
 } from 'lucide-react';
 import { accessKeyService } from '../services/accessKeyService';
+import { pinRequestService } from '../services/pinRequestService';
 
 export default function GatekeeperPinModal({
   isOpen,
@@ -33,6 +42,18 @@ export default function GatekeeperPinModal({
   const [isShake, setIsShake] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
+
+  // Request PIN Modal & Form State
+  const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
+  const [requestForm, setRequestForm] = useState({
+    email: '',
+    name: '',
+    organization: '',
+    notes: ''
+  });
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+  const [requestSuccess, setRequestSuccess] = useState(false);
+  const [requestError, setRequestError] = useState('');
 
   const inputRefs = [
     useRef(null),
@@ -51,6 +72,9 @@ export default function GatekeeperPinModal({
       setPinDigits(['', '', '', '', '', '']);
       setErrorMessage('');
       setLockoutSeconds(0);
+      setIsRequestModalOpen(false);
+      setRequestSuccess(false);
+      setRequestError('');
     }
   }, [isOpen]);
 
@@ -215,6 +239,44 @@ export default function GatekeeperPinModal({
         onUnlock(session);
       }, 400);
     });
+  };
+
+  // Submit PIN Authorization Request
+  const handleRequestSubmit = async (e) => {
+    e?.preventDefault();
+    if (!profile) return;
+    if (!requestForm.email || !requestForm.name || !requestForm.organization) {
+      setRequestError('Please fill in your email, full name, and store/company location.');
+      return;
+    }
+    setIsSubmittingRequest(true);
+    setRequestError('');
+    try {
+      await pinRequestService.createPinRequest({
+        accessSlug: profile.access_slug,
+        accessKeyId: profile.id,
+        requesterEmail: requestForm.email,
+        requesterName: requestForm.name,
+        organizationName: requestForm.organization,
+        notes: requestForm.notes
+      });
+      setIsSubmittingRequest(false);
+      setRequestSuccess(true);
+    } catch (err) {
+      console.error('Submit PIN request error:', err);
+      setIsSubmittingRequest(false);
+      setRequestError(err.message || 'Failed to submit PIN request. Please try again.');
+    }
+  };
+
+  // Test mode auto-fill & unlock helper
+  const handleAutoFillTestPin = () => {
+    if (!profile?.pin_code) return;
+    const digits = profile.pin_code.split('');
+    setPinDigits(digits);
+    setIsRequestModalOpen(false);
+    setRequestSuccess(false);
+    verifyPinCode(profile.pin_code);
   };
 
   return (
@@ -436,6 +498,22 @@ export default function GatekeeperPinModal({
                   Numeric digits 0–9 • Auto-verifies on 6th digit
                 </div>
               )}
+
+              {/* Option: Request Authorization PIN */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRequestSuccess(false);
+                    setRequestError('');
+                    setIsRequestModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50/80 hover:bg-blue-100 dark:bg-blue-950/50 dark:hover:bg-blue-900/60 border border-blue-200/80 dark:border-blue-800/80 transition-all cursor-pointer shadow-xs active:scale-95"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>Don't have the 6-digit PIN? Request Access Here</span>
+                </button>
+              </div>
             </div>
 
             {/* Test Mode Quick Bypass (QA Helper) */}
@@ -477,6 +555,243 @@ export default function GatekeeperPinModal({
               </button>
             </div>
 
+          </div>
+        )}
+
+        {/* ================================================================= */}
+        {/* SUB-MODAL: REQUEST 6-DIGIT RETURN AUTHORIZATION PIN               */}
+        {/* ================================================================= */}
+        {isRequestModalOpen && (
+          <div className="absolute inset-0 bg-white dark:bg-slate-900 z-30 p-6 sm:p-7 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-bottom duration-200">
+            <div>
+              {/* Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                    <KeyRound className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900 dark:text-white leading-tight">
+                      Request Authorization PIN
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Station: {profile?.name || currentSlug}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsRequestModalOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {!requestSuccess ? (
+                <>
+                  {/* Step-by-Step Guidance Banner */}
+                  <div className="mt-4 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 space-y-2 text-xs">
+                    <div className="text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1">
+                      📋 How It Works:
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                      <div className="flex items-start gap-1.5">
+                        <span className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">1</span>
+                        <span>Submit your store &amp; contact details</span>
+                      </div>
+                      <div className="flex items-start gap-1.5">
+                        <span className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">2</span>
+                        <span>Admin reviews &amp; approves request</span>
+                      </div>
+                      <div className="flex items-start gap-1.5">
+                        <span className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">3</span>
+                        <span>Receive 6-digit PIN directly via email</span>
+                      </div>
+                      <div className="flex items-start gap-1.5">
+                        <span className="w-4 h-4 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">4</span>
+                        <span>Reuse PIN anytime for future returns!</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Submission Form */}
+                  <form onSubmit={handleRequestSubmit} className="mt-4 space-y-3">
+                    {/* Email */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Your Email Address <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="email"
+                          required
+                          value={requestForm.email}
+                          onChange={(e) => setRequestForm({ ...requestForm, email: e.target.value })}
+                          placeholder="reporter@supermarket.com"
+                          className="w-full pl-9 pr-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Full Name */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Your Full Name <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          required
+                          value={requestForm.name}
+                          onChange={(e) => setRequestForm({ ...requestForm, name: e.target.value })}
+                          placeholder="Juan Dela Cruz"
+                          className="w-full pl-9 pr-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Organization / Location */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Company / Supermarket / Location <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <Building className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          required
+                          value={requestForm.organization}
+                          onChange={(e) => setRequestForm({ ...requestForm, organization: e.target.value })}
+                          placeholder="e.g. Savemore Market Branch 5"
+                          className="w-full pl-9 pr-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Optional Reason / Notes */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Brief Reason / Delivery Reference <span className="text-slate-400 text-[10px]">(Optional)</span>
+                      </label>
+                      <div className="relative">
+                        <FileText className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                        <textarea
+                          rows="2"
+                          value={requestForm.notes}
+                          onChange={(e) => setRequestForm({ ...requestForm, notes: e.target.value })}
+                          placeholder="e.g. Received damaged box of canned goods from delivery #104"
+                          className="w-full pl-9 pr-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Error Notice */}
+                    {requestError && (
+                      <div className="p-2.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 rounded-xl flex items-center gap-2 text-xs font-bold text-rose-700 dark:text-rose-300">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        <span>{requestError}</span>
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="pt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsRequestModalOpen(false)}
+                        className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isSubmittingRequest}
+                        className="w-2/3 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        {isSubmittingRequest ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Submitting Request...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5" />
+                            <span>Submit PIN Request</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </>
+              ) : (
+                /* Confirmation State */
+                <div className="mt-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="w-16 h-16 rounded-3xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/10">
+                    <CheckCircle2 className="w-8 h-8" />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <h4 className="text-lg font-black text-slate-900 dark:text-white">
+                      Request Submitted!
+                    </h4>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 max-w-sm mx-auto leading-relaxed">
+                      Our administrative team has been notified. Please check your inbox (and spam folder) at <strong className="text-blue-600 dark:text-blue-400">{requestForm.email}</strong> for the 6-digit access PIN.
+                    </p>
+                  </div>
+
+                  {/* Test Mode Sandbox Bypass (QA Requirement 5) */}
+                  {isTestMode && profile?.pin_code && (
+                    <div className="p-3.5 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-2xl text-left space-y-2">
+                      <div className="flex items-center justify-between text-xs font-extrabold text-amber-800 dark:text-amber-300">
+                        <span className="flex items-center gap-1">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                          Test Mode Sandbox Active
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-200/80 dark:bg-amber-900 text-amber-900 dark:text-amber-200 font-mono">
+                          QA Bypass
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-amber-900/90 dark:text-amber-200 leading-snug">
+                        Developers and testers do not need to wait for email delivery. The active PIN for this profile is:
+                      </p>
+                      <div className="p-2 bg-amber-100/70 dark:bg-amber-900/40 rounded-xl text-center font-mono font-black text-xl tracking-widest text-amber-950 dark:text-amber-100">
+                        {profile.pin_code}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAutoFillTestPin}
+                        className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Auto-Fill PIN &amp; Unlock Now</span>
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsRequestModalOpen(false);
+                        setRequestSuccess(false);
+                        setTimeout(() => inputRefs[0]?.current?.focus(), 150);
+                      }}
+                      className="w-full py-2.5 bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+                    >
+                      Return to 6-Digit PIN Screen
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 text-center border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400">
+              Keysys &amp; Pingcon Automated Return Authorization Gatekeeper
+            </div>
           </div>
         )}
 

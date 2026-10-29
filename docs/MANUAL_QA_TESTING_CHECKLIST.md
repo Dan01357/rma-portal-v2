@@ -631,6 +631,50 @@ Each test scenario defines:
     2. The recognized product remains permanently displayed without disappearing or being overwritten by slower out-of-order responses from preceding keystrokes.
     3. Accidental Enter keys from hardware scanners or keyboards do not prematurely submit or clear the form.
 
+---
+
+## Phase 9: Role-Based QR Gatekeeper & Automated PIN Request Approval Engine
+
+- [ ] **TC-PIN-REQ-01 (User "Request PIN" Form Submission & Supabase Row Creation)**
+  * **Location**: Public Intake (`/intake/:slug`, e.g. `/intake/returns`) -> Gatekeeper PIN Screen
+  * **Action**: Click *"Don't have the 6-digit PIN? Request Access Here"*, fill in email (`reporter@supermarket.com`), full name, store location, optional delivery reference, and submit.
+  * **Expected Behavior**:
+    1. System creates a pending row in `public.pin_requests` (or fallback store) with `status = 'pending'`.
+    2. UI displays confirmation state instructing the user to check their email inbox.
+    3. If **Test Mode: ON** is active, a sandbox banner immediately surfaces the active 6-digit PIN on-screen with an "Auto-Fill PIN & Unlock Now" button so developers and testers bypass email latency.
+
+- [ ] **TC-PIN-NOTIF-02 (Admin Notification Counter Badge Update)**
+  * **Location**: Admin Top Navigation Header -> `PIN Requests (X pending)` Button
+  * **Action**: Submit one or more PIN authorization requests from external QR scans.
+  * **Expected Behavior**:
+    1. The live header badge automatically updates its counter (e.g. `PIN Requests (1)` with amber pulse indicator).
+    2. Counter updates reactively without requiring a full page refresh via `rma-pin-requests-changed` custom event dispatch.
+
+- [ ] **TC-PIN-APPROVE-03 (Admin "Approve & Dispatch PIN" Action & Google SMTP Email Delivery)**
+  * **Location**: Admin Top Header -> `PIN Requests` Modal -> Pending Tab
+  * **Action**: Click `[ Approve & Dispatch PIN ]` on a pending request (or use "Approve Selected" for batch approval).
+  * **Expected Behavior**:
+    1. System fetches the target station's active 6-digit PIN from `public.portal_access_keys`.
+    2. An official, branded HTML email is dispatched via Google SMTP (`/api/send-email`) featuring the prominent 6-digit PIN box, station instructions, and direct return portal URL.
+    3. The request's status transitions to `approved`, logging `approved_by` (Super Admin name) and `reviewed_at`.
+    4. Feedback toast confirms email dispatch, and pending badge decrements.
+
+- [ ] **TC-PIN-REJECT-04 (Admin "Reject" Action Test)**
+  * **Location**: Admin Top Header -> `PIN Requests` Modal -> Pending Tab
+  * **Action**: Click `[ Reject ]`, provide an optional rejection reason (e.g. "Unrecognized customer branch"), and confirm.
+  * **Expected Behavior**:
+    1. The request status transitions to `rejected` with the rejection note stored in `notes`.
+    2. Item moves from Pending tab to Rejected tab.
+    3. Pending counter decrements immediately.
+
+- [ ] **TC-PIN-REUSE-05 (Re-using Approved PIN for Subsequent Sessions Without Re-requesting)**
+  * **Location**: Return Portal Intake (`/intake/:slug`)
+  * **Action**: Enter the approved 6-digit PIN received in the approval email on a second session or after device lock.
+  * **Expected Behavior**:
+    1. System verifies the 6-digit PIN against the active station key.
+    2. Intake form unlocks immediately without requiring the user to submit another authorization request.
+    3. Active session cookie/storage is established based on the profile's configured duration.
+
 
 ---
 
@@ -646,4 +690,5 @@ Each test scenario defines:
 | **Phase 6: SHA-256 REST API Vault** | Partner Integration (`/docs`) | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 7: Free-Tier Optimization & Google Drive** | WebP Compression & Cloud Storage | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 8: Column Separation & Instant Submit** | Table Views & Storage Cleanup | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 9: Role-Based QR Gatekeeper & PIN Queue** | Gatekeeper Engine & SMTP Approvals | `READY FOR TESTING` | *Lead QA Director* |
 

@@ -80,7 +80,9 @@ import QuickRMAActionModal from './components/QuickRMAActionModal';
 import PortalAccessQRModal from './components/PortalAccessQRModal';
 import GatekeeperPinModal from './components/GatekeeperPinModal';
 import PortalAccessKeysModal from './components/PortalAccessKeysModal';
+import PinRequestsQueueModal from './components/PinRequestsQueueModal';
 import { accessKeyService } from './services/accessKeyService';
+import { pinRequestService } from './services/pinRequestService';
 import { QRCodeSVG } from 'qrcode.react';
 
 const DEFECT_REASONS = [
@@ -200,6 +202,28 @@ export default function App() {
   const [pendingQuickRmaNumber, setPendingQuickRmaNumber] = useState(null);
   const [isPortalAccessQrOpen, setIsPortalAccessQrOpen] = useState(false);
   const [isAccessKeysModalOpen, setIsAccessKeysModalOpen] = useState(false);
+  const [isPinRequestsModalOpen, setIsPinRequestsModalOpen] = useState(false);
+  const [pendingPinRequestsCount, setPendingPinRequestsCount] = useState(0);
+
+  // Sync Pending PIN Requests count for live badge
+  useEffect(() => {
+    let isMounted = true;
+    const updatePendingCount = async () => {
+      try {
+        const count = await pinRequestService.getPendingCount();
+        if (isMounted) setPendingPinRequestsCount(count);
+      } catch (e) {}
+    };
+
+    updatePendingCount();
+
+    const handleChanged = () => updatePendingCount();
+    window.addEventListener('rma-pin-requests-changed', handleChanged);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('rma-pin-requests-changed', handleChanged);
+    };
+  }, []);
 
   // Role-Based QR Code & 6-Digit PIN Gatekeeper Engine
   const [intakeSlug, setIntakeSlug] = useState(() => getIntakeSlugFromUrl());
@@ -2071,6 +2095,30 @@ export default function App() {
                   <span>QR Keys & PINs</span>
                 </button>
 
+                {/* Live Notification Badge for Pending Return Authorization PIN Requests */}
+                <button
+                  type="button"
+                  onClick={() => setIsPinRequestsModalOpen(true)}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer ${
+                    pendingPinRequestsCount > 0
+                      ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 ring-2 ring-amber-400/30'
+                      : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-transparent'
+                  }`}
+                  title="Pending 6-Digit PIN Requests Queue"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span>PIN Requests</span>
+                  {pendingPinRequestsCount > 0 ? (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-amber-600 text-white animate-pulse">
+                      {pendingPinRequestsCount}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 font-semibold">
+                      (0)
+                    </span>
+                  )}
+                </button>
+
                 <button
                   type="button"
                   onClick={() => navigateTo('/')}
@@ -3674,6 +3722,23 @@ export default function App() {
           setIsPortalAccessQrOpen(false);
         }}
         currentUser={currentUser}
+        onOpenPinRequests={() => {
+          setIsAccessKeysModalOpen(false);
+          setIsPortalAccessQrOpen(false);
+          setIsPinRequestsModalOpen(true);
+        }}
+      />
+
+      {/* Return Authorization PIN Requests Queue Modal */}
+      <PinRequestsQueueModal
+        isOpen={isPinRequestsModalOpen}
+        onClose={() => setIsPinRequestsModalOpen(false)}
+        currentUser={currentUser}
+        isTestMode={isTestMode}
+        onQueueUpdated={(reqs) => {
+          const pending = reqs.filter(r => r.status === 'pending').length;
+          setPendingPinRequestsCount(pending);
+        }}
       />
 
 
