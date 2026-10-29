@@ -275,26 +275,71 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
   // High-Fidelity Isolated Print Handler (Guarantees exactly 1 page & 100% preview match)
   const handlePrintPoster = () => {
     const sizeConfig = {
-      'a4': { pageSize: 'A4 portrait', pageMargin: '0.4in', scale: 1.0 },
-      '4x6': { pageSize: '4in 6in', pageMargin: '0.15in', scale: 1.0 },
-      '3x3': { pageSize: '3in 3in', pageMargin: '0.08in', scale: 0.95 },
-      '2x2': { pageSize: '2in 2in', pageMargin: '0.04in', scale: 0.88 }
-    }[printSize] || { pageSize: 'A4 portrait', pageMargin: '0.4in', scale: 1.0 };
+      'a4': {
+        pageSize: 'A4 portrait',
+        pageMargin: '0.4in',
+        scale: 1.0,
+        customStyles: `
+          #portal-poster-print-mount {
+            width: 100% !important;
+            max-width: 190mm !important;
+            box-shadow: none !important;
+            margin: auto !important;
+          }
+        `
+      },
+      '4x6': {
+        pageSize: '4in 6in',
+        pageMargin: '0.25in',
+        scale: 1.0,
+        customStyles: `
+          #portal-poster-print-mount {
+            width: 3.4in !important;
+            max-width: 3.4in !important;
+            box-shadow: none !important;
+            margin: auto !important;
+          }
+        `
+      },
+      '3x3': {
+        pageSize: '3in 3in',
+        pageMargin: '0.1in',
+        scale: 1.0,
+        customStyles: `
+          #portal-poster-print-mount {
+            width: 2.75in !important;
+            height: 2.75in !important;
+            max-width: 2.75in !important;
+            box-shadow: none !important;
+            margin: auto !important;
+            box-sizing: border-box !important;
+          }
+        `
+      },
+      '2x2': {
+        pageSize: '2in 2in',
+        pageMargin: '0.06in',
+        scale: 1.0,
+        customStyles: `
+          #portal-poster-print-mount {
+            width: 1.84in !important;
+            height: 1.84in !important;
+            max-width: 1.84in !important;
+            box-shadow: none !important;
+            margin: auto !important;
+            box-sizing: border-box !important;
+          }
+        `
+      }
+    }[printSize] || { pageSize: 'A4 portrait', pageMargin: '0.4in', scale: 1.0, customStyles: '' };
 
     printIsolatedElement({
       elementId: 'portal-poster-print-mount',
-      documentTitle: `RMA-QR-${selectedProfile?.access_slug || 'Station'}`,
+      documentTitle: `RMA-QR-${selectedProfile?.access_slug || 'Station'}-${printSize}`,
       pageSize: sizeConfig.pageSize,
       pageMargin: sizeConfig.pageMargin,
       scale: sizeConfig.scale,
-      customStyles: `
-        #portal-poster-print-mount {
-          box-shadow: none !important;
-          margin: 0 auto !important;
-          page-break-inside: avoid !important;
-          break-inside: avoid !important;
-        }
-      `
+      customStyles: sizeConfig.customStyles
     });
   };
 
@@ -848,77 +893,212 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
             </div>
 
             {/* Poster Sheet Preview Mount (Strict Target for Print) */}
-            <div className="flex justify-center p-2 sm:p-4 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-x-auto">
-              <div 
-                id="portal-poster-print-mount"
-                className={`bg-white text-black p-4 sm:p-6 rounded-2xl border-2 border-black shadow-lg text-center font-sans space-y-3 transition-all ${
-                  printSize === '2x2' 
-                    ? 'w-[200px] text-[10px] space-y-2 p-2.5' 
-                    : printSize === '3x3' 
-                    ? 'w-[280px] text-xs space-y-2.5 p-3.5' 
-                    : printSize === '4x6' 
-                    ? 'w-[340px] text-xs space-y-3 p-4' 
-                    : 'w-full max-w-[420px] text-xs space-y-4 p-6'
-                }`}
-              >
-                {/* Header */}
-                <div className="border-b-2 border-black pb-2 space-y-0.5">
-                  <div className="text-[9px] font-black uppercase tracking-widest text-black">
-                    {selectedProfile.type === 'internal_warehouse' ? 'WHOLESALE WAREHOUSE DOCK' : 'CUSTOMER RETURN INTAKE'}
-                  </div>
-                  <h2 className={`font-black text-black uppercase leading-tight ${
-                    printSize === '2x2' ? 'text-xs' : printSize === '3x3' ? 'text-sm' : 'text-base sm:text-lg'
-                  }`}>
-                    {selectedProfile.name}
-                  </h2>
-                  <p className="text-[10px] text-black font-medium">
-                    Scan with <strong>Google Lens</strong> or QR scanner app
-                  </p>
-                </div>
-
-                {/* QR Code */}
-                <div className="inline-block p-2 bg-white border-2 border-black rounded-xl">
-                  <QRCodeSVG
-                    id="station-qr-svg"
-                    value={`${originUrl}/intake/${selectedProfile.access_slug}`}
-                    size={printSize === '2x2' ? 90 : printSize === '3x3' ? 120 : printSize === '4x6' ? 150 : 180}
-                    level="H"
-                    includeMargin={false}
-                  />
-                </div>
-
-                {/* Slug Pill */}
-                <div className="bg-black text-white font-mono text-[10px] font-bold py-1 px-2.5 rounded-lg inline-block max-w-full truncate">
-                  {originUrl.replace(/^https?:\/\//, '')}/intake/{selectedProfile.access_slug}
-                </div>
-
-                {/* Optional 6-Digit PIN on Poster */}
-                {showPinOnPoster && (
-                  <div className="p-2 border-2 border-black rounded-xl bg-slate-50 space-y-0.5">
-                    <div className="text-[9px] font-black uppercase tracking-wider text-black">
-                      Station 6-Digit Gatekeeper PIN
+            <div className="flex justify-center p-3 sm:p-5 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-x-auto">
+              
+              {/* VARIANT 1: A4 FULL SHEET WALL POSTER (The BIGGEST among all 4) */}
+              {printSize === 'a4' && (
+                <div 
+                  id="portal-poster-print-mount"
+                  className="bg-white text-black p-8 sm:p-10 rounded-3xl border-4 border-black shadow-xl text-center font-sans space-y-5 w-full max-w-[600px] mx-auto transition-all"
+                >
+                  {/* Header */}
+                  <div className="border-b-4 border-black pb-4 space-y-1">
+                    <div className="text-xs sm:text-sm font-black uppercase tracking-[0.25em] text-black">
+                      {selectedProfile.type === 'internal_warehouse' ? 'WHOLESALE WAREHOUSE DOCK' : 'CUSTOMER RETURN INTAKE'}
                     </div>
-                    <div className={`font-black font-mono tracking-widest text-black ${
-                      printSize === '2x2' ? 'text-base' : 'text-xl'
-                    }`}>
-                      {selectedProfile.pin_code}
-                    </div>
+                    <h2 className="text-2xl sm:text-4xl font-black text-black uppercase tracking-tight leading-tight">
+                      {selectedProfile.name}
+                    </h2>
+                    <p className="text-xs sm:text-sm text-black font-semibold pt-0.5">
+                      Scan with <strong>Google Lens</strong> or Phone Camera to File Return Report
+                    </p>
                   </div>
-                )}
 
-                {/* Numbered Google Lens Instructions (Compact on small tags) */}
-                {printSize !== '2x2' ? (
+                  {/* Big QR Code */}
+                  <div className="inline-block p-4 bg-white border-4 border-black rounded-3xl shadow-xs">
+                    <QRCodeSVG
+                      id="station-qr-svg"
+                      value={`${originUrl}/intake/${selectedProfile.access_slug}`}
+                      size={240}
+                      level="H"
+                      includeMargin={false}
+                    />
+                  </div>
+
+                  {/* Slug Pill */}
+                  <div>
+                    <span className="bg-black text-white font-mono text-xs sm:text-sm font-bold py-1.5 px-4 rounded-xl inline-block max-w-full truncate shadow-xs">
+                      {originUrl.replace(/^https?:\/\//, '')}/intake/{selectedProfile.access_slug}
+                    </span>
+                  </div>
+
+                  {/* Large 6-Digit PIN on Poster */}
+                  {showPinOnPoster && (
+                    <div className="p-3.5 sm:p-4 border-3 border-black rounded-2xl bg-slate-50 space-y-1">
+                      <div className="text-xs font-black uppercase tracking-widest text-black">
+                        Station 6-Digit Gatekeeper PIN
+                      </div>
+                      <div className="font-mono font-black text-3xl sm:text-4xl tracking-[0.3em] text-black">
+                        {selectedProfile.pin_code}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Numbered Google Lens Instructions */}
+                  <div className="text-left text-xs sm:text-sm space-y-2 text-black pt-3.5 border-t-4 border-black font-medium leading-relaxed">
+                    <div><strong>1.</strong> Open <strong>Google Lens</strong> (or phone camera) on your mobile device.</div>
+                    <div><strong>2.</strong> Point camera directly at QR code above and tap the link to launch portal.</div>
+                    <div><strong>3.</strong> Enter station 6-digit PIN (<strong>{selectedProfile.pin_code}</strong>) when prompted to unlock intake scanner.</div>
+                  </div>
+                </div>
+              )}
+
+              {/* VARIANT 2: 4" x 6" CARTON STICKER (Symmetrical & Balanced Margins) */}
+              {printSize === '4x6' && (
+                <div 
+                  id="portal-poster-print-mount"
+                  className="bg-white text-black p-5 sm:p-6 rounded-2xl border-2 border-black shadow-md text-center font-sans space-y-3 w-[330px] mx-auto transition-all"
+                >
+                  {/* Header */}
+                  <div className="border-b-2 border-black pb-2 space-y-0.5">
+                    <div className="text-[10px] font-black uppercase tracking-widest text-black">
+                      {selectedProfile.type === 'internal_warehouse' ? 'WHOLESALE WAREHOUSE DOCK' : 'CUSTOMER RETURN INTAKE'}
+                    </div>
+                    <h2 className="text-base sm:text-lg font-black text-black uppercase leading-tight">
+                      {selectedProfile.name}
+                    </h2>
+                    <p className="text-[10px] text-black font-medium">
+                      Scan with <strong>Google Lens</strong> or QR scanner app
+                    </p>
+                  </div>
+
+                  {/* QR Code */}
+                  <div className="inline-block p-2 bg-white border-2 border-black rounded-xl">
+                    <QRCodeSVG
+                      id="station-qr-svg"
+                      value={`${originUrl}/intake/${selectedProfile.access_slug}`}
+                      size={145}
+                      level="H"
+                      includeMargin={false}
+                    />
+                  </div>
+
+                  {/* Slug Pill */}
+                  <div>
+                    <span className="bg-black text-white font-mono text-[10px] font-bold py-1 px-3 rounded-lg inline-block max-w-full truncate">
+                      {originUrl.replace(/^https?:\/\//, '')}/intake/{selectedProfile.access_slug}
+                    </span>
+                  </div>
+
+                  {/* Optional 6-Digit PIN on Sticker */}
+                  {showPinOnPoster && (
+                    <div className="p-2 border-2 border-black rounded-xl bg-slate-50 space-y-0.5">
+                      <div className="text-[9px] font-black uppercase tracking-wider text-black">
+                        Station 6-Digit Gatekeeper PIN
+                      </div>
+                      <div className="font-black font-mono text-xl tracking-widest text-black">
+                        {selectedProfile.pin_code}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Numbered Instructions */}
                   <div className="text-left text-[10px] space-y-1 text-black pt-2 border-t-2 border-black">
                     <div><strong>1.</strong> Open <strong>Google Lens</strong> (or QR scanner) on phone.</div>
-                    <div><strong>2.</strong> Point at QR code above & tap link to launch portal.</div>
+                    <div><strong>2.</strong> Point at QR code above &amp; tap link to launch portal.</div>
                     <div><strong>3.</strong> Enter 6-digit station PIN when prompted.</div>
                   </div>
-                ) : (
-                  <div className="text-[9px] font-bold text-black border-t border-black pt-1">
-                    Open Google Lens & Scan QR to Return
+                </div>
+              )}
+
+              {/* VARIANT 3: 3" x 3" MEDIUM LABEL (Zero Overflow, Compact Horizontal PIN) */}
+              {printSize === '3x3' && (
+                <div 
+                  id="portal-poster-print-mount"
+                  className="bg-white text-black p-3.5 rounded-xl border-2 border-black shadow-md text-center font-sans space-y-2 w-[260px] mx-auto transition-all"
+                >
+                  {/* Header */}
+                  <div className="border-b border-black pb-1 space-y-0.5">
+                    <div className="text-[8px] font-black uppercase tracking-wider text-black">
+                      {selectedProfile.type === 'internal_warehouse' ? 'WAREHOUSE DOCK' : 'CUSTOMER RETURN'}
+                    </div>
+                    <h2 className="text-xs font-black text-black uppercase leading-tight truncate">
+                      {selectedProfile.name}
+                    </h2>
                   </div>
-                )}
-              </div>
+
+                  {/* QR Code */}
+                  <div className="inline-block p-1 bg-white border border-black rounded-lg">
+                    <QRCodeSVG
+                      id="station-qr-svg"
+                      value={`${originUrl}/intake/${selectedProfile.access_slug}`}
+                      size={95}
+                      level="H"
+                      includeMargin={false}
+                    />
+                  </div>
+
+                  {/* Slug Pill */}
+                  <div>
+                    <span className="bg-black text-white font-mono text-[9px] font-bold py-0.5 px-2 rounded-md inline-block max-w-full truncate">
+                      /{selectedProfile.access_slug}
+                    </span>
+                  </div>
+
+                  {/* Compact Horizontal PIN Strip */}
+                  {showPinOnPoster && (
+                    <div className="py-1 px-2.5 border border-black rounded-lg bg-slate-50 flex items-center justify-between text-black">
+                      <span className="text-[9px] font-black uppercase">STATION PIN</span>
+                      <span className="font-mono font-black text-sm tracking-wider">{selectedProfile.pin_code}</span>
+                    </div>
+                  )}
+
+                  {/* Concise 1-line Instruction */}
+                  <div className="text-[9px] font-bold text-black border-t border-black pt-1">
+                    Scan with Google Lens to Return Item
+                  </div>
+                </div>
+              )}
+
+              {/* VARIANT 4: 2" x 2" SMALL ITEM TAG (Concise, Mini-Format for Loose/Unboxed Items) */}
+              {printSize === '2x2' && (
+                <div 
+                  id="portal-poster-print-mount"
+                  className="bg-white text-black p-2 rounded-lg border-2 border-black shadow-sm text-center font-sans space-y-1.5 w-[180px] mx-auto transition-all"
+                >
+                  {/* Title */}
+                  <div className="border-b border-black pb-0.5">
+                    <h2 className="text-[10px] font-black text-black uppercase leading-tight truncate">
+                      {selectedProfile.name}
+                    </h2>
+                  </div>
+
+                  {/* Mini QR Code */}
+                  <div className="inline-block p-1 bg-white border border-black rounded-md">
+                    <QRCodeSVG
+                      id="station-qr-svg"
+                      value={`${originUrl}/intake/${selectedProfile.access_slug}`}
+                      size={72}
+                      level="H"
+                      includeMargin={false}
+                    />
+                  </div>
+
+                  {/* Inline PIN Pill */}
+                  {showPinOnPoster && (
+                    <div className="py-0.5 px-1.5 bg-black text-white rounded text-[9px] font-mono font-black flex items-center justify-between">
+                      <span>PIN:</span>
+                      <span className="tracking-widest">{selectedProfile.pin_code}</span>
+                    </div>
+                  )}
+
+                  {/* Mini Scan Prompt */}
+                  <div className="text-[8px] font-extrabold uppercase text-black pt-0.5 border-t border-black">
+                    Scan via Google Lens
+                  </div>
+                </div>
+              )}
+
             </div>
 
             {/* Poster Controls Bar */}

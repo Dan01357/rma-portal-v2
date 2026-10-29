@@ -1,12 +1,12 @@
 import React, { useRef } from 'react';
-import { 
-  Printer, 
-  X, 
-  Download, 
-  CheckCircle2, 
-  Package, 
-  MapPin, 
-  Calendar, 
+import {
+  Printer,
+  X,
+  Download,
+  CheckCircle2,
+  Package,
+  MapPin,
+  Calendar,
   Building2,
   Tag,
   ShieldCheck,
@@ -24,7 +24,7 @@ function SimpleBarcodeSVG({ value, height = 48 }) {
   // Generate deterministic bar widths from character codes
   const bars = [];
   let currentX = 0;
-  
+
   // Guard quiet zone
   bars.push({ x: 0, width: 4 });
   currentX += 8;
@@ -49,10 +49,10 @@ function SimpleBarcodeSVG({ value, height = 48 }) {
 
   return (
     <div className="flex flex-col items-center">
-      <svg 
-        width="100%" 
-        height={height} 
-        viewBox={`0 0 ${currentX} ${height}`} 
+      <svg
+        width="100%"
+        height={height}
+        viewBox={`0 0 ${currentX} ${height}`}
         className="w-full max-h-12 overflow-visible"
         preserveAspectRatio="none"
       >
@@ -121,11 +121,63 @@ export default function ThermalBoxLabelModal({
     }
 
     const sizeConfig = {
-      'a4': { pageSize: 'A4 portrait', pageMargin: '0.4in', scale: 1.0 },
-      '4x6': { pageSize: '4in 6in', pageMargin: '0.15in', scale: 1.0 },
-      '3x3': { pageSize: '3in 3in', pageMargin: '0.08in', scale: 0.95 },
-      '2x2': { pageSize: '2in 2in', pageMargin: '0.04in', scale: 0.88 }
-    }[labelSize] || { pageSize: '4in 6in', pageMargin: '0.15in', scale: 1.0 };
+      'a4': {
+        pageSize: 'A4 portrait',
+        pageMargin: '0.4in',
+        scale: 1.0,
+        customStyles: `
+          #thermal-label-mount {
+            width: 100% !important;
+            max-width: 185mm !important;
+            box-shadow: none !important;
+            margin: auto !important;
+          }
+        `
+      },
+      '4x6': {
+        pageSize: '4in 6in',
+        pageMargin: '0.2in',
+        scale: 1.0,
+        customStyles: `
+          #thermal-label-mount {
+            width: 3.4in !important;
+            max-width: 3.4in !important;
+            box-shadow: none !important;
+            margin: auto !important;
+          }
+        `
+      },
+      '3x3': {
+        pageSize: '3in 3in',
+        pageMargin: '0.1in',
+        scale: 0.95,
+        customStyles: `
+          #thermal-label-mount {
+            width: 2.75in !important;
+            height: 2.75in !important;
+            max-width: 2.75in !important;
+            box-shadow: none !important;
+            margin: auto !important;
+            box-sizing: border-box !important;
+          }
+        `
+      },
+      '2x2': {
+        pageSize: '2in 2in',
+        pageMargin: '0.06in',
+        scale: 0.88,
+        customStyles: `
+          #thermal-label-mount {
+            width: 1.84in !important;
+            height: 1.84in !important;
+            max-width: 1.84in !important;
+            box-shadow: none !important;
+            margin: auto !important;
+            box-sizing: border-box !important;
+          }
+        `
+      }
+    }[labelSize] || { pageSize: '4in 6in', pageMargin: '0.2in', scale: 1.0, customStyles: '' };
 
     printIsolatedElement({
       elementId: 'thermal-label-mount',
@@ -133,14 +185,7 @@ export default function ThermalBoxLabelModal({
       pageSize: sizeConfig.pageSize,
       pageMargin: sizeConfig.pageMargin,
       scale: sizeConfig.scale,
-      customStyles: `
-        #thermal-label-mount {
-          box-shadow: none !important;
-          margin: 0 auto !important;
-          page-break-inside: avoid !important;
-          break-inside: avoid !important;
-        }
-      `
+      customStyles: sizeConfig.customStyles
     });
   };
 
@@ -148,7 +193,7 @@ export default function ThermalBoxLabelModal({
     <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 md:p-8 overflow-y-auto animate-in fade-in duration-150">
       {/* Container */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 max-w-xl w-full my-auto shadow-2xl overflow-hidden flex flex-col max-h-[88vh] animate-in zoom-in-95">
-        
+
         {/* Header Bar */}
         <div className="p-5 sm:px-7 bg-slate-50 dark:bg-slate-850 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
@@ -175,20 +220,19 @@ export default function ThermalBoxLabelModal({
 
         {/* Modal Scrollable Body */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-4 bg-slate-100 dark:bg-slate-950 flex flex-col items-center">
-          
+
           {/* DYNAMIC THERMAL LABEL CONTAINER (Target of print stylesheet) */}
-          <div 
+          <div
             id="thermal-label-mount"
             ref={printAreaRef}
-            className={`bg-white text-black border-2 border-black rounded-lg shadow-md font-sans transition-all ${
-              labelSize === '2x2' 
-                ? 'w-[200px] p-2.5 text-[10px] space-y-2' 
-                : labelSize === '3x3' 
-                ? 'w-[280px] p-3 text-xs space-y-2.5' 
-                : labelSize === '4x6' 
-                ? 'w-full max-w-[380px] p-4 text-xs space-y-3 min-h-[500px]' 
-                : 'w-full max-w-[460px] p-6 text-xs space-y-4'
-            }`}
+            className={`bg-white text-black border-2 border-black rounded-lg shadow-md font-sans transition-all ${labelSize === '2x2'
+                ? 'w-[200px] p-2.5 text-[10px] space-y-2'
+                : labelSize === '3x3'
+                  ? 'w-[280px] p-3 text-xs space-y-2.5'
+                  : labelSize === '4x6'
+                    ? 'w-full max-w-[380px] p-4 text-xs space-y-3 min-h-[500px]'
+                    : 'w-full max-w-[460px] p-6 text-xs space-y-4'
+              }`}
           >
             {/* Top Header */}
             <div className="border-b-2 border-black pb-2 flex items-center justify-between">
@@ -284,8 +328,8 @@ export default function ThermalBoxLabelModal({
 
               {/* 2D QR Code */}
               <div className="p-1 border-2 border-black bg-white shrink-0">
-                <QRCodeSVG 
-                  value={JSON.stringify({ rma: rmaNumber, sku, bc: barcode, loc: location })} 
+                <QRCodeSVG
+                  value={JSON.stringify({ rma: rmaNumber, sku, bc: barcode, loc: location })}
                   size={76}
                   level="M"
                 />

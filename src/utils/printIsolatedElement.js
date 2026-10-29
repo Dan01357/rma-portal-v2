@@ -143,3 +143,4 @@ export function printIsolatedElement({
   // Wait 150ms for layout & SVG render
   setTimeout(executePrint, 150);
 }
+
