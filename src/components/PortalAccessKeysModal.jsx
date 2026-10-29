@@ -26,6 +26,18 @@ import {
 import { accessKeyService, DEFAULT_ACCESS_PROFILES } from '../services/accessKeyService';
 import { downloadPortalPosterPng, downloadQrCodePng, printPortalPoster } from '../utils/qrDownload';
 
+export function formatDurationLabel(hours) {
+  const h = Number(hours || 0);
+  if (h <= 0) return 'Permanent (0h)';
+  const totalMins = Math.round(h * 60);
+  if (totalMins < 60) return `${totalMins} Minutes`;
+  if (totalMins % 60 === 0) {
+    const hoursNum = totalMins / 60;
+    return `${hoursNum} Hour${hoursNum === 1 ? '' : 's'}`;
+  }
+  return `${h.toFixed(1)} Hours (${totalMins}m)`;
+}
+
 export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) {
   const [profiles, setProfiles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -46,6 +58,14 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
   });
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Dynamic Session Duration Mode: 'permanent' | 'custom'
+  const [durationMode, setDurationMode] = useState('permanent');
+  const [customDurationVal, setCustomDurationVal] = useState(2);
+  const [customDurationUnit, setCustomDurationUnit] = useState('hrs');
+
+  // Dynamic Print Sizes: 'a4' | '4x6' | '3x3' | '2x2'
+  const [printSize, setPrintSize] = useState('a4');
 
   // Print Poster Options
   const [showPinOnPoster, setShowPinOnPoster] = useState(true);
@@ -136,6 +156,9 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
       pinCode: Math.floor(100000 + Math.random() * 900000).toString(),
       sessionDurationHours: 0
     });
+    setDurationMode('permanent');
+    setCustomDurationVal(2);
+    setCustomDurationUnit('hrs');
     setFormError('');
     setModalMode('create');
   };
@@ -143,12 +166,26 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
   // Open Edit Modal
   const handleOpenEdit = (prof) => {
     setSelectedProfile(prof);
+    const h = Number(prof.session_duration_hours || 0);
+    if (h <= 0) {
+      setDurationMode('permanent');
+      setCustomDurationVal(2);
+      setCustomDurationUnit('hrs');
+    } else if (h * 60 < 60) {
+      setDurationMode('custom');
+      setCustomDurationVal(Math.round(h * 60));
+      setCustomDurationUnit('mins');
+    } else {
+      setDurationMode('custom');
+      setCustomDurationVal(h);
+      setCustomDurationUnit('hrs');
+    }
     setFormData({
       name: prof.name,
       type: prof.type,
       accessSlug: prof.access_slug,
       pinCode: prof.pin_code,
-      sessionDurationHours: prof.session_duration_hours || 0
+      sessionDurationHours: h
     });
     setFormError('');
     setModalMode('edit');
@@ -187,6 +224,12 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
     }
 
     setIsSaving(true);
+    let finalDurationHours = 0;
+    if (durationMode === 'custom') {
+      const numVal = Math.max(0.1, parseFloat(customDurationVal) || 1);
+      finalDurationHours = customDurationUnit === 'mins' ? numVal / 60 : numVal;
+    }
+
     try {
       if (modalMode === 'create') {
         await accessKeyService.createProfile({
@@ -194,7 +237,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
           type: formData.type,
           accessSlug: formData.accessSlug,
           pinCode: formData.pinCode,
-          sessionDurationHours: formData.sessionDurationHours,
+          sessionDurationHours: finalDurationHours,
           createdBy: currentUser?.name || 'Admin'
         });
       } else if (modalMode === 'edit' && selectedProfile) {
@@ -202,7 +245,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
           name: formData.name,
           type: formData.type,
           pin_code: formData.pinCode,
-          session_duration_hours: Number(formData.sessionDurationHours || 0)
+          session_duration_hours: finalDurationHours
         });
       }
 
@@ -380,7 +423,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
                           <div className="text-[10px] font-black uppercase text-slate-400">Session Window</div>
                           <div className="flex items-center gap-1 font-bold text-slate-700 dark:text-slate-300 mt-0.5">
                             <Clock className="w-3 h-3 text-slate-400" />
-                            <span>{prof.session_duration_hours === 0 ? 'Permanent (0h)' : `${prof.session_duration_hours} Hours`}</span>
+                            <span>{formatDurationLabel(prof.session_duration_hours)}</span>
                           </div>
                         </div>
                       </div>
@@ -581,23 +624,100 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
               />
             </div>
 
-            {/* Session Duration Selector */}
-            <div className="space-y-1.5">
+            {/* Customizable Session Expiration (Hours or Minutes) */}
+            <div className="space-y-2">
               <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
                 Session Expiration (Duration) *
               </label>
-              <select
-                value={formData.sessionDurationHours}
-                onChange={(e) => setFormData(prev => ({ ...prev, sessionDurationHours: parseInt(e.target.value, 10) }))}
-                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer"
-              >
-                <option value={0}>0 Hours (Permanent / No Expiration - Warehouse Dock)</option>
-                <option value={2}>2 Hours (Recommended for Customer Delivery Cartons)</option>
-                <option value={4}>4 Hours</option>
-                <option value={12}>12 Hours (Half-Day Shift)</option>
-                <option value={24}>24 Hours (Full-Day Return Window)</option>
-                <option value={48}>48 Hours (Weekend Intake)</option>
-              </select>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDurationMode('permanent')}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    durationMode === 'permanent'
+                      ? 'bg-blue-50 border-blue-500 ring-2 ring-blue-500/20 dark:bg-blue-950/40 text-blue-900 dark:text-blue-200'
+                      : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  <div className="text-xs font-black">Permanent (No Expiry)</div>
+                  <div className="text-[10px] opacity-75 mt-0.5">Stays unlocked indefinitely (Docks)</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDurationMode('custom')}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    durationMode === 'custom'
+                      ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500/20 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200'
+                      : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  <div className="text-xs font-black">Custom Expiration</div>
+                  <div className="text-[10px] opacity-75 mt-0.5">Expires in minutes or hours</div>
+                </button>
+              </div>
+
+              {durationMode === 'custom' && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2.5 animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max="10000"
+                      value={customDurationVal}
+                      onChange={(e) => setCustomDurationVal(e.target.value)}
+                      placeholder="Duration value"
+                      className="w-28 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-black text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
+                    />
+
+                    <select
+                      value={customDurationUnit}
+                      onChange={(e) => setCustomDurationUnit(e.target.value)}
+                      className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer"
+                    >
+                      <option value="mins">Minutes</option>
+                      <option value="hrs">Hours</option>
+                    </select>
+
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 font-bold ml-1 truncate">
+                      = {customDurationUnit === 'mins' 
+                          ? `${customDurationVal} min${customDurationVal === '1' ? '' : 's'}` 
+                          : `${customDurationVal} hour${customDurationVal === '1' ? '' : 's'} (${(parseFloat(customDurationVal) || 0) * 60}m)`}
+                    </span>
+                  </div>
+
+                  {/* Quick Preset Pills */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Presets:</span>
+                    {[
+                      { label: '15m', val: 15, unit: 'mins' },
+                      { label: '30m', val: 30, unit: 'mins' },
+                      { label: '1h', val: 1, unit: 'hrs' },
+                      { label: '2h', val: 2, unit: 'hrs' },
+                      { label: '4h', val: 4, unit: 'hrs' },
+                      { label: '12h', val: 12, unit: 'hrs' },
+                      { label: '24h', val: 24, unit: 'hrs' }
+                    ].map(p => (
+                      <button
+                        key={p.label}
+                        type="button"
+                        onClick={() => {
+                          setCustomDurationVal(p.val);
+                          setCustomDurationUnit(p.unit);
+                        }}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                          String(customDurationVal) === String(p.val) && customDurationUnit === p.unit
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-500'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Form Action Buttons */}
@@ -621,72 +741,142 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
         )}
 
         {/* =================================================================== */}
-        {/* VIEW 3: PRINT POSTER / STICKER VIEW                                 */}
+        {/* VIEW 3: PRINT POSTER / STICKER VIEW (DYNAMIC SIZES & ISOLATED PRINT)*/}
         {/* =================================================================== */}
         {modalMode === 'print' && selectedProfile && (
-          <div className="p-6 overflow-y-auto space-y-6 flex-1">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="p-5 sm:p-6 overflow-y-auto space-y-5 flex-1">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
               <div>
                 <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                  Workplace Poster & Box Sticker: {selectedProfile.name}
+                  Station QR Poster & Label: {selectedProfile.name}
                 </h3>
-                <p className="text-xs text-slate-500">Ready for A4 workplace printing or adhesive carton label.</p>
+                <p className="text-xs text-slate-500">
+                  Select print size for workplace dock walls, cartons, or loose/unboxed items.
+                </p>
               </div>
               <button
                 type="button"
                 onClick={() => setModalMode('list')}
-                className="text-xs font-bold text-slate-500 hover:text-slate-800"
+                className="text-xs font-bold text-slate-500 hover:text-slate-800 self-start sm:self-auto cursor-pointer"
               >
                 Back to List
               </button>
             </div>
 
-            {/* Poster Sheet Preview Mount */}
-            <div className="max-w-md mx-auto bg-white text-slate-950 p-6 rounded-3xl border-2 border-slate-900 shadow-xl space-y-5 text-center font-sans">
-              
-              <div className="space-y-1 border-b pb-3 border-slate-200">
-                <div className="text-[10px] font-black uppercase tracking-widest text-blue-600">
-                  {selectedProfile.type === 'internal_warehouse' ? 'WHOLESALE WAREHOUSE DOCK' : 'CUSTOMER RETURN INTAKE'}
-                </div>
-                <h2 className="text-xl font-black text-slate-900 uppercase">
-                  {selectedProfile.name}
-                </h2>
-                <p className="text-[11px] text-slate-600">Scan with mobile phone camera to file return report</p>
+            {/* Dynamic Print Size Selector Bar */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Select Output Print Size:
+                </label>
+                <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400">
+                  {printSize === 'a4' && 'Full Sheet Wall Poster (A4 / Letter)'}
+                  {printSize === '4x6' && 'Standard 4" x 6" Carton Sticker'}
+                  {printSize === '3x3' && 'Medium 3" x 3" Parcel Label'}
+                  {printSize === '2x2' && 'Small 2" x 2" Tag (Unboxed / Loose Items)'}
+                </span>
               </div>
 
-              {/* High-Resolution QR */}
-              <div className="inline-block p-4 bg-slate-50 border-2 border-slate-900 rounded-2xl">
-                <QRCodeSVG
-                  id="station-qr-svg"
-                  value={`${originUrl}/intake/${selectedProfile.access_slug}`}
-                  size={200}
-                  level="H"
-                  includeMargin={true}
-                />
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { id: 'a4', label: 'Wall Poster', sub: 'A4 / Letter Sheet', badge: 'Dock Wall' },
+                  { id: '4x6', label: 'Carton Sticker', sub: '4" x 6" Thermal', badge: 'Box/Crate' },
+                  { id: '3x3', label: 'Medium Label', sub: '3" x 3" Thermal', badge: 'Polybag' },
+                  { id: '2x2', label: 'Small Item Tag', sub: '2" x 2" Mini Tag', badge: 'Unboxed / Loose' }
+                ].map(s => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setPrintSize(s.id)}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      printSize === s.id
+                        ? 'bg-blue-50 border-blue-600 ring-2 ring-blue-500/20 dark:bg-blue-950/40 text-blue-900 dark:text-blue-100'
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-xs font-black">{s.label}</span>
+                      <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                        {s.badge}
+                      </span>
+                    </div>
+                    <div className="text-[10px] opacity-75 mt-0.5">{s.sub}</div>
+                  </button>
+                ))}
               </div>
+            </div>
 
-              {/* Station URL Pill */}
-              <div className="bg-slate-900 text-white font-mono text-xs font-bold py-1.5 px-3 rounded-xl inline-block max-w-full truncate">
-                {originUrl.replace(/^https?:\/\//, '')}/intake/{selectedProfile.access_slug}
-              </div>
-
-              {/* Optional 6-Digit PIN on Poster */}
-              {showPinOnPoster && (
-                <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl space-y-1">
-                  <div className="text-[10px] font-black uppercase tracking-wider text-amber-900">
-                    Station 6-Digit Gatekeeper PIN
+            {/* Poster Sheet Preview Mount (Strict Target for Print) */}
+            <div className="flex justify-center p-2 sm:p-4 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-x-auto">
+              <div 
+                id="portal-poster-print-mount"
+                className={`bg-white text-black p-4 sm:p-6 rounded-2xl border-2 border-black shadow-lg text-center font-sans space-y-3 transition-all ${
+                  printSize === '2x2' 
+                    ? 'w-[200px] text-[10px] space-y-2 p-2.5' 
+                    : printSize === '3x3' 
+                    ? 'w-[280px] text-xs space-y-2.5 p-3.5' 
+                    : printSize === '4x6' 
+                    ? 'w-[340px] text-xs space-y-3 p-4' 
+                    : 'w-full max-w-[420px] text-xs space-y-4 p-6'
+                }`}
+              >
+                {/* Header */}
+                <div className="border-b-2 border-black pb-2 space-y-0.5">
+                  <div className="text-[9px] font-black uppercase tracking-widest text-black">
+                    {selectedProfile.type === 'internal_warehouse' ? 'WHOLESALE WAREHOUSE DOCK' : 'CUSTOMER RETURN INTAKE'}
                   </div>
-                  <div className="text-2xl font-black font-mono tracking-widest text-slate-900">
-                    {selectedProfile.pin_code}
-                  </div>
+                  <h2 className={`font-black text-black uppercase leading-tight ${
+                    printSize === '2x2' ? 'text-xs' : printSize === '3x3' ? 'text-sm' : 'text-base sm:text-lg'
+                  }`}>
+                    {selectedProfile.name}
+                  </h2>
+                  <p className="text-[10px] text-black font-medium">
+                    Scan with <strong>Google Lens</strong> or QR scanner app
+                  </p>
                 </div>
-              )}
 
-              {/* Instructions */}
-              <div className="text-left text-[11px] space-y-1 text-slate-600 pt-2 border-t border-slate-200">
-                <div><strong>1.</strong> Point phone camera at QR code above.</div>
-                <div><strong>2.</strong> Enter 6-digit gatekeeper PIN when prompted.</div>
-                <div><strong>3.</strong> Scan damaged carton barcode and snap defect photos.</div>
+                {/* QR Code */}
+                <div className="inline-block p-2 bg-white border-2 border-black rounded-xl">
+                  <QRCodeSVG
+                    id="station-qr-svg"
+                    value={`${originUrl}/intake/${selectedProfile.access_slug}`}
+                    size={printSize === '2x2' ? 90 : printSize === '3x3' ? 120 : printSize === '4x6' ? 150 : 180}
+                    level="H"
+                    includeMargin={false}
+                  />
+                </div>
+
+                {/* Slug Pill */}
+                <div className="bg-black text-white font-mono text-[10px] font-bold py-1 px-2.5 rounded-lg inline-block max-w-full truncate">
+                  {originUrl.replace(/^https?:\/\//, '')}/intake/{selectedProfile.access_slug}
+                </div>
+
+                {/* Optional 6-Digit PIN on Poster */}
+                {showPinOnPoster && (
+                  <div className="p-2 border-2 border-black rounded-xl bg-slate-50 space-y-0.5">
+                    <div className="text-[9px] font-black uppercase tracking-wider text-black">
+                      Station 6-Digit Gatekeeper PIN
+                    </div>
+                    <div className={`font-black font-mono tracking-widest text-black ${
+                      printSize === '2x2' ? 'text-base' : 'text-xl'
+                    }`}>
+                      {selectedProfile.pin_code}
+                    </div>
+                  </div>
+                )}
+
+                {/* Numbered Google Lens Instructions (Compact on small tags) */}
+                {printSize !== '2x2' ? (
+                  <div className="text-left text-[10px] space-y-1 text-black pt-2 border-t-2 border-black">
+                    <div><strong>1.</strong> Open <strong>Google Lens</strong> (or QR scanner) on phone.</div>
+                    <div><strong>2.</strong> Point at QR code above & tap link to launch portal.</div>
+                    <div><strong>3.</strong> Enter 6-digit station PIN when prompted.</div>
+                  </div>
+                ) : (
+                  <div className="text-[9px] font-bold text-black border-t border-black pt-1">
+                    Open Google Lens & Scan QR to Return
+                  </div>
+                )}
               </div>
             </div>
 
@@ -697,22 +887,54 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser }) 
                   type="checkbox"
                   checked={showPinOnPoster}
                   onChange={(e) => setShowPinOnPoster(e.target.checked)}
-                  className="rounded text-blue-600 w-4 h-4"
+                  className="rounded text-blue-600 w-4 h-4 cursor-pointer"
                 />
-                <span>Include 6-Digit PIN on Printable Poster</span>
+                <span>Include 6-Digit PIN on Printed Sheet</span>
               </label>
 
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-blue-600/20 cursor-pointer"
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-blue-600/20 cursor-pointer active:scale-95 transition-all"
                 >
                   <Printer className="w-4 h-4" />
-                  <span>Print Sheet</span>
+                  <span>Print {printSize === 'a4' ? 'Wall Poster' : printSize === '4x6' ? '4x6" Sticker' : printSize === '3x3' ? '3x3" Label' : '2x2" Tag'}</span>
                 </button>
               </div>
             </div>
+
+            {/* Embedded Print Stylesheet specifically for isolating the poster sheet */}
+            <style>{`
+              @media print {
+                body * {
+                  visibility: hidden !important;
+                }
+                #portal-poster-print-mount, #portal-poster-print-mount * {
+                  visibility: visible !important;
+                }
+                #portal-poster-print-mount {
+                  position: fixed !important;
+                  left: 0 !important;
+                  top: 0 !important;
+                  margin: 0 !important;
+                  background: #fff !important;
+                  color: #000 !important;
+                  -webkit-print-color-adjust: exact !important;
+                  print-color-adjust: exact !important;
+                  box-shadow: none !important;
+                  border: 2px solid #000 !important;
+                  padding: ${printSize === '2x2' ? '0.08in' : printSize === '3x3' ? '0.12in' : printSize === '4x6' ? '0.2in' : '0.4in'} !important;
+                  width: ${printSize === 'a4' ? '100%' : printSize === '4x6' ? '4in' : printSize === '3x3' ? '3in' : '2in'} !important;
+                  max-width: ${printSize === 'a4' ? '100%' : printSize === '4x6' ? '4in' : printSize === '3x3' ? '3in' : '2in'} !important;
+                  height: ${printSize === 'a4' ? 'auto' : printSize === '4x6' ? '6in' : printSize === '3x3' ? '3in' : '2in'} !important;
+                }
+                @page {
+                  size: ${printSize === 'a4' ? 'portrait' : printSize === '4x6' ? '4in 6in' : printSize === '3x3' ? '3in 3in' : '2in 2in'};
+                  margin: 0;
+                }
+              }
+            `}</style>
 
           </div>
         )}

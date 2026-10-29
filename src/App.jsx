@@ -1,18 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Barcode, 
-  Search, 
-  CheckCircle, 
-  AlertCircle, 
-  RefreshCw, 
-  X, 
-  Server, 
-  Database, 
-  Camera, 
-  Plus, 
-  Minus, 
-  Send, 
-  FileText, 
+import {
+  Barcode,
+  Search,
+  CheckCircle,
+  AlertCircle,
+  RefreshCw,
+  X,
+  Server,
+  Database,
+  Camera,
+  Plus,
+  Minus,
+  Send,
+  FileText,
   AlertTriangle,
   MapPin,
   Upload,
@@ -147,7 +147,7 @@ function getIntakeSlugFromUrl() {
     const params = new URLSearchParams(window.location.search);
     const paramSlug = params.get('intake') || params.get('slug');
     if (paramSlug) return decodeURIComponent(paramSlug);
-  } catch {}
+  } catch { }
 
   return null;
 }
@@ -232,13 +232,13 @@ export default function App() {
         const url = new URL(str.startsWith('http') ? str : `https://example.com/${str.replace(/^\/?/, '')}`);
         const val = url.searchParams.get('rma') || url.searchParams.get('rma_number');
         if (val) return val;
-      } catch {}
+      } catch { }
     }
     if (str.startsWith('{') && str.endsWith('}')) {
       try {
         const parsed = JSON.parse(str);
         if (parsed.rma) return parsed.rma;
-      } catch {}
+      } catch { }
     }
     if (/^RMA-\d{4}-\d+-[A-Z0-9]+/i.test(str) || /^RMA-/i.test(str)) {
       return str;
@@ -276,7 +276,7 @@ export default function App() {
       const hash = window.location.hash.toLowerCase();
       const onAdmin = path === '/admin' || path.startsWith('/admin/') || hash === '#/admin' || window.location.search.includes('admin=true');
       setIsAdminView(onAdmin);
-      
+
       const newSlug = getIntakeSlugFromUrl();
       setIntakeSlug(newSlug);
       setGateSession(accessKeyService.getActiveSession(newSlug));
@@ -310,15 +310,15 @@ export default function App() {
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const hasAuthHash = window.location.hash.includes('access_token') || 
-                            window.location.hash.includes('type=recovery') || 
-                            window.location.search.includes('code=');
+        const hasAuthHash = window.location.hash.includes('access_token') ||
+          window.location.hash.includes('type=recovery') ||
+          window.location.search.includes('code=');
 
         const localUser = authService.getCurrentUser();
 
         // If user is not logged in locally and not clicking a magic link in URL, ensure Supabase local session is cleared
         if (!localUser && !hasAuthHash) {
-          await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+          await supabase.auth.signOut({ scope: 'local' }).catch(() => { });
           return;
         }
 
@@ -398,7 +398,7 @@ export default function App() {
   const handleLogout = async () => {
     try {
       await authService.logout();
-    } catch (e) {}
+    } catch (e) { }
     setCurrentUser(null);
     setIsAdminView(false);
     setIsLoginModalOpen(false);
@@ -431,7 +431,7 @@ export default function App() {
         document.documentElement.classList.remove('dark');
         localStorage.setItem('rma_theme', 'light');
       }
-    } catch (e) {}
+    } catch (e) { }
   }, [isDarkMode]);
 
   const toggleTheme = () => setIsDarkMode(prev => !prev);
@@ -456,7 +456,7 @@ export default function App() {
       }
       try {
         localStorage.setItem('rma_portal_test_mode', 'false');
-      } catch (e) {}
+      } catch (e) { }
     }
   }, [currentUser, isTestMode]);
 
@@ -468,7 +468,7 @@ export default function App() {
         } else {
           setIsTestMode(false);
         }
-      } catch (e) {}
+      } catch (e) { }
     };
     window.addEventListener('storage', handleSyncTestMode);
     window.addEventListener('rma-data-changed', handleSyncTestMode);
@@ -484,7 +484,7 @@ export default function App() {
       setIsTestMode(false);
       try {
         localStorage.setItem('rma_portal_test_mode', 'false');
-      } catch (e) {}
+      } catch (e) { }
       return;
     }
 
@@ -494,7 +494,7 @@ export default function App() {
         localStorage.setItem('rma_portal_test_mode', String(next));
         window.dispatchEvent(new Event('storage'));
         window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'test-mode-toggled', isTestMode: next } }));
-      } catch (e) {}
+      } catch (e) { }
       if (next) {
         showToast('🧪 Test Mode Enabled: Emails safely sent exclusively to finance2@keysysincorporated.com', 'success');
       } else {
@@ -509,7 +509,7 @@ export default function App() {
     try {
       const saved = localStorage.getItem('rma_portal_notifications_v2');
       if (saved) return JSON.parse(saved);
-    } catch (e) {}
+    } catch (e) { }
     return [
       {
         id: 'seed-notif-1',
@@ -527,7 +527,7 @@ export default function App() {
   useEffect(() => {
     try {
       localStorage.setItem('rma_portal_notifications_v2', JSON.stringify(notifications.slice(0, 60)));
-    } catch (e) {}
+    } catch (e) { }
   }, [notifications]);
 
   const addNotification = (notif) => {
@@ -677,8 +677,8 @@ export default function App() {
     if (existing && existing.is_verified) {
       setEditingProduct(existing);
     } else {
-      const cleanName = report.name && !report.name.toLowerCase().includes('unidentified') 
-        ? report.name 
+      const cleanName = report.name && !report.name.toLowerCase().includes('unidentified')
+        ? report.name
         : '';
 
       // Unassigned barcode: MUST start with NO default product image (empty placeholder state)
@@ -895,7 +895,7 @@ export default function App() {
     setReportsViewMode(mode);
     try {
       localStorage.setItem('rma_admin_reports_view_mode', mode);
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const handleReportsSort = (field) => {
@@ -1201,7 +1201,7 @@ export default function App() {
             setIsAdminView(true);
             setIsLoginModalOpen(false);
           }
-        } catch (e) {}
+        } catch (e) { }
       }
     });
 
@@ -1225,7 +1225,7 @@ export default function App() {
       if (realtimeChannel) {
         try {
           supabase.removeChannel(realtimeChannel);
-        } catch (e) {}
+        } catch (e) { }
       }
       authListener?.subscription?.unsubscribe();
       window.removeEventListener('visibilitychange', handleVisibility);
@@ -1309,7 +1309,7 @@ export default function App() {
       if (supaRes) {
         setSupaStatus({ checking: false, connected: supaRes.connected, rowsFound: supaRes.rowsFound });
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const refreshAllData = async () => {
@@ -1476,18 +1476,30 @@ export default function App() {
         {/* ================================================================= */}
         {!isAdminView && (
           <div className="space-y-4 animate-in fade-in duration-200">
-            
-            {/* Unified Clean Header: Station Details, Device Lock & Theme Control */}
-            <div className="flex items-center justify-between gap-3 pt-1 pb-1">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 inline-block shadow-2xs truncate">
-                  {gateSession ? (gateSession.profileName || 'Station Active') : 'Customer & Warehouse Returns'}
-                </span>
-                {gateSession && (
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold shrink-0">
-                    /{gateSession.slug}
-                  </span>
-                )}
+
+            {/* Top Navigation Bar: Station Branding, Device Lock & Theme Control */}
+            <div className="flex items-center justify-between gap-3 p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xs">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="p-2 rounded-2xl bg-blue-50 dark:bg-blue-950/70 border border-blue-200 dark:border-blue-900 text-blue-600 dark:text-blue-400 shrink-0">
+                  {gateSession?.type === 'internal_warehouse' ? <Building2 className="w-4 h-4" /> : <Package className="w-4 h-4" />}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-extrabold text-xs text-slate-900 dark:text-white truncate">
+                      {gateSession ? (gateSession.profileName || 'Station Active') : 'Customer & Warehouse Returns'}
+                    </span>
+                    {gateSession && (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold shrink-0">
+                        /{gateSession.slug}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                    {gateSession 
+                      ? (gateSession.expiresAt ? `Session active (~${Math.max(1, Math.round((new Date(gateSession.expiresAt).getTime() - Date.now()) / (60 * 1000)))}m remaining)` : 'Permanent Station Unlock')
+                      : 'Wholesale RMA Return Intake'}
+                  </div>
+                </div>
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
@@ -1495,7 +1507,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleLockStation}
-                    className="touch-target px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                    className="touch-target px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
                     title="Lock device and require 6-digit PIN"
                   >
                     <Lock className="w-3.5 h-3.5 text-slate-400" />
@@ -1506,7 +1518,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={toggleTheme}
-                  className="touch-target p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white shadow-xs transition-colors cursor-pointer shrink-0"
+                  className="touch-target p-2 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white shadow-2xs transition-colors cursor-pointer shrink-0"
                   title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
                   aria-label="Toggle Theme"
                 >
@@ -1520,15 +1532,13 @@ export default function App() {
                 Only displayed if the active user is an authenticated Super Admin.
                 If not logged in as Super Admin, this banner is invisible and submissions are permanently Live. */}
             {currentUser?.role === 'super_admin' && (
-              <div className={`p-3 sm:p-3.5 rounded-2xl border transition-all text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
-                isTestMode
+              <div className={`p-3 sm:p-3.5 rounded-2xl border transition-all text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${isTestMode
                   ? 'bg-amber-500/10 dark:bg-amber-950/40 border-amber-500/40 text-amber-900 dark:text-amber-200'
                   : 'bg-emerald-500/10 dark:bg-emerald-950/40 border-emerald-500/40 text-emerald-900 dark:text-emerald-200'
-              }`}>
+                }`}>
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className={`p-2 rounded-xl shrink-0 shadow-xs ${
-                    isTestMode ? 'bg-amber-500 text-slate-950 font-black' : 'bg-emerald-600 text-white'
-                  }`}>
+                  <div className={`p-2 rounded-xl shrink-0 shadow-xs ${isTestMode ? 'bg-amber-500 text-slate-950 font-black' : 'bg-emerald-600 text-white'
+                    }`}>
                     {isTestMode ? <FlaskConical className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
                   </div>
                   <div className="min-w-0 space-y-0.5">
@@ -1541,8 +1551,8 @@ export default function App() {
                       </span>
                     </div>
                     <p className="text-[11px] opacity-85 leading-snug">
-                      {isTestMode 
-                        ? 'Test emails routed safely to finance2@keysysincorporated.com' 
+                      {isTestMode
+                        ? 'Test emails routed safely to finance2@keysysincorporated.com'
                         : 'Official return reports will be sent directly to supplier & Assigned AEs'}
                     </p>
                   </div>
@@ -1552,11 +1562,10 @@ export default function App() {
                   <button
                     type="button"
                     onClick={toggleTestMode}
-                    className={`touch-target px-3 py-1.5 rounded-xl font-black text-xs transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 ${
-                      isTestMode
+                    className={`touch-target px-3 py-1.5 rounded-xl font-black text-xs transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 ${isTestMode
                         ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
                         : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700'
-                    }`}
+                      }`}
                     title="Toggle Test / Sandbox Mode"
                   >
                     {isTestMode ? <ToggleRight className="w-4 h-4 text-slate-950" /> : <ToggleLeft className="w-4 h-4 text-slate-400" />}
@@ -1712,20 +1721,20 @@ export default function App() {
               </div>
             ) : (
               <form onSubmit={handleSubmitReport} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
-                
+
                 {/* 1. BARCODE SCAN / INPUT */}
                 <div className="space-y-2">
                   <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
                     1. Product Barcode / QR Code *
                   </label>
-                  
+
                   <button
                     type="button"
                     onClick={() => setIsScannerOpen(true)}
                     className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 transition-all active:scale-[0.99]"
                   >
                     <Camera className="w-5 h-5" />
-                    <span>Scan with Phone Camera</span>
+                    <span>Scan with Camera / Google Lens</span>
                   </button>
 
                   <div className="space-y-2.5 pt-1">
@@ -1925,11 +1934,10 @@ export default function App() {
                         key={reason}
                         type="button"
                         onClick={() => setSelectedReason(reason)}
-                        className={`p-2.5 rounded-2xl border text-xs font-bold text-left transition-all flex items-center justify-between ${
-                          selectedReason === reason
+                        className={`p-2.5 rounded-2xl border text-xs font-bold text-left transition-all flex items-center justify-between ${selectedReason === reason
                             ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-400 dark:border-rose-700 text-rose-900 dark:text-rose-200 shadow-sm'
                             : 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
-                        }`}
+                          }`}
                       >
                         <span>{reason}</span>
                         {selectedReason === reason && <CheckCircle className="w-4 h-4 text-rose-600 shrink-0" />}
@@ -2012,7 +2020,7 @@ export default function App() {
         {/* ================================================================= */}
         {isAdminView && currentUser && (
           <div className="space-y-5 animate-in fade-in duration-200">
-            
+
             {/* Production-Level SaaS Header */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="space-y-1">
@@ -2086,11 +2094,10 @@ export default function App() {
             {/* SaaS KPI Overview Strip: Fluid grid tracks for all viewports */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3.5">
               {/* Metric 1: Saved Products */}
-              <div 
+              <div
                 onClick={() => setAdminActiveTab('products')}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
-                  adminActiveTab === 'products' ? 'border-indigo-500 ring-2 ring-indigo-100 dark:ring-indigo-900/40' : 'border-slate-200 dark:border-slate-800'
-                }`}
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${adminActiveTab === 'products' ? 'border-indigo-500 ring-2 ring-indigo-100 dark:ring-indigo-900/40' : 'border-slate-200 dark:border-slate-800'
+                  }`}
               >
                 <div className="flex items-center justify-between text-indigo-600 dark:text-indigo-400 mb-1.5 sm:mb-2">
                   <Package className="w-5 h-5 shrink-0" />
@@ -2104,11 +2111,10 @@ export default function App() {
               </div>
 
               {/* Metric 2: Return Reports */}
-              <div 
+              <div
                 onClick={() => setAdminActiveTab('reports')}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
-                  adminActiveTab === 'reports' ? 'border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900/40' : 'border-slate-200 dark:border-slate-800'
-                }`}
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${adminActiveTab === 'reports' ? 'border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900/40' : 'border-slate-200 dark:border-slate-800'
+                  }`}
               >
                 <div className="flex items-center justify-between text-blue-600 dark:text-blue-400 mb-1.5 sm:mb-2">
                   <FileText className="w-5 h-5 shrink-0" />
@@ -2122,11 +2128,10 @@ export default function App() {
               </div>
 
               {/* Metric 3: Credit Memos (Finance Section) */}
-              <div 
+              <div
                 onClick={() => setAdminActiveTab('credit_memos')}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
-                  adminActiveTab === 'credit_memos' ? 'border-emerald-500 ring-2 ring-emerald-100 dark:ring-emerald-900/40' : 'border-slate-200 dark:border-slate-800'
-                }`}
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${adminActiveTab === 'credit_memos' ? 'border-emerald-500 ring-2 ring-emerald-100 dark:ring-emerald-900/40' : 'border-slate-200 dark:border-slate-800'
+                  }`}
               >
                 <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 mb-1.5 sm:mb-2">
                   <Receipt className="w-5 h-5 shrink-0" />
@@ -2137,18 +2142,17 @@ export default function App() {
                 </div>
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Credit Memos</div>
                 <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">
-                  {creditMemosList.length > 0 
+                  {creditMemosList.length > 0
                     ? `₱${creditMemosList.reduce((acc, m) => acc + Number(m.credit_amount || m.amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} credited`
                     : 'Customer deductions'}
                 </div>
               </div>
 
               {/* Metric 4: Pending Barcodes */}
-              <div 
+              <div
                 onClick={() => setIsPendingModalOpen(true)}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${
-                  pendingBarcodesList.length > 0 ? 'border-amber-400 bg-amber-50/20 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-800'
-                }`}
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${pendingBarcodesList.length > 0 ? 'border-amber-400 bg-amber-50/20 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-800'
+                  }`}
               >
                 <div className="flex items-center justify-between text-amber-600 dark:text-amber-400 mb-1.5 sm:mb-2">
                   <AlertTriangle className="w-5 h-5 shrink-0" />
@@ -2162,13 +2166,12 @@ export default function App() {
               </div>
 
               {/* Metric 5: Staff Directory */}
-              <div 
+              <div
                 onClick={() => {
                   if (currentUser?.role === 'super_admin') setIsEmployeeModalOpen(true);
                 }}
-                className={`col-span-2 sm:col-span-1 bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm ${
-                  currentUser?.role === 'super_admin' ? 'cursor-pointer hover:shadow-md hover:border-purple-300 dark:hover:border-purple-700' : ''
-                } border-slate-200 dark:border-slate-800`}
+                className={`col-span-2 sm:col-span-1 bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm ${currentUser?.role === 'super_admin' ? 'cursor-pointer hover:shadow-md hover:border-purple-300 dark:hover:border-purple-700' : ''
+                  } border-slate-200 dark:border-slate-800`}
               >
                 <div className="flex items-center justify-between text-purple-600 dark:text-purple-400 mb-1.5 sm:mb-2">
                   <Users className="w-5 h-5 shrink-0" />
@@ -2187,11 +2190,10 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('products')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                  adminActiveTab === 'products'
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'products'
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
+                  }`}
               >
                 <Package className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
                 <span>Saved Products ({savedProductsList.length})</span>
@@ -2200,11 +2202,10 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('reports')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                  adminActiveTab === 'reports'
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'reports'
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
+                  }`}
               >
                 <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                 <span>Return Reports ({recentReportsList.length})</span>
@@ -2213,36 +2214,22 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('credit_memos')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                  adminActiveTab === 'credit_memos'
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'credit_memos'
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
+                  }`}
               >
                 <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 <span>Credit Memos ({creditMemosList.length})</span>
               </button>
 
-
-              {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') && (
-                <button
-                  type="button"
-                  onClick={() => setIsAccessKeysModalOpen(true)}
-                  className="touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 text-blue-700 dark:text-blue-300 hover:bg-blue-100/60 dark:hover:bg-blue-950/40 transition-all cursor-pointer whitespace-nowrap shrink-0"
-                  title="Manage Role-Based QR Access Profiles & Gatekeeper PINs"
-                >
-                  <KeyRound className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                  <span>QR Keys & PINs</span>
-                </button>
-              )}
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('supplier_claims')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                  adminActiveTab === 'supplier_claims'
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'supplier_claims'
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
+                  }`}
               >
                 <Building2 className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
                 <span>Supplier Claims (RTV)</span>
@@ -2252,11 +2239,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setAdminActiveTab('settings')}
-                  className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                    adminActiveTab === 'settings'
+                  className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'settings'
                       ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
+                    }`}
                 >
                   <Settings className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                   <span>Settings & SMTP</span>
@@ -2327,11 +2313,10 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => handleSetReportsViewMode('table')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
-                          reportsViewMode === 'table'
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${reportsViewMode === 'table'
                             ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
                             : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                        }`}
+                          }`}
                         title="Rows / Table View (with SN column)"
                       >
                         <List className="w-3.5 h-3.5" />
@@ -2340,11 +2325,10 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => handleSetReportsViewMode('grid')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${
-                          reportsViewMode === 'grid'
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${reportsViewMode === 'grid'
                             ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
                             : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                        }`}
+                          }`}
                         title="Grid / Cards View"
                       >
                         <LayoutGrid className="w-3.5 h-3.5" />
@@ -2516,11 +2500,10 @@ export default function App() {
                             setReportsDispositionFilter(chip.id);
                             setReportsCurrentPage(1);
                           }}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all cursor-pointer ${
-                            isActive
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all cursor-pointer ${isActive
                               ? 'bg-blue-600 text-white shadow-2xs font-black'
                               : 'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                          }`}
+                            }`}
                         >
                           {chip.label}
                         </button>
@@ -2573,7 +2556,7 @@ export default function App() {
                                 title={isAllReportsPageSelected ? "Deselect all on this page" : "Select all on this page"}
                               />
                             </th>
-                            <th 
+                            <th
                               onClick={() => handleReportsSort('id')}
                               className="py-3 px-3.5 font-black text-slate-900 dark:text-white w-16 cursor-pointer select-none hover:text-blue-600 dark:hover:text-blue-400 transition-colors group"
                               title="Click to sort by Serial Number"
@@ -2585,7 +2568,7 @@ export default function App() {
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
                             </th>
-                            <th 
+                            <th
                               onClick={() => handleReportsSort('rma_number')}
                               className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
                               title="Click to sort by RMA #"
@@ -2598,7 +2581,7 @@ export default function App() {
                               </div>
                             </th>
                             <th className="py-3 px-3 w-14 text-center select-none">Photo</th>
-                            <th 
+                            <th
                               onClick={() => handleReportsSort('barcode')}
                               className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
                               title="Click to sort by Barcode"
@@ -2610,7 +2593,7 @@ export default function App() {
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
                             </th>
-                            <th 
+                            <th
                               onClick={() => handleReportsSort('name')}
                               className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
                               title="Click to sort by Item Name"
@@ -2622,7 +2605,7 @@ export default function App() {
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
                             </th>
-                            <th 
+                            <th
                               onClick={() => handleReportsSort('reason')}
                               className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
                               title="Click to sort by Reason"
@@ -2634,7 +2617,7 @@ export default function App() {
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
                             </th>
-                            <th 
+                            <th
                               onClick={() => handleReportsSort('reporter')}
                               className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
                               title="Click to sort by Reporter"
@@ -2647,7 +2630,7 @@ export default function App() {
                               </div>
                             </th>
                             {/* 8. Catalog Status Header */}
-                            <th 
+                            <th
                               onClick={() => handleReportsSort('catalog_status')}
                               className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
                               title="Click to sort by Catalog Status"
@@ -2661,7 +2644,7 @@ export default function App() {
                             </th>
 
                             {/* 9. Lifecycle Stage Header */}
-                            <th 
+                            <th
                               onClick={() => handleReportsSort('lifecycle_stage')}
                               className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
                               title="Click to sort by Lifecycle Stage"
@@ -2675,7 +2658,7 @@ export default function App() {
                             </th>
 
                             {/* 10. Disposition Header */}
-                            <th 
+                            <th
                               onClick={() => handleReportsSort('disposition')}
                               className="py-3 px-3.5 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
                               title="Click to sort by Disposition"
@@ -2689,7 +2672,7 @@ export default function App() {
                             </th>
 
                             {/* 11. Warehouse Location Header */}
-                            <th 
+                            <th
                               onClick={() => handleReportsSort('warehouse_location')}
                               className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
                               title="Click to sort by Warehouse Rack/Bin Location"
@@ -2701,7 +2684,7 @@ export default function App() {
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
                             </th>
-                            <th 
+                            <th
                               onClick={() => handleReportsSort('created_at')}
                               className="py-3 px-3.5 text-right font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
                               title="Click to sort by Date"
@@ -2720,29 +2703,28 @@ export default function App() {
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
                           {paginatedReports.map(item => {
-                            const photoList = Array.isArray(item.photos) 
-                              ? item.photos 
+                            const photoList = Array.isArray(item.photos)
+                              ? item.photos
                               : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
                             const isSelected = selectedReportIds.has(item.id || item.rma_number);
                             const matchedProduct = savedProductsList.find(p => p.barcode && String(p.barcode) === String(item.barcode));
-                            const resolvedName = (item.name && !item.name.toLowerCase().startsWith('unidentified')) 
-                              ? item.name 
+                            const resolvedName = (item.name && !item.name.toLowerCase().startsWith('unidentified'))
+                              ? item.name
                               : (matchedProduct?.name || item.name || `Unidentified (${item.barcode})`);
                             const isPendingUnknown = !matchedProduct && item.status === 'pending_admin_details';
 
                             return (
-                              <tr 
-                                key={item.id || item.rma_number} 
+                              <tr
+                                key={item.id || item.rma_number}
                                 onClick={(e) => {
                                   if (e.target.closest('input, button, a')) return;
                                   setQuickRmaNumber(item.rma_number);
                                   setIsQuickRmaModalOpen(true);
                                 }}
-                                className={`transition-colors cursor-pointer ${
-                                  isSelected 
-                                    ? 'bg-blue-50/80 dark:bg-blue-950/50' 
+                                className={`transition-colors cursor-pointer ${isSelected
+                                    ? 'bg-blue-50/80 dark:bg-blue-950/50'
                                     : 'hover:bg-blue-50/50 dark:hover:bg-slate-800/60'
-                                }`}
+                                  }`}
                                 title={`Click row to inspect & triage RMA #${item.rma_number}`}
                               >
                                 {/* Row Selection Checkbox */}
@@ -2802,10 +2784,10 @@ export default function App() {
                                       className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
                                       title="Click to view full-size proof photo"
                                     >
-                                      <img 
-                                        src={photoList[0]} 
-                                        alt="Proof" 
-                                        className="w-full h-full object-cover" 
+                                      <img
+                                        src={photoList[0]}
+                                        alt="Proof"
+                                        className="w-full h-full object-cover"
                                       />
                                     </button>
                                   ) : (
@@ -2849,11 +2831,10 @@ export default function App() {
 
                                 {/* 8. Catalog Status */}
                                 <td className="py-3 px-3 text-center whitespace-nowrap">
-                                  <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider inline-block ${
-                                    isPendingUnknown
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider inline-block ${isPendingUnknown
                                       ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
                                       : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                                  }`}>
+                                    }`}>
                                     {isPendingUnknown ? 'Pending SKU' : 'Logged'}
                                   </span>
                                 </td>
@@ -3066,24 +3047,23 @@ export default function App() {
                   <div className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {paginatedReports.map(item => {
-                        const photoList = Array.isArray(item.photos) 
-                          ? item.photos 
+                        const photoList = Array.isArray(item.photos)
+                          ? item.photos
                           : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
                         const isSelected = selectedReportIds.has(item.id || item.rma_number);
                         const matchedProduct = savedProductsList.find(p => p.barcode && String(p.barcode) === String(item.barcode));
-                        const resolvedName = (item.name && !item.name.toLowerCase().startsWith('unidentified')) 
-                          ? item.name 
+                        const resolvedName = (item.name && !item.name.toLowerCase().startsWith('unidentified'))
+                          ? item.name
                           : (matchedProduct?.name || item.name || `Unidentified (${item.barcode})`);
                         const isPendingUnknown = !matchedProduct && item.status === 'pending_admin_details';
 
                         return (
-                          <div 
+                          <div
                             key={item.id || item.rma_number}
-                            className={`p-4 border rounded-2xl space-y-2 transition-all shadow-sm ${
-                              isSelected
+                            className={`p-4 border rounded-2xl space-y-2 transition-all shadow-sm ${isSelected
                                 ? 'bg-blue-50/90 dark:bg-blue-950/60 border-blue-500'
                                 : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-                            }`}
+                              }`}
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div>
@@ -3234,10 +3214,10 @@ export default function App() {
                                       className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 cursor-zoom-in hover:opacity-85 transition-opacity shrink-0"
                                       title="Click to zoom proof photo"
                                     >
-                                      <img 
-                                        src={url} 
-                                        alt="Proof" 
-                                        className="w-full h-full object-cover" 
+                                      <img
+                                        src={url}
+                                        alt="Proof"
+                                        className="w-full h-full object-cover"
                                       />
                                     </button>
                                   ))}
@@ -3635,9 +3615,9 @@ export default function App() {
         onOpenLightbox={setLightboxPhoto}
         onRefresh={(updated) => {
           if (updated && (updated.id || updated.rma_number)) {
-            setRecentReportsList(prev => prev.map(r => 
-              (r.id === updated.id || (r.rma_number && r.rma_number === updated.rma_number)) 
-                ? { ...r, ...updated } 
+            setRecentReportsList(prev => prev.map(r =>
+              (r.id === updated.id || (r.rma_number && r.rma_number === updated.rma_number))
+                ? { ...r, ...updated }
                 : r
             ));
           }
@@ -3648,11 +3628,10 @@ export default function App() {
       {/* Toast Alert Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-3">
-          <div className={`px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2 ${
-            toastMessage.type === 'error'
+          <div className={`px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2 ${toastMessage.type === 'error'
               ? 'bg-rose-50 border-rose-300 text-rose-800'
               : 'bg-slate-900 border-slate-700 text-white'
-          }`}>
+            }`}>
             <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{toastMessage.text}</span>
           </div>

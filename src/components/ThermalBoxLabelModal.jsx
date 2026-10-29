@@ -73,6 +73,8 @@ export default function ThermalBoxLabelModal({
   currentUser
 }) {
   const printAreaRef = useRef(null);
+  // Dynamic Print Sizing: '4x6' | '3x3' | '2x2' | 'a4'
+  const [labelSize, setLabelSize] = useState('4x6');
 
   if (!isOpen || !report) return null;
 
@@ -92,6 +94,10 @@ export default function ThermalBoxLabelModal({
     month: 'short',
     day: 'numeric'
   }) : new Date().toLocaleDateString();
+
+  const qrPayload = typeof window !== 'undefined'
+    ? `${window.location.origin}/?rma=${encodeURIComponent(rmaNumber)}`
+    : rmaNumber;
 
   const handlePrint = async () => {
     try {
@@ -147,12 +153,19 @@ export default function ThermalBoxLabelModal({
         {/* Modal Scrollable Body */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-4 bg-slate-100 dark:bg-slate-950 flex flex-col items-center">
           
-          {/* THE 4x6 THERMAL LABEL CONTAINER (Target of print stylesheet) */}
+          {/* DYNAMIC THERMAL LABEL CONTAINER (Target of print stylesheet) */}
           <div 
             id="thermal-label-mount"
             ref={printAreaRef}
-            className="w-full max-w-[380px] bg-white text-black p-4 border-2 border-black rounded-lg shadow-md font-sans text-xs space-y-3 print:border-none print:shadow-none print:p-0 print:m-0 print:w-full"
-            style={{ minHeight: '520px' }}
+            className={`bg-white text-black border-2 border-black rounded-lg shadow-md font-sans transition-all print:border-none print:shadow-none print:p-0 print:m-0 print:w-full ${
+              labelSize === '2x2' 
+                ? 'w-[200px] p-2.5 text-[10px] space-y-2' 
+                : labelSize === '3x3' 
+                ? 'w-[280px] p-3 text-xs space-y-2.5' 
+                : labelSize === '4x6' 
+                ? 'w-full max-w-[380px] p-4 text-xs space-y-3 min-h-[500px]' 
+                : 'w-full max-w-[460px] p-6 text-xs space-y-4'
+            }`}
           >
             {/* Top Header */}
             <div className="border-b-2 border-black pb-2 flex items-center justify-between">
@@ -283,13 +296,13 @@ export default function ThermalBoxLabelModal({
             className="px-5 py-2.5 bg-slate-900 hover:bg-black text-white dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 rounded-xl text-xs font-black flex items-center gap-2 shadow-md transition-all cursor-pointer"
           >
             <Printer className="w-4 h-4" />
-            <span>Print 4x6" Label</span>
+            <span>Print {labelSize === '4x6' ? '4x6" Box Label' : labelSize === '3x3' ? '3x3" Label' : labelSize === '2x2' ? '2x2" Tag (Unboxed)' : 'A4 Document'}</span>
           </button>
         </div>
 
       </div>
 
-      {/* Embedded Print Stylesheet specifically for 4x6 thermal sticker output */}
+      {/* Embedded Print Stylesheet for Dynamic Sizes */}
       <style>{`
         @media print {
           body * {
@@ -302,11 +315,11 @@ export default function ThermalBoxLabelModal({
             position: fixed !important;
             left: 0 !important;
             top: 0 !important;
-            width: 4in !important;
-            height: 6in !important;
-            max-width: 4in !important;
+            width: ${labelSize === '2x2' ? '2in' : labelSize === '3x3' ? '3in' : labelSize === '4x6' ? '4in' : '100%'} !important;
+            max-width: ${labelSize === '2x2' ? '2in' : labelSize === '3x3' ? '3in' : labelSize === '4x6' ? '4in' : '100%'} !important;
+            height: ${labelSize === '2x2' ? '2in' : labelSize === '3x3' ? '3in' : labelSize === '4x6' ? '6in' : 'auto'} !important;
             margin: 0 !important;
-            padding: 0.15in !important;
+            padding: ${labelSize === '2x2' ? '0.08in' : labelSize === '3x3' ? '0.12in' : labelSize === '4x6' ? '0.15in' : '0.4in'} !important;
             border: 2px solid #000 !important;
             box-shadow: none !important;
             background: #fff !important;
@@ -315,7 +328,7 @@ export default function ThermalBoxLabelModal({
             print-color-adjust: exact !important;
           }
           @page {
-            size: 4in 6in;
+            size: ${labelSize === '2x2' ? '2in 2in' : labelSize === '3x3' ? '3in 3in' : labelSize === '4x6' ? '4in 6in' : 'portrait'};
             margin: 0;
           }
         }

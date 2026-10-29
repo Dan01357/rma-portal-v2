@@ -246,7 +246,7 @@ export default function GatekeeperPinModal({
                 Official RMA Gatekeeper
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-xs mx-auto">
-                Please scan the official QR code located at the <strong>warehouse dock wall</strong> or on your <strong>product delivery carton</strong> to access the return intake system.
+                Please open <strong>Google Lens</strong> or your phone's QR scanner to scan the official code located at the <strong>warehouse dock wall</strong> or on your <strong>product delivery carton</strong>.
               </p>
             </div>
 
@@ -254,11 +254,11 @@ export default function GatekeeperPinModal({
             <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700/80 text-left space-y-2.5 text-xs">
               <div className="flex items-center gap-2.5 font-bold text-slate-800 dark:text-slate-200">
                 <div className="w-6 h-6 rounded-lg bg-blue-600 text-white flex items-center justify-center text-[11px] font-black shrink-0">1</div>
-                <span>Warehouse Staff: Scan dock intake poster</span>
+                <span>Warehouse Staff: Open Google Lens & scan dock poster</span>
               </div>
               <div className="flex items-center gap-2.5 font-bold text-slate-800 dark:text-slate-200">
                 <div className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-[11px] font-black shrink-0">2</div>
-                <span>Customer Repackers: Scan outer carton sticker</span>
+                <span>Customer Repackers: Open Google Lens & scan carton sticker</span>
               </div>
             </div>
 
