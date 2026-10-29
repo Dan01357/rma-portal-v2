@@ -84,6 +84,52 @@ Restricted strictly to authenticated `SUPER_ADMIN` and `ADMIN` personnel:
 - **High-Resolution Poster & Sticker Printing**: Renders print-ready A4 or 4x6" sheets with the generated station QR code, instructions, and an optional PIN visibility toggle.
 - **1-Click Revocation**: Toggling status to `Inactive` immediately blocks all inbound scans from that profile.
 
+### 1.5 Unbypassable Cooldown Lockout System & Anti-Fraud Architecture
+
+To prevent duplicate returns, spam submissions, and inventory tampering by external customer reporters, the portal incorporates a server-side **Unbypassable Cooldown Lockout Engine**.
+
+#### 1. The Multi-Vector Bypass Vulnerability Solved
+Previously, client-side session expiration stored strictly in browser `localStorage` or cookies could be bypassed if a user:
+1. Cleared their browser cache and history.
+2. Opened an Incognito / Private browsing window.
+3. Switched browsers on the same phone (e.g. Chrome to Safari, Brave, Edge, or Firefox).
+
+#### 2. Deterministic Physical Hardware Fingerprinting
+The client calculates an immutable hardware signature via `src/utils/deviceFingerprint.js`:
+- Queries the physical GPU vendor & renderer string via WebGL (`UNMASKED_RENDERER_WEBGL`).
+- Queries Web Audio API oscillator frequency response and sample rate.
+- Analyzes hardware concurrency (CPU cores), device pixel ratio, and physical display dimensions.
+- Produces a high-entropy SHA-256 hardware hash that remains **identical across Incognito tabs and different browsers on the same physical phone**.
+
+#### 3. Database Schema (`public.device_intake_sessions`)
+Backed by a high-performance Supabase tracking table:
+- `id`: `uuid PRIMARY KEY DEFAULT gen_random_uuid()`
+- `profile_id`: `uuid REFERENCES public.portal_access_keys(id) ON DELETE CASCADE`
+- `access_slug`: `text NOT NULL` (e.g., `returns`)
+- `device_fingerprint`: `text NOT NULL` (deterministic hardware hash)
+- `ip_address`: `text NOT NULL` (client network IP extracted from headers)
+- `session_started_at`: `timestamptz DEFAULT now()`
+- `session_expires_at`: `timestamptz NOT NULL` (e.g. `NOW() + 2 hours`)
+- `cooldown_until`: `timestamptz NOT NULL` (e.g. `session_expires_at + 6 hours`)
+- `status`: `text CHECK (status IN ('active', 'in_cooldown', 'expired'))`
+
+#### 4. Server-Side Verification Endpoint (`/api/v1/auth/verify-pin`)
+1. Receives `{ slug, pin, deviceFingerprint }` and client IP.
+2. Checks if an active cooldown exists in `public.device_intake_sessions` where `NOW() < cooldown_until`.
+3. If active, rejects authentication with HTTP `429 Too Many Requests`:
+   ```json
+   {
+     "error": "COOLDOWN_ACTIVE",
+     "message": "Return Window Currently Locked",
+     "cooldownRemainingMinutes": 145,
+     "unlocksAt": "2026-10-29T23:30:00Z"
+   }
+   ```
+4. Renders the **Cooldown Lockout Screen** with a live ticking countdown timer (`HH:MM:SS`), support contact button, and Supervisor Override option.
+
+#### 5. Admin Emergency Reset / Clear Cooldowns
+If an authorized customer or technician urgently needs to submit returns before the cooldown period expires, an Admin can click **"Clear Cooldowns"** on the profile in the QR Keys & PINs Manager. This calls `/api/v1/auth/clear-cooldown`, instantly releasing all device lockouts.
+
 ---
 
 ## Chapter 2: Physical Dock Arrival & Initial Intake

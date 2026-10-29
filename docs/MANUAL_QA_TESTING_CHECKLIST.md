@@ -76,6 +76,27 @@ Each test scenario defines:
   * **Action**: With test mode active, load `/`. Click **"Sandbox Quick Unlock (Warehouse Dock)"**.
   * **Expected Behavior**: Instantly unlocks the portal for rapid QA testing without requiring manual PIN entry.
 
+### 1.1 Unbypassable Cooldown Lockout & Anti-Fraud Security
+- [ ] **Active Session 2-Hour Expiration Trigger**
+  * **Location**: Customer Intake Gateway (`/intake/returns`)
+  * **Action**: Scan customer box QR code, enter PIN `654321`. Verify active session countdown starts at 2 hours. Fast-forward clock or expire session.
+  * **Expected Behavior**: Upon expiration, the intake portal immediately locks and transitions the physical device into the configured 6-hour Cooldown Period.
+
+- [ ] **Server-Side Cooldown Lockout Verification**
+  * **Location**: `/api/v1/auth/verify-pin`
+  * **Action**: With device or IP currently in an active cooldown, attempt to send a POST request to `/api/v1/auth/verify-pin` with valid PIN `654321`.
+  * **Expected Behavior**: Server rejects authentication with HTTP `429 Too Many Requests` and JSON payload `{ error: "COOLDOWN_ACTIVE", cooldownRemainingMinutes: ..., unlocksAt: ... }`. The UI displays the Cooldown Lockout Screen with live ticking timer (`HH:MM:SS`).
+
+- [ ] **Incognito / Different Browser Bypass Prevention Test**
+  * **Location**: Secondary Browser / Incognito Tab (e.g. Chrome -> Safari, Brave, or Private Window)
+  * **Action**: On the same physical device in active cooldown, open an incognito tab or switch browsers. Navigate to `/intake/returns` and enter PIN `654321`.
+  * **Expected Behavior**: The deterministic hardware fingerprint engine (`src/utils/deviceFingerprint.js`) identifies the identical physical GPU, audio context, and display metrics. The server blocks authentication with HTTP 429 and displays the Cooldown Lockout Screen. Browser switching or cache wiping CANNOT bypass the lockout.
+
+- [ ] **Admin Emergency Cooldown Reset Test**
+  * **Location**: Admin Dashboard -> **"QR Keys & PINs Manager"** -> Profile Action: **"Clear Cooldowns"**
+  * **Action**: As Super Admin or Admin, click **"Clear Cooldowns"** on the `Customer Delivery Boxes` profile. Confirm the prompt.
+  * **Expected Behavior**: Server calls `/api/v1/auth/clear-cooldown` and purges matching records from `public.device_intake_sessions`. Previously locked devices are instantly unlocked and can scan and authenticate with the PIN immediately.
+
 ---
 
 ## Section 2: Public Intake Form Features

@@ -1,12 +1,23 @@
 import { supabase } from '../../_lib/supabase.js';
 import { generateApiKeyPair, ALLOWED_SYSTEMS } from '../../_lib/keyUtils.js';
 import { sendJson, setCorsHeaders } from '../../_lib/auth.js';
+import { handleVerifyPin, handleClearCooldown } from '../../_lib/verifyPinHandler.js';
 
 export default async function handler(req, res) {
   setCorsHeaders(res, req);
 
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
+  }
+
+  // Route: /api/v1/auth/verify-pin or action=verify-pin
+  if (req.query?.action === 'verify-pin' || req.url?.includes('verify-pin')) {
+    return handleVerifyPin(req, res);
+  }
+
+  // Route: /api/v1/auth/clear-cooldown or action=clear-cooldown
+  if (req.query?.action === 'clear-cooldown' || req.url?.includes('clear-cooldown')) {
+    return handleClearCooldown(req, res);
   }
 
   // GET: List all API Keys (Masked only, safe for admin dashboard)

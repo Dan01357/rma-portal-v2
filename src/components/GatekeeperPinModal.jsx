@@ -43,6 +43,10 @@ export default function GatekeeperPinModal({
   const [isSuccess, setIsSuccess] = useState(false);
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
 
+  // Anti-Fraud Cooldown State
+  const [cooldownInfo, setCooldownInfo] = useState(null);
+  const [countdownString, setCountdownString] = useState('');
+
   // Request PIN Modal & Form State
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
   const [requestForm, setRequestForm] = useState({
@@ -72,18 +76,21 @@ export default function GatekeeperPinModal({
       setPinDigits(['', '', '', '', '', '']);
       setErrorMessage('');
       setLockoutSeconds(0);
+      setCooldownInfo(null);
+      setCountdownString('');
       setIsRequestModalOpen(false);
       setRequestSuccess(false);
       setRequestError('');
     }
   }, [isOpen]);
 
-  // 2. Fetch profile when slug changes or modal opens
+  // 2. Fetch profile & check device cooldown when slug changes or modal opens
   useEffect(() => {
     let isMounted = true;
     if (!isOpen || !currentSlug) {
       setProfile(null);
       setIsLoadingProfile(false);
+      setCooldownInfo(null);
       return;
     }
 
@@ -96,6 +103,16 @@ export default function GatekeeperPinModal({
         if (!isMounted) return;
         setProfile(prof);
         setIsLoadingProfile(false);
+
+        // Check if device is in cooldown for this profile
+        if (prof?.type === 'external_customer') {
+          accessKeyService.checkDeviceCooldown(currentSlug).then(cd => {
+            if (!isMounted) return;
+            if (cd && cd.isCooldownActive) {
+              setCooldownInfo(cd);
+            }
+          });
+        }
       })
       .catch(() => {
         if (!isMounted) return;
@@ -105,6 +122,35 @@ export default function GatekeeperPinModal({
 
     return () => { isMounted = false; };
   }, [isOpen, currentSlug]);
+
+  // Live ticking countdown for Cooldown Lockout Screen
+  useEffect(() => {
+    if (!cooldownInfo?.unlocksAt) return;
+
+    const updateTimer = () => {
+      const now = Date.now();
+      const target = new Date(cooldownInfo.unlocksAt).getTime();
+      const diffMs = target - now;
+
+      if (diffMs <= 0) {
+        setCooldownInfo(null);
+        setCountdownString('');
+        return;
+      }
+
+      const totalSec = Math.floor(diffMs / 1000);
+      const hours = Math.floor(totalSec / 3600);
+      const minutes = Math.floor((totalSec % 3600) / 60);
+      const seconds = totalSec % 60;
+
+      const pad = (n) => String(n).padStart(2, '0');
+      setCountdownString(`${pad(hours)}:${pad(minutes)}:${pad(seconds)}`);
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [cooldownInfo]);
 
   // Auto-focus first PIN box on open
   useEffect(() => {
@@ -200,6 +246,10 @@ export default function GatekeeperPinModal({
           setIsSuccess(false);
           onUnlock(res.session);
         }, 500);
+      } else if (res && res.error === 'COOLDOWN_ACTIVE') {
+        // Anti-Fraud Cooldown Lockout triggered
+        setIsVerifying(false);
+        setCooldownInfo(res);
       } else {
         setIsVerifying(false);
         setIsShake(true);
@@ -218,6 +268,22 @@ export default function GatekeeperPinModal({
       setErrorMessage('Verification failed. Please retry.');
       setPinDigits(['', '', '', '', '', '']);
       setTimeout(() => inputRefs[0]?.current?.focus(), 100);
+    }
+  };
+
+  // Refresh Cooldown Lockout state
+  const handleRefreshCooldown = async () => {
+    setIsVerifying(true);
+    try {
+      const cd = await accessKeyService.checkDeviceCooldown(profile?.access_slug || currentSlug);
+      if (!cd || !cd.isCooldownActive) {
+        setCooldownInfo(null);
+        setCountdownString('');
+      } else {
+        setCooldownInfo(cd);
+      }
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -404,6 +470,81 @@ export default function GatekeeperPinModal({
               >
                 Supervisor Login
               </button>
+            </div>
+          </div>
+        ) : cooldownInfo?.unlocksAt ? (
+          /* ================================================================= */
+          /* STATE C: ENTERPRISE COOLDOWN LOCKOUT SCREEN                       */
+          /* ================================================================= */
+          <div className="space-y-6 text-center animate-in fade-in zoom-in-95">
+            {/* Shield Alert Glow Icon */}
+            <div className="relative mx-auto w-16 h-16 rounded-3xl bg-amber-50 dark:bg-amber-950/70 border border-amber-300 dark:border-amber-700/80 text-amber-600 dark:text-amber-400 flex items-center justify-center shadow-lg shadow-amber-500/10">
+              <ShieldAlert className="w-8 h-8 animate-pulse" />
+              <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 border-2 border-white dark:border-slate-900" />
+            </div>
+
+            <div className="space-y-2">
+              <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 border border-amber-200 dark:border-amber-800">
+                Security Lockout • Anti-Duplicate Shield
+              </span>
+              <h2 className="text-xl font-black text-slate-900 dark:text-white">
+                Return Window Currently Locked
+              </h2>
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed max-w-sm mx-auto">
+                Your previous RMA intake session has concluded. To protect inventory records and prevent duplicate submissions, this portal will unlock again for this device once the cooldown period completes.
+              </p>
+            </div>
+
+            {/* Live Ticking Countdown Box */}
+            <div className="p-5 bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-800/80 dark:to-slate-850 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-inner space-y-2">
+              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                Device Unlocks In
+              </div>
+              <div className="text-3xl sm:text-4xl font-mono font-black tracking-widest text-slate-900 dark:text-white">
+                {countdownString || 'Calculating...'}
+              </div>
+              <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200 dark:border-slate-700/80">
+                Unlocks At: {new Date(cooldownInfo.unlocksAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}, {new Date(cooldownInfo.unlocksAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+              </div>
+            </div>
+
+            {/* Profile Info Pill */}
+            <div className="flex items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono">
+              <span className="truncate">Station: <strong>{profile?.name || currentSlug}</strong></span>
+              <span>•</span>
+              <span>Cooldown: <strong>{cooldownInfo.cooldownDurationHours || profile?.cooldown_duration_hours || 6}h</strong></span>
+            </div>
+
+            {/* Actions: Refresh & Contact Support & Supervisor Override */}
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2 text-xs">
+              <button
+                type="button"
+                onClick={handleRefreshCooldown}
+                disabled={isVerifying}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-black transition-all shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isVerifying ? 'animate-spin' : ''}`} />
+                <span>{isVerifying ? 'Checking Status...' : 'Refresh Lockout Status'}</span>
+              </button>
+
+              <div className="flex items-center justify-between pt-1 font-bold">
+                <a
+                  href="mailto:finance2@keysysincorporated.com?subject=Urgent%20RMA%20Portal%20Unlock%20Request"
+                  className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1"
+                >
+                  <Mail className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Contact Support / AE</span>
+                </a>
+
+                <button
+                  type="button"
+                  onClick={onOpenAdminLogin}
+                  className="text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>Supervisor Override</span>
+                </button>
+              </div>
             </div>
           </div>
         ) : (

@@ -33,6 +33,20 @@ export default defineConfig({
             const handler = (await import('./api/docs.js')).default;
             return handler(req, res);
           }
+          if (req.url?.startsWith('/api/v1/auth/verify-pin') || req.url?.startsWith('/api/v1/auth/clear-cooldown')) {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', async () => {
+              try { req.body = JSON.parse(body); } catch (e) { req.body = body; }
+              const { handleVerifyPin, handleClearCooldown } = await import('./api/_lib/verifyPinHandler.js');
+              if (req.url?.includes('verify-pin')) {
+                return handleVerifyPin(req, res);
+              } else {
+                return handleClearCooldown(req, res);
+              }
+            });
+            return;
+          }
           next();
         });
       }

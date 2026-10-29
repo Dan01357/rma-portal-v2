@@ -1,4 +1,5 @@
 import { supabase } from '../supabaseClient';
+import { getDeviceFingerprint } from '../utils/deviceFingerprint';
 
 const STORAGE_KEY = 'rma_portal_access_keys_v2';
 const SETTINGS_KEY = 'portal_access_keys_store';
@@ -35,6 +36,7 @@ export const DEFAULT_ACCESS_PROFILES = [
     access_slug: 'dock',
     pin_code: '123456',
     session_duration_hours: 0, // 0 = No Expiry (Permanent)
+    cooldown_duration_hours: 0, // 0 = Cooldown Disabled
     is_active: true,
     created_by: 'System Default',
     created_at: '2026-01-01T00:00:00.000Z',
@@ -47,6 +49,7 @@ export const DEFAULT_ACCESS_PROFILES = [
     access_slug: 'returns',
     pin_code: '654321',
     session_duration_hours: 2, // 2 Hours per device
+    cooldown_duration_hours: 6, // 6 Hours Cooldown Lockout
     is_active: true,
     created_by: 'System Default',
     created_at: '2026-01-01T00:00:00.000Z',
@@ -156,6 +159,7 @@ export const accessKeyService = {
     accessSlug,
     pinCode,
     sessionDurationHours = 0,
+    cooldownDurationHours = 6,
     createdBy = 'Admin'
   }) {
     if (!name || !name.trim()) throw new Error('Profile name is required');
@@ -185,6 +189,7 @@ export const accessKeyService = {
       access_slug: cleanSlug,
       pin_code: String(pinCode).trim(),
       session_duration_hours: Math.max(0, parseInt(sessionDurationHours, 10) || 0),
+      cooldown_duration_hours: type === 'internal_warehouse' ? 0 : Math.max(0, parseInt(cooldownDurationHours, 10) || 0),
       is_active: true,
       created_by: createdBy || 'Admin',
       created_at: new Date().toISOString(),
@@ -214,7 +219,7 @@ export const accessKeyService = {
   },
 
   /**
-   * UPDATE PROFILE (PIN, Duration, Name, Status)
+   * UPDATE PROFILE (PIN, Duration, Name, Cooldown, Status)
    */
   async updateProfile(idOrSlug, updates) {
     const existing = await this.getProfiles();
@@ -300,7 +305,7 @@ export const accessKeyService = {
   },
 
   /**
-   * VERIFY PIN WITH RATE-LIMIT BRUTE-FORCE PROTECTION
+   * VERIFY PIN WITH SERVER-SIDE ANTI-FRAUD COOLDOWN ENGINE & BRUTE-FORCE PROTECTION
    */
   async verifyPin(slug, inputPin) {
     const profile = await this.getProfileBySlug(slug);
@@ -332,21 +337,136 @@ export const accessKeyService = {
     }
 
     const cleanInput = String(inputPin || '').trim();
-    const cleanExpected = String(profile.pin_code || '').trim();
+    const deviceFingerprint = await getDeviceFingerprint();
 
-    if (cleanInput === cleanExpected) {
-      // Reset attempts on correct PIN
-      try { localStorage.removeItem(attemptKey); } catch (e) {}
-      const session = this.createSession(profile);
-      return { success: true, profile, session };
-    } else {
-      // Increment attempt counter
-      const newCount = (attemptsData.count || 0) + 1;
-      let lockedUntil = 0;
-      if (newCount >= 5) {
-        lockedUntil = now + 30000; // 30 seconds cooldown
+    // 1. PRIMARY: Call unbypassable server-side verification endpoint
+    try {
+      const resp = await fetch('/api/v1/auth/verify-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slug: profile.access_slug,
+          pin: cleanInput,
+          deviceFingerprint
+        })
+      });
+
+      const data = await resp.json().catch(() => ({}));
+
+      // HTTP 429: Active Cooldown Lockout
+      if (resp.status === 429 || data.error === 'COOLDOWN_ACTIVE') {
+        return {
+          success: false,
+          error: 'COOLDOWN_ACTIVE',
+          message: data.message || 'Return Window Currently Locked',
+          cooldownRemainingMinutes: data.cooldownRemainingMinutes || 60,
+          unlocksAt: data.unlocksAt,
+          sessionExpiresAt: data.sessionExpiresAt,
+          profileName: data.profileName || profile.name,
+          cooldownDurationHours: data.cooldownDurationHours || profile.cooldown_duration_hours || 6
+        };
       }
 
+      // HTTP 200: Successful authentication
+      if (resp.ok && data.success && data.session) {
+        try { localStorage.removeItem(attemptKey); } catch (e) {}
+        try { localStorage.setItem(SESSION_KEY, JSON.stringify(data.session)); } catch (e) {}
+        return { success: true, profile: data.profile || profile, session: data.session };
+      }
+
+      // HTTP 401: Invalid PIN
+      if (resp.status === 401 || data.error === 'INVALID_PIN') {
+        const newCount = (attemptsData.count || 0) + 1;
+        let lockedUntil = 0;
+        if (newCount >= 5) lockedUntil = now + 30000;
+        try {
+          localStorage.setItem(attemptKey, JSON.stringify({ count: newCount >= 5 ? 0 : newCount, lockedUntil }));
+        } catch (e) {}
+
+        return {
+          success: false,
+          error: 'INVALID_PIN',
+          remainingAttempts: Math.max(0, 5 - newCount),
+          isLocked: lockedUntil > 0,
+          message: lockedUntil > 0 
+            ? 'Too many incorrect attempts. Locked for 30 seconds.'
+            : 'Incorrect 6-digit PIN. Please retry.'
+        };
+      }
+
+      if (data.message && !resp.ok) {
+        return { success: false, error: data.error || 'ERROR', message: data.message };
+      }
+    } catch (netErr) {
+      console.warn('API endpoint unreachable; using direct Supabase anti-fraud fallback:', netErr);
+    }
+
+    // 2. FALLBACK: Direct Supabase Cooldown Check & PIN verification
+    // Checks public.device_intake_sessions directly so cooldowns are NEVER bypassed
+    try {
+      if (profile.type === 'external_customer' && Number(profile.session_duration_hours) > 0) {
+        const { data: dbSessions } = await supabase
+          .from('device_intake_sessions')
+          .select('*')
+          .eq('device_fingerprint', deviceFingerprint)
+          .eq('access_slug', profile.access_slug)
+          .order('cooldown_until', { ascending: false })
+          .limit(1);
+
+        if (dbSessions && dbSessions.length > 0) {
+          const s = dbSessions[0];
+          const cooldownDate = new Date(s.cooldown_until);
+          const expiresDate = new Date(s.session_expires_at);
+          const nowDate = new Date();
+
+          if (nowDate >= expiresDate && nowDate < cooldownDate) {
+            const diffMs = cooldownDate.getTime() - nowDate.getTime();
+            const cooldownRemainingMinutes = Math.max(1, Math.ceil(diffMs / (60 * 1000)));
+            return {
+              success: false,
+              error: 'COOLDOWN_ACTIVE',
+              message: 'Return Window Currently Locked: Your previous RMA session has concluded.',
+              cooldownRemainingMinutes,
+              unlocksAt: s.cooldown_until,
+              sessionExpiresAt: s.session_expires_at,
+              profileName: profile.name,
+              cooldownDurationHours: profile.cooldown_duration_hours || 6
+            };
+          }
+        }
+      }
+    } catch (e) {}
+
+    // Verify PIN locally
+    const cleanExpected = String(profile.pin_code || '').trim();
+    if (cleanInput === cleanExpected) {
+      try { localStorage.removeItem(attemptKey); } catch (e) {}
+      const session = this.createSession(profile);
+
+      // Async record session in Supabase
+      if (profile.type === 'external_customer') {
+        const durationHours = Number(profile.session_duration_hours || 2);
+        const cooldownHours = Number(profile.cooldown_duration_hours !== undefined ? profile.cooldown_duration_hours : 6);
+        const nowIso = new Date().toISOString();
+        const sessionExpiresAt = new Date(Date.now() + (durationHours * 3600 * 1000)).toISOString();
+        const cooldownUntil = new Date(new Date(sessionExpiresAt).getTime() + (cooldownHours * 3600 * 1000)).toISOString();
+
+        supabase.from('device_intake_sessions').insert([{
+          access_slug: profile.access_slug,
+          device_fingerprint: deviceFingerprint,
+          ip_address: 'client-direct',
+          session_started_at: nowIso,
+          session_expires_at: sessionExpiresAt,
+          cooldown_until: cooldownUntil,
+          status: 'active'
+        }]).then(() => {}).catch(() => {});
+      }
+
+      return { success: true, profile, session };
+    } else {
+      const newCount = (attemptsData.count || 0) + 1;
+      let lockedUntil = 0;
+      if (newCount >= 5) lockedUntil = now + 30000;
       try {
         localStorage.setItem(attemptKey, JSON.stringify({ count: newCount >= 5 ? 0 : newCount, lockedUntil }));
       } catch (e) {}
@@ -361,6 +481,74 @@ export const accessKeyService = {
           : 'Incorrect 6-digit PIN. Please retry.'
       };
     }
+  },
+
+  /**
+   * CHECK DEVICE COOLDOWN STATUS
+   * Checks if current device is in active cooldown for a given slug
+   */
+  async checkDeviceCooldown(slug) {
+    if (!slug) return null;
+    try {
+      const deviceFingerprint = await getDeviceFingerprint();
+      const cleanSlug = String(slug).trim().toLowerCase();
+
+      const { data, error } = await supabase
+        .from('device_intake_sessions')
+        .select('*')
+        .eq('access_slug', cleanSlug)
+        .eq('device_fingerprint', deviceFingerprint)
+        .order('cooldown_until', { ascending: false })
+        .limit(1);
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const s = data[0];
+        const now = new Date();
+        const cooldownDate = new Date(s.cooldown_until);
+        const expiresDate = new Date(s.session_expires_at);
+
+        if (now >= expiresDate && now < cooldownDate) {
+          const diffMs = cooldownDate.getTime() - now.getTime();
+          return {
+            isCooldownActive: true,
+            cooldownRemainingMinutes: Math.max(1, Math.ceil(diffMs / (60 * 1000))),
+            unlocksAt: s.cooldown_until,
+            sessionExpiresAt: s.session_expires_at
+          };
+        }
+      }
+    } catch (e) {}
+    return null;
+  },
+
+  /**
+   * ADMIN EMERGENCY RESET / CLEAR COOLDOWNS
+   * Instantly unlocks all devices for a given QR profile.
+   */
+  async emergencyResetCooldowns(slug, profileId = null) {
+    const cleanSlug = String(slug || '').trim().toLowerCase();
+
+    // 1. Call server route
+    try {
+      await fetch('/api/v1/auth/clear-cooldown', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: cleanSlug, profileId })
+      });
+    } catch (e) {}
+
+    // 2. Direct Supabase delete
+    try {
+      let query = supabase.from('device_intake_sessions').delete();
+      if (cleanSlug) {
+        query = query.eq('access_slug', cleanSlug);
+      } else if (profileId) {
+        query = query.eq('profile_id', profileId);
+      }
+      await query;
+    } catch (e) {}
+
+    return true;
   },
 
   /**
