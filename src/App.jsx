@@ -973,6 +973,8 @@ export default function App() {
   const [paperworkCaptureMode, setPaperworkCaptureMode] = useState('single'); // 'single' (Camera snap) | 'batch' (Multi-file select)
   const [paperworkMetadata, setPaperworkMetadata] = useState(null);
   const [isInspectingPaperwork, setIsInspectingPaperwork] = useState(false);
+  const [paperworkInspectionProgress, setPaperworkInspectionProgress] = useState(null); // { current: 1, total: 3 }
+  const paperworkAbortControllerRef = useRef(null);
   const [paperworkShake, setPaperworkShake] = useState(false);
   const [paperworkError, setPaperworkError] = useState(null);
   const [siNumber, setSiNumber] = useState('');
@@ -1532,6 +1534,17 @@ export default function App() {
     });
   };
 
+  // Cancel long-running Gemini Flash Paperwork Inspection
+  const cancelPaperworkInspection = () => {
+    if (paperworkAbortControllerRef.current) {
+      paperworkAbortControllerRef.current.abort();
+      paperworkAbortControllerRef.current = null;
+    }
+    setIsInspectingPaperwork(false);
+    setPaperworkInspectionProgress(null);
+    showToast('Inspection cancelled. You can select another photo.', 'info');
+  };
+
   // Official Logistics Paperwork (DR / Invoice / PO) Photo Handler with Gemini Flash AI OCR (Multi-photo up to 3)
   const handlePaperworkSelect = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -1552,14 +1565,25 @@ export default function App() {
 
     setPaperworkError(null);
     setIsInspectingPaperwork(true);
+    setPaperworkInspectionProgress({ current: 1, total: filesToProcess.length });
+
+    const abortController = new AbortController();
+    paperworkAbortControllerRef.current = abortController;
 
     try {
       const validNewPhotos = [];
       let latestValidResult = null;
 
-      for (const file of filesToProcess) {
+      for (let i = 0; i < filesToProcess.length; i++) {
+        if (abortController.signal.aborted) break;
+
+        const file = filesToProcess[i];
+        setPaperworkInspectionProgress({ current: i + 1, total: filesToProcess.length });
+
         // 1. Inspect paperwork with Gemini Flash via /api/v1/ai/inspect-paperwork
-        const inspectionResult = await catalogService.inspectPaperwork(file);
+        const inspectionResult = await catalogService.inspectPaperwork(file, abortController.signal);
+
+        if (abortController.signal.aborted) break;
 
         // 2. Strict Rejection Check
         if (!inspectionResult || !inspectionResult.is_valid_document) {
@@ -1579,6 +1603,8 @@ export default function App() {
         });
       }
 
+      if (abortController.signal.aborted) return;
+
       if (validNewPhotos.length > 0) {
         setPaperworkPhotos(prev => [...prev, ...validNewPhotos]);
         setPaperworkMetadata(latestValidResult);
@@ -1594,6 +1620,10 @@ export default function App() {
         showToast(`✓ Verified ${latestValidResult.document_type || 'Paperwork'} (${detectedNum})`, 'success');
       }
     } catch (err) {
+      if (err.name === 'AbortError' || abortController.signal.aborted) {
+        console.log('Paperwork inspection cancelled by user.');
+        return;
+      }
       console.error('Paperwork inspection error:', err);
       setPaperworkShake(true);
       setTimeout(() => setPaperworkShake(false), 900);
@@ -1601,6 +1631,8 @@ export default function App() {
       showToast('Paperwork inspection failed. Please ensure the document is flat and readable.', 'warning');
     } finally {
       setIsInspectingPaperwork(false);
+      setPaperworkInspectionProgress(null);
+      paperworkAbortControllerRef.current = null;
       if (e.target) e.target.value = '';
     }
   };
@@ -1645,10 +1677,13 @@ export default function App() {
       return;
     }
 
-    if (paperworkPhotos.length === 0) {
-      setPaperworkShake(true);
-      setTimeout(() => setPaperworkShake(false), 800);
-      showToast('Official paperwork photo (Delivery Receipt / Invoice / PO) is required.', 'warning');
+    const cleanSi = siNumber.trim();
+    const cleanDr = drNumber.trim();
+    const cleanPo = poNumber.trim();
+
+    // At least one commercial document number (SI#, DR#, or PO#) is required
+    if (!cleanSi && !cleanDr && !cleanPo) {
+      showToast('Please provide at least one commercial document number: Sales Invoice (SI) #, Delivery Receipt (DR) #, or Purchase Order (PO) #.', 'warning');
       return;
     }
 
@@ -1678,10 +1713,6 @@ export default function App() {
     const rmaNumber = catalogService.generateRMANumber();
     const submitQty = Math.max(1, parseInt(quantity, 10) || 1);
     const finalUnit = unitName || detectedProduct?.unit_name || 'pc';
-
-    const cleanSi = siNumber.trim();
-    const cleanDr = drNumber.trim();
-    const cleanPo = poNumber.trim();
     const primaryDocNumber = cleanSi || cleanDr || cleanPo || invoiceDrNumber.trim() || null;
 
     // 2. Show success screen with full report details for QR sticker generation INSTANTLY!
@@ -2260,14 +2291,17 @@ export default function App() {
                 <div className="space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                     <div>
-                      <label className="block text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                      <label className="block text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2 flex-wrap">
                         <span>2. Proof & Paperwork Photos</span>
                         <span className="text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/70 border border-rose-200 dark:border-rose-900/60 px-2 py-0.5 rounded-full">
-                          Both Required
+                          Damaged Photo: Required
+                        </span>
+                        <span className="text-[9px] font-bold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/70 border border-violet-200 dark:border-violet-900/60 px-2 py-0.5 rounded-full">
+                          Paperwork: Recommended
                         </span>
                       </label>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                        Upload clear photos of the damaged merchandise and the official delivery paperwork.
+                        Upload clear photos of the damaged merchandise and optional official delivery paperwork.
                       </p>
                     </div>
                     <span className="text-[10px] text-slate-400 font-bold self-start sm:self-auto">
@@ -2279,7 +2313,7 @@ export default function App() {
                   <div className="p-2.5 bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200/90 dark:border-amber-800/60 rounded-xl flex items-start sm:items-center gap-2.5 text-xs text-amber-900 dark:text-amber-200 shadow-2xs">
                     <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
                     <div className="text-[11px] leading-snug flex-1">
-                      <strong>Photo Quality Reminder:</strong> Use clear lighting without glare. In the paperwork photo, ensure the <strong>Sales Invoice #, DR #, or PO #</strong> is sharply in focus and uncropped.
+                      <strong>Photo Quality Reminder:</strong> Official paperwork photo is <strong>optional, but recommended</strong> to attach so AI can auto-fill document numbers. At least 1 document number below (SI#, DR#, or PO#) is required.
                     </div>
                   </div>
 
@@ -2287,8 +2321,8 @@ export default function App() {
                     {/* ZONE 1: PHOTO OF DAMAGED PRODUCT (REQUIRED) */}
                     <div className={`p-4 rounded-2xl border-2 transition-all flex flex-col justify-between space-y-3 ${
                       photoFiles.length > 0
-                        ? 'bg-rose-50/30 dark:bg-rose-950/20 border-rose-300 dark:border-rose-800 shadow-2xs'
-                        : 'bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-700/80 hover:border-rose-400 shadow-2xs'
+                        ? 'bg-rose-50/30 dark:bg-slate-900 border-rose-300 dark:border-rose-900/80 shadow-2xs'
+                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-rose-400 dark:hover:border-rose-700 shadow-2xs'
                     }`}>
                       <div>
                         {/* Header Row */}
@@ -2352,14 +2386,14 @@ export default function App() {
 
                         {/* Photos Grid & Upload Action */}
                         {photoFiles.length === 0 ? (
-                          <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-rose-300 dark:border-rose-800/80 hover:border-rose-500 rounded-2xl bg-rose-50/30 dark:bg-rose-950/20 hover:bg-rose-50/60 dark:hover:bg-rose-950/40 cursor-pointer transition-all active:scale-[0.99] text-center group min-h-[140px]">
-                            <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-300 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform shadow-xs">
+                          <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-rose-300 dark:border-rose-800 hover:border-rose-500 dark:hover:border-rose-600 rounded-2xl bg-rose-50/40 dark:bg-rose-950/30 hover:bg-rose-50/70 dark:hover:bg-rose-950/50 cursor-pointer transition-all active:scale-[0.99] text-center group min-h-[140px]">
+                            <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-900/50 text-rose-600 dark:text-rose-300 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform shadow-xs">
                               <Camera className="w-5 h-5" />
                             </div>
                             <span className="text-xs font-black text-rose-950 dark:text-rose-200">
                               Snap Photo of Damaged Product
                             </span>
-                            <span className="text-[10px] text-rose-600/80 dark:text-rose-400 mt-0.5">
+                            <span className="text-[10px] text-rose-700/90 dark:text-rose-400 mt-0.5">
                               {photoCaptureMode === 'single' ? 'Tap to open camera' : 'Tap to select photos from gallery'}
                             </span>
                             <input
@@ -2427,12 +2461,12 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* ZONE 2: PHOTO OF DELIVERY RECEIPT / DR / INVOICE (REQUIRED - MULTI-PHOTO UP TO 3) */}
+                    {/* ZONE 2: PHOTO OF DELIVERY RECEIPT / DR / INVOICE (OPTIONAL BUT RECOMMENDED - MULTI-PHOTO UP TO 3) */}
                     <div className={`p-4 rounded-2xl border-2 transition-all flex flex-col justify-between space-y-3 ${
                       paperworkShake ? 'animate-shake border-rose-500 bg-rose-50 dark:bg-rose-950/40' :
                       paperworkPhotos.length > 0
-                        ? 'bg-emerald-50/30 dark:bg-emerald-950/20 border-emerald-400 dark:border-emerald-700 shadow-2xs'
-                        : 'bg-white dark:bg-slate-855 border-slate-200 dark:border-slate-700/80 hover:border-violet-400 shadow-2xs'
+                        ? 'bg-emerald-50/30 dark:bg-slate-900 border-emerald-400 dark:border-emerald-800/80 shadow-2xs'
+                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-violet-400 dark:hover:border-violet-700 shadow-2xs'
                     }`}>
                       <div>
                         {/* Header Row */}
@@ -2453,9 +2487,9 @@ export default function App() {
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
                             paperworkPhotos.length > 0
                               ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
-                              : 'bg-violet-100 dark:bg-violet-950/70 text-violet-800 dark:text-violet-300 border border-violet-200 dark:border-violet-800'
+                              : 'bg-violet-100 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800'
                           }`}>
-                            {paperworkPhotos.length > 0 ? `✓ ${paperworkPhotos.length}/3 Verified` : 'Required (0/3)'}
+                            {paperworkPhotos.length > 0 ? `✓ ${paperworkPhotos.length}/3 Verified` : 'Optional / Recommended'}
                           </span>
                         </div>
 
@@ -2494,29 +2528,52 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Inspecting Radar State */}
+                        {/* Inspecting Radar State with Real-Time Progress & Cancel Button */}
                         {isInspectingPaperwork && (
-                          <div className="py-5 px-3 border border-violet-300 dark:border-violet-700 bg-violet-50/90 dark:bg-violet-950/50 rounded-2xl flex flex-col items-center justify-center gap-2 text-center animate-pulse min-h-[140px]">
-                            <RefreshCw className="w-5 h-5 animate-spin text-violet-600 dark:text-violet-400 shrink-0" />
-                            <span className="text-xs font-black text-violet-900 dark:text-violet-200">
-                              Gemini Flash Inspecting & Validating Paperwork...
+                          <div className="py-5 px-3 border border-violet-300 dark:border-violet-700 bg-violet-50/90 dark:bg-violet-950/60 rounded-2xl flex flex-col items-center justify-center gap-2.5 text-center min-h-[140px] shadow-2xs">
+                            <div className="flex items-center gap-2">
+                              <RefreshCw className="w-5 h-5 animate-spin text-violet-600 dark:text-violet-400 shrink-0" />
+                              <span className="text-xs font-black text-violet-950 dark:text-violet-200">
+                                Inspecting paperwork {paperworkInspectionProgress?.current || 1} of {paperworkInspectionProgress?.total || 1} ({paperworkInspectionProgress?.current || 1}/{paperworkInspectionProgress?.total || 1})...
+                              </span>
+                            </div>
+
+                            {/* Progress bar */}
+                            <div className="w-44 h-1.5 bg-violet-200 dark:bg-violet-900/60 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-violet-600 dark:bg-violet-400 transition-all duration-300"
+                                style={{
+                                  width: `${Math.round(((paperworkInspectionProgress?.current || 1) / (paperworkInspectionProgress?.total || 1)) * 100)}%`
+                                }}
+                              />
+                            </div>
+
+                            <span className="text-[10px] text-violet-700 dark:text-violet-300">
+                              Verifying authentic DR / SI / PO and auto-detecting numbers
                             </span>
-                            <span className="text-[10px] text-violet-600 dark:text-violet-400">
-                              Verifying authentic DR / SI / PO and extracting numbers
-                            </span>
+
+                            <button
+                              type="button"
+                              onClick={cancelPaperworkInspection}
+                              className="mt-1 px-3 py-1 bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 border border-rose-300 dark:border-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg text-xs font-bold cursor-pointer transition-all shadow-xs flex items-center gap-1 active:scale-95"
+                              title="Cancel paperwork inspection"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              <span>Cancel Inspection</span>
+                            </button>
                           </div>
                         )}
 
                         {/* Photos Grid & Upload Action (when not inspecting) */}
                         {!isInspectingPaperwork && (paperworkPhotos.length === 0 ? (
-                          <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-violet-300 dark:border-violet-800/80 hover:border-violet-500 rounded-2xl bg-violet-50/30 dark:bg-violet-950/20 hover:bg-violet-50/60 dark:hover:bg-violet-950/40 cursor-pointer transition-all active:scale-[0.99] text-center group min-h-[140px]">
-                            <div className="w-10 h-10 rounded-xl bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-300 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform shadow-xs">
+                          <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-violet-300 dark:border-violet-800 hover:border-violet-500 dark:hover:border-violet-600 rounded-2xl bg-violet-50/40 dark:bg-violet-950/30 hover:bg-violet-50/70 dark:hover:bg-violet-950/50 cursor-pointer transition-all active:scale-[0.99] text-center group min-h-[140px]">
+                            <div className="w-10 h-10 rounded-xl bg-violet-100 dark:bg-violet-900/50 text-violet-600 dark:text-violet-300 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform shadow-xs">
                               <FileText className="w-5 h-5" />
                             </div>
-                            <span className="text-xs font-black text-violet-900 dark:text-violet-200">
+                            <span className="text-xs font-black text-violet-950 dark:text-violet-200">
                               Snap Photo of DR / Invoice / PO
                             </span>
-                            <span className="text-[10px] text-violet-600/80 dark:text-violet-400 mt-0.5">
+                            <span className="text-[10px] text-violet-700/90 dark:text-violet-400 mt-0.5">
                               {paperworkCaptureMode === 'single' ? 'Tap to open camera' : 'Tap to select paperwork from gallery'}
                             </span>
                             <input
@@ -2608,10 +2665,13 @@ export default function App() {
 
                 {/* DEDICATED INPUT FIELDS FOR SI#, DR#, AND PO# (AUTO-POPULATED OR MANUAL) */}
                 <div className="space-y-2 pt-1">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                      <FileText className="w-4 h-4 text-violet-600" />
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5 flex-wrap">
+                      <FileText className="w-4 h-4 text-violet-600 dark:text-violet-400 shrink-0" />
                       <span>Commercial Document Numbers</span>
+                      <span className="text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/70 border border-rose-200 dark:border-rose-900/60 px-2 py-0.5 rounded-full lowercase first-letter:uppercase">
+                        * At least 1 required (SI#, DR#, or PO#)
+                      </span>
                     </label>
                     {(siNumber || drNumber || poNumber) && (
                       <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
@@ -2620,6 +2680,9 @@ export default function App() {
                       </span>
                     )}
                   </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Snap official paperwork above to auto-detect, or enter manually below. At least one document number is required.
+                  </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                     {/* Sales Invoice (SI) # */}

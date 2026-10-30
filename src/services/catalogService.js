@@ -270,7 +270,7 @@ export const catalogService = {
    * Inspect paperwork photo using Google Gemini Flash OCR service
    * Returns verification flag, document type, DR number, store branch, etc.
    */
-  async inspectPaperwork(fileOrBase64) {
+  async inspectPaperwork(fileOrBase64, signal) {
     let base64Data = '';
     let mimeType = 'image/jpeg';
 
@@ -292,7 +292,8 @@ export const catalogService = {
       body: JSON.stringify({
         fileData: base64Data,
         mimeType
-      })
+      }),
+      signal
     });
 
     if (!res.ok) {
