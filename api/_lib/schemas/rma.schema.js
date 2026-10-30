@@ -29,9 +29,15 @@ export const RMADispositionEnum = z.enum([
   'Scrap / Dispose'
 ]);
 
+export const RMATypeEnum = z.enum([
+  'customer_inbound',
+  'supplier_outbound'
+]);
+
 export const RMAReportSchema = z.object({
   id: z.number().int().openapi({ example: 1042 }),
   rma_number: z.string().openapi({ example: 'RMA-20261026-8941' }),
+  rma_type: RMATypeEnum.default('customer_inbound').openapi({ example: 'customer_inbound', description: 'Logistics type: customer_inbound (store return) or supplier_outbound (vendor RTV)' }),
   barcode: z.string().openapi({ example: '4800016644833' }),
   code: z.string().nullable().optional().openapi({ example: 'OISHI-PRAWN-50G' }),
   name: z.string().openapi({ example: 'Oishi Prawn Crackers 50g' }),
@@ -66,6 +72,7 @@ export const RMAReportSchema = z.object({
 export const CreateRMAReportSchema = z.object({
   barcode: z.string().min(1, 'Barcode is required').openapi({ example: '4800016644833' }),
   name: z.string().min(1, 'Product name is required').openapi({ example: 'Oishi Prawn Crackers 50g' }),
+  rma_type: RMATypeEnum.optional().default('customer_inbound').openapi({ example: 'customer_inbound', description: 'Logistics type: customer_inbound (default) or supplier_outbound' }),
   code: z.string().optional().openapi({ example: 'P2678P' }),
   quantity: z.number().int().min(1).default(1).openapi({ example: 2 }),
   supplier_name: z.string().optional().default('Savemore').openapi({ example: 'Liwayway Marketing' }),
@@ -93,6 +100,7 @@ export const CreateRMAReportSchema = z.object({
 }).openapi('CreateRMAReportRequest');
 
 export const UpdateRMAReportSchema = z.object({
+  rma_type: RMATypeEnum.optional().openapi({ example: 'supplier_outbound', description: 'Reclassify logistics type between customer_inbound and supplier_outbound' }),
   status: RMAStatusEnum.optional().openapi({ example: 'under_inspection' }),
   condition_grade: RMAConditionGradeEnum.optional().openapi({ example: 'A - Like New / Resellable' }),
   disposition: RMADispositionEnum.optional().openapi({ example: 'Restock to Inventory' }),
@@ -122,6 +130,7 @@ export function registerRMARoutes(registry) {
     tags: ['RMA Reports'],
     request: {
       query: PaginationQuerySchema.extend({
+        rma_type: z.enum(['customer_inbound', 'supplier_outbound']).optional().openapi({ description: 'Filter by logistics type: customer_inbound or supplier_outbound', example: 'customer_inbound' }),
         status: z.string().optional().openapi({ description: 'Filter by status (pending, resolved, etc.)', example: 'pending' }),
         barcode: z.string().optional().openapi({ description: 'Filter by exact product barcode', example: '4800016644833' }),
         search: z.string().optional().openapi({ description: 'Search term across RMA #, name, SKU, or reporter', example: 'Oishi' })

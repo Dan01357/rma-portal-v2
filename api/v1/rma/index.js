@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   // 2. GET: List RMA Reports with query filters
   if (req.method === 'GET') {
     try {
-      const { status, barcode, search, limit = '50', offset = '0' } = req.query;
+      const { rma_type, status, barcode, search, limit = '50', offset = '0' } = req.query;
 
       const numLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
       const numOffset = Math.max(parseInt(offset, 10) || 0, 0);
@@ -24,6 +24,9 @@ export default async function handler(req, res) {
         .from('rma_reports')
         .select('*', { count: 'exact' });
 
+      if (rma_type) {
+        query = query.eq('rma_type', rma_type);
+      }
       if (status) {
         query = query.eq('status', status);
       }
@@ -80,6 +83,7 @@ export default async function handler(req, res) {
       const {
         barcode,
         name,
+        rma_type = 'customer_inbound',
         code,
         quantity = 1,
         supplier_name,
@@ -123,6 +127,7 @@ export default async function handler(req, res) {
 
       const reportPayload = {
         rma_number: rmaNumber,
+        rma_type: rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound',
         barcode: String(barcode).trim(),
         code: code ? String(code).trim() : null,
         name: String(name).trim(),

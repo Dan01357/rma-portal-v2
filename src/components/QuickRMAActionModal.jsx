@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
+import { catalogService } from '../services/catalogService';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import RMATimelineAudit from './RMATimelineAudit';
 
@@ -83,6 +84,34 @@ export default function QuickRMAActionModal({
   const [isSavingTriage, setIsSavingTriage] = useState(false);
   const [triageSavedSuccess, setTriageSavedSuccess] = useState(false);
   const [isThermalLabelOpen, setIsThermalLabelOpen] = useState(false);
+  const [isUpdatingType, setIsUpdatingType] = useState(false);
+  const [typeFeedback, setTypeFeedback] = useState(null);
+
+  // Reclassify RMA Type between customer_inbound and supplier_outbound
+  const handleToggleRmaType = async (newType) => {
+    if (!report || isUpdatingType) return;
+    const currentType = report.rma_type || 'customer_inbound';
+    if (currentType === newType) return;
+
+    setIsUpdatingType(true);
+    setTypeFeedback(null);
+    try {
+      // Optimistic update
+      setReport(prev => ({ ...prev, rma_type: newType }));
+      const cleanId = report.id || report.rma_number;
+      await catalogService.updateRMAType(cleanId, newType);
+      setTypeFeedback(newType === 'customer_inbound' ? 'Moved to Customer RMA Hub (Inbound)' : 'Moved to Supplier RMA Hub (Outbound / RTV)');
+      setTimeout(() => setTypeFeedback(null), 3000);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error('Failed to update RMA type:', err);
+      // Revert optimistic update
+      setReport(prev => ({ ...prev, rma_type: currentType }));
+      alert(`Could not switch return type: ${err.message}`);
+    } finally {
+      setIsUpdatingType(false);
+    }
+  };
 
   // Synchronize triage inputs when report loads or updates
   useEffect(() => {
@@ -566,6 +595,57 @@ export default function QuickRMAActionModal({
           {/* 3. Report Loaded: Display Summary Card */}
           {report && (
             <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-4 space-y-3">
+              {/* TOP SEGMENTED SWITCHER: Customer Inbound vs Supplier Outbound */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Logistics Stream Classification:
+                  </span>
+                  <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                    report.rma_type === 'supplier_outbound'
+                      ? 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
+                      : 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                  }`}>
+                    {report.rma_type === 'supplier_outbound' ? 'Outbound Vendor RTV' : 'Inbound Customer RMA'}
+                  </span>
+                </div>
+                <div className="bg-slate-200/80 dark:bg-slate-900 p-1 rounded-xl border border-slate-300/80 dark:border-slate-700 flex items-center justify-between gap-1 shadow-2xs">
+                  <button
+                    type="button"
+                    disabled={isUpdatingType}
+                    onClick={() => handleToggleRmaType('customer_inbound')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      (report.rma_type === 'customer_inbound' || !report.rma_type)
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <Package className="w-3.5 h-3.5 shrink-0" />
+                    <span>📥 Customer Return (Inbound)</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isUpdatingType}
+                    onClick={() => handleToggleRmaType('supplier_outbound')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      report.rma_type === 'supplier_outbound'
+                        ? 'bg-purple-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <Building2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>📤 Supplier Claim (Outbound / RTV)</span>
+                  </button>
+                </div>
+              </div>
+
+              {typeFeedback && (
+                <div className="p-2 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 rounded-xl text-[11px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{typeFeedback}</span>
+                </div>
+              )}
+
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-700 pb-3">
                 <div className="space-y-0.5">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
@@ -636,6 +716,71 @@ export default function QuickRMAActionModal({
                   )}
                 </div>
               </div>
+
+              {/* CONTEXTUAL STREAM HIGHLIGHT: Customer Inbound vs Supplier Outbound */}
+              {report.rma_type === 'supplier_outbound' ? (
+                <div className="p-3 bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-xl space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between text-purple-900 dark:text-purple-200 font-black">
+                    <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide">
+                      <Building2 className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                      <span>Supplier Outbound Return (RTV Recovery)</span>
+                    </span>
+                    <span className="text-[10px] bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-300 px-2 py-0.5 rounded-full font-bold">
+                      Vendor Chargeback
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Master Supplier</span>
+                      <strong className="text-slate-900 dark:text-white truncate block">{report.supplier_name || 'Savemore'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Warehouse Bin</span>
+                      <strong className="text-slate-900 dark:text-white font-mono">{report.warehouse_location || 'DOCK'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Batch / Lot #</span>
+                      <strong className="text-slate-900 dark:text-white font-mono">{report.batch_lot_number || 'N/A'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Total Debit Value</span>
+                      <strong className="text-emerald-600 dark:text-emerald-400 font-mono font-black">₱{totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between text-blue-900 dark:text-blue-200 font-black">
+                    <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide">
+                      <Package className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>Customer Inbound Return (Credit Processing)</span>
+                    </span>
+                    <span className="text-[10px] bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 px-2 py-0.5 rounded-full font-bold">
+                      Customer Credit
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Store / Branch</span>
+                      <strong className="text-slate-900 dark:text-white truncate block">{report.store_branch || 'Store/Branch Unassigned'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Invoice / DR #</span>
+                      <strong className="text-slate-900 dark:text-white font-mono">{report.invoice_dr_number || report.dr_number || report.si_number || 'None'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Customer AE</span>
+                      <strong className="text-slate-900 dark:text-white truncate block">{report.ae_name || 'Unassigned'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Credit Memo</span>
+                      <strong className={existingMemo ? 'text-emerald-600 dark:text-emerald-400 font-mono' : 'text-amber-600 dark:text-amber-400 font-bold'}>
+                        {existingMemo ? `✓ ${existingMemo.credit_memo_number || 'Issued'}` : 'Pending Issuance'}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Proof Photos Thumbnail */}
               {photoList.length > 0 && (

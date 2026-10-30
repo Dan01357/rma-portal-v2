@@ -968,6 +968,7 @@ export const catalogService = {
    */
   async submitReport({ 
     rmaNumber: explicitRmaNumber = null,
+    rma_type = 'customer_inbound',
     barcode, 
     product, 
     quantity = 1, 
@@ -1072,6 +1073,7 @@ export const catalogService = {
 
     const reportRow = {
       rma_number: rmaNumber,
+      rma_type: rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound',
       barcode: cleanBarcode,
       code: isKnown ? (resolvedProduct.code || resolvedProduct.barcode) : null,
       name: isKnown ? resolvedProduct.name : `Unidentified Item (${cleanBarcode})`,
@@ -1135,6 +1137,9 @@ export const catalogService = {
       delete fallbackRow.ai_document_metadata;
       delete fallbackRow.google_drive_folder_url;
       delete fallbackRow.google_drive_folder_id;
+      if (reportError.message?.includes('rma_type')) {
+        delete fallbackRow.rma_type;
+      }
       const retry = await supabase.from('rma_reports').insert([fallbackRow]).select().single();
       if (!retry.error) {
         insertedReport = retry.data;
@@ -1200,6 +1205,30 @@ export const catalogService = {
       status: reportRow.status,
       report: finalReport
     };
+  },
+
+  /**
+   * Reclassify RMA Type between 'customer_inbound' and 'supplier_outbound'
+   */
+  async updateRMAType(id, rma_type) {
+    const cleanType = rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
+    const cleanId = String(id).trim();
+    const isNum = /^\d+$/.test(cleanId);
+
+    let query = supabase.from('rma_reports').update({ rma_type: cleanType });
+    if (isNum) {
+      query = query.eq('id', parseInt(cleanId, 10));
+    } else {
+      query = query.eq('rma_number', cleanId);
+    }
+
+    const { data, error } = await query.select().single();
+    if (error) {
+      console.error('Failed to update rma_type:', error);
+      throw error;
+    }
+    this.notifyChange('report-updated', { report: data });
+    return data;
   },
 
   /**

@@ -71,7 +71,7 @@ import SettingsTab from './components/SettingsTab';
 import CreditMemosTab from './components/CreditMemosTab';
 import SupplierClaimsTab from './components/SupplierClaimsTab';
 import ThermalBoxLabelModal from './components/ThermalBoxLabelModal';
-import { exportRMAReportsToCSV } from './utils/exportCsv';
+import { exportRMAReportsToCSV, exportCustomerInboundRMAsToCSV, exportSupplierOutboundClaimsToCSV } from './utils/exportCsv';
 import CreditMemoModal from './components/CreditMemoModal';
 import CreditMemoVoucherModal from './components/CreditMemoVoucherModal';
 import ProductEditModal from './components/ProductEditModal';
@@ -595,7 +595,7 @@ export default function App() {
     }
     if (notif.type === 'rma') {
       if (isAdminView) {
-        setAdminActiveTab('reports');
+        setAdminActiveTab('customer_reports');
       } else {
         setIsReportsModalOpen(true);
       }
@@ -1071,10 +1071,24 @@ export default function App() {
     setSelectedReportIds(new Set());
   };
 
-  // Filter and sort return reports
+  // Operational Segregation: Inbound Customer Returns vs Outbound Supplier Claims
+  const customerInboundReports = React.useMemo(() => {
+    return recentReportsList.filter(r => r.rma_type === 'customer_inbound' || !r.rma_type);
+  }, [recentReportsList]);
+
+  const supplierOutboundReports = React.useMemo(() => {
+    return recentReportsList.filter(r => r.rma_type === 'supplier_outbound' || (r.disposition && (r.disposition.toLowerCase().includes('rtv') || r.disposition.toLowerCase().includes('vendor'))));
+  }, [recentReportsList]);
+
+  // Filter and sort return reports - strictly isolated to Customer Inbound Returns
   const processedReports = React.useMemo(() => {
     const q = reportsSearchQuery.toLowerCase().trim();
     let list = recentReportsList.filter(item => {
+      // Isolate to Customer Inbound Returns (treat missing rma_type as customer_inbound for backward compatibility)
+      if (item.rma_type && item.rma_type !== 'customer_inbound') {
+        return false;
+      }
+
       if (q) {
         const matches = (
           String(item.id || '').includes(q) ||
@@ -1084,7 +1098,13 @@ export default function App() {
           (item.reporter_name || item.reported_by || '').toLowerCase().includes(q) ||
           (item.reporter_contact || '').toLowerCase().includes(q) ||
           (item.reason || '').toLowerCase().includes(q) ||
-          (item.warehouse_location || '').toLowerCase().includes(q)
+          (item.warehouse_location || '').toLowerCase().includes(q) ||
+          (item.store_branch || '').toLowerCase().includes(q) ||
+          (item.invoice_dr_number || '').toLowerCase().includes(q) ||
+          (item.si_number || '').toLowerCase().includes(q) ||
+          (item.dr_number || '').toLowerCase().includes(q) ||
+          (item.po_number || '').toLowerCase().includes(q) ||
+          (item.batch_lot_number || '').toLowerCase().includes(q)
         );
         if (!matches) return false;
       }
@@ -1163,6 +1183,14 @@ export default function App() {
         case 'reporter':
           valA = String(a.reporter_name || a.reported_by || '').toLowerCase();
           valB = String(b.reporter_name || b.reported_by || '').toLowerCase();
+          break;
+        case 'store_branch':
+          valA = String(a.store_branch || '').toLowerCase();
+          valB = String(b.store_branch || '').toLowerCase();
+          break;
+        case 'invoice_dr_number':
+          valA = String(a.invoice_dr_number || a.dr_number || a.si_number || a.po_number || '').toLowerCase();
+          valB = String(b.invoice_dr_number || b.dr_number || b.si_number || b.po_number || '').toLowerCase();
           break;
         case 'catalog_status':
           valA = a.status === 'pending_admin_details' ? 0 : 1;
@@ -1709,16 +1737,20 @@ export default function App() {
       localStorage.setItem('rma_reporter_contact', reporterContact.trim());
     } catch {}
 
-    // 1. Generate unique RMA Number synchronously for instant sticker/QR display
+    // 1. Determine RMA Type based on station Gatekeeper profile (internal warehouse vs external customer)
+    const determinedRmaType = (gateSession?.type === 'internal_warehouse') ? 'supplier_outbound' : 'customer_inbound';
+
+    // 2. Generate unique RMA Number synchronously for instant sticker/QR display
     const rmaNumber = catalogService.generateRMANumber();
     const submitQty = Math.max(1, parseInt(quantity, 10) || 1);
     const finalUnit = unitName || detectedProduct?.unit_name || 'pc';
     const primaryDocNumber = cleanSi || cleanDr || cleanPo || invoiceDrNumber.trim() || null;
 
-    // 2. Show success screen with full report details for QR sticker generation INSTANTLY!
+    // 3. Show success screen with full report details for QR sticker generation INSTANTLY!
     setSubmitSuccessReport({
       rma_number: rmaNumber,
       rmaNumber: rmaNumber,
+      rma_type: determinedRmaType,
       barcode: cleanBarcode,
       name: detectedProduct?.name || `Barcode ${cleanBarcode}`,
       productName: detectedProduct?.name || `Barcode ${cleanBarcode}`,
@@ -1812,6 +1844,7 @@ export default function App() {
         const res = await catalogService.submitReport({
           rmaNumber,
           barcode: cleanBarcode,
+          rma_type: determinedRmaType,
           product: capturedProduct,
           quantity: submitQty,
           reporterName: capturedReporterName,
@@ -3007,8 +3040,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* SaaS KPI Overview Strip: Fluid grid tracks for all viewports */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3.5">
+            {/* SaaS KPI Overview Strip: Enterprise Logistics 6-column Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3.5">
               {/* Metric 1: Saved Products */}
               <div
                 onClick={() => setAdminActiveTab('products')}
@@ -3017,7 +3050,7 @@ export default function App() {
               >
                 <div className="flex items-center justify-between text-indigo-600 dark:text-indigo-400 mb-1.5 sm:mb-2">
                   <Package className="w-5 h-5 shrink-0" />
-                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">Database</span>
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">Catalog</span>
                 </div>
                 <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
                   {savedProductsList.length}
@@ -3026,24 +3059,43 @@ export default function App() {
                 <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Catalog items</div>
               </div>
 
-              {/* Metric 2: Return Reports */}
+              {/* Metric 2: Customer Returns (Inbound Logistics) */}
               <div
-                onClick={() => setAdminActiveTab('reports')}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${adminActiveTab === 'reports' ? 'border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900/40' : 'border-slate-200 dark:border-slate-800'
+                onClick={() => setAdminActiveTab('customer_reports')}
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports') ? 'border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900/40' : 'border-slate-200 dark:border-slate-800'
                   }`}
               >
                 <div className="flex items-center justify-between text-blue-600 dark:text-blue-400 mb-1.5 sm:mb-2">
                   <FileText className="w-5 h-5 shrink-0" />
-                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">Reports</span>
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">Inbound</span>
                 </div>
                 <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
-                  {recentReportsList.length}
+                  {customerInboundReports.length}
                 </div>
-                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">RMA Returns</div>
-                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Total filed returns</div>
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Customer Inbound</div>
+                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">
+                  {customerInboundReports.filter(r => !creditMemosList.some(m => m.rma_number === r.rma_number || m.report_id === r.id)).length} pending credit
+                </div>
               </div>
 
-              {/* Metric 3: Credit Memos (Finance Section) */}
+              {/* Metric 3: Supplier RTVs (Outbound Logistics) */}
+              <div
+                onClick={() => setAdminActiveTab('supplier_claims')}
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${adminActiveTab === 'supplier_claims' ? 'border-purple-500 ring-2 ring-purple-100 dark:ring-purple-900/40' : 'border-slate-200 dark:border-slate-800'
+                  }`}
+              >
+                <div className="flex items-center justify-between text-purple-600 dark:text-purple-400 mb-1.5 sm:mb-2">
+                  <Building2 className="w-5 h-5 shrink-0" />
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300">Outbound</span>
+                </div>
+                <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
+                  {supplierOutboundReports.length}
+                </div>
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Supplier RTVs</div>
+                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Vendor claims queued</div>
+              </div>
+
+              {/* Metric 4: Credit Memos (Finance Section) */}
               <div
                 onClick={() => setAdminActiveTab('credit_memos')}
                 className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${adminActiveTab === 'credit_memos' ? 'border-emerald-500 ring-2 ring-emerald-100 dark:ring-emerald-900/40' : 'border-slate-200 dark:border-slate-800'
@@ -3064,7 +3116,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Metric 4: Pending Barcodes */}
+              {/* Metric 5: Pending Barcodes */}
               <div
                 onClick={() => setIsPendingModalOpen(true)}
                 className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${pendingBarcodesList.length > 0 ? 'border-amber-400 bg-amber-50/20 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-800'
@@ -3081,7 +3133,7 @@ export default function App() {
                 <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Needs verification</div>
               </div>
 
-              {/* Metric 5: Staff Directory */}
+              {/* Metric 6: Staff Directory */}
               <div
                 onClick={() => {
                   if (currentUser?.role === 'super_admin') setIsEmployeeModalOpen(true);
@@ -3117,14 +3169,26 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={() => setAdminActiveTab('reports')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'reports'
+                onClick={() => setAdminActiveTab('customer_reports')}
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
               >
                 <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                <span>Return Reports ({recentReportsList.length})</span>
+                <span>Customer RMA Hub ({customerInboundReports.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAdminActiveTab('supplier_claims')}
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'supplier_claims'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+              >
+                <Building2 className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                <span>Supplier RMA Hub ({supplierOutboundReports.length})</span>
               </button>
 
               <button
@@ -3205,22 +3269,22 @@ export default function App() {
               />
             )}
 
-            {/* TAB 2: INCOMING RETURN REPORTS */}
-            {adminActiveTab === 'reports' && (
+            {/* TAB 2: CUSTOMER RMA HUB (INBOUND LOGISTICS) */}
+            {(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports') && (
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 w-full min-w-0 box-border">
                 {/* Header & Responsive Action Toolbar */}
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 w-full min-w-0">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
-                        Incoming Return Reports
+                        Customer RMA Hub (Inbound Logistics)
                       </h3>
                       <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0">
-                        {recentReportsList.length} Total
+                        {processedReports.length} Returns Active
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                      Recent RMA submissions from warehouse & customer returns.
+                      Store & branch merchandise returns, billing document matching, and customer credit memo vouchers.
                     </p>
                   </div>
 
@@ -3269,12 +3333,12 @@ export default function App() {
 
                       <button
                         type="button"
-                        onClick={() => exportRMAReportsToCSV(processedReports)}
+                        onClick={() => exportCustomerInboundRMAsToCSV(processedReports)}
                         className="w-full sm:w-auto justify-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
-                        title="Export filtered reports to CSV with financial & triage data"
+                        title="Export Customer Inbound RMAs to CSV with Store Branch, Customer Name, DR#, AE Name, and Credit Memo #"
                       >
                         <Download className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate">Export CSV</span>
+                        <span className="truncate">Export Inbound CSV</span>
                       </button>
                     </div>
                   </div>
@@ -3548,14 +3612,29 @@ export default function App() {
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
                             </th>
+                            {/* 7. Customer Branch Header */}
                             <th
-                              onClick={() => handleReportsSort('reporter')}
+                              onClick={() => handleReportsSort('store_branch')}
                               className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Reporter"
+                              title="Click to sort by Customer Branch"
                             >
                               <div className="flex items-center">
-                                <span>Reported By</span>
-                                {reportsSortField === 'reporter' ? (
+                                <span>Customer Branch</span>
+                                {reportsSortField === 'store_branch' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
+
+                            {/* 8. Invoice / DR # Header */}
+                            <th
+                              onClick={() => handleReportsSort('invoice_dr_number')}
+                              className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by Invoice / DR #"
+                            >
+                              <div className="flex items-center">
+                                <span>Invoice / DR #</span>
+                                {reportsSortField === 'invoice_dr_number' ? (
                                   reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
@@ -3762,25 +3841,42 @@ export default function App() {
                                   </span>
                                 </td>
 
-                                {/* 7. Reported By */}
+                                {/* 7. Customer Branch & Reporter */}
                                 <td className="py-3 px-3.5">
-                                  <div className="font-bold text-slate-900 dark:text-slate-200 text-[11px]">
-                                    {item.reporter_name || item.reported_by || 'Reporter'}
+                                  <div className="font-bold text-slate-900 dark:text-slate-200 text-[11px] flex items-center gap-1" title={item.store_branch || 'Direct Return'}>
+                                    <span className="text-blue-600 dark:text-blue-400">📍</span>
+                                    <span className="truncate max-w-[130px] font-extrabold text-blue-900 dark:text-blue-300">
+                                      {item.store_branch || 'Direct Return'}
+                                    </span>
                                   </div>
-                                  {item.reporter_contact && (
-                                    <div className="font-mono text-slate-500 dark:text-slate-400 text-[10px]">
-                                      {item.reporter_contact}
+                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5 truncate max-w-[130px]">
+                                    {item.reporter_name || item.reported_by || 'Staff'}
+                                    {item.reporter_contact ? ` • ${item.reporter_contact}` : ''}
+                                  </div>
+                                </td>
+
+                                {/* 8. Commercial Document / DR # */}
+                                <td className="py-3 px-3.5 font-mono">
+                                  {item.invoice_dr_number || item.dr_number || item.si_number || item.po_number ? (
+                                    <div className="space-y-0.5">
+                                      {(item.invoice_dr_number || item.dr_number) && (
+                                        <span className="px-1.5 py-0.5 rounded bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 text-[9px] font-bold block truncate max-w-[120px]">
+                                          DR: {item.invoice_dr_number || item.dr_number}
+                                        </span>
+                                      )}
+                                      {item.si_number && (
+                                        <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[9px] font-bold block truncate max-w-[120px]">
+                                          SI: {item.si_number}
+                                        </span>
+                                      )}
+                                      {item.po_number && (
+                                        <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9px] font-semibold block truncate max-w-[120px]">
+                                          PO: {item.po_number}
+                                        </span>
+                                      )}
                                     </div>
-                                  )}
-                                  {item.store_branch && (
-                                    <div className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-0.5 mt-0.5 max-w-[150px] truncate" title={item.store_branch}>
-                                      📍 {item.store_branch}
-                                    </div>
-                                  )}
-                                  {item.invoice_dr_number && (
-                                    <div className="text-[10px] font-mono text-violet-600 dark:text-violet-400 font-bold">
-                                      DR: {item.invoice_dr_number}
-                                    </div>
+                                  ) : (
+                                    <span className="text-slate-300 dark:text-slate-600 text-[10px]">—</span>
                                   )}
                                 </td>
 
@@ -4031,6 +4127,9 @@ export default function App() {
                                   />
                                   <span className="font-mono font-black text-xs text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg">
                                     SN #{(reportsCurrentPage - 1) * reportsPageSize + index + 1}
+                                  </span>
+                                  <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                    📥 Inbound
                                   </span>
                                   <button
                                     type="button"

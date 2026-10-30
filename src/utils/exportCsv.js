@@ -104,6 +104,154 @@ export function exportRMAReportsToCSV(reports, filename = null) {
 }
 
 /**
+ * Export Customer Inbound RMAs to CSV
+ */
+export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
+  if (!reports || reports.length === 0) {
+    alert('No customer return reports available to export.');
+    return;
+  }
+
+  const headers = [
+    'SN',
+    'RMA Number',
+    'Date Logged',
+    'Customer Store / Branch',
+    'Reporter Name',
+    'Reporter Contact',
+    'Sales Invoice (SI) #',
+    'Delivery Receipt (DR) #',
+    'Purchase Order (PO) #',
+    'Account Executive (AE)',
+    'AE Email',
+    'Barcode',
+    'Assigned SKU',
+    'Product Description',
+    'Quantity',
+    'Packaging Unit',
+    'Unit Price (PHP)',
+    'Total Credit Claim (PHP)',
+    'Lifecycle Stage / Status',
+    'Disposition',
+    'Condition Grade',
+    'Defect Reason',
+    'Credit Memo #',
+    'Google Drive Folder',
+    'Customer Notes'
+  ];
+
+  const rows = reports.map((r, index) => {
+    const qty = Number(r.quantity || 1);
+    const unitPrice = Number(r.price_with_vat || r.price || 0);
+    const totalVal = (qty * unitPrice).toFixed(2);
+    const dateStr = r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '';
+
+    return [
+      escapeCsvCell(index + 1),
+      escapeCsvCell(r.rma_number),
+      escapeCsvCell(dateStr),
+      escapeCsvCell(r.store_branch || ''),
+      escapeCsvCell(r.reporter_name || ''),
+      escapeCsvCell(r.reporter_contact || ''),
+      escapeCsvCell(r.si_number || ''),
+      escapeCsvCell(r.dr_number || r.invoice_dr_number || ''),
+      escapeCsvCell(r.po_number || ''),
+      escapeCsvCell(r.ae_name || ''),
+      escapeCsvCell(r.ae_email || ''),
+      escapeCsvCell(r.barcode),
+      escapeCsvCell(r.code || r.sku || ''),
+      escapeCsvCell(r.name),
+      escapeCsvCell(qty),
+      escapeCsvCell(r.unit_name || 'pc'),
+      escapeCsvCell(unitPrice.toFixed(2)),
+      escapeCsvCell(totalVal),
+      escapeCsvCell(r.status || 'received_at_dock'),
+      escapeCsvCell(r.disposition || 'Pending Triage'),
+      escapeCsvCell(r.condition_grade || 'Unassessed'),
+      escapeCsvCell(r.reason || ''),
+      escapeCsvCell(r.credit_memo_no || r.credit_memo_number || ''),
+      escapeCsvCell(r.google_drive_folder_url || ''),
+      escapeCsvCell(r.notes || '')
+    ].join(',');
+  });
+
+  const csv = [headers.join(','), ...rows].join('\r\n');
+  const actualFilename = filename || `Customer_Inbound_RMAs_${new Date().toISOString().slice(0, 10)}.csv`;
+  downloadCsvBlob(csv, actualFilename);
+}
+
+/**
+ * Export Supplier Outbound / RTV Debit Claims to CSV
+ */
+export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
+  if (!reports || reports.length === 0) {
+    alert('No supplier outbound claims available to export.');
+    return;
+  }
+
+  const headers = [
+    'SN',
+    'RMA Number',
+    'Date Logged',
+    'Master Supplier / Vendor',
+    'Warehouse Bin / Location',
+    'Batch / Lot #',
+    'Expiry Date',
+    'Barcode',
+    'Assigned SKU',
+    'Product Description',
+    'Quantity',
+    'Packaging Unit',
+    'Net Purchase Price (PHP)',
+    'Total Debit Value (PHP)',
+    'Condition Grade',
+    'Disposition',
+    'Debit Claim Status',
+    'Inspected By',
+    'Defect Reason / Diagnosis',
+    'Supplier PO #',
+    'Google Drive Folder',
+    'Warehouse Notes'
+  ];
+
+  const rows = reports.map((r, index) => {
+    const qty = Number(r.quantity || 1);
+    const unitPrice = Number(r.price || r.price_with_vat || 0);
+    const totalVal = (qty * unitPrice).toFixed(2);
+    const dateStr = r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '';
+
+    return [
+      escapeCsvCell(index + 1),
+      escapeCsvCell(r.rma_number),
+      escapeCsvCell(dateStr),
+      escapeCsvCell(r.supplier_name || 'Savemore'),
+      escapeCsvCell(r.warehouse_location || 'DOCK'),
+      escapeCsvCell(r.batch_lot_number || ''),
+      escapeCsvCell(r.expiry_date || ''),
+      escapeCsvCell(r.barcode),
+      escapeCsvCell(r.code || r.sku || ''),
+      escapeCsvCell(r.name),
+      escapeCsvCell(qty),
+      escapeCsvCell(r.unit_name || 'pc'),
+      escapeCsvCell(unitPrice.toFixed(2)),
+      escapeCsvCell(totalVal),
+      escapeCsvCell(r.condition_grade || 'Unassessed'),
+      escapeCsvCell(r.disposition || 'Return to Vendor (RTV)'),
+      escapeCsvCell(r.status || 'Pending Debit'),
+      escapeCsvCell(r.inspected_by || ''),
+      escapeCsvCell(r.reason || r.explanation || ''),
+      escapeCsvCell(r.po_number || r.supplier_po_no || ''),
+      escapeCsvCell(r.google_drive_folder_url || ''),
+      escapeCsvCell(r.notes || '')
+    ].join(',');
+  });
+
+  const csv = [headers.join(','), ...rows].join('\r\n');
+  const actualFilename = filename || `Supplier_Outbound_Claims_${new Date().toISOString().slice(0, 10)}.csv`;
+  downloadCsvBlob(csv, actualFilename);
+}
+
+/**
  * Export Credit Memos to CSV
  */
 export function exportCreditMemosToCSV(memos, filename = null) {

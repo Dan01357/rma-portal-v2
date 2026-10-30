@@ -492,3 +492,34 @@ Root Folder: "Wholesale RMA Records"
 - **Admin Portal Access**: In `QuickRMAActionModal`, warehouse supervisors and finance managers can click **"Open RMA Drive Folder"** to inspect the organized media and view the AI-extracted metadata.
 - **Manual Override**: If Gemini misread a handwritten digit on a carbon copy receipt, Admins can click **"Edit DR# / Branch"** to manually update the record with instant database synchronization.
 
+---
+
+## Chapter 10: Operational Separation — Inbound Customer Logistics vs Outbound Supplier Reverse Logistics
+
+To satisfy enterprise supply chain compliance (aligned with SAP ERP, Oracle SCM, and FMCG distributor standards), the portal provides clean operational segregation between **Inbound Customer Logistics** and **Outbound Supplier Reverse Logistics (RTV)**.
+
+### 10.1 Key Operational Differences
+
+| Operational Domain | Inbound Customer Returns (`customer_inbound`) | Outbound Supplier Claims (`supplier_outbound` / RTV) |
+| :--- | :--- | :--- |
+| **Origin Station** | Customer Stores / Branches (Savemore, Puregold, Robinson's) | Internal Warehouse Floor & Dock Bays |
+| **Primary Goal** | Validate customer defect claims & issue accurate Credit Memos | Recover financial loss via vendor chargebacks & debit notes |
+| **Intake Mechanism** | Customer Delivery Carton QR Sticker (`/intake/returns`) | Internal Warehouse Floor Dock Poster (`/intake/dock`) |
+| **Key Commercial Docs** | Customer Sales Invoice (SI), Delivery Receipt (DR), Customer PO | Supplier PO, Vendor Delivery Note, Batch/Lot Number |
+| **Financial Instrument** | **Customer Credit Memo Voucher** (Deduction from accounts receivable) | **Supplier Debit Claim Note** (Chargeback against vendor accounts payable) |
+| **Admin Hub Tab** | `Customer RMA Hub (Inbound)` (`adminActiveTab: 'customer_reports'`) | `Supplier RMA Hub (Outbound / RTV)` (`adminActiveTab: 'supplier_claims'`) |
+| **CSV Export Report** | `Customer_Inbound_RMAs_[Date].csv` (Branch, DR#, AE Name, Credit Memo #) | `Supplier_Outbound_Claims_[Date].csv` (Supplier, Bin, Batch/Lot#, Purchase Price) |
+
+### 10.2 Zero-Typing Automatic Attribution Engine
+- **Gatekeeper Profile Detection**: When a user scans a station QR code or inputs an authorized 6-digit PIN, the portal creates a gatekeeper session (`gateSession.type`).
+  - Profile `external_customer` $\rightarrow$ automatically logs `rma_type: 'customer_inbound'`.
+  - Profile `internal_warehouse` $\rightarrow$ automatically logs `rma_type: 'supplier_outbound'`.
+- Drivers and store personnel do zero configuration or categorizing; the station QR guarantees accurate logistics attribution.
+
+### 10.3 Quick Processing Reclassification & Triage Governance
+- If an authorized warehouse supervisor inspects an item and discovers it was filed under the wrong logistics category, they can open `QuickRMAActionModal`.
+- At the top of the modal, the **Logistics Classification Switcher** allows 1-click reclassification:
+  `[ 📥 Customer Return (Inbound) ]` $\longleftrightarrow$ `[ 📤 Supplier Claim (Outbound / RTV) ]`
+- Toggling this switcher executes an optimistic UI update, changes `rma_type` in Supabase via `catalogService.updateRMAType`, and appends an entry to `rma_reports.audit_trail`. The record shifts seamlessly into the appropriate hub table without page reload.
+
+

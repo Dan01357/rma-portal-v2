@@ -16,7 +16,7 @@ import {
   ArrowDown,
   ArrowUpDown
 } from 'lucide-react';
-import { exportRMAReportsToCSV } from '../utils/exportCsv';
+import { exportRMAReportsToCSV, exportSupplierOutboundClaimsToCSV } from '../utils/exportCsv';
 import TablePagination from './TablePagination';
 import ImageLightboxModal from './ImageLightboxModal';
 import { supplierClaimService } from '../services/supplierClaimService';
@@ -81,9 +81,15 @@ export default function SupplierClaimsTab({
     }
   };
 
-  // Filter & sort reports suitable for RTV
+  // Filter & sort reports suitable for Supplier Outbound / RTV
   const rtvCandidates = useMemo(() => {
     let list = reportsList.filter(r => {
+      // Must be supplier outbound OR have an RTV disposition
+      const isSupplierCandidate = (r.rma_type === 'supplier_outbound') ||
+        (r.disposition && (r.disposition.toLowerCase().includes('return to vendor') || r.disposition.toLowerCase().includes('rtv')));
+
+      if (!isSupplierCandidate) return false;
+
       const matchesSupplier = selectedSupplier === 'All' || 
         (r.supplier_name || 'Savemore').toLowerCase() === selectedSupplier.toLowerCase();
 
@@ -96,7 +102,9 @@ export default function SupplierClaimsTab({
         r.barcode?.includes(q) ||
         r.rma_number?.toLowerCase().includes(q) ||
         r.code?.toLowerCase().includes(q) ||
-        r.supplier_name?.toLowerCase().includes(q);
+        r.supplier_name?.toLowerCase().includes(q) ||
+        r.warehouse_location?.toLowerCase().includes(q) ||
+        r.batch_lot_number?.toLowerCase().includes(q);
 
       return matchesSupplier && matchesDisposition && matchesSearch;
     });
@@ -595,11 +603,12 @@ export default function SupplierClaimsTab({
 
           <button
             type="button"
-            onClick={() => exportRMAReportsToCSV(selectedItems.length > 0 ? selectedItems : rtvCandidates)}
-            className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-white flex items-center gap-1 font-bold cursor-pointer ml-auto"
+            onClick={() => exportSupplierOutboundClaimsToCSV(selectedItems.length > 0 ? selectedItems : rtvCandidates)}
+            className="text-xs text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 flex items-center gap-1.5 font-bold cursor-pointer ml-auto bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-3 py-1.5 rounded-xl shadow-2xs hover:shadow-xs transition-all"
+            title="Download vendor chargeback CSV with bin location and batch numbers"
           >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export RTV CSV</span>
+            <Download className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span>Export Supplier Claims CSV</span>
           </button>
         </div>
       </div>
@@ -833,9 +842,17 @@ export default function SupplierClaimsTab({
                         </div>
                       </td>
 
-                      {/* Vendor / Supplier */}
-                      <td className="p-3 font-semibold text-slate-700 dark:text-slate-300">
-                        {r.supplier_name || 'Savemore'}
+                      {/* Vendor / Supplier & Warehouse Bin */}
+                      <td className="p-3">
+                        <div className="font-bold text-slate-800 dark:text-slate-200">
+                          {r.supplier_name || 'Savemore'}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          Bin: <strong className="text-slate-600 dark:text-slate-300">{r.warehouse_location || 'DOCK'}</strong>
+                          {r.batch_lot_number && (
+                            <span className="text-purple-600 dark:text-purple-400 font-bold ml-1.5">• Lot: {r.batch_lot_number}</span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Product Description & SKU */}

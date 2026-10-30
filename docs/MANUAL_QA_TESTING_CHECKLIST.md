@@ -834,6 +834,64 @@ Each test scenario defines:
   * **Action**: Click the **"Open RMA Drive Folder"** button with amber Folder icon.
   * **Expected Behavior**: Directly opens the specific `[RMA_NUMBER]` folder in Google Drive in a new tab, displaying `01_Damaged_Items` and `02_Official_Paperwork` neatly organized.
 
+---
+
+## Section 11: Logistics Segregation — Inbound Customer Returns vs Outbound Supplier Claims (RTV)
+
+### 11.1 Intake Auto-Attribution by Gatekeeper Station
+- [ ] **TC-LOG-01 (External Customer QR Intake Auto-Attribution)**
+  * **Location**: Public Portal `/intake/returns` (Unlocked via External Customer gatekeeper profile)
+  * **Action**: Submit an RMA report with proof photos, customer branch, and SI/DR document number.
+  * **Expected Behavior**: 
+    1. Report is automatically saved with `rma_type: 'customer_inbound'`.
+    2. Zero manual typing or dropdown selection required from the user to select return classification.
+    3. Item immediately appears in Tab 2: **Customer RMA Hub (Inbound Logistics)**.
+
+- [ ] **TC-LOG-02 (Internal Warehouse Dock QR Intake Auto-Attribution)**
+  * **Location**: Public Portal `/intake/dock` (Unlocked via Internal Warehouse Floor profile)
+  * **Action**: Submit a defective warehouse report.
+  * **Expected Behavior**:
+    1. Report is automatically saved with `rma_type: 'supplier_outbound'`.
+    2. Item routes directly to Tab 4: **Supplier RMA Hub (Outbound / RTV)**.
+
+### 11.2 Admin Dashboard Navigation & KPI Metrics Isolation
+- [ ] **TC-LOG-03 (Customer RMA Hub Listing & Filter Isolation)**
+  * **Location**: Admin Dashboard -> Tab 2 **Customer RMA Hub (Inbound Logistics)**
+  * **Action**: Switch to Customer RMA Hub.
+  * **Expected Behavior**:
+    1. Only reports with `rma_type: 'customer_inbound'` (or legacy unclassified records) are displayed.
+    2. Table columns emphasize customer billing: `[ Customer Branch ]`, `[ Invoice / DR # ]`, `[ Defect Reason ]`, and `[ Credit Memo Status ]`.
+    3. Warehouse internal supplier defects (`rma_type: 'supplier_outbound'`) are strictly excluded.
+
+- [ ] **TC-LOG-04 (Supplier RMA Hub Listing & Filter Isolation)**
+  * **Location**: Admin Dashboard -> Tab 4 **Supplier RMA Hub (Outbound / RTV)**
+  * **Action**: Switch to Supplier Claims Tab.
+  * **Expected Behavior**:
+    1. Combines `rma_type: 'supplier_outbound'` warehouse returns and all items triaged with `Return to Vendor (RTV)`.
+    2. Table columns emphasize vendor recovery: `[ Master Supplier ]`, `[ Warehouse Bin ]`, `[ Batch / Lot # ]`, and `[ Debit Claim Status ]`.
+    3. Standard customer returns pending credit memo are strictly excluded.
+
+- [ ] **TC-LOG-05 (QuickRMAActionModal Type Reclassification Toggle)**
+  * **Location**: Inside `QuickRMAActionModal`
+  * **Action**: Click the segmented switcher `[ 📥 Customer Return (Inbound) ]` / `[ 📤 Supplier Claim (Outbound / RTV) ]` to reclassify an item.
+  * **Expected Behavior**:
+    1. The badge updates instantly in optimistic UI.
+    2. Modal triggers `catalogService.updateRMAType` which mutates `public.rma_reports.rma_type` in Supabase.
+    3. The item moves between Customer RMA Hub and Supplier RMA Hub without requiring a hard browser refresh.
+    4. Audit trail records `RMA_TYPE_RECLASSIFIED`.
+
+### 11.3 Independent Inbound vs. Outbound CSV Exports
+- [ ] **TC-LOG-06 (Customer Inbound RMA CSV Export)**
+  * **Location**: Customer RMA Hub -> Click **"Export Inbound CSV"**
+  * **Expected Behavior**:
+    1. File downloads as `Customer_Inbound_RMAs_[Date].csv` with UTF-8 BOM.
+    2. Columns include: `Store Branch`, `Reporter Name`, `Reporter Contact`, `Sales Invoice (SI) #`, `Delivery Receipt (DR) #`, `Purchase Order (PO) #`, `Customer AE`, and `Credit Memo #`.
+
+- [ ] **TC-LOG-07 (Supplier Outbound Claims CSV Export)**
+  * **Location**: Supplier RMA Hub -> Click **"Export Vendor Debit CSV"**
+  * **Expected Behavior**:
+    1. File downloads as `Supplier_Outbound_Claims_[Date].csv` with UTF-8 BOM.
+    2. Columns include: `Master Supplier`, `Warehouse Bin / Location`, `Batch / Lot #`, `Expiry Date`, `Net Purchase Price`, `Total Debit Value`, and `Supplier PO #`.
 
 ---
 
@@ -850,4 +908,5 @@ Each test scenario defines:
 | **Phase 7: Free-Tier Optimization & Google Drive** | WebP Compression & Cloud Storage | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 8: Column Separation & Instant Submit** | Table Views & Storage Cleanup | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 9: Role-Based QR Gatekeeper & PIN Queue** | Gatekeeper Engine & SMTP Approvals | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 10: Inbound vs Outbound Logistics Segregation** | Customer RMA & Supplier RTV Hubs | `READY FOR TESTING` | *Lead QA Director* |
 
