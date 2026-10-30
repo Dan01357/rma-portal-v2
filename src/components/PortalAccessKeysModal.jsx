@@ -407,32 +407,44 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
       >
 
         {/* Modal Header */}
-        <div className="px-6 sm:px-8 py-5 sm:py-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/80 dark:bg-slate-800/50">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center shadow-md shadow-blue-600/20">
-              <KeyRound className="w-5 h-5" />
+        <div className="px-4 sm:px-8 py-3.5 sm:py-5 border-b border-slate-100 dark:border-slate-800 shrink-0 bg-slate-50/80 dark:bg-slate-800/50 space-y-2.5 sm:space-y-0 sm:flex sm:items-center sm:justify-between">
+          <div className="flex items-center justify-between sm:justify-start gap-2.5 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center shadow-md shadow-blue-600/20 shrink-0">
+                <KeyRound className="w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                  <span className="truncate">QR Access Keys & PINs</span>
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 shrink-0">
+                    Gatekeeper
+                  </span>
+                </h2>
+                <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 line-clamp-1">
+                  Authorize warehouse docks & customer delivery cartons
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                QR Access Keys & 6-Digit PIN Manager
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
-                  Gatekeeper
-                </span>
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Authorize warehouse docks and customer delivery cartons with role-based QR stations and expiring PINs.
-              </p>
-            </div>
+
+            {/* Mobile close button (top-right of header) */}
+            <button
+              type="button"
+              onClick={onClose}
+              className="sm:hidden p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+              aria-label="Close modal"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
             {modalMode === 'list' && (
               <>
                 {onOpenPinRequests && (
                   <button
                     type="button"
                     onClick={onOpenPinRequests}
-                    className="px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                    className="flex-1 sm:flex-initial px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
                     title="View & Approve Pending Return Authorization PIN Requests"
                   >
                     <Mail className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
@@ -442,17 +454,20 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                 <button
                   type="button"
                   onClick={handleOpenCreate}
-                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all cursor-pointer active:scale-95"
+                  className="flex-1 sm:flex-initial px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-md shadow-blue-600/20 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
                 >
-                  <Plus className="w-4 h-4" />
-                  <span>New QR Access Code</span>
+                  <Plus className="w-4 h-4 shrink-0" />
+                  <span>New QR Code</span>
                 </button>
               </>
             )}
+
+            {/* Desktop close button */}
             <button
               type="button"
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              className="hidden sm:block p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0 ml-1"
+              aria-label="Close modal"
             >
               <X className="w-5 h-5" />
             </button>
@@ -546,8 +561,8 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                       </div>
 
                       {/* Detail Metrics: 6-Digit PIN, Active Session, & Cooldown Window */}
-                      <div className="grid grid-cols-3 gap-2 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-100 dark:border-slate-800 text-xs mb-4">
-                        <div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-2.5 sm:p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-100 dark:border-slate-800 text-xs mb-3.5">
+                        <div className="flex items-center justify-between sm:block">
                           <div className="text-[10px] font-black uppercase text-slate-400">6-Digit PIN</div>
                           <div className="flex items-center gap-1 font-mono font-black text-slate-900 dark:text-white mt-0.5">
                             <span className="truncate">{isPinShown ? prof.pin_code : '••••••'}</span>
@@ -561,7 +576,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                           </div>
                         </div>
 
-                        <div>
+                        <div className="flex items-center justify-between sm:block pt-1.5 sm:pt-0 border-t sm:border-t-0 border-slate-200/50 dark:border-slate-700/50">
                           <div className="text-[10px] font-black uppercase text-slate-400">Session Window</div>
                           <div className="flex items-center gap-1 font-bold text-slate-700 dark:text-slate-300 mt-0.5 truncate">
                             <Clock className="w-3 h-3 text-slate-400 shrink-0" />
@@ -569,7 +584,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                           </div>
                         </div>
 
-                        <div>
+                        <div className="flex items-center justify-between sm:block pt-1.5 sm:pt-0 border-t sm:border-t-0 border-slate-200/50 dark:border-slate-700/50">
                           <div className="text-[10px] font-black uppercase text-slate-400">Anti-Fraud Cooldown</div>
                           <div className="flex items-center gap-1 font-bold text-slate-700 dark:text-slate-300 mt-0.5 truncate">
                             <ShieldAlert className="w-3 h-3 text-amber-500 shrink-0" />
@@ -704,7 +719,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
               <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
                 Station Role / User Type *
               </label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <button
                   type="button"
                   onClick={() => setFormData(prev => ({ ...prev, type: 'internal_warehouse', sessionDurationHours: 0 }))}
@@ -740,13 +755,13 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
             </div>
 
             {/* Access Slug (URL) */}
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 min-w-0">
               <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
                 Access Slug (QR URL) *
               </label>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 shrink-0">
-                  {originUrl}/intake/
+              <div className="flex items-stretch min-w-0 rounded-xl border border-slate-300 dark:border-slate-700 overflow-hidden focus-within:border-blue-600 focus-within:ring-2 focus-within:ring-blue-500/20 shadow-2xs">
+                <span className="text-xs font-mono font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-2.5 border-r border-slate-300 dark:border-slate-700 shrink-0 flex items-center select-none">
+                  /intake/
                 </span>
                 <input
                   type="text"
@@ -755,9 +770,12 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                   value={formData.accessSlug}
                   onChange={(e) => setFormData(prev => ({ ...prev, accessSlug: e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '') }))}
                   placeholder="e.g. wh-dock-north"
-                  className="flex-1 px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold font-mono text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 disabled:opacity-50"
+                  className="flex-1 min-w-0 px-3 py-2.5 bg-slate-50 dark:bg-slate-900 text-xs font-bold font-mono text-slate-900 dark:text-white focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
                 />
               </div>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 font-mono truncate">
+                Full Scan URL: {originUrl}/intake/{formData.accessSlug || '...'}
+              </p>
             </div>
 
             {/* 6-Digit PIN Code & Randomizer */}
@@ -794,7 +812,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                 Session Expiration (Duration) *
               </label>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => setDurationMode('permanent')}
@@ -1052,59 +1070,60 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
             </div>
 
             {/* Poster Sheet Preview Mount (Strict Target for Print) */}
-            <div className="flex justify-center p-3 sm:p-5 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-x-auto">
+            <div className="flex justify-center p-2 sm:p-5 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-x-hidden max-w-full">
               
-              {/* VARIANT 1: A4 FULL SHEET WALL POSTER (The BIGGEST among all 4) */}
+              {/* VARIANT 1: A4 FULL SHEET WALL POSTER (Responsive & Zero Overflow) */}
               {printSize === 'a4' && (
                 <div 
                   id="portal-poster-print-mount"
-                  className="bg-white text-black p-8 sm:p-10 rounded-3xl border-4 border-black shadow-xl text-center font-sans space-y-5 w-full max-w-[600px] mx-auto transition-all"
+                  className="bg-white text-black p-4 sm:p-8 md:p-10 rounded-2xl sm:rounded-3xl border-2 sm:border-4 border-black shadow-xl text-center font-sans space-y-3.5 sm:space-y-5 w-full max-w-[540px] mx-auto transition-all box-border overflow-hidden"
                 >
                   {/* Header */}
-                  <div className="border-b-4 border-black pb-4 space-y-1">
-                    <div className="text-xs sm:text-sm font-black uppercase tracking-[0.25em] text-black">
+                  <div className="border-b-2 sm:border-b-4 border-black pb-3 sm:pb-4 space-y-1">
+                    <div className="text-[10px] sm:text-xs md:text-sm font-black uppercase tracking-[0.2em] sm:tracking-[0.25em] text-black">
                       {selectedProfile.type === 'internal_warehouse' ? 'WHOLESALE WAREHOUSE DOCK' : 'CUSTOMER RETURN INTAKE'}
                     </div>
-                    <h2 className="text-2xl sm:text-4xl font-black text-black uppercase tracking-tight leading-tight">
+                    <h2 className="text-xl sm:text-3xl md:text-4xl font-black text-black uppercase tracking-tight leading-tight">
                       {selectedProfile.name}
                     </h2>
-                    <p className="text-xs sm:text-sm text-black font-semibold pt-0.5">
+                    <p className="text-[11px] sm:text-xs md:text-sm text-black font-semibold pt-0.5">
                       Scan with <strong>Google Lens</strong> or Phone Camera to File Return Report
                     </p>
                   </div>
 
-                  {/* Big QR Code */}
-                  <div className="inline-block p-4 bg-white border-4 border-black rounded-3xl shadow-xs">
+                  {/* Big Responsive QR Code */}
+                  <div className="inline-block p-2.5 sm:p-4 bg-white border-2 sm:border-4 border-black rounded-2xl sm:rounded-3xl shadow-xs max-w-full">
                     <QRCodeSVG
                       id="station-qr-svg"
                       value={`${originUrl}/intake/${selectedProfile.access_slug}`}
-                      size={240}
+                      size={180}
                       level="H"
                       includeMargin={false}
+                      className="w-40 h-40 sm:w-56 sm:h-56 max-w-full h-auto mx-auto"
                     />
                   </div>
 
                   {/* Slug Pill */}
-                  <div>
-                    <span className="bg-black text-white font-mono text-xs sm:text-sm font-bold py-1.5 px-4 rounded-xl inline-block max-w-full truncate shadow-xs">
+                  <div className="px-2">
+                    <span className="bg-black text-white font-mono text-[10px] sm:text-xs md:text-sm font-bold py-1 sm:py-1.5 px-3 sm:px-4 rounded-xl inline-block max-w-full truncate shadow-xs">
                       {originUrl.replace(/^https?:\/\//, '')}/intake/{selectedProfile.access_slug}
                     </span>
                   </div>
 
                   {/* Large 6-Digit PIN on Poster */}
                   {showPinOnPoster && (
-                    <div className="p-3.5 sm:p-4 border-3 border-black rounded-2xl bg-slate-50 space-y-1">
-                      <div className="text-xs font-black uppercase tracking-widest text-black">
+                    <div className="p-2.5 sm:p-4 border-2 sm:border-3 border-black rounded-xl sm:rounded-2xl bg-slate-50 space-y-0.5 sm:space-y-1">
+                      <div className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-black">
                         Station 6-Digit Gatekeeper PIN
                       </div>
-                      <div className="font-mono font-black text-3xl sm:text-4xl tracking-[0.3em] text-black">
+                      <div className="font-mono font-black text-2xl sm:text-4xl tracking-[0.25em] sm:tracking-[0.3em] text-black">
                         {selectedProfile.pin_code}
                       </div>
                     </div>
                   )}
 
                   {/* Numbered Google Lens Instructions */}
-                  <div className="text-left text-xs sm:text-sm space-y-2 text-black pt-3.5 border-t-4 border-black font-medium leading-relaxed">
+                  <div className="text-left text-[11px] sm:text-xs md:text-sm space-y-1.5 sm:space-y-2 text-black pt-2.5 sm:pt-3.5 border-t-2 sm:border-t-4 border-black font-medium leading-relaxed">
                     <div><strong>1.</strong> Open <strong>Google Lens</strong> (or phone camera) on your mobile device.</div>
                     <div><strong>2.</strong> Point camera directly at QR code above and tap the link to launch portal.</div>
                     <div><strong>3.</strong> Enter station 6-digit PIN (<strong>{selectedProfile.pin_code}</strong>) when prompted to unlock intake scanner.</div>
@@ -1116,7 +1135,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
               {printSize === '4x6' && (
                 <div 
                   id="portal-poster-print-mount"
-                  className="bg-white text-black p-4 sm:p-5 rounded-2xl border-2 border-black shadow-md text-center font-sans space-y-2.5 w-[280px] mx-auto transition-all box-border"
+                  className="bg-white text-black p-4 sm:p-5 rounded-2xl border-2 border-black shadow-md text-center font-sans space-y-2.5 w-[280px] max-w-full mx-auto transition-all box-border"
                 >
                   {/* Header */}
                   <div className="border-b-2 border-black pb-1.5 space-y-0.5">
@@ -1174,7 +1193,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
               {printSize === '3x3' && (
                 <div 
                   id="portal-poster-print-mount"
-                  className="bg-white text-black p-2 rounded-xl border-2 border-black shadow-md text-center font-sans space-y-1.5 w-[205px] mx-auto transition-all box-border"
+                  className="bg-white text-black p-2 rounded-xl border-2 border-black shadow-md text-center font-sans space-y-1.5 w-[205px] max-w-full mx-auto transition-all box-border"
                 >
                   {/* Header */}
                   <div className="border-b border-black pb-0.5 space-y-0.5">
@@ -1223,7 +1242,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
               {printSize === '2x2' && (
                 <div 
                   id="portal-poster-print-mount"
-                  className="bg-white text-black p-1.5 rounded-lg border-2 border-black shadow-sm text-center font-sans space-y-1 w-[138px] mx-auto transition-all box-border"
+                  className="bg-white text-black p-1.5 rounded-lg border-2 border-black shadow-sm text-center font-sans space-y-1 w-[138px] max-w-full mx-auto transition-all box-border"
                 >
                   {/* Title */}
                   <div className="border-b border-black pb-0.5">

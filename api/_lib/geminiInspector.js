@@ -1,9 +1,7 @@
-import { GoogleGenAI } from '@google/genai';
-
 /**
  * Validates and inspects paperwork photo using Google Gemini Flash
  * Extracts DR/SI number, store branch, vendor, and document type.
- * Rejects photos that are not official logistics paperwork.
+ * Rejects photos that are not official logistics paperwork with clear reasons.
  */
 export async function inspectPaperworkWithGemini({ fileData, imageUrl, mimeType = 'image/jpeg' }) {
   const apiKey = process.env.GEMINI_API_KEY ||
@@ -26,7 +24,6 @@ export async function inspectPaperworkWithGemini({ fileData, imageUrl, mimeType 
       base64String = fileData;
     }
   } else if (imageUrl) {
-    // Fetch image from URL and convert to Base64
     const imgRes = await fetch(imageUrl);
     if (!imgRes.ok) {
       throw new Error(`Failed to fetch image from URL: ${imgRes.statusText}`);
@@ -57,9 +54,6 @@ export async function inspectPaperworkWithGemini({ fileData, imageUrl, mimeType 
     };
   }
 
-  // 3. Initialize GoogleGenAI SDK
-  const ai = new GoogleGenAI({ apiKey });
-
   const promptText = `
 You are a strict Wholesale Commercial Logistics Auditor and High-Accuracy Document OCR Specialist.
 Your task is to examine the provided photo and determine if it is an authentic wholesale logistics paper document:
@@ -69,10 +63,16 @@ Your task is to examine the provided photo and determine if it is an authentic w
 - Official Pull-Out Slip / Credit Slip
 
 CRITICAL REJECTION RULES (Return is_valid_document: false):
-1. If the photo does NOT depict an authentic commercial/logistics paper document (e.g. selfies, persons, faces, food, empty cartons, product packaging only, walls, desks, floors, computer screens, casual retail grocery slips, or unreadable blurs):
-   You MUST reject it.
-2. If it is a photo of paper, but NO identifying document numbers (Sales Invoice #, Delivery Receipt #, or Purchase Order #) are legible or visible:
-   You MUST reject it with a rejection reason stating the numbers are missing or cut off.
+1. If the photo does NOT depict an authentic commercial/logistics paper document:
+   You MUST reject it with a specific rejection_reason explaining what was detected instead:
+   - For a person or face: "Photo shows a person or selfie instead of a commercial delivery document."
+   - For merchandise or snack packaging: "Photo shows product packaging only, not the official Delivery Receipt, Invoice, or PO paperwork."
+   - For an empty desk, floor, or room: "Photo shows a surface or room with no readable paperwork."
+   - For a casual retail grocery receipt or cafe bill: "Photo appears to be a casual retail receipt rather than an official wholesale Delivery Receipt (DR), Sales Invoice (SI), or Purchase Order (PO)."
+2. If it is a photo of paper, but NO identifying document numbers (Sales Invoice #, Delivery Receipt #, or Purchase Order #) are legible:
+   You MUST reject it with: "Paperwork detected, but document numbers (Sales Invoice #, DR #, or PO #) are blurry, dark, or cropped. Please retake a clear, well-lit close-up."
+3. If the image is blurry, out of focus, or glare blocks the text:
+   You MUST reject it with: "Image is too blurry or has excessive glare to read document numbers. Please retake under clear lighting."
 
 CRITICAL EXTRACTION RULES (When is_valid_document: true):
 - Extract whatever numbers are present on the document:
@@ -103,44 +103,64 @@ Return ONLY valid JSON matching this schema:
 }
 `;
 
-  // Model cascade: try gemini-2.5-flash first, fallback to gemini-1.5-flash or gemini-2.0-flash
-  const modelsToTry = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+  // Direct fast REST model cascade: gemini-3.5-flash-lite first for instant <1.5s OCR
+  const configuredModel = process.env.GEMINI_MODEL;
+  const modelsToTry = [
+    configuredModel || 'gemini-3.5-flash-lite',
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-flash-latest'
+  ].filter(Boolean);
+
   let lastError = null;
 
   for (const modelName of modelsToTry) {
     try {
-      const response = await ai.models.generateContent({
-        model: modelName,
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              { text: promptText },
-              {
-                inlineData: {
-                  mimeType: cleanMimeType,
-                  data: base64String
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+
+      const apiRes = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: promptText },
+                {
+                  inlineData: {
+                    mimeType: cleanMimeType,
+                    data: base64String
+                  }
                 }
-              }
-            ]
+              ]
+            }
+          ],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.1
           }
-        ],
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.1
-        }
+        })
       });
 
-      const responseText = response.text ? response.text.trim() : '';
-      if (!responseText) {
-        throw new Error('Empty response from Gemini API');
+      if (!apiRes.ok) {
+        const errBody = await apiRes.text();
+        throw new Error(`Google API ${apiRes.status} on model ${modelName}: ${errBody}`);
+      }
+
+      const resData = await apiRes.json();
+      const candidate = resData?.candidates?.[0];
+      const partText = candidate?.content?.parts?.[0]?.text?.trim() || '';
+
+      if (!partText) {
+        throw new Error(`Empty response from model ${modelName}`);
       }
 
       // Parse JSON from response
-      const jsonStart = responseText.indexOf('{');
-      const jsonEnd = responseText.lastIndexOf('}');
+      const jsonStart = partText.indexOf('{');
+      const jsonEnd = partText.lastIndexOf('}');
       if (jsonStart !== -1 && jsonEnd !== -1) {
-        const cleanJsonStr = responseText.substring(jsonStart, jsonEnd + 1);
+        const cleanJsonStr = partText.substring(jsonStart, jsonEnd + 1);
         const parsed = JSON.parse(cleanJsonStr);
         const isValid = Boolean(parsed.is_valid_document);
         const siNum = parsed.si_number ? String(parsed.si_number).trim() : null;
@@ -164,7 +184,7 @@ Return ONLY valid JSON matching this schema:
         };
       }
 
-      throw new Error(`Invalid JSON returned from model ${modelName}`);
+      throw new Error(`Invalid JSON format from model ${modelName}`);
     } catch (err) {
       console.warn(`[Gemini Flash] Model ${modelName} attempt notice:`, err.message);
       lastError = err;
