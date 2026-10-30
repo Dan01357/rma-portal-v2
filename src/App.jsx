@@ -968,12 +968,16 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccessReport, setSubmitSuccessReport] = useState(null);
 
-  // Official Logistics Paperwork (DR / Invoice / PO) & Gemini Flash AI OCR
-  const [paperworkPhotos, setPaperworkPhotos] = useState([]); // Array of { file, previewUrl }
+  // Official Logistics Paperwork (DR / Invoice / PO) & Gemini Flash AI OCR (Multi-photo up to 3)
+  const [paperworkPhotos, setPaperworkPhotos] = useState([]); // Array of { file, previewUrl, metadata } (max 3)
+  const [paperworkCaptureMode, setPaperworkCaptureMode] = useState('single'); // 'single' (Camera snap) | 'batch' (Multi-file select)
   const [paperworkMetadata, setPaperworkMetadata] = useState(null);
   const [isInspectingPaperwork, setIsInspectingPaperwork] = useState(false);
   const [paperworkShake, setPaperworkShake] = useState(false);
   const [paperworkError, setPaperworkError] = useState(null);
+  const [siNumber, setSiNumber] = useState('');
+  const [drNumber, setDrNumber] = useState('');
+  const [poNumber, setPoNumber] = useState('');
   const [invoiceDrNumber, setInvoiceDrNumber] = useState('');
   const [storeBranch, setStoreBranch] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
@@ -1528,46 +1532,72 @@ export default function App() {
     });
   };
 
-  // Official Logistics Paperwork (DR / Invoice / PO) Photo Handler with Gemini Flash AI OCR
+  // Official Logistics Paperwork (DR / Invoice / PO) Photo Handler with Gemini Flash AI OCR (Multi-photo up to 3)
   const handlePaperworkSelect = async (e) => {
     const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
+    if (!files.length) return;
 
-    const file = files[0];
-    const previewUrl = URL.createObjectURL(file);
+    // Enforce Max 3 photos for Official Paperwork
+    const availableSlots = 3 - paperworkPhotos.length;
+    if (availableSlots <= 0) {
+      showToast('Maximum of 3 official paperwork photos allowed.', 'warning');
+      if (e.target) e.target.value = '';
+      return;
+    }
+
+    const filesToProcess = files.slice(0, availableSlots);
+    if (files.length > availableSlots) {
+      showToast(`Processing ${availableSlots} photo(s). Maximum 3 paperwork photos allowed.`, 'info');
+    }
+
     setPaperworkError(null);
     setIsInspectingPaperwork(true);
 
     try {
-      // 1. Inspect paperwork with Gemini Flash via /api/v1/ai/inspect-paperwork
-      const inspectionResult = await catalogService.inspectPaperwork(file);
+      const validNewPhotos = [];
+      let latestValidResult = null;
 
-      // 2. Strict Rejection Check
-      if (!inspectionResult || !inspectionResult.is_valid_document) {
-        setPaperworkShake(true);
-        setTimeout(() => setPaperworkShake(false), 900);
-        const reason = inspectionResult?.rejection_reason || 'Photo does not appear to be an official invoice, DR, or PO.';
-        setPaperworkError(reason);
-        showToast(`Invalid document photo: Please take a clear picture of the paper delivery receipt or invoice. (${reason})`, 'warning');
-        return;
+      for (const file of filesToProcess) {
+        // 1. Inspect paperwork with Gemini Flash via /api/v1/ai/inspect-paperwork
+        const inspectionResult = await catalogService.inspectPaperwork(file);
+
+        // 2. Strict Rejection Check
+        if (!inspectionResult || !inspectionResult.is_valid_document) {
+          setPaperworkShake(true);
+          setTimeout(() => setPaperworkShake(false), 900);
+          const reason = inspectionResult?.rejection_reason || 'Photo does not appear to be an authentic wholesale Sales Invoice, DR, or PO.';
+          setPaperworkError(reason);
+          showToast(`Invalid document photo: ${reason}`, 'warning');
+          continue; // Strictly block and do NOT add invalid photo!
+        }
+
+        latestValidResult = inspectionResult;
+        validNewPhotos.push({
+          file,
+          previewUrl: URL.createObjectURL(file),
+          metadata: inspectionResult
+        });
       }
 
-      // 3. Accepted Document: Auto-fill fields for zero-typing UX!
-      setPaperworkMetadata(inspectionResult);
-      if (inspectionResult.invoice_dr_number) {
-        setInvoiceDrNumber(inspectionResult.invoice_dr_number);
-      }
-      if (inspectionResult.store_branch) {
-        setStoreBranch(inspectionResult.store_branch);
-      }
+      if (validNewPhotos.length > 0) {
+        setPaperworkPhotos(prev => [...prev, ...validNewPhotos]);
+        setPaperworkMetadata(latestValidResult);
 
-      setPaperworkPhotos([{ file, previewUrl }]);
-      showToast(`✓ Verified ${inspectionResult.document_type || 'Delivery Receipt'} (${inspectionResult.invoice_dr_number || 'Detected'})`, 'success');
+        // 3. Accepted Document: Auto-populate separate SI#, DR#, PO# and Store Branch fields!
+        if (latestValidResult.si_number) setSiNumber(latestValidResult.si_number);
+        if (latestValidResult.dr_number) setDrNumber(latestValidResult.dr_number);
+        if (latestValidResult.po_number) setPoNumber(latestValidResult.po_number);
+        if (latestValidResult.invoice_dr_number) setInvoiceDrNumber(latestValidResult.invoice_dr_number);
+        if (latestValidResult.store_branch) setStoreBranch(latestValidResult.store_branch);
+
+        const detectedNum = latestValidResult.si_number || latestValidResult.dr_number || latestValidResult.po_number || latestValidResult.invoice_dr_number || 'Detected';
+        showToast(`✓ Verified ${latestValidResult.document_type || 'Paperwork'} (${detectedNum})`, 'success');
+      }
     } catch (err) {
       console.error('Paperwork inspection error:', err);
       setPaperworkShake(true);
       setTimeout(() => setPaperworkShake(false), 900);
-      setPaperworkError('Could not verify paperwork photo. Please try again with clear lighting.');
+      setPaperworkError('Could not verify paperwork photo. Please ensure document numbers are clear.');
       showToast('Paperwork inspection failed. Please ensure the document is flat and readable.', 'warning');
     } finally {
       setIsInspectingPaperwork(false);
@@ -1575,15 +1605,19 @@ export default function App() {
     }
   };
 
-  const removePaperworkPhoto = () => {
-    if (paperworkPhotos[0]?.previewUrl) {
-      URL.revokeObjectURL(paperworkPhotos[0].previewUrl);
-    }
-    setPaperworkPhotos([]);
-    setPaperworkMetadata(null);
-    setInvoiceDrNumber('');
-    setStoreBranch('');
-    setPaperworkError(null);
+  const removePaperworkPhoto = (index) => {
+    setPaperworkPhotos(prev => {
+      const updated = [...prev];
+      if (updated[index]?.previewUrl) {
+        URL.revokeObjectURL(updated[index].previewUrl);
+      }
+      updated.splice(index, 1);
+      if (updated.length === 0) {
+        setPaperworkMetadata(null);
+        setPaperworkError(null);
+      }
+      return updated;
+    });
   };
 
   // Submit RMA Report Handler - INSTANT response (<0.15s) with background sync
@@ -1645,6 +1679,11 @@ export default function App() {
     const submitQty = Math.max(1, parseInt(quantity, 10) || 1);
     const finalUnit = unitName || detectedProduct?.unit_name || 'pc';
 
+    const cleanSi = siNumber.trim();
+    const cleanDr = drNumber.trim();
+    const cleanPo = poNumber.trim();
+    const primaryDocNumber = cleanSi || cleanDr || cleanPo || invoiceDrNumber.trim() || null;
+
     // 2. Show success screen with full report details for QR sticker generation INSTANTLY!
     setSubmitSuccessReport({
       rma_number: rmaNumber,
@@ -1662,7 +1701,10 @@ export default function App() {
       reason: selectedReason,
       reporter_name: reporterName || 'Staff',
       reporter_contact: reporterContact || '',
-      invoice_dr_number: invoiceDrNumber || null,
+      si_number: cleanSi || null,
+      dr_number: cleanDr || null,
+      po_number: cleanPo || null,
+      invoice_dr_number: primaryDocNumber,
       store_branch: resolvedBranch,
       expiry_date: expiryDate || null,
       batch_lot_number: batchLotNumber ? batchLotNumber.trim() : null,
@@ -1676,7 +1718,10 @@ export default function App() {
     // 3. Reset form fields immediately so UI is completely responsive
     const capturedPhotos = [...photoFiles];
     const capturedPaperworkPhotos = [...paperworkPhotos];
-    const capturedInvoiceDrNumber = invoiceDrNumber;
+    const capturedSiNumber = cleanSi || null;
+    const capturedDrNumber = cleanDr || null;
+    const capturedPoNumber = cleanPo || null;
+    const capturedInvoiceDrNumber = primaryDocNumber;
     const capturedStoreBranch = resolvedBranch;
     const capturedExpiryDate = expiryDate || null;
     const capturedBatchLotNumber = batchLotNumber ? batchLotNumber.trim() : null;
@@ -1697,6 +1742,9 @@ export default function App() {
     setPhotoFiles([]);
     setPaperworkPhotos([]);
     setPaperworkMetadata(null);
+    setSiNumber('');
+    setDrNumber('');
+    setPoNumber('');
     setInvoiceDrNumber('');
     setCustomStoreBranch('');
     setExpiryDate('');
@@ -1741,6 +1789,9 @@ export default function App() {
           explanation: capturedExplanation,
           photos: uploadedDamagedUrls.length > 0 ? uploadedDamagedUrls : ['https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800&auto=format&fit=crop&q=80'],
           paperwork_photos: uploadedPaperworkUrls,
+          si_number: capturedSiNumber,
+          dr_number: capturedDrNumber,
+          po_number: capturedPoNumber,
           invoice_dr_number: capturedInvoiceDrNumber,
           store_branch: capturedStoreBranch,
           expiry_date: capturedExpiryDate,
@@ -1976,7 +2027,20 @@ export default function App() {
                       )}
                       <div>Date & Time: <span className="font-mono">{new Date(submitSuccessReport.created_at || Date.now()).toLocaleString()}</span></div>
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+
+                    {/* Reporter Signature Area */}
+                    <div className="pt-2 border-t-2 border-dashed border-slate-300 dark:border-slate-700 text-[10px]">
+                      <div className="flex items-center justify-between text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-4">
+                        <span>Reporter Signature:</span>
+                        <span>Date: ____________</span>
+                      </div>
+                      <div className="border-b-2 border-slate-800 dark:border-slate-300 w-full mb-1"></div>
+                      <div className="text-[8px] text-slate-600 dark:text-slate-400 font-semibold text-center">
+                        Signed by {submitSuccessReport.reporter_name || 'Staff'} • Physical Return Handover
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 pt-1">
                       Download QR or print sticker to tape directly to the returned box for instant warehouse intake scanning.
                     </p>
                   </div>
@@ -2277,7 +2341,7 @@ export default function App() {
                       )}
                     </div>
 
-                    {/* ZONE 2: PHOTO OF DELIVERY RECEIPT / DR / INVOICE (REQUIRED - ZERO TYPING) */}
+                    {/* ZONE 2: PHOTO OF DELIVERY RECEIPT / DR / INVOICE (REQUIRED - MULTI-PHOTO UP TO 3) */}
                     <div className={`p-3.5 rounded-2xl border-2 transition-all space-y-2.5 ${
                       paperworkShake ? 'animate-shake border-rose-500 bg-rose-50 dark:bg-rose-950/40' :
                       paperworkPhotos.length > 0
@@ -2298,87 +2362,126 @@ export default function App() {
                               </span>
                             </h4>
                             <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                              Don't type numbers! Snap your paper delivery receipt, DR, invoice, or PO.
+                              Snap up to 3 photos of delivery receipt, sales invoice, or PO.
                             </p>
                           </div>
                         </div>
-                        <span className="text-[10px] font-bold text-rose-500 shrink-0">• Required</span>
+
+                        {/* Capture Mode Toggle */}
+                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setPaperworkCaptureMode('single')}
+                            className={`px-2 py-0.5 rounded-lg text-[9px] font-black flex items-center gap-0.5 cursor-pointer transition-all ${
+                              paperworkCaptureMode === 'single'
+                                ? 'bg-white dark:bg-slate-700 text-violet-700 dark:text-violet-300 shadow-2xs'
+                                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                            }`}
+                            title="Single camera photo snap"
+                          >
+                            <Camera className="w-3 h-3" />
+                            <span>Snap</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPaperworkCaptureMode('batch')}
+                            className={`px-2 py-0.5 rounded-lg text-[9px] font-black flex items-center gap-0.5 cursor-pointer transition-all ${
+                              paperworkCaptureMode === 'batch'
+                                ? 'bg-white dark:bg-slate-700 text-violet-700 dark:text-violet-300 shadow-2xs'
+                                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                            }`}
+                            title="Multi-file upload (up to 3)"
+                          >
+                            <Layers className="w-3 h-3" />
+                            <span>Batch</span>
+                          </button>
+                          <span className="text-[10px] font-bold text-rose-500 ml-1">• Required</span>
+                        </div>
+                      </div>
+
+                      {/* Prominent Quality Reminder Banner */}
+                      <div className="p-2 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-[10px] text-amber-900 dark:text-amber-200 flex items-start gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>Visibility Reminder:</strong> Ensure the <strong>Sales Invoice #, DR #, or PO #</strong> is completely legible, well-lit, and uncropped. Blurry, cut-off, or non-logistics photos will be rejected.
+                        </span>
                       </div>
 
                       {/* Inspecting Radar State */}
-                      {isInspectingPaperwork ? (
+                      {isInspectingPaperwork && (
                         <div className="py-4 px-3 border border-violet-300 dark:border-violet-700 bg-violet-50/80 dark:bg-violet-950/50 rounded-xl flex items-center justify-center gap-2.5 text-center animate-pulse">
                           <RefreshCw className="w-4 h-4 animate-spin text-violet-600 dark:text-violet-400 shrink-0" />
                           <span className="text-xs font-black text-violet-900 dark:text-violet-200">
-                            Gemini Flash Inspecting Paperwork & Auto-Extracting DR#...
+                            Gemini Flash Inspecting & Validating Commercial Paperwork...
                           </span>
                         </div>
-                      ) : paperworkPhotos.length === 0 ? (
+                      )}
+
+                      {/* Paperwork Photos Thumbnails Grid (Up to 3 Photos) */}
+                      {paperworkPhotos.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-3 gap-2 pt-1">
+                            {paperworkPhotos.map((item, idx) => (
+                              <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border-2 border-emerald-400 dark:border-emerald-700 group shadow-2xs bg-slate-100 dark:bg-slate-800">
+                                <button
+                                  type="button"
+                                  onClick={() => setLightboxPhoto({
+                                    images: paperworkPhotos.map(p => p.previewUrl),
+                                    initialIndex: idx,
+                                    url: item.previewUrl,
+                                    title: item.metadata?.document_type || 'Official Paperwork',
+                                    subtitle: `Photo ${idx + 1} of ${paperworkPhotos.length} • ${item.metadata?.invoice_dr_number || ''}`
+                                  })}
+                                  className="w-full h-full block cursor-zoom-in"
+                                  title="Click to view enlarged document"
+                                >
+                                  <img src={item.previewUrl} alt="Paperwork" className="w-full h-full object-cover" />
+                                </button>
+                                <span className="absolute bottom-1 left-1 px-1 py-0.2 rounded text-[8px] font-black bg-emerald-600 text-white shadow-xs">
+                                  ✓ P{idx + 1}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); removePaperworkPhoto(idx); }}
+                                  className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full opacity-90 hover:opacity-100 transition-opacity z-10 cursor-pointer"
+                                  title="Remove paperwork photo"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Paperwork Summary Badge */}
+                          {paperworkMetadata && (
+                            <div className="p-2 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 rounded-xl text-xs flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5 truncate">
+                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>Verified {paperworkMetadata.document_type || 'Commercial Document'} ({paperworkPhotos.length}/3 photos attached)</span>
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Snap / Add Paperwork Photo Button (if < 3) */}
+                      {paperworkPhotos.length < 3 && !isInspectingPaperwork && (
                         <label className="w-full py-3.5 px-4 border-2 border-dashed border-violet-300 dark:border-violet-700 hover:border-violet-500 bg-violet-50/60 dark:bg-violet-950/30 hover:bg-violet-100/60 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99] text-center">
                           <FileText className="w-5 h-5 text-violet-600 dark:text-violet-400 shrink-0" />
                           <span className="text-xs font-black text-violet-900 dark:text-violet-200">
-                            📄 Snap Delivery Receipt / DR / Invoice / PO
+                            {paperworkPhotos.length === 0
+                              ? '📄 Snap Photo of DR / Invoice / PO'
+                              : `+ Add Another Paperwork Photo (${paperworkPhotos.length}/3)`}
                           </span>
                           <input
                             type="file"
                             accept="image/*"
-                            capture="environment"
+                            multiple={paperworkCaptureMode === 'batch'}
+                            capture={paperworkCaptureMode === 'single' ? 'environment' : undefined}
                             onChange={handlePaperworkSelect}
                             className="hidden"
                           />
                         </label>
-                      ) : (
-                        /* Verified Paperwork Badge & Auto-Filled Details */
-                        <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 rounded-xl shadow-2xs space-y-2 animate-in fade-in">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="px-2 py-0.5 rounded-lg text-[11px] font-black bg-emerald-600 text-white flex items-center gap-1 shadow-2xs">
-                              <CheckCircle className="w-3 h-3" />
-                              ✓ Verified {paperworkMetadata?.document_type || 'Delivery Receipt'} ({invoiceDrNumber || 'DR Detected'})
-                            </span>
-                            <button
-                              type="button"
-                              onClick={removePaperworkPhoto}
-                              className="text-xs text-slate-400 hover:text-rose-600 font-bold p-1 rounded-lg transition-colors cursor-pointer"
-                              title="Remove and retake paperwork photo"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-
-                          <div className="flex items-center gap-2.5">
-                            {paperworkPhotos[0]?.previewUrl && (
-                              <button
-                                type="button"
-                                onClick={() => setLightboxPhoto({
-                                  images: [paperworkPhotos[0].previewUrl],
-                                  initialIndex: 0,
-                                  url: paperworkPhotos[0].previewUrl,
-                                  title: paperworkMetadata?.document_type || 'Official Paperwork',
-                                  subtitle: `DR #${invoiceDrNumber} • ${storeBranch}`
-                                })}
-                                className="w-12 h-12 rounded-lg overflow-hidden border border-emerald-300 dark:border-emerald-700 shrink-0 cursor-zoom-in"
-                                title="Click to zoom paperwork"
-                              >
-                                <img src={paperworkPhotos[0].previewUrl} alt="DR" className="w-full h-full object-cover" />
-                              </button>
-                            )}
-                            <div className="flex-1 min-w-0 text-[11px] space-y-0.5">
-                              <div className="flex items-center gap-1 truncate">
-                                <span className="text-slate-500 dark:text-slate-400">Extracted DR#:</span>
-                                <strong className="font-mono text-slate-900 dark:text-white font-black">{invoiceDrNumber || 'Auto-linked'}</strong>
-                              </div>
-                              {storeBranch && (
-                                <div className="flex items-center gap-1 truncate">
-                                  <span className="text-slate-500 dark:text-slate-400">Extracted Branch:</span>
-                                  <strong className="text-slate-800 dark:text-slate-200">{storeBranch}</strong>
-                                </div>
-                              )}
-                              <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-bold">
-                                ✓ Auto-filled into return payload (Zero typing)
-                              </div>
-                            </div>
-                          </div>
-                        </div>
                       )}
 
                       {/* Paperwork Error Alert */}
@@ -2386,12 +2489,84 @@ export default function App() {
                         <div className="p-2.5 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 rounded-xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2 animate-in fade-in">
                           <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
                           <div className="text-[11px] leading-tight">
-                            <strong className="font-bold">Invalid document photo:</strong> Please take a clear picture of the paper delivery receipt or invoice. ({paperworkError})
+                            <strong className="font-bold">Paperwork rejected:</strong> {paperworkError}
                           </div>
                         </div>
                       )}
                     </div>
                   </div>
+                </div>
+
+                {/* DEDICATED INPUT FIELDS FOR SI#, DR#, AND PO# (AUTO-POPULATED OR MANUAL) */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <FileText className="w-4 h-4 text-violet-600" />
+                      <span>Commercial Document Numbers</span>
+                    </label>
+                    {(siNumber || drNumber || poNumber) && (
+                      <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" />
+                        Auto-populated by AI OCR
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {/* Sales Invoice (SI) # */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          Sales Invoice (SI) #
+                        </span>
+                        {siNumber && <span className="text-[9px] text-emerald-600 font-bold">✓ Detected</span>}
+                      </div>
+                      <input
+                        type="text"
+                        value={siNumber}
+                        onChange={(e) => setSiNumber(e.target.value)}
+                        placeholder="e.g., SI-2026-9021"
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500 shadow-2xs"
+                      />
+                    </div>
+
+                    {/* Delivery Receipt (DR) # */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          Delivery Receipt (DR) #
+                        </span>
+                        {drNumber && <span className="text-[9px] text-emerald-600 font-bold">✓ Detected</span>}
+                      </div>
+                      <input
+                        type="text"
+                        value={drNumber}
+                        onChange={(e) => setDrNumber(e.target.value)}
+                        placeholder="e.g., DR-2026-8812"
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500 shadow-2xs"
+                      />
+                    </div>
+
+                    {/* Purchase Order (PO) # */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          Purchase Order (PO) #
+                        </span>
+                        {poNumber && <span className="text-[9px] text-emerald-600 font-bold">✓ Detected</span>}
+                      </div>
+                      <input
+                        type="text"
+                        value={poNumber}
+                        onChange={(e) => setPoNumber(e.target.value)}
+                        placeholder="e.g., PO-2026-4401"
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500 shadow-2xs"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                    Auto-extracted from attached paperwork, or type manually if known.
+                  </p>
                 </div>
 
                 {/* 3. STORE / BRANCH LOCATION (MANUAL OR AUTO-POPULATED BY OCR) */}

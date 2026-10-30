@@ -178,20 +178,29 @@ Each test scenario defines:
   * **Action**: Upload 3 distinct photos, then click thumbnail 2.
   * **Expected Behavior**: `ImageLightboxModal` opens displaying photo 2 with navigation arrows `<-` and `->`, zoom control, and subtitle `Photo 2 of 3`. Supporting both Google Drive CDN URLs and Supabase storage URLs.
 
-- [ ] **TC-AI-01 (Damaged Item Photo Capture vs. Paperwork Receipt Photo Capture - Both Required)**
+- [ ] **TC-AI-01 (Damaged Item Photo Capture vs. Paperwork Receipt Photo Capture - Multi-Photo up to 3)**
   * **Location**: Section 2: Dual-Zone Photo Capture (`/`)
-  * **Action**: Verify two distinct visual cards: `[ 📸 Photo of Damaged Product (Required) ]` (max 3 photos) and `[ 📄 Photo of Delivery Receipt / DR / Invoice / PO (Required) ]`.
-  * **Expected Behavior**: Damaged product photos are slotted into `photoFiles`; paperwork is slotted into `paperworkPhotos`. Both are strictly required. Attempting submission without paperwork triggers shake animation and error toast: *"Official paperwork photo (Delivery Receipt / Invoice / PO) is required."*
+  * **Action**: Verify two distinct visual cards: `[ 📸 Photo of Damaged Product (Required) ]` (max 3 photos, single/batch modes) and `[ 📄 Photo of Delivery Receipt / DR / Invoice / PO (Required) ]` (max 3 photos, single/batch modes).
+  * **Expected Behavior**: Damaged product photos are slotted into `photoFiles`; paperwork is slotted into `paperworkPhotos`. Both allow up to 3 high-res photos. Attempting submission without paperwork triggers shake animation and error toast: *"Official paperwork photo (Delivery Receipt / Invoice / PO) is required."* Prominent visibility reminder warns reporters that SI#, DR#, and PO# must be completely legible.
 
-- [ ] **TC-AI-02 (Gemini Paperwork Validator: Valid DR Accepted vs. Random Item Rejected)**
+- [ ] **TC-AI-02 (Gemini Paperwork Validator: Zero Synthetic Numbers & Strict Rejection)**
   * **Location**: Section 2: Zone 2 `Photo of DR / Invoice / PO`
-  * **Action**: Upload a non-paperwork image (selfie, floor, empty room, or snack packaging).
-  * **Expected Behavior**: Card triggers shake animation (`animate-shake`), input clears, and red alert displays: *"Invalid document photo: Please take a clear picture of the paper delivery receipt or invoice. (Photo does not appear to be an official invoice, DR, or PO.)"*. Uploading a real paper delivery receipt succeeds with a green badge.
+  * **Action**: Upload a non-paperwork image (selfie, floor, desk, food, or snack packaging).
+  * **Expected Behavior**: Card triggers shake animation (`animate-shake`), invalid photo is blocked from upload list, and red alert displays: *"Invalid document photo: Photo does not appear to be an authentic Sales Invoice, DR, or PO, or document numbers are unreadable."* **CRITICAL**: The system NEVER synthesizes or generates fake numbers (e.g. `DR-2026-XXXX`). If numbers are missing or key is absent, the upload is rejected.
 
-- [ ] **TC-AI-03 (AI OCR Auto-Fill: invoice_dr_number and store_branch Extraction)**
-  * **Location**: Section 2: Zone 2 `Photo of DR / Invoice / PO`
-  * **Action**: Upload a delivery receipt photo containing `DR-2026-8812` and store branch.
-  * **Expected Behavior**: Gemini Flash extracts the metadata within < 2s; displays green badge `✓ Verified Delivery Receipt (DR-2026-8812)`; auto-populates `invoice_dr_number` and auto-fills Section 3 `Store / Branch Location *` with zero bias and zero manual typing. Reporter can also edit or type manually into the field.
+- [ ] **TC-AI-03 (AI OCR Auto-Fill: SI#, DR#, and PO# Independent Fields + Store Branch Extraction)**
+  * **Location**: Section 2 & 3: Zone 2 `Photo of DR / Invoice / PO` and `Commercial Document Numbers`
+  * **Action**: Upload a paper document with visible Sales Invoice, Delivery Receipt, and Purchase Order numbers.
+  * **Expected Behavior**: Gemini Flash extracts the metadata within < 2s; displays green verification badge; independently auto-populates `Sales Invoice (SI) #`, `Delivery Receipt (DR) #`, and `Purchase Order (PO) #` in their dedicated input fields with `✓ Detected` badges. Also auto-fills Section 3 `Store / Branch Location *`. Reporters can manually edit or input them at any time.
+
+- [ ] **TC-QR-01 (Physical Reporter Signature Block on ALL RMA QR Codes & Printouts)**
+  * **Location**: Success Screen Ticket Preview, Return QR Modal, Thermal 4x6" Label Modal, and Downloaded PNGs/Stickers
+  * **Action**: Generate an RMA ticket or open any QR code view / printout.
+  * **Expected Behavior**: Every sticker, modal, and high-resolution downloadable canvas features a dedicated physical signature block:
+    * `REPORTER SIGNATURE / HANDOVER ACKNOWLEDGEMENT:`
+    * `__________________________   Date: ____________________`
+    * `Signed by [Reporter Name] • Physical Return Handover Sign-Off`
+    Enables warehouse clerks and receiving drivers to physically sign the ticket immediately after printing.
 
 - [ ] **TC-AI-04 (Google Drive Subfolder Organization: /01_Damaged_Items vs /02_Official_Paperwork)**
   * **Location**: Google Workspace Drive -> Root: `Wholesale RMA Records`

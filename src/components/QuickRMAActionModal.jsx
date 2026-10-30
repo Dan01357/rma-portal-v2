@@ -703,26 +703,47 @@ export default function QuickRMAActionModal({
 
                   <div className="flex items-start gap-3 bg-violet-50/50 dark:bg-violet-950/20 p-2.5 rounded-2xl border border-violet-100 dark:border-violet-900/50">
                     {paperworkList.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => onOpenLightbox && onOpenLightbox({
-                          images: paperworkList,
-                          initialIndex: 0,
-                          url: paperworkList[0],
-                          title: aiMetadata?.document_type || 'Paperwork Document',
-                          subtitle: `DR #${adminDrNumber || report.invoice_dr_number || 'N/A'} • ${adminStoreBranch || report.store_branch || ''}`
-                        })}
-                        className="w-12 h-12 rounded-xl overflow-hidden border border-violet-200 dark:border-violet-800 hover:scale-105 shadow-xs transition-transform cursor-zoom-in shrink-0"
-                        title="Click to view paperwork photo"
-                      >
-                        <img src={paperworkList[0]} alt="Paperwork" className="w-full h-full object-cover" />
-                      </button>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {paperworkList.map((photoUrl, pIdx) => (
+                          <button
+                            key={pIdx}
+                            type="button"
+                            onClick={() => onOpenLightbox && onOpenLightbox({
+                              images: paperworkList,
+                              initialIndex: pIdx,
+                              url: photoUrl,
+                              title: aiMetadata?.document_type || 'Paperwork Document',
+                              subtitle: `Paperwork ${pIdx + 1}/${paperworkList.length} • DR #${adminDrNumber || report.invoice_dr_number || 'N/A'}`
+                            })}
+                            className="w-12 h-12 rounded-xl overflow-hidden border border-violet-200 dark:border-violet-800 hover:scale-105 shadow-xs transition-transform cursor-zoom-in shrink-0 relative"
+                            title={`Click to view paperwork photo ${pIdx + 1}`}
+                          >
+                            <img src={photoUrl} alt={`Paperwork ${pIdx + 1}`} className="w-full h-full object-cover" />
+                            <span className="absolute bottom-0 right-0 px-1 text-[8px] bg-slate-900/80 text-white font-mono">P{pIdx + 1}</span>
+                          </button>
+                        ))}
+                      </div>
                     )}
 
                     <div className="flex-1 min-w-0 text-xs space-y-0.5">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-slate-400 text-[10px] uppercase font-bold">DR / Invoice:</span>
                         <strong className="font-mono text-slate-900 dark:text-white font-black">{adminDrNumber || report.invoice_dr_number || 'None assigned'}</strong>
+                        {(report.si_number || aiMetadata?.si_number) && (
+                          <span className="text-[10px] font-mono bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 px-1.5 py-0.5 rounded font-bold">
+                            SI: {report.si_number || aiMetadata?.si_number}
+                          </span>
+                        )}
+                        {(report.dr_number || aiMetadata?.dr_number) && (
+                          <span className="text-[10px] font-mono bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 px-1.5 py-0.5 rounded font-bold">
+                            DR: {report.dr_number || aiMetadata?.dr_number}
+                          </span>
+                        )}
+                        {(report.po_number || aiMetadata?.po_number) && (
+                          <span className="text-[10px] font-mono bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.5 rounded font-bold">
+                            PO: {report.po_number || aiMetadata?.po_number}
+                          </span>
+                        )}
                         {(adminDrNumber || report.invoice_dr_number) && (
                           <button
                             type="button"

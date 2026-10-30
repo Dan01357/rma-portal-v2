@@ -229,8 +229,21 @@ export async function downloadQrCodePng({
         const metaLine = [repInfo, dateFormatted].filter(Boolean).join('  •  ');
         if (metaLine) {
           ctx.fillText(metaLine, width / 2, nextY + 10);
+          nextY += 40;
         }
       }
+
+      // Reporter Signature Line
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(width / 2 - 240, nextY + 30);
+      ctx.lineTo(width / 2 + 240, nextY + 30);
+      ctx.stroke();
+
+      ctx.fillStyle = '#64748b';
+      ctx.font = 'bold 20px "Inter", sans-serif';
+      ctx.fillText(`Reporter Signature: ${reporter || 'Staff'}`, width / 2, nextY + 60);
     }
 
     // 8. Footer timestamp / system notice
@@ -470,6 +483,42 @@ export async function generateBoxStickerCanvas({
     ctx.fillStyle = '#334155';
     ctx.font = 'bold 26px "JetBrains Mono", Consolas, monospace';
     ctx.fillText(dateFormatted || new Date().toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }), 520, row2ValY);
+
+    // Reporter Signature Block for Physical Verification
+    const sigBlockY = Math.max(row2ValY + 70, 1315);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(120, sigBlockY);
+    ctx.lineTo(width - 120, sigBlockY);
+    ctx.stroke();
+
+    ctx.fillStyle = '#475569';
+    ctx.font = 'bold 22px "Inter", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('REPORTER SIGNATURE / HANDOVER ACKNOWLEDGEMENT:', 120, sigBlockY + 32);
+
+    // Signature line
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(120, sigBlockY + 95);
+    ctx.lineTo(600, sigBlockY + 95);
+    ctx.stroke();
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 20px "Inter", sans-serif';
+    ctx.fillText(`Sign Above (${reporter || 'Staff'})`, 120, sigBlockY + 125);
+
+    // Date line
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(680, sigBlockY + 95);
+    ctx.lineTo(width - 120, sigBlockY + 95);
+    ctx.stroke();
+
+    ctx.fillText('Date: ____________________', 680, sigBlockY + 125);
 
     // 7. Dashed Tear Line and Footer
     const cutLineY = 1495;

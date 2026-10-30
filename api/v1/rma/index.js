@@ -98,6 +98,13 @@ export default async function handler(req, res) {
         reporter_contact,
         ae_name,
         ae_email,
+        store_branch,
+        invoice_dr_number,
+        si_number,
+        dr_number,
+        po_number,
+        expiry_date,
+        batch_lot_number,
         notes
       } = body || {};
 
@@ -138,6 +145,13 @@ export default async function handler(req, res) {
         reported_by: `${client.name} (API)`,
         ae_name: ae_name || null,
         ae_email: ae_email || null,
+        store_branch: store_branch ? String(store_branch).trim() : null,
+        invoice_dr_number: invoice_dr_number ? String(invoice_dr_number).trim() : null,
+        si_number: si_number ? String(si_number).trim() : null,
+        dr_number: dr_number ? String(dr_number).trim() : null,
+        po_number: po_number ? String(po_number).trim() : null,
+        expiry_date: expiry_date || null,
+        batch_lot_number: batch_lot_number ? String(batch_lot_number).trim() : null,
         notes: notes ? String(notes).trim() : `Reported via REST API by ${client.name}`,
         created_at: new Date().toISOString()
       };

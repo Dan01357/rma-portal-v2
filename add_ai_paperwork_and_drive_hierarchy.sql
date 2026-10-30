@@ -6,6 +6,9 @@
 ALTER TABLE public.rma_reports
   ADD COLUMN IF NOT EXISTS paperwork_photos jsonb DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS invoice_dr_number text,
+  ADD COLUMN IF NOT EXISTS si_number text,
+  ADD COLUMN IF NOT EXISTS dr_number text,
+  ADD COLUMN IF NOT EXISTS po_number text,
   ADD COLUMN IF NOT EXISTS store_branch text,
   ADD COLUMN IF NOT EXISTS expiry_date date,
   ADD COLUMN IF NOT EXISTS batch_lot_number text,
@@ -15,6 +18,9 @@ ALTER TABLE public.rma_reports
 
 -- Fast search indexes for invoice DR numbers, branch names, and lot/expiry
 CREATE INDEX IF NOT EXISTS idx_rma_reports_invoice_dr ON public.rma_reports(invoice_dr_number);
+CREATE INDEX IF NOT EXISTS idx_rma_reports_si_number ON public.rma_reports(si_number);
+CREATE INDEX IF NOT EXISTS idx_rma_reports_dr_number ON public.rma_reports(dr_number);
+CREATE INDEX IF NOT EXISTS idx_rma_reports_po_number ON public.rma_reports(po_number);
 CREATE INDEX IF NOT EXISTS idx_rma_reports_store_branch ON public.rma_reports(store_branch);
 CREATE INDEX IF NOT EXISTS idx_rma_reports_expiry_date ON public.rma_reports(expiry_date);
 CREATE INDEX IF NOT EXISTS idx_rma_reports_batch_lot ON public.rma_reports(batch_lot_number);

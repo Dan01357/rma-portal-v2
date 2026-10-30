@@ -976,6 +976,9 @@ export const catalogService = {
     explanation = '',
     photos = [],
     paperwork_photos = [],
+    si_number = null,
+    dr_number = null,
+    po_number = null,
     invoice_dr_number = null,
     store_branch = null,
     expiry_date = null,
@@ -1081,7 +1084,10 @@ export const catalogService = {
       explanation: explanation || null,
       photos: Array.isArray(photos) ? photos : [photos],
       paperwork_photos: Array.isArray(paperwork_photos) ? paperwork_photos : (paperwork_photos ? [paperwork_photos] : []),
-      invoice_dr_number: invoice_dr_number || null,
+      si_number: si_number ? String(si_number).trim() : null,
+      dr_number: dr_number ? String(dr_number).trim() : null,
+      po_number: po_number ? String(po_number).trim() : null,
+      invoice_dr_number: invoice_dr_number || si_number || dr_number || po_number || null,
       store_branch: store_branch || null,
       expiry_date: expiry_date || null,
       batch_lot_number: batch_lot_number ? String(batch_lot_number).trim() : null,
@@ -1119,6 +1125,9 @@ export const catalogService = {
       const fallbackRow = { ...reportRow };
       delete fallbackRow.paperwork_photos;
       delete fallbackRow.invoice_dr_number;
+      delete fallbackRow.si_number;
+      delete fallbackRow.dr_number;
+      delete fallbackRow.po_number;
       delete fallbackRow.store_branch;
       delete fallbackRow.expiry_date;
       delete fallbackRow.batch_lot_number;

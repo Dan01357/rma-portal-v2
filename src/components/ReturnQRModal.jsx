@@ -259,6 +259,18 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
               </div>
             </div>
 
+            {/* Reporter Physical Signature Section */}
+            <div className="border-t-2 border-dashed border-slate-400 pt-2 text-[10px]">
+              <div className="flex items-center justify-between text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-5">
+                <span>Reporter Signature:</span>
+                <span>Date: ____________________</span>
+              </div>
+              <div className="border-b-2 border-slate-900 w-full mb-1"></div>
+              <div className="text-[8px] sm:text-[9px] text-slate-600 font-semibold text-center">
+                Signed by {reporter} • Physical Return Handover Sign-Off
+              </div>
+            </div>
+
             {/* Footer Instruction */}
             <div className="text-[8px] sm:text-[9px] text-center font-bold text-slate-400 uppercase tracking-wider border-t border-dashed border-slate-300 pt-1.5">
               Attach securely to outer box or returned merchandise

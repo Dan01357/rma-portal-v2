@@ -356,6 +356,19 @@ export default function ThermalBoxLabelModal({
               </div>
             </div>
 
+            {/* Reporter Signature Area for Thermal Label */}
+            <div className="border-t-2 border-dashed border-black pt-2 text-[10px] space-y-1">
+              <div className="flex items-center justify-between text-[9px] font-black text-black uppercase">
+                <span>REPORTER SIGNATURE / SIGN-OFF:</span>
+                <span>DATE: ____________</span>
+              </div>
+              <div className="h-5"></div>
+              <div className="border-b-2 border-black w-full"></div>
+              <div className="text-[8px] text-black font-bold text-center">
+                Signed by {reporterName} • Physical Return Handover Acknowledged
+              </div>
+            </div>
+
             {/* Footer Notice */}
             <div className="border-t border-black pt-1 text-center text-[8px] font-extrabold tracking-wider uppercase text-black">
               * AFFIX FIRMLY TO BULK CRATE / RETURN TOTE *
