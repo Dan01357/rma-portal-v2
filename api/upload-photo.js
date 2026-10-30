@@ -443,7 +443,7 @@ export default async function handler(req, res) {
   }
 
   // 1. Handle Gemini Flash Paperwork Inspection
-  if (req.query?.action === 'inspect-paperwork' || req.body?.action === 'inspect-paperwork') {
+  if (req.query?.action === 'inspect-paperwork' || req.body?.action === 'inspect-paperwork' || req.url?.includes('inspect-paperwork')) {
     try {
       const { fileData, imageUrl, mimeType } = req.body || {};
       const result = await inspectPaperworkWithGemini({

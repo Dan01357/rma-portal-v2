@@ -178,6 +178,31 @@ Each test scenario defines:
   * **Action**: Upload 3 distinct photos, then click thumbnail 2.
   * **Expected Behavior**: `ImageLightboxModal` opens displaying photo 2 with navigation arrows `<-` and `->`, zoom control, and subtitle `Photo 2 of 3`. Supporting both Google Drive CDN URLs and Supabase storage URLs.
 
+- [ ] **TC-AI-01 (Damaged Item Photo Capture vs. Paperwork Receipt Photo Capture)**
+  * **Location**: Section 2: Dual-Zone Photo Capture (`/`)
+  * **Action**: Verify two distinct visual cards: `[ 📸 Photo of Damaged Product (Required) ]` (max 3 photos) and `[ 📄 Photo of Delivery Receipt / DR / Invoice (Recommended) ]`.
+  * **Expected Behavior**: Damaged product photos are slotted into `photoFiles`; paperwork is slotted into `paperworkPhotos`. The UI clearly separates physical item proofs from official logistics receipts.
+
+- [ ] **TC-AI-02 (Gemini Paperwork Validator: Valid DR Accepted vs. Random Item Rejected)**
+  * **Location**: Section 2: Zone 2 `Photo of DR / Invoice`
+  * **Action**: Upload a non-paperwork image (selfie, floor, empty room, or snack packaging).
+  * **Expected Behavior**: Card triggers shake animation (`animate-shake`), input clears, and red alert displays: *"Invalid document photo: Please take a clear picture of the paper delivery receipt or invoice. (Photo does not appear to be an official invoice, DR, or PO.)"*. Uploading a real paper delivery receipt succeeds with a green badge.
+
+- [ ] **TC-AI-03 (AI OCR Auto-Fill: invoice_dr_number and store_branch Extraction)**
+  * **Location**: Section 2: Zone 2 `Photo of DR / Invoice`
+  * **Action**: Upload a delivery receipt photo containing `DR-2026-8812` and store `Savemore Market - Taguig`.
+  * **Expected Behavior**: Gemini Flash extracts the metadata within < 2s; displays green badge `✓ Verified Delivery Receipt (DR-2026-8812)`; auto-populates `invoice_dr_number` and sets store dropdown to `Savemore Market - Taguig` with zero manual typing.
+
+- [ ] **TC-AI-04 (Google Drive Subfolder Organization: /01_Damaged_Items vs /02_Official_Paperwork)**
+  * **Location**: Google Workspace Drive -> Root: `Wholesale RMA Records`
+  * **Action**: Submit an RMA containing both damaged product photos and an official delivery receipt.
+  * **Expected Behavior**: Automatic directory creation: `Wholesale RMA Records/YYYY-MM/RMA-[NUMBER]/`. Damaged product photos are stored under `01_Damaged_Items/`; verified receipts are stored under `02_Official_Paperwork/`.
+
+- [ ] **TC-AI-05 (Admin Side-by-Side Paperwork Inspection & DR# Manual Override)**
+  * **Location**: Admin Return Reports -> Quick RMA Action Modal
+  * **Action**: Click RMA row with attached paperwork.
+  * **Expected Behavior**: Paperwork photo displays with zoom thumbnail; "AI Verified" badge shows confidence and extracted DR#; 1-click **"Copy DR#"** button copies number to clipboard for credit memo creation; Admin can click **"Edit DR# / Branch"** to manually override misread values. Direct link opens the specific Google Drive subfolder.
+
 ---
 
 ### 1.4 Enterprise Wholesale Intake Fields (FMCG Logistics Alignment)

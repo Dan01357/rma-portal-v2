@@ -150,18 +150,24 @@ When a delivery truck, return pallet, or customer shipment arrives at the wareho
    * If recognized, product name, net unit price, 12% VAT price, supplier, unit of measure (`pc`, `box`, `roll`, `unit`), and assigned Customer Account Executive (AE) auto-populate instantly.
    * If uncatalogued, the portal flags the submission as `Unidentified Item`, allowing intake to continue without blocking dock operations while queueing the item for Admin SKU enrichment.
 
-3. **Mandatory Proof Photos & Supabase Storage**:
-   * Intake strictly requires at least **1 proof photograph** demonstrating defect, crushed packaging, or carton condition.
-   * Tapping **"Tap to Take Photo with Camera or Upload"** allows multi-file selection or immediate live camera snapshots.
-   * **Automatic Client-Side Image Compression**: High-resolution mobile photos (often 5–15 MB) are automatically compressed in-memory via HTML5 Canvas to a maximum dimension of 1600px at 82% JPEG quality. This cuts upload times from 15 seconds to under 400ms while preserving defect visual clarity.
-   * Compressed binary blobs are uploaded directly to the Supabase Storage bucket **`rma-photos`** under unique timestamps: `rma_proofs/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`.
+3. **Tap-First Dual-Zone Photo Capture & Google Drive Subfolder Architecture**:
+   * **Zone 1: Damaged Product Photo (Required)**: Max 3 photos of damaged carton, crushed packaging, or broken product seals. Files are compressed via client-side WebP canvas to $< 180\text{KB}$.
+   * **Zone 2: Official Paperwork Photo (Recommended - Zero Typing UX)**: Warehouse clerks snap the paper Delivery Receipt (DR), Sales Invoice (SI), or Purchase Order (PO). The caption instructs: *"Don't type numbers! Just snap your paper receipt, DR, or invoice."*
+   * **Automated Hierarchical Google Drive Storage**: Rather than dumping files into a single flat directory, images are sorted into structured nested folders:
+     ```
+     Root: "Wholesale RMA Records"
+       └── [YYYY-MM] (e.g. 2026-10)
+           └── [RMA_NUMBER] (e.g. RMA-20261030-9841)
+               ├── 01_Damaged_Items/ (stores photos of defective products)
+               └── 02_Official_Paperwork/ (stores verified DR, SI, and PO photos)
+     ```
+   * Public preview URLs (`https://lh3.googleusercontent.com/d/{fileId}`) are saved directly to `rma_reports.photos` and `rma_reports.paperwork_photos`.
 
-4. **Enterprise Logistics Details & Origin Validation**:
-   * **Store / Branch / Warehouse Location (Required)**: Identifies which physical branch or dock initiated the return (e.g. `Savemore Taguig`, `Puregold Cubao`, `Dock Bay 4`). Form submission is blocked if empty.
-   * **Sales Invoice (SI) / Delivery Receipt (DR) Reference (Optional / Recommended)**: Links the physical return directly to original wholesale billing for Finance and Accounting credit memo issuance.
-   * **Smart Conditional Expiry Date**: When defect reason `2- Expired / Near Expiry Date` is selected, the portal dynamically reveals the `Product Expiry Date *` date selector. Required for wholesale FMCG returns to substantiate vendor credit claims.
-   * **Batch / Lot Number (Optional)**: Records manufacturing batch or lot codes (e.g., `LOT-B42`) printed on cartons/cans for supplier quality recall tracking.
-   * **Gemini Flash AI Paperwork OCR**: When a delivery receipt or invoice photo is attached, Google Gemini Flash AI validates authenticity, inspects the document, and automatically populates the DR# and Store Branch with zero manual typing required.
+4. **Gemini Flash AI Paperwork Inspector & 1-Tap Branch Selection**:
+   * **Instant Serverless OCR (`/api/v1/ai/inspect-paperwork`)**: Invokes Google Gemini Flash (`gemini-2.5-flash`) to validate document authenticity and extract `invoice_dr_number`, `store_branch`, `vendor_name`, and `detected_date`.
+   * **Anti-Fraud Rejection Gate**: If a user uploads non-paperwork (food, floor, face, or unrelated item), the card shakes (`animate-shake`), the input clears, and a warning alert instructs the user to provide an official logistics receipt.
+   * **1-Tap Account Selector**: Eliminates manual store typing with pre-populated FMCG accounts (`Savemore Taguig`, `Puregold Cubao`, `Dock Bay 4`). If Gemini Flash detects the branch from the DR, it automatically pre-selects it.
+   * **Persistent Local Contact Info**: Reporter name and contact phone/email are cached in `localStorage` (`rma_reporter_name`, `rma_reporter_contact`), saving repeat drivers and warehouse clerks from ever having to re-type contact info.
 
 5. **Accurate Dock GPS Geofencing Threshold Check**:
    * The portal invokes `navigator.geolocation.getCurrentPosition()` with `{ enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }`.

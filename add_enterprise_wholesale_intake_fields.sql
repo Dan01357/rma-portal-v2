@@ -15,3 +15,4 @@ CREATE INDEX IF NOT EXISTS idx_rma_reports_store_branch ON public.rma_reports(st
 CREATE INDEX IF NOT EXISTS idx_rma_reports_invoice_dr ON public.rma_reports(invoice_dr_number);
 CREATE INDEX IF NOT EXISTS idx_rma_reports_expiry_date ON public.rma_reports(expiry_date);
 CREATE INDEX IF NOT EXISTS idx_rma_reports_batch_lot ON public.rma_reports(batch_lot_number);
+

@@ -266,4 +266,45 @@ export function registerRMARoutes(registry) {
       404: { description: 'Report not found', content: { 'application/json': { schema: StandardErrorSchema } } }
     }
   });
+
+  // POST /api/v1/ai/inspect-paperwork
+  registry.registerPath({
+    method: 'post',
+    path: '/api/v1/ai/inspect-paperwork',
+    summary: 'Inspect Paperwork Photo via Gemini Flash AI',
+    description: 'Validates wholesale logistics paperwork (DR, SI, PO) and auto-extracts document numbers and branch names.',
+    tags: ['AI Document Inspection'],
+    request: {
+      body: {
+        content: {
+          'application/json': {
+            schema: z.object({
+              fileData: z.string().optional().openapi({ description: 'Base64 image string', example: 'data:image/jpeg;base64,...' }),
+              imageUrl: z.string().url().optional().openapi({ description: 'Public image URL to inspect', example: 'https://example.com/dr.jpg' }),
+              mimeType: z.string().optional().default('image/jpeg').openapi({ example: 'image/jpeg' })
+            })
+          }
+        }
+      }
+    },
+    responses: {
+      200: {
+        description: 'Inspection result',
+        content: {
+          'application/json': {
+            schema: z.object({
+              is_valid_document: z.boolean().openapi({ example: true }),
+              document_type: z.string().openapi({ example: 'Delivery Receipt' }),
+              confidence: z.number().openapi({ example: 0.95 }),
+              invoice_dr_number: z.string().nullable().openapi({ example: 'DR-2026-8812' }),
+              store_branch: z.string().nullable().openapi({ example: 'Savemore Market - Taguig' }),
+              detected_date: z.string().nullable().openapi({ example: '2026-10-30' }),
+              vendor_name: z.string().nullable().openapi({ example: 'Pingcon Marketing' }),
+              rejection_reason: z.string().nullable().openapi({ example: null })
+            })
+          }
+        }
+      }
+    }
+  });
 }

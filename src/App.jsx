@@ -97,6 +97,22 @@ const DEFECT_REASONS = [
   '6- Other Defect'
 ];
 
+// Pre-populated top wholesale customer branches for 1-tap zero-typing selection
+const PRESET_STORE_BRANCHES = [
+  'Savemore Market - Taguig',
+  'Savemore Market - Makati',
+  'Savemore Market - Cubao',
+  'Puregold - Cubao',
+  'Puregold - San Juan',
+  'Puregold - Commonwealth',
+  'SM Supermarket - Megamall',
+  'SM Hypermarket - Pasig',
+  'Robinsons Supermarket - Galleria',
+  'Central Warehouse Floor (Dock Bay 4)',
+  'Customer Delivery / Repack Carton',
+  'Other Store / Branch'
+];
+
 /**
  * Universal Lifecycle Stage Formatter & Color Resolver
  */
@@ -957,8 +973,13 @@ export default function App() {
   const [unitName, setUnitName] = useState('pc');
   const [selectedReason, setSelectedReason] = useState(DEFECT_REASONS[0]);
   const [explanation, setExplanation] = useState('');
-  const [reporterName, setReporterName] = useState('');
-  const [reporterContact, setReporterContact] = useState('');
+  const [reporterName, setReporterName] = useState(() => {
+    try { return localStorage.getItem('rma_reporter_name') || ''; } catch { return ''; }
+  });
+  const [reporterContact, setReporterContact] = useState(() => {
+    try { return localStorage.getItem('rma_reporter_contact') || ''; } catch { return ''; }
+  });
+  const [customStoreBranch, setCustomStoreBranch] = useState('');
   const [photoFiles, setPhotoFiles] = useState([]); // Array of { file, previewUrl }
   const [photoCaptureMode, setPhotoCaptureMode] = useState('single'); // 'single' (Camera snap) | 'batch' (Multi-file select)
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1003,6 +1024,18 @@ export default function App() {
   const [selectedReportIds, setSelectedReportIds] = useState(new Set());
 
   // Automatically prune orphan report selection IDs whenever recentReportsList updates
+  useEffect(() => {
+    if (reporterName) {
+      try { localStorage.setItem('rma_reporter_name', reporterName); } catch {}
+    }
+  }, [reporterName]);
+
+  useEffect(() => {
+    if (reporterContact) {
+      try { localStorage.setItem('rma_reporter_contact', reporterContact); } catch {}
+    }
+  }, [reporterContact]);
+
   useEffect(() => {
     setSelectedReportIds(prev => {
       if (prev.size === 0) return prev;
@@ -1470,8 +1503,21 @@ export default function App() {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
+    // Enforce Max 3 photos for Damaged Product
+    const availableSlots = 3 - photoFiles.length;
+    if (availableSlots <= 0) {
+      showToast('Maximum of 3 damaged item photos allowed.', 'warning');
+      if (e.target) e.target.value = '';
+      return;
+    }
+
+    const filesToProcess = files.slice(0, availableSlots);
+    if (files.length > availableSlots) {
+      showToast(`Added ${availableSlots} photo(s). Maximum 3 photos allowed.`, 'info');
+    }
+
     const currentBarcode = barcodeInput.trim() || 'DOCK';
-    const newPhotos = files.map(file => {
+    const newPhotos = filesToProcess.map(file => {
       // Start background upload immediately so it's completed by the time user clicks submit!
       const uploadPromise = catalogService.uploadPhoto(file, currentBarcode).catch(err => {
         console.warn('Background photo upload warning:', err);
@@ -1587,8 +1633,12 @@ export default function App() {
       return;
     }
 
-    if (!storeBranch || !storeBranch.trim()) {
-      showToast('Store / Branch / Warehouse Location is required.', 'warning');
+    const resolvedBranch = (storeBranch === 'Other Store / Branch' && customStoreBranch.trim())
+      ? customStoreBranch.trim()
+      : storeBranch.trim();
+
+    if (!resolvedBranch || resolvedBranch === 'Other Store / Branch') {
+      showToast('Please select or specify your Store / Branch location.', 'warning');
       return;
     }
 
@@ -1596,6 +1646,12 @@ export default function App() {
       showToast('Product expiry date is required when returning expired items.', 'warning');
       return;
     }
+
+    // Persist reporter contact info in localStorage for 1-tap zero-typing returns
+    try {
+      localStorage.setItem('rma_reporter_name', reporterName.trim());
+      localStorage.setItem('rma_reporter_contact', reporterContact.trim());
+    } catch {}
 
     // 1. Generate unique RMA Number synchronously for instant sticker/QR display
     const rmaNumber = catalogService.generateRMANumber();
@@ -1620,7 +1676,7 @@ export default function App() {
       reporter_name: reporterName || 'Staff',
       reporter_contact: reporterContact || '',
       invoice_dr_number: invoiceDrNumber || null,
-      store_branch: storeBranch || null,
+      store_branch: resolvedBranch,
       expiry_date: expiryDate || null,
       batch_lot_number: batchLotNumber ? batchLotNumber.trim() : null,
       ai_document_metadata: paperworkMetadata || null,
@@ -1634,7 +1690,7 @@ export default function App() {
     const capturedPhotos = [...photoFiles];
     const capturedPaperworkPhotos = [...paperworkPhotos];
     const capturedInvoiceDrNumber = invoiceDrNumber;
-    const capturedStoreBranch = storeBranch;
+    const capturedStoreBranch = resolvedBranch;
     const capturedExpiryDate = expiryDate || null;
     const capturedBatchLotNumber = batchLotNumber ? batchLotNumber.trim() : null;
     const capturedPaperworkMetadata = paperworkMetadata;
@@ -1655,7 +1711,7 @@ export default function App() {
     setPaperworkPhotos([]);
     setPaperworkMetadata(null);
     setInvoiceDrNumber('');
-    setStoreBranch('');
+    setCustomStoreBranch('');
     setExpiryDate('');
     setBatchLotNumber('');
     setPaperworkError(null);
@@ -2040,14 +2096,14 @@ export default function App() {
                     <div className="flex items-center justify-between gap-3 pt-0.5">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold text-slate-600 dark:text-slate-400">Qty:</span>
-                        <div className="flex items-center border border-slate-300 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-800 px-1.5 py-1 focus-within:border-blue-600 shadow-2xs">
+                        <div className="flex items-center border-2 border-slate-300 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-800 p-1 focus-within:border-blue-600 shadow-2xs">
                           <button
                             type="button"
                             onClick={() => setQuantity(Math.max(1, (parseInt(quantity, 10) || 1) - 1))}
-                            className="p-1.5 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white cursor-pointer active:scale-95 transition-transform"
+                            className="w-10 h-10 rounded-xl bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 font-black text-lg flex items-center justify-center cursor-pointer shadow-xs active:scale-90 transition-all"
                             title="Decrease quantity (-1)"
                           >
-                            <Minus className="w-3.5 h-3.5" />
+                            <Minus className="w-5 h-5" />
                           </button>
                           <input
                             type="number"
@@ -2069,16 +2125,16 @@ export default function App() {
                               const q = Math.max(1, parseInt(quantity, 10) || 1);
                               setQuantity(q);
                             }}
-                            className="w-12 text-center text-xs font-black text-slate-800 dark:text-slate-200 bg-transparent border-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            className="w-14 text-center text-sm font-black text-slate-900 dark:text-white bg-transparent border-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             title="Directly enter return quantity"
                           />
                           <button
                             type="button"
                             onClick={() => setQuantity(Math.max(1, (parseInt(quantity, 10) || 0) + 1))}
-                            className="p-1.5 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white cursor-pointer active:scale-95 transition-transform"
+                            className="w-10 h-10 rounded-xl bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 font-black text-lg flex items-center justify-center cursor-pointer shadow-xs active:scale-90 transition-all"
                             title="Increase quantity (+1)"
                           >
-                            <Plus className="w-3.5 h-3.5" />
+                            <Plus className="w-5 h-5" />
                           </button>
                         </div>
                       </div>
@@ -2089,7 +2145,7 @@ export default function App() {
                         <select
                           value={unitName}
                           onChange={(e) => setUnitName(e.target.value)}
-                          className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer shadow-2xs h-[38px]"
+                          className="px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer shadow-2xs h-[44px]"
                           title="Select return unit (pc or case)"
                         >
                           <option value="pc">pc</option>
@@ -2149,340 +2205,295 @@ export default function App() {
                   ) : null}
                 </div>
 
-                {/* 2. PHOTO UPLOADER (REQUIRED) - WITH SINGLE OR BATCH MODE */}
-                <div className="space-y-2.5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                        2. Proof Photos (Required) *
-                      </label>
-                      <span className="text-[10px] font-bold text-rose-500">• At least 1 photo required</span>
-                    </div>
-
-                    {/* Single vs Batch Camera Mode Toggle */}
-                    <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700 self-start sm:self-auto">
-                      <button
-                        type="button"
-                        onClick={() => setPhotoCaptureMode('single')}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                          photoCaptureMode === 'single'
-                            ? 'bg-white dark:bg-slate-700 text-rose-600 dark:text-rose-400 shadow-xs font-black'
-                            : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                        }`}
-                        title="Single Photo Mode: Opens camera directly for individual snaps"
-                      >
-                        <Camera className="w-3 h-3" />
-                        <span>Single Photo</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPhotoCaptureMode('batch')}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                          photoCaptureMode === 'batch'
-                            ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-xs font-black'
-                            : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                        }`}
-                        title="Batch Mode: Multi-image select from gallery or file manager"
-                      >
-                        <Layers className="w-3 h-3" />
-                        <span>Batch / Multi</span>
-                      </button>
-                    </div>
+                {/* 2. DUAL-ZONE PHOTO CAPTURE (TAP-FIRST ZERO-TYPING) */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      2. Proof & Paperwork Photos
+                    </label>
+                    <span className="text-[10px] text-slate-400 font-bold">Tap to capture or upload</span>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2">
-                    {photoFiles.map((item, idx) => (
-                      <div key={idx} className="relative aspect-square rounded-2xl overflow-hidden border-2 border-slate-300 dark:border-slate-700 group shadow-sm bg-slate-100 dark:bg-slate-800">
-                        <button
-                          type="button"
-                          onClick={() => setLightboxPhoto({
-                            images: photoFiles.map(p => p.previewUrl),
-                            initialIndex: idx,
-                            url: item.previewUrl,
-                            title: 'Proof Photo',
-                            subtitle: `Photo ${idx + 1} of ${photoFiles.length}`
-                          })}
-                          className="w-full h-full block cursor-zoom-in"
-                          title="Click to preview enlarged photo"
-                        >
-                          <img src={item.previewUrl} alt="Preview" className="w-full h-full object-cover" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); removePhoto(idx); }}
-                          className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full opacity-80 hover:opacity-100 transition-opacity z-10"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
-
-                    <label className={`aspect-square border-2 border-dashed rounded-2xl flex flex-col items-center justify-center p-2 text-center cursor-pointer transition-all ${
-                      photoCaptureMode === 'single'
-                        ? 'border-rose-300 dark:border-rose-800/80 hover:border-rose-500 bg-rose-50/40 dark:bg-rose-950/20 hover:bg-rose-50/80'
-                        : 'border-blue-300 dark:border-blue-800/80 hover:border-blue-500 bg-blue-50/40 dark:bg-blue-950/20 hover:bg-blue-50/80'
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {/* ZONE 1: PHOTO OF DAMAGED PRODUCT (REQUIRED) */}
+                    <div className={`p-3.5 rounded-2xl border-2 transition-all space-y-2.5 ${
+                      photoFiles.length > 0
+                        ? 'bg-rose-50/30 dark:bg-rose-950/20 border-rose-300 dark:border-rose-800'
+                        : 'bg-white dark:bg-slate-800/80 border-dashed border-rose-300 dark:border-rose-800/70 hover:border-rose-500'
                     }`}>
-                      {photoCaptureMode === 'single' ? (
-                        <>
-                          <Camera className="w-6 h-6 text-rose-500 mb-1" />
-                          <span className="text-[11px] font-extrabold text-slate-800 dark:text-slate-100 leading-tight">
-                            Snap Photo
-                          </span>
-                          <span className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">
-                            Camera (Single Mode)
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="p-2 rounded-xl bg-rose-500 text-white shadow-2xs shrink-0">
+                            <Package className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                              <span>Photo of Damaged Product *</span>
+                              <span className="text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-100 dark:bg-rose-950/70 px-1.5 py-0.2 rounded-full">
+                                Required ({photoFiles.length}/3)
+                              </span>
+                            </h4>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                              Snap damaged box, carton, or broken item (Max 3)
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Thumbnails of damaged photos */}
+                      {photoFiles.length > 0 && (
+                        <div className="grid grid-cols-3 gap-2 pt-1">
+                          {photoFiles.map((item, idx) => (
+                            <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 group shadow-2xs bg-slate-100 dark:bg-slate-800">
+                              <button
+                                type="button"
+                                onClick={() => setLightboxPhoto({
+                                  images: photoFiles.map(p => p.previewUrl),
+                                  initialIndex: idx,
+                                  url: item.previewUrl,
+                                  title: 'Damaged Product Photo',
+                                  subtitle: `Photo ${idx + 1} of ${photoFiles.length}`
+                                })}
+                                className="w-full h-full block cursor-zoom-in"
+                                title="Click to preview enlarged photo"
+                              >
+                                <img src={item.previewUrl} alt="Damaged Item" className="w-full h-full object-cover" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); removePhoto(idx); }}
+                                className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full opacity-90 hover:opacity-100 transition-opacity z-10"
+                                title="Remove photo"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Snap Button if < 3 photos */}
+                      {photoFiles.length < 3 && (
+                        <label className="w-full py-3.5 px-4 border-2 border-dashed border-rose-300 dark:border-rose-700 hover:border-rose-500 bg-rose-50/60 dark:bg-rose-950/30 hover:bg-rose-100/60 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99] text-center">
+                          <Camera className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
+                          <span className="text-xs font-black text-rose-900 dark:text-rose-200">
+                            {photoFiles.length === 0 ? '📸 Snap Photo of Damaged Product' : `+ Add Another Photo (${photoFiles.length}/3)`}
                           </span>
                           <input
-                            key="single-photo-input"
                             type="file"
                             accept="image/*"
                             capture="environment"
                             onChange={handlePhotoSelect}
                             className="hidden"
                           />
-                        </>
-                      ) : (
-                        <>
-                          <Layers className="w-6 h-6 text-blue-500 mb-1" />
-                          <span className="text-[11px] font-extrabold text-slate-800 dark:text-slate-100 leading-tight">
-                            Select Photos
+                        </label>
+                      )}
+                    </div>
+
+                    {/* ZONE 2: PHOTO OF DELIVERY RECEIPT / DR / INVOICE (RECOMMENDED - ZERO TYPING) */}
+                    <div className={`p-3.5 rounded-2xl border-2 transition-all space-y-2.5 ${
+                      paperworkShake ? 'animate-shake border-rose-500 bg-rose-50 dark:bg-rose-950/40' :
+                      paperworkPhotos.length > 0
+                        ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-400 dark:border-emerald-700'
+                        : 'bg-white dark:bg-slate-800/80 border-dashed border-violet-300 dark:border-violet-800/70 hover:border-violet-500'
+                    }`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="p-2 rounded-xl bg-violet-600 text-white shadow-2xs shrink-0">
+                            <FileText className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                              <span>Photo of DR / Invoice</span>
+                              <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 flex items-center gap-0.5">
+                                <Sparkles className="w-2.5 h-2.5" />
+                                Gemini Flash AI
+                              </span>
+                            </h4>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                              Don't type numbers! Just snap your paper receipt, DR, or invoice.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Inspecting Radar State */}
+                      {isInspectingPaperwork ? (
+                        <div className="py-4 px-3 border border-violet-300 dark:border-violet-700 bg-violet-50/80 dark:bg-violet-950/50 rounded-xl flex items-center justify-center gap-2.5 text-center animate-pulse">
+                          <RefreshCw className="w-4 h-4 animate-spin text-violet-600 dark:text-violet-400 shrink-0" />
+                          <span className="text-xs font-black text-violet-900 dark:text-violet-200">
+                            Gemini Flash Inspecting Paperwork & Auto-Extracting DR#...
                           </span>
-                          <span className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">
-                            Batch / Multi Mode
+                        </div>
+                      ) : paperworkPhotos.length === 0 ? (
+                        <label className="w-full py-3.5 px-4 border-2 border-dashed border-violet-300 dark:border-violet-700 hover:border-violet-500 bg-violet-50/60 dark:bg-violet-950/30 hover:bg-violet-100/60 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99] text-center">
+                          <FileText className="w-5 h-5 text-violet-600 dark:text-violet-400 shrink-0" />
+                          <span className="text-xs font-black text-violet-900 dark:text-violet-200">
+                            📄 Snap Delivery Receipt / DR / Invoice
                           </span>
                           <input
-                            key="batch-photo-input"
                             type="file"
                             accept="image/*"
-                            multiple
-                            onChange={handlePhotoSelect}
+                            capture="environment"
+                            onChange={handlePaperworkSelect}
                             className="hidden"
                           />
-                        </>
-                      )}
-                    </label>
-                  </div>
-                </div>
-
-                {/* 2.1 OFFICIAL PAPERWORK (DELIVERY RECEIPT / INVOICE / PO) WITH GEMINI FLASH OCR */}
-                <div className="space-y-2.5 pt-1">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                    <div className="flex items-center gap-2">
-                      <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                        Official Paperwork (DR / Invoice / PO)
-                      </label>
-                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 flex items-center gap-1 shrink-0">
-                        <Sparkles className="w-2.5 h-2.5" />
-                        Gemini Flash AI
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-slate-400 font-medium">Auto-fills DR# & Branch</span>
-                  </div>
-
-                  {/* Rejection Alert if non-paperwork was uploaded */}
-                  {paperworkError && (
-                    <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 rounded-2xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5 animate-in fade-in">
-                      <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
-                      <div className="space-y-0.5">
-                        <div className="font-black text-rose-900 dark:text-rose-100">
-                          Invalid document photo rejected
-                        </div>
-                        <p className="text-[11px] text-rose-700 dark:text-rose-300 leading-relaxed">
-                          Please take a clear picture of the paper delivery receipt or invoice. ({paperworkError})
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Inspecting Radar State */}
-                  {isInspectingPaperwork ? (
-                    <div className="p-5 border-2 border-dashed border-violet-400 dark:border-violet-600 bg-violet-50/60 dark:bg-violet-950/30 rounded-2xl flex flex-col items-center justify-center text-center space-y-2 animate-pulse">
-                      <div className="w-10 h-10 rounded-2xl bg-violet-600 text-white flex items-center justify-center shadow-md animate-bounce">
-                        <Sparkles className="w-5 h-5" />
-                      </div>
-                      <div className="text-xs font-black text-violet-900 dark:text-violet-200">
-                        Gemini Flash Inspecting Paperwork...
-                      </div>
-                      <p className="text-[10px] text-violet-700 dark:text-violet-400 max-w-xs">
-                        Validating authentic wholesale invoice / DR and extracting document metadata...
-                      </p>
-                    </div>
-                  ) : paperworkPhotos.length === 0 ? (
-                    /* Initial Empty Upload State */
-                    <label className={`block border-2 border-dashed rounded-2xl p-4 text-center cursor-pointer transition-all ${
-                      paperworkShake
-                        ? 'border-rose-500 bg-rose-50 dark:bg-rose-950/40 animate-shake'
-                        : 'border-violet-300 dark:border-violet-800/80 hover:border-violet-500 bg-violet-50/40 dark:bg-violet-950/20 hover:bg-violet-50/80'
-                    }`}>
-                      <FileText className="w-7 h-7 text-violet-600 dark:text-violet-400 mx-auto mb-1.5" />
-                      <span className="text-xs font-extrabold text-slate-800 dark:text-white block">
-                        Snap or Upload Delivery Receipt (DR) / Invoice
-                      </span>
-                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block mt-0.5">
-                        Gemini Flash AI will inspect the photo and extract DR# & Store Branch (Zero typing!)
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handlePaperworkSelect}
-                        className="hidden"
-                      />
-                    </label>
-                  ) : (
-                    /* Verified Paperwork Badge & Auto-Filled Details */
-                    <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/50 border-2 border-emerald-400 dark:border-emerald-700 rounded-2xl shadow-xs space-y-2.5 animate-in fade-in">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 flex-wrap min-w-0">
-                          <span className="px-2.5 py-1 rounded-xl text-xs font-black bg-emerald-600 text-white flex items-center gap-1.5 shadow-2xs">
-                            <CheckCircle className="w-3.5 h-3.5" />
-                            ✓ Verified {paperworkMetadata?.document_type || 'Delivery Receipt'} ({invoiceDrNumber || 'DR Detected'})
-                          </span>
-                          <span className="text-[10px] font-mono font-bold text-emerald-800 dark:text-emerald-300">
-                            {Math.round((paperworkMetadata?.confidence || 0.95) * 100)}% AI Confidence
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={removePaperworkPhoto}
-                          className="text-xs text-slate-400 hover:text-rose-600 font-bold p-1 rounded-lg transition-colors cursor-pointer shrink-0"
-                          title="Remove and retake paperwork photo"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-
-                      <div className="flex items-center gap-3">
-                        {paperworkPhotos[0]?.previewUrl && (
-                          <button
-                            type="button"
-                            onClick={() => setLightboxPhoto({
-                              images: [paperworkPhotos[0].previewUrl],
-                              initialIndex: 0,
-                              url: paperworkPhotos[0].previewUrl,
-                              title: paperworkMetadata?.document_type || 'Official Paperwork',
-                              subtitle: `DR #${invoiceDrNumber} • ${storeBranch}`
-                            })}
-                            className="w-14 h-14 rounded-xl overflow-hidden border border-emerald-300 dark:border-emerald-700 shrink-0 cursor-zoom-in"
-                            title="Click to preview paperwork"
-                          >
-                            <img src={paperworkPhotos[0].previewUrl} alt="Paperwork Preview" className="w-full h-full object-cover" />
-                          </button>
-                        )}
-
-                        <div className="flex-1 min-w-0 text-xs space-y-0.5">
-                          <div className="flex items-center gap-1.5 truncate">
-                            <span className="text-slate-500 dark:text-slate-400 text-[11px]">DR/Invoice #:</span>
-                            <strong className="font-mono text-slate-900 dark:text-white font-black">{invoiceDrNumber || 'N/A'}</strong>
+                        </label>
+                      ) : (
+                        /* Verified Paperwork Badge & Auto-Filled Details */
+                        <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 rounded-xl shadow-2xs space-y-2 animate-in fade-in">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="px-2 py-0.5 rounded-lg text-[11px] font-black bg-emerald-600 text-white flex items-center gap-1 shadow-2xs">
+                              <CheckCircle className="w-3 h-3" />
+                              ✓ Verified {paperworkMetadata?.document_type || 'Delivery Receipt'} ({invoiceDrNumber || 'DR Detected'})
+                            </span>
+                            <button
+                              type="button"
+                              onClick={removePaperworkPhoto}
+                              className="text-xs text-slate-400 hover:text-rose-600 font-bold p-1 rounded-lg transition-colors cursor-pointer"
+                              title="Remove and retake paperwork photo"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
                           </div>
-                          {storeBranch && (
-                            <div className="flex items-center gap-1.5 truncate">
-                              <span className="text-slate-500 dark:text-slate-400 text-[11px]">Store Branch:</span>
-                              <strong className="text-slate-800 dark:text-slate-200">{storeBranch}</strong>
+
+                          <div className="flex items-center gap-2.5">
+                            {paperworkPhotos[0]?.previewUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setLightboxPhoto({
+                                  images: [paperworkPhotos[0].previewUrl],
+                                  initialIndex: 0,
+                                  url: paperworkPhotos[0].previewUrl,
+                                  title: paperworkMetadata?.document_type || 'Official Paperwork',
+                                  subtitle: `DR #${invoiceDrNumber} • ${storeBranch}`
+                                })}
+                                className="w-12 h-12 rounded-lg overflow-hidden border border-emerald-300 dark:border-emerald-700 shrink-0 cursor-zoom-in"
+                                title="Click to zoom paperwork"
+                              >
+                                <img src={paperworkPhotos[0].previewUrl} alt="DR" className="w-full h-full object-cover" />
+                              </button>
+                            )}
+                            <div className="flex-1 min-w-0 text-[11px] space-y-0.5">
+                              <div className="flex items-center gap-1 truncate">
+                                <span className="text-slate-500 dark:text-slate-400">Extracted DR#:</span>
+                                <strong className="font-mono text-slate-900 dark:text-white font-black">{invoiceDrNumber || 'Auto-linked'}</strong>
+                              </div>
+                              {storeBranch && (
+                                <div className="flex items-center gap-1 truncate">
+                                  <span className="text-slate-500 dark:text-slate-400">Extracted Branch:</span>
+                                  <strong className="text-slate-800 dark:text-slate-200">{storeBranch}</strong>
+                                </div>
+                              )}
+                              <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-bold">
+                                ✓ Auto-filled into return payload (Zero typing)
+                              </div>
                             </div>
-                          )}
-                          <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">
-                            ✓ Auto-filled by Gemini Flash (Zero typing)
                           </div>
                         </div>
+                      )}
 
-                        <button
-                          type="button"
-                          onClick={() => setIsEditingPaperworkDetails(!isEditingPaperworkDetails)}
-                          className="text-[11px] font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white underline cursor-pointer shrink-0"
-                        >
-                          {isEditingPaperworkDetails ? 'Done' : 'Edit'}
-                        </button>
-                      </div>
-
-                      {/* Manual Override inputs if Admin/User needs to tweak handwritten digits */}
-                      {isEditingPaperworkDetails && (
-                        <div className="pt-2 border-t border-emerald-200 dark:border-emerald-800 grid grid-cols-1 sm:grid-cols-2 gap-2 animate-in fade-in">
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Edit DR/Invoice #:</label>
-                            <input
-                              type="text"
-                              value={invoiceDrNumber}
-                              onChange={(e) => setInvoiceDrNumber(e.target.value)}
-                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Edit Store Branch:</label>
-                            <input
-                              type="text"
-                              value={storeBranch}
-                              onChange={(e) => setStoreBranch(e.target.value)}
-                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
-                            />
+                      {/* Paperwork Error Alert */}
+                      {paperworkError && (
+                        <div className="p-2.5 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 rounded-xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2 animate-in fade-in">
+                          <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                          <div className="text-[11px] leading-tight">
+                            <strong className="font-bold">Invalid document photo:</strong> Please take a clear picture of the paper delivery receipt or invoice. ({paperworkError})
                           </div>
                         </div>
                       )}
                     </div>
-                  )}
+                  </div>
                 </div>
 
-                {/* 3. ORIGIN & DOCUMENT REFERENCE (ENTERPRISE LOGISTICS) */}
-                <div className="space-y-3 pt-1">
+                {/* 3. BRANCH / STORE SELECTION (NO MANUAL TYPING) */}
+                <div className="space-y-2.5 pt-1">
                   <div className="flex items-center justify-between">
-                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                      3. Origin & Logistics Reference
+                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Building className="w-4 h-4 text-blue-600" />
+                      <span>3. Store / Branch Location *</span>
                     </label>
-                    <span className="text-[10px] text-slate-400 font-medium">FMCG Wholesale Intake</span>
+                    <span className="text-[10px] font-bold text-rose-500">• 1-Tap Select</span>
                   </div>
 
-                  {/* Origin / Location (Required) */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                        <Building className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Store / Branch / Warehouse Location *</span>
-                      </label>
-                      <span className="text-[10px] font-bold text-rose-500">• Required</span>
+                  {/* 1-Tap Quick Account Pills */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                    {[
+                      'Savemore Market - Taguig',
+                      'Puregold - Cubao',
+                      'Central Warehouse Floor (Dock Bay 4)',
+                      'Customer Delivery / Repack Carton'
+                    ].map(preset => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => {
+                          setStoreBranch(preset);
+                          setCustomStoreBranch('');
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                          storeBranch === preset
+                            ? 'bg-blue-600 text-white shadow-xs font-black'
+                            : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        {preset.split(' - ')[0].replace('Central Warehouse Floor (Dock Bay 4)', 'Dock Bay 4').replace('Customer Delivery / Repack Carton', 'Customer Carton')}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Dropdown Selector */}
+                  <select
+                    value={PRESET_STORE_BRANCHES.includes(storeBranch) ? storeBranch : (storeBranch ? 'Other Store / Branch' : '')}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'Other Store / Branch') {
+                        setStoreBranch(customStoreBranch || 'Other Store / Branch');
+                      } else {
+                        setStoreBranch(val);
+                        setCustomStoreBranch('');
+                      }
+                    }}
+                    className="w-full px-3.5 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs"
+                  >
+                    <option value="" disabled>-- Tap to select your Store / Branch / Dock --</option>
+                    {PRESET_STORE_BRANCHES.map(branch => (
+                      <option key={branch} value={branch}>{branch}</option>
+                    ))}
+                  </select>
+
+                  {/* If Other or custom OCR extracted branch not in preset list */}
+                  {(storeBranch === 'Other Store / Branch' || (!PRESET_STORE_BRANCHES.includes(storeBranch) && storeBranch)) && (
+                    <div className="pt-1 animate-in fade-in">
+                      <input
+                        type="text"
+                        value={customStoreBranch || (!PRESET_STORE_BRANCHES.includes(storeBranch) ? storeBranch : '')}
+                        onChange={(e) => {
+                          setCustomStoreBranch(e.target.value);
+                          setStoreBranch(e.target.value);
+                        }}
+                        placeholder="Type specific store / warehouse branch name..."
+                        className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border-2 border-blue-400 dark:border-blue-600 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  )}
+
+                  {/* Optional Lot / Batch Number */}
+                  <div className="pt-1">
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 mb-1">
+                      <span className="font-semibold flex items-center gap-1">
+                        <Layers className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Batch / Lot Number (Optional):</span>
+                      </span>
+                      <span className="text-[10px]">Printed on can/box</span>
                     </div>
                     <input
                       type="text"
-                      required
-                      value={storeBranch}
-                      onChange={(e) => setStoreBranch(e.target.value)}
-                      placeholder="e.g., Savemore Taguig, Puregold Cubao, or Dock Bay 4"
-                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 transition-colors"
+                      value={batchLotNumber}
+                      onChange={(e) => setBatchLotNumber(e.target.value)}
+                      placeholder="e.g., LOT-B42 (leave blank if not visible)"
+                      className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600"
                     />
-                  </div>
-
-                  {/* DR Reference & Batch / Lot Number side by side */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                        <span className="flex items-center gap-1.5">
-                          <FileText className="w-3.5 h-3.5 text-violet-600" />
-                          <span>Sales Invoice (SI) / DR #</span>
-                        </span>
-                        <span className="text-[10px] text-slate-400">Optional</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={invoiceDrNumber}
-                        onChange={(e) => setInvoiceDrNumber(e.target.value)}
-                        placeholder="e.g., DR-2026-8891 (leave blank if unknown)"
-                        className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-mono font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 transition-colors"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                        <span className="flex items-center gap-1.5">
-                          <Layers className="w-3.5 h-3.5 text-amber-600" />
-                          <span>Batch / Lot Number</span>
-                        </span>
-                        <span className="text-[10px] text-slate-400">Optional</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={batchLotNumber}
-                        onChange={(e) => setBatchLotNumber(e.target.value)}
-                        placeholder="e.g., LOT-B42 (printed on box/can)"
-                        className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-mono font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 transition-colors"
-                      />
-                    </div>
                   </div>
                 </div>
 
@@ -2544,9 +2555,17 @@ export default function App() {
 
                 {/* 5. REPORTER CONTACT INFORMATION */}
                 <div className="space-y-2">
-                  <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                    5. Reporter Information (Required) *
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      5. Reporter Information (Required) *
+                    </label>
+                    {(reporterName || reporterContact) && (
+                      <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
+                        <CheckCircle className="w-3 h-3" />
+                        Saved on this device (No re-typing)
+                      </span>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div className="relative">
                       <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />

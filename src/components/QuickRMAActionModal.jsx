@@ -28,7 +28,8 @@ import {
   Shield,
   KeyRound,
   ArrowLeft,
-  Folder
+  Folder,
+  Copy
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
@@ -443,6 +444,7 @@ export default function QuickRMAActionModal({
   const [adminBatchLot, setAdminBatchLot] = useState(report?.batch_lot_number || '');
   const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
   const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
+  const [copyDrSuccess, setCopyDrSuccess] = useState(false);
 
   useEffect(() => {
     setAdminDrNumber(report?.invoice_dr_number || report?.ai_document_metadata?.invoice_dr_number || '');
@@ -718,9 +720,25 @@ export default function QuickRMAActionModal({
                     )}
 
                     <div className="flex-1 min-w-0 text-xs space-y-0.5">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-slate-400 text-[10px] uppercase font-bold">DR / Invoice:</span>
                         <strong className="font-mono text-slate-900 dark:text-white font-black">{adminDrNumber || report.invoice_dr_number || 'None assigned'}</strong>
+                        {(adminDrNumber || report.invoice_dr_number) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const dr = adminDrNumber || report.invoice_dr_number;
+                              navigator.clipboard.writeText(dr);
+                              setCopyDrSuccess(true);
+                              setTimeout(() => setCopyDrSuccess(false), 2000);
+                            }}
+                            className="px-2 py-0.5 text-[10px] font-bold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-slate-700 dark:text-slate-200 hover:border-blue-500 hover:text-blue-600 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs ml-auto sm:ml-0"
+                            title="Copy DR# for Credit Memo voucher"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>{copyDrSuccess ? 'Copied!' : 'Copy DR#'}</span>
+                          </button>
+                        )}
                       </div>
                       {(adminStoreBranch || report.store_branch) && (
                         <div className="flex items-center gap-2">
