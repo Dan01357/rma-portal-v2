@@ -359,12 +359,14 @@ export const catalogService = {
   },
 
   /**
-   * Delete multiple stored image URLs in batch
+   * Delete multiple stored image URLs and Google Drive folders in batch
    */
-  async deleteStoredImages(imageUrls) {
-    if (!Array.isArray(imageUrls) || imageUrls.length === 0) return;
-    const cleanList = imageUrls.filter(u => u && typeof u === 'string');
-    if (cleanList.length === 0) return;
+  async deleteStoredImages(imageUrls, folderIds = [], folderUrls = []) {
+    const cleanList = Array.isArray(imageUrls) ? imageUrls.filter(u => u && typeof u === 'string') : [];
+    const cleanFolders = Array.isArray(folderIds) ? folderIds.filter(f => f && typeof f === 'string') : (folderIds ? [folderIds] : []);
+    const cleanFolderUrls = Array.isArray(folderUrls) ? folderUrls.filter(u => u && typeof u === 'string') : (folderUrls ? [folderUrls] : []);
+
+    if (cleanList.length === 0 && cleanFolders.length === 0 && cleanFolderUrls.length === 0) return;
 
     // Separate Google Drive vs Supabase Storage
     const gdriveUrls = [];
@@ -392,17 +394,21 @@ export const catalogService = {
       );
     }
 
-    // Batch delete Google Drive photos in 1 call to /api/upload-photo
-    if (gdriveUrls.length > 0) {
+    // Batch delete Google Drive photos & folders in 1 call to /api/upload-photo
+    if (gdriveUrls.length > 0 || cleanFolders.length > 0 || cleanFolderUrls.length > 0) {
       tasks.push(
         fetch('/api/upload-photo', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileUrls: gdriveUrls })
+          body: JSON.stringify({
+            fileUrls: gdriveUrls,
+            folderIds: cleanFolders,
+            folderUrls: cleanFolderUrls
+          })
         }).then(async res => {
           if (res.ok) {
             const data = await res.json().catch(() => null);
-            console.log('[Google Drive Photo Delete Result]:', data);
+            console.log('[Google Drive Asset Delete Result]:', data);
             if (data?.failed && data.failed.length > 0) {
               console.warn('[Google Drive Delete Incomplete Notice]:', data.failed);
             }
@@ -1419,48 +1425,83 @@ export const catalogService = {
   },
 
   /**
-   * Delete an RMA report (with robust hard-delete, soft-delete fallback, and proof photo cleanup)
+   * Delete an RMA report (with robust hard-delete, soft-delete fallback, and proof photo/paperwork/Google Drive folder cleanup)
    */
-  async deleteReport(id, rmaNumber, explicitPhotos = null) {
+  async deleteReport(id, rmaNumber, explicitItemOrPhotos = null) {
     if (!id && !rmaNumber) return false;
     try {
-      // First find barcode and proof photos to clean up storage and unverified products
       let barcodeToCheck = null;
       let photosToDelete = [];
+      let foldersToDelete = [];
+      let folderUrlsToDelete = [];
 
-      if (explicitPhotos && Array.isArray(explicitPhotos) && explicitPhotos.length > 0) {
-        photosToDelete = explicitPhotos;
+      // 1. Process explicit item object or array of photos if passed
+      if (explicitItemOrPhotos) {
+        if (Array.isArray(explicitItemOrPhotos)) {
+          photosToDelete.push(...explicitItemOrPhotos);
+        } else if (typeof explicitItemOrPhotos === 'object') {
+          if (explicitItemOrPhotos.barcode) barcodeToCheck = explicitItemOrPhotos.barcode;
+          if (explicitItemOrPhotos.google_drive_folder_id) foldersToDelete.push(explicitItemOrPhotos.google_drive_folder_id);
+          if (explicitItemOrPhotos.google_drive_folder_url) folderUrlsToDelete.push(explicitItemOrPhotos.google_drive_folder_url);
+
+          [
+            explicitItemOrPhotos.photos,
+            explicitItemOrPhotos.paperwork_photos,
+            explicitItemOrPhotos.proof_photos,
+            explicitItemOrPhotos.photo_url
+          ].forEach(cand => {
+            if (!cand) return;
+            if (Array.isArray(cand)) photosToDelete.push(...cand);
+            else if (typeof cand === 'string') {
+              try {
+                const parsed = JSON.parse(cand);
+                if (Array.isArray(parsed)) photosToDelete.push(...parsed);
+                else photosToDelete.push(cand);
+              } catch {
+                photosToDelete.push(cand);
+              }
+            }
+          });
+        }
       }
 
+      // 2. Query Supabase for full record before deletion to guarantee all assets (photos, paperwork, gdrive folders) are retrieved
       try {
-        let findQ = supabase.from('rma_reports').select('barcode, photos, proof_photos, photo_url').limit(1);
+        let findQ = supabase
+          .from('rma_reports')
+          .select('barcode, photos, proof_photos, photo_url, paperwork_photos, google_drive_folder_id, google_drive_folder_url')
+          .limit(1);
         if (id) findQ = findQ.eq('id', id);
         else findQ = findQ.eq('rma_number', rmaNumber);
         const { data: found } = await findQ;
         if (found && found.length > 0) {
-          barcodeToCheck = found[0].barcode;
           const foundItem = found[0];
-          const foundPhotos = [];
-          [foundItem.photos, foundItem.proof_photos, foundItem.photo_url].forEach(cand => {
+          if (!barcodeToCheck && foundItem.barcode) barcodeToCheck = foundItem.barcode;
+          if (foundItem.google_drive_folder_id) foldersToDelete.push(foundItem.google_drive_folder_id);
+          if (foundItem.google_drive_folder_url) folderUrlsToDelete.push(foundItem.google_drive_folder_url);
+
+          [
+            foundItem.photos,
+            foundItem.paperwork_photos,
+            foundItem.proof_photos,
+            foundItem.photo_url
+          ].forEach(cand => {
             if (!cand) return;
-            if (Array.isArray(cand)) foundPhotos.push(...cand);
+            if (Array.isArray(cand)) photosToDelete.push(...cand);
             else if (typeof cand === 'string') {
-              if (cand.startsWith('[') && cand.endsWith(']')) {
-                try {
-                  const parsed = JSON.parse(cand);
-                  if (Array.isArray(parsed)) foundPhotos.push(...parsed);
-                  else foundPhotos.push(cand);
-                } catch (e) {
-                  foundPhotos.push(cand);
-                }
-              } else {
-                foundPhotos.push(cand);
+              try {
+                const parsed = JSON.parse(cand);
+                if (Array.isArray(parsed)) photosToDelete.push(...parsed);
+                else photosToDelete.push(cand);
+              } catch {
+                photosToDelete.push(cand);
               }
             }
           });
-          photosToDelete = [...new Set([...photosToDelete, ...foundPhotos])];
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn('[Fetch Report Before Delete Notice]:', e.message);
+      }
 
       let query = supabase.from('rma_reports').delete();
       if (id) {
@@ -1500,9 +1541,13 @@ export const catalogService = {
         } catch (e) {}
       }
 
-      // Permanently delete associated proof photos from Google Drive & Supabase Storage
-      if (photosToDelete.length > 0) {
-        await this.deleteStoredImages(photosToDelete);
+      // Permanently delete associated proof photos, paperwork photos, and Google Drive folders
+      const cleanPhotos = [...new Set(photosToDelete.filter(Boolean))];
+      const cleanFolders = [...new Set(foldersToDelete.filter(Boolean))];
+      const cleanFolderUrls = [...new Set(folderUrlsToDelete.filter(Boolean))];
+
+      if (cleanPhotos.length > 0 || cleanFolders.length > 0 || cleanFolderUrls.length > 0) {
+        await this.deleteStoredImages(cleanPhotos, cleanFolders, cleanFolderUrls);
       }
 
       this.notifyChange('report-deleted', { id, rmaNumber });
@@ -1514,7 +1559,7 @@ export const catalogService = {
   },
 
   /**
-   * ADMIN ACTION: Permanently delete multiple RMA reports in bulk and cleanup photos
+   * ADMIN ACTION: Permanently delete multiple RMA reports in bulk and cleanup photos & Google Drive folders
    */
   async deleteMultipleReports(reportsList) {
     if (!Array.isArray(reportsList) || reportsList.length === 0) return { success: true, count: 0 };
@@ -1522,10 +1567,17 @@ export const catalogService = {
     const ids = reportsList.map(r => r.id).filter(id => id !== undefined && id !== null);
     const rmaNumbers = reportsList.map(r => r.rma_number).filter(Boolean);
 
-    // Extract all photos across reports to delete from Google Drive / Supabase Storage
+    // Extract all photos and folders across reports to delete from Google Drive / Supabase Storage
     const allPhotos = [];
-    reportsList.forEach(r => {
-      const candidates = [r.photos, r.proof_photos, r.photo_url, r.image_url, r.photo];
+    const allFolders = [];
+    const allFolderUrls = [];
+
+    const harvestReportAssets = (r) => {
+      if (!r) return;
+      if (r.google_drive_folder_id) allFolders.push(r.google_drive_folder_id);
+      if (r.google_drive_folder_url) allFolderUrls.push(r.google_drive_folder_url);
+
+      const candidates = [r.photos, r.paperwork_photos, r.proof_photos, r.photo_url, r.image_url, r.photo];
       candidates.forEach(cand => {
         if (!cand) return;
         if (Array.isArray(cand)) {
@@ -1544,7 +1596,25 @@ export const catalogService = {
           }
         }
       });
-    });
+    };
+
+    // First harvest from passed objects
+    reportsList.forEach(harvestReportAssets);
+
+    // Also query Supabase to ensure full paperwork_photos and google_drive_folder_id are harvested for all selected rows
+    try {
+      if (ids.length > 0) {
+        const { data: dbRecords } = await supabase
+          .from('rma_reports')
+          .select('id, rma_number, photos, paperwork_photos, proof_photos, photo_url, google_drive_folder_id, google_drive_folder_url')
+          .in('id', ids);
+        if (dbRecords && Array.isArray(dbRecords)) {
+          dbRecords.forEach(harvestReportAssets);
+        }
+      }
+    } catch (e) {
+      console.warn('[Bulk Delete Fetch Notice]:', e.message);
+    }
 
     try {
       let deleteError = null;
@@ -1565,9 +1635,13 @@ export const catalogService = {
         }
       }
 
-      // Delete all stored photos in parallel
-      if (allPhotos.length > 0) {
-        await this.deleteStoredImages(allPhotos);
+      // Delete all stored photos & Google Drive folders in parallel
+      const cleanPhotos = [...new Set(allPhotos.filter(Boolean))];
+      const cleanFolders = [...new Set(allFolders.filter(Boolean))];
+      const cleanFolderUrls = [...new Set(allFolderUrls.filter(Boolean))];
+
+      if (cleanPhotos.length > 0 || cleanFolders.length > 0 || cleanFolderUrls.length > 0) {
+        await this.deleteStoredImages(cleanPhotos, cleanFolders, cleanFolderUrls);
       }
 
       this.notifyChange('reports-bulk-deleted', { count: reportsList.length });

@@ -152,7 +152,7 @@ When a delivery truck, return pallet, or customer shipment arrives at the wareho
 
 3. **Tap-First Dual-Zone Photo Capture & Google Drive Subfolder Architecture**:
    * **Zone 1: Damaged Product Photo (Required)**: Max 3 photos of damaged carton, crushed packaging, or broken product seals. Files are compressed via client-side WebP canvas to $< 180\text{KB}$.
-   * **Zone 2: Official Paperwork Photo (Recommended - Zero Typing UX)**: Warehouse clerks snap the paper Delivery Receipt (DR), Sales Invoice (SI), or Purchase Order (PO). The caption instructs: *"Don't type numbers! Just snap your paper receipt, DR, or invoice."*
+   * **Zone 2: Official Paperwork Photo (Required - Zero Typing UX)**: Warehouse clerks snap the paper Delivery Receipt (DR), Sales Invoice (SI), or Purchase Order (PO). The caption instructs: *"Don't type numbers! Snap your paper delivery receipt, DR, invoice, or PO."* Both product and paperwork photos are mandatory for submission.
    * **Automated Hierarchical Google Drive Storage**: Rather than dumping files into a single flat directory, images are sorted into structured nested folders:
      ```
      Root: "Wholesale RMA Records"
@@ -162,11 +162,12 @@ When a delivery truck, return pallet, or customer shipment arrives at the wareho
                └── 02_Official_Paperwork/ (stores verified DR, SI, and PO photos)
      ```
    * Public preview URLs (`https://lh3.googleusercontent.com/d/{fileId}`) are saved directly to `rma_reports.photos` and `rma_reports.paperwork_photos`.
+   * **Full Lifecycle Google Drive Asset Deletion**: When an administrator permanently deletes an RMA report (single or bulk), the system calls the Google Drive API (`DELETE` / `trashed: true`) to purge the entire dedicated RMA folder (`google_drive_folder_id`) and all nested photos, leaving zero orphaned files.
 
-4. **Gemini Flash AI Paperwork Inspector & 1-Tap Branch Selection**:
+4. **Gemini Flash AI Paperwork Inspector & Unbiased Store / Branch Auto-Fill**:
    * **Instant Serverless OCR (`/api/v1/ai/inspect-paperwork`)**: Invokes Google Gemini Flash (`gemini-2.5-flash`) to validate document authenticity and extract `invoice_dr_number`, `store_branch`, `vendor_name`, and `detected_date`.
    * **Anti-Fraud Rejection Gate**: If a user uploads non-paperwork (food, floor, face, or unrelated item), the card shakes (`animate-shake`), the input clears, and a warning alert instructs the user to provide an official logistics receipt.
-   * **1-Tap Account Selector**: Eliminates manual store typing with pre-populated FMCG accounts (`Savemore Taguig`, `Puregold Cubao`, `Dock Bay 4`). If Gemini Flash detects the branch from the DR, it automatically pre-selects it.
+   * **Unbiased Store / Branch Location**: Manual input field with zero supplier bias (no hardcoded favoritism or preset dropdowns). If Gemini Flash detects the store/branch from the attached paperwork, it automatically populates the field with an *"Auto-filled from Paperwork"* indicator, while allowing the user to freely type or modify.
    * **Persistent Local Contact Info**: Reporter name and contact phone/email are cached in `localStorage` (`rma_reporter_name`, `rma_reporter_contact`), saving repeat drivers and warehouse clerks from ever having to re-type contact info.
 
 5. **Accurate Dock GPS Geofencing Threshold Check**:

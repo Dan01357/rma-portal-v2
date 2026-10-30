@@ -97,22 +97,6 @@ const DEFECT_REASONS = [
   '6- Other Defect'
 ];
 
-// Pre-populated top wholesale customer branches for 1-tap zero-typing selection
-const PRESET_STORE_BRANCHES = [
-  'Savemore Market - Taguig',
-  'Savemore Market - Makati',
-  'Savemore Market - Cubao',
-  'Puregold - Cubao',
-  'Puregold - San Juan',
-  'Puregold - Commonwealth',
-  'SM Supermarket - Megamall',
-  'SM Hypermarket - Pasig',
-  'Robinsons Supermarket - Galleria',
-  'Central Warehouse Floor (Dock Bay 4)',
-  'Customer Delivery / Repack Carton',
-  'Other Store / Branch'
-];
-
 /**
  * Universal Lifecycle Stage Formatter & Color Resolver
  */
@@ -894,8 +878,7 @@ export default function App() {
         refreshAllData();
       } else if (deleteModalState.type === 'report') {
         const { id, rmaNumber, item } = deleteModalState;
-        const photos = item?.photos || [];
-        await catalogService.deleteReport(id, rmaNumber, photos);
+        await catalogService.deleteReport(id, rmaNumber, item);
         setSelectedReportIds(prev => {
           const next = new Set(prev);
           if (id) next.delete(id);
@@ -1628,17 +1611,21 @@ export default function App() {
       return;
     }
 
+    if (paperworkPhotos.length === 0) {
+      setPaperworkShake(true);
+      setTimeout(() => setPaperworkShake(false), 800);
+      showToast('Official paperwork photo (Delivery Receipt / Invoice / PO) is required.', 'warning');
+      return;
+    }
+
     if (!reporterName.trim() || !reporterContact.trim()) {
       showToast('Please provide your name and contact information.', 'warning');
       return;
     }
 
-    const resolvedBranch = (storeBranch === 'Other Store / Branch' && customStoreBranch.trim())
-      ? customStoreBranch.trim()
-      : storeBranch.trim();
-
-    if (!resolvedBranch || resolvedBranch === 'Other Store / Branch') {
-      showToast('Please select or specify your Store / Branch location.', 'warning');
+    const resolvedBranch = storeBranch.trim();
+    if (!resolvedBranch) {
+      showToast('Please enter your Store / Branch location (or snap paperwork to auto-fill).', 'warning');
       return;
     }
 
@@ -2290,7 +2277,7 @@ export default function App() {
                       )}
                     </div>
 
-                    {/* ZONE 2: PHOTO OF DELIVERY RECEIPT / DR / INVOICE (RECOMMENDED - ZERO TYPING) */}
+                    {/* ZONE 2: PHOTO OF DELIVERY RECEIPT / DR / INVOICE (REQUIRED - ZERO TYPING) */}
                     <div className={`p-3.5 rounded-2xl border-2 transition-all space-y-2.5 ${
                       paperworkShake ? 'animate-shake border-rose-500 bg-rose-50 dark:bg-rose-950/40' :
                       paperworkPhotos.length > 0
@@ -2304,17 +2291,18 @@ export default function App() {
                           </div>
                           <div>
                             <h4 className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
-                              <span>Photo of DR / Invoice</span>
+                              <span>Photo of DR / Invoice / PO</span>
                               <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 flex items-center gap-0.5">
                                 <Sparkles className="w-2.5 h-2.5" />
                                 Gemini Flash AI
                               </span>
                             </h4>
                             <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                              Don't type numbers! Just snap your paper receipt, DR, or invoice.
+                              Don't type numbers! Snap your paper delivery receipt, DR, invoice, or PO.
                             </p>
                           </div>
                         </div>
+                        <span className="text-[10px] font-bold text-rose-500 shrink-0">• Required</span>
                       </div>
 
                       {/* Inspecting Radar State */}
@@ -2329,7 +2317,7 @@ export default function App() {
                         <label className="w-full py-3.5 px-4 border-2 border-dashed border-violet-300 dark:border-violet-700 hover:border-violet-500 bg-violet-50/60 dark:bg-violet-950/30 hover:bg-violet-100/60 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99] text-center">
                           <FileText className="w-5 h-5 text-violet-600 dark:text-violet-400 shrink-0" />
                           <span className="text-xs font-black text-violet-900 dark:text-violet-200">
-                            📄 Snap Delivery Receipt / DR / Invoice
+                            📄 Snap Delivery Receipt / DR / Invoice / PO
                           </span>
                           <input
                             type="file"
@@ -2406,77 +2394,45 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 3. BRANCH / STORE SELECTION (NO MANUAL TYPING) */}
-                <div className="space-y-2.5 pt-1">
+                {/* 3. STORE / BRANCH LOCATION (MANUAL OR AUTO-POPULATED BY OCR) */}
+                <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                       <Building className="w-4 h-4 text-blue-600" />
                       <span>3. Store / Branch Location *</span>
                     </label>
-                    <span className="text-[10px] font-bold text-rose-500">• 1-Tap Select</span>
+                    {storeBranch && paperworkMetadata?.store_branch ? (
+                      <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" />
+                        Auto-filled from Paperwork
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-rose-500">• Required</span>
+                    )}
                   </div>
 
-                  {/* 1-Tap Quick Account Pills */}
-                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-                    {[
-                      'Savemore Market - Taguig',
-                      'Puregold - Cubao',
-                      'Central Warehouse Floor (Dock Bay 4)',
-                      'Customer Delivery / Repack Carton'
-                    ].map(preset => (
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={storeBranch}
+                      onChange={(e) => setStoreBranch(e.target.value)}
+                      placeholder="e.g., Savemore Taguig, Puregold Cubao, or Dock Bay 4 (or auto-filled from DR)"
+                      className="w-full px-3.5 py-3 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 focus:border-blue-600 dark:focus:border-blue-500 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-2xs transition-all"
+                    />
+                    {storeBranch && (
                       <button
-                        key={preset}
                         type="button"
-                        onClick={() => {
-                          setStoreBranch(preset);
-                          setCustomStoreBranch('');
-                        }}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                          storeBranch === preset
-                            ? 'bg-blue-600 text-white shadow-xs font-black'
-                            : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
-                        }`}
+                        onClick={() => setStoreBranch('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full cursor-pointer"
+                        title="Clear branch location"
                       >
-                        {preset.split(' - ')[0].replace('Central Warehouse Floor (Dock Bay 4)', 'Dock Bay 4').replace('Customer Delivery / Repack Carton', 'Customer Carton')}
+                        <X className="w-3.5 h-3.5" />
                       </button>
-                    ))}
+                    )}
                   </div>
-
-                  {/* Dropdown Selector */}
-                  <select
-                    value={PRESET_STORE_BRANCHES.includes(storeBranch) ? storeBranch : (storeBranch ? 'Other Store / Branch' : '')}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === 'Other Store / Branch') {
-                        setStoreBranch(customStoreBranch || 'Other Store / Branch');
-                      } else {
-                        setStoreBranch(val);
-                        setCustomStoreBranch('');
-                      }
-                    }}
-                    className="w-full px-3.5 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs"
-                  >
-                    <option value="" disabled>-- Tap to select your Store / Branch / Dock --</option>
-                    {PRESET_STORE_BRANCHES.map(branch => (
-                      <option key={branch} value={branch}>{branch}</option>
-                    ))}
-                  </select>
-
-                  {/* If Other or custom OCR extracted branch not in preset list */}
-                  {(storeBranch === 'Other Store / Branch' || (!PRESET_STORE_BRANCHES.includes(storeBranch) && storeBranch)) && (
-                    <div className="pt-1 animate-in fade-in">
-                      <input
-                        type="text"
-                        value={customStoreBranch || (!PRESET_STORE_BRANCHES.includes(storeBranch) ? storeBranch : '')}
-                        onChange={(e) => {
-                          setCustomStoreBranch(e.target.value);
-                          setStoreBranch(e.target.value);
-                        }}
-                        placeholder="Type specific store / warehouse branch name..."
-                        className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border-2 border-blue-400 dark:border-blue-600 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                  )}
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                    Type your store branch or let Gemini Flash detect it automatically from the attached receipt / invoice.
+                  </p>
 
                   {/* Optional Lot / Batch Number */}
                   <div className="pt-1">

@@ -318,14 +318,20 @@ export default async function handler(req, res) {
       const rawUrlsOrIds = [];
       if (req.query?.fileId) rawUrlsOrIds.push(req.query.fileId);
       if (req.query?.fileUrl) rawUrlsOrIds.push(req.query.fileUrl);
+      if (req.query?.folderId) rawUrlsOrIds.push(req.query.folderId);
+      if (req.query?.folderUrl) rawUrlsOrIds.push(req.query.folderUrl);
       if (parsedBody?.fileId) rawUrlsOrIds.push(parsedBody.fileId);
       if (parsedBody?.fileUrl) rawUrlsOrIds.push(parsedBody.fileUrl);
+      if (parsedBody?.folderId) rawUrlsOrIds.push(parsedBody.folderId);
+      if (parsedBody?.folderUrl) rawUrlsOrIds.push(parsedBody.folderUrl);
       if (Array.isArray(parsedBody?.fileIds)) rawUrlsOrIds.push(...parsedBody.fileIds);
       if (Array.isArray(parsedBody?.fileUrls)) rawUrlsOrIds.push(...parsedBody.fileUrls);
+      if (Array.isArray(parsedBody?.folderIds)) rawUrlsOrIds.push(...parsedBody.folderIds);
+      if (Array.isArray(parsedBody?.folderUrls)) rawUrlsOrIds.push(...parsedBody.folderUrls);
       if (Array.isArray(parsedBody?.urls)) rawUrlsOrIds.push(...parsedBody.urls);
 
       if (rawUrlsOrIds.length === 0) {
-        return res.status(400).json({ success: false, error: 'Missing fileId, fileUrl, or fileUrls for deletion' });
+        return res.status(400).json({ success: false, error: 'Missing fileId, fileUrl, folderId, or fileUrls for deletion' });
       }
 
       const accessToken = await getGoogleAccessToken(creds);
@@ -333,19 +339,29 @@ export default async function handler(req, res) {
       const failed = [];
 
       for (const item of rawUrlsOrIds) {
-        if (!item || typeof item !== 'string') continue;
+        if (!item) continue;
         let fileId = null;
 
-        // Try extracting Google Drive File ID from URL
-        const cleanItem = String(item).trim();
+        // Support strings or objects with url/id/fileId/folderId
+        let cleanItem = '';
+        if (typeof item === 'string') {
+          cleanItem = item.trim();
+        } else if (typeof item === 'object') {
+          cleanItem = String(item.fileId || item.folderId || item.id || item.fileUrl || item.url || '').trim();
+        }
+
+        if (!cleanItem) continue;
+
+        // Try extracting Google Drive File/Folder ID from URL
         const idMatch = cleanItem.match(/\/d\/([a-zA-Z0-9_-]+)/) || 
+                        cleanItem.match(/\/folders\/([a-zA-Z0-9_-]+)/) ||
                         cleanItem.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
                         cleanItem.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
         
         if (idMatch && idMatch[1]) {
           fileId = idMatch[1].split(/[?&=/]/)[0];
-        } else if (/^[a-zA-Z0-9_-]{20,55}$/.test(cleanItem)) {
-          // Direct fileId passed
+        } else if (/^[a-zA-Z0-9_-]{15,65}$/.test(cleanItem)) {
+          // Direct fileId or folderId passed
           fileId = cleanItem;
         } else {
           // Attempt filename search in Google Drive as fallback
@@ -384,16 +400,16 @@ export default async function handler(req, res) {
             }
           );
 
-          if (delRes.status === 204 || delRes.ok) {
-            console.log(`[Google Drive] Photo permanently deleted: ${fileId}`);
+          if (delRes.status === 204 || delRes.ok || delRes.status === 404) {
+            console.log(`[Google Drive] Asset permanently deleted or already removed: ${fileId}`);
             deletedIds.push(fileId);
             continue;
           }
 
           const delErrText = await delRes.text();
-          console.warn(`[Google Drive Permanent Delete Notice for ${fileId}]: ${delErrText}. Attempting fallback to move file to trash...`);
+          console.warn(`[Google Drive Permanent Delete Notice for ${fileId}]: ${delErrText}. Attempting fallback to move file/folder to trash...`);
 
-          // Attempt 2: Move file to trash (supported for Content Managers and Managers in Shared Drives)
+          // Attempt 2: Move file or folder to trash (supported for Content Managers and Managers in Shared Drives)
           const trashRes = await fetch(
             `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
             {
@@ -406,8 +422,8 @@ export default async function handler(req, res) {
             }
           );
 
-          if (trashRes.ok || trashRes.status === 200) {
-            console.log(`[Google Drive] Photo successfully moved to trash: ${fileId}`);
+          if (trashRes.ok || trashRes.status === 200 || trashRes.status === 404) {
+            console.log(`[Google Drive] Asset successfully moved to trash: ${fileId}`);
             deletedIds.push(fileId);
             continue;
           }

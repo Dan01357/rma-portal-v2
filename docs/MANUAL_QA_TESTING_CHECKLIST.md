@@ -178,20 +178,20 @@ Each test scenario defines:
   * **Action**: Upload 3 distinct photos, then click thumbnail 2.
   * **Expected Behavior**: `ImageLightboxModal` opens displaying photo 2 with navigation arrows `<-` and `->`, zoom control, and subtitle `Photo 2 of 3`. Supporting both Google Drive CDN URLs and Supabase storage URLs.
 
-- [ ] **TC-AI-01 (Damaged Item Photo Capture vs. Paperwork Receipt Photo Capture)**
+- [ ] **TC-AI-01 (Damaged Item Photo Capture vs. Paperwork Receipt Photo Capture - Both Required)**
   * **Location**: Section 2: Dual-Zone Photo Capture (`/`)
-  * **Action**: Verify two distinct visual cards: `[ 📸 Photo of Damaged Product (Required) ]` (max 3 photos) and `[ 📄 Photo of Delivery Receipt / DR / Invoice (Recommended) ]`.
-  * **Expected Behavior**: Damaged product photos are slotted into `photoFiles`; paperwork is slotted into `paperworkPhotos`. The UI clearly separates physical item proofs from official logistics receipts.
+  * **Action**: Verify two distinct visual cards: `[ 📸 Photo of Damaged Product (Required) ]` (max 3 photos) and `[ 📄 Photo of Delivery Receipt / DR / Invoice / PO (Required) ]`.
+  * **Expected Behavior**: Damaged product photos are slotted into `photoFiles`; paperwork is slotted into `paperworkPhotos`. Both are strictly required. Attempting submission without paperwork triggers shake animation and error toast: *"Official paperwork photo (Delivery Receipt / Invoice / PO) is required."*
 
 - [ ] **TC-AI-02 (Gemini Paperwork Validator: Valid DR Accepted vs. Random Item Rejected)**
-  * **Location**: Section 2: Zone 2 `Photo of DR / Invoice`
+  * **Location**: Section 2: Zone 2 `Photo of DR / Invoice / PO`
   * **Action**: Upload a non-paperwork image (selfie, floor, empty room, or snack packaging).
   * **Expected Behavior**: Card triggers shake animation (`animate-shake`), input clears, and red alert displays: *"Invalid document photo: Please take a clear picture of the paper delivery receipt or invoice. (Photo does not appear to be an official invoice, DR, or PO.)"*. Uploading a real paper delivery receipt succeeds with a green badge.
 
 - [ ] **TC-AI-03 (AI OCR Auto-Fill: invoice_dr_number and store_branch Extraction)**
-  * **Location**: Section 2: Zone 2 `Photo of DR / Invoice`
-  * **Action**: Upload a delivery receipt photo containing `DR-2026-8812` and store `Savemore Market - Taguig`.
-  * **Expected Behavior**: Gemini Flash extracts the metadata within < 2s; displays green badge `✓ Verified Delivery Receipt (DR-2026-8812)`; auto-populates `invoice_dr_number` and sets store dropdown to `Savemore Market - Taguig` with zero manual typing.
+  * **Location**: Section 2: Zone 2 `Photo of DR / Invoice / PO`
+  * **Action**: Upload a delivery receipt photo containing `DR-2026-8812` and store branch.
+  * **Expected Behavior**: Gemini Flash extracts the metadata within < 2s; displays green badge `✓ Verified Delivery Receipt (DR-2026-8812)`; auto-populates `invoice_dr_number` and auto-fills Section 3 `Store / Branch Location *` with zero bias and zero manual typing. Reporter can also edit or type manually into the field.
 
 - [ ] **TC-AI-04 (Google Drive Subfolder Organization: /01_Damaged_Items vs /02_Official_Paperwork)**
   * **Location**: Google Workspace Drive -> Root: `Wholesale RMA Records`
@@ -202,6 +202,11 @@ Each test scenario defines:
   * **Location**: Admin Return Reports -> Quick RMA Action Modal
   * **Action**: Click RMA row with attached paperwork.
   * **Expected Behavior**: Paperwork photo displays with zoom thumbnail; "AI Verified" badge shows confidence and extracted DR#; 1-click **"Copy DR#"** button copies number to clipboard for credit memo creation; Admin can click **"Edit DR# / Branch"** to manually override misread values. Direct link opens the specific Google Drive subfolder.
+
+- [ ] **TC-AI-06 (Google Drive Asset Cleanup on Admin Record Deletion)**
+  * **Location**: Admin Return Reports -> Delete RMA Report / Bulk Delete
+  * **Action**: Delete an RMA report (single or bulk) that has damaged photos, paperwork photos, and an associated Google Drive folder.
+  * **Expected Behavior**: System deletes or trashes the entire RMA folder (`google_drive_folder_id`) in Google Drive along with all subfolder files (`01_Damaged_Items` & `02_Official_Paperwork`). No orphan files or folders remain on Google Drive after record deletion.
 
 ---
 
