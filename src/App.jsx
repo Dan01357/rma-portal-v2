@@ -51,7 +51,9 @@ import {
   ToggleLeft,
   ClipboardCheck,
   KeyRound,
-  Sparkles
+  Sparkles,
+  Calendar,
+  Building
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
@@ -970,6 +972,8 @@ export default function App() {
   const [paperworkError, setPaperworkError] = useState(null);
   const [invoiceDrNumber, setInvoiceDrNumber] = useState('');
   const [storeBranch, setStoreBranch] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
+  const [batchLotNumber, setBatchLotNumber] = useState('');
   const [isEditingPaperworkDetails, setIsEditingPaperworkDetails] = useState(false);
 
   // Modals & Queues
@@ -1583,6 +1587,16 @@ export default function App() {
       return;
     }
 
+    if (!storeBranch || !storeBranch.trim()) {
+      showToast('Store / Branch / Warehouse Location is required.', 'warning');
+      return;
+    }
+
+    if (selectedReason.toLowerCase().includes('expired') && !expiryDate) {
+      showToast('Product expiry date is required when returning expired items.', 'warning');
+      return;
+    }
+
     // 1. Generate unique RMA Number synchronously for instant sticker/QR display
     const rmaNumber = catalogService.generateRMANumber();
     const submitQty = Math.max(1, parseInt(quantity, 10) || 1);
@@ -1607,6 +1621,8 @@ export default function App() {
       reporter_contact: reporterContact || '',
       invoice_dr_number: invoiceDrNumber || null,
       store_branch: storeBranch || null,
+      expiry_date: expiryDate || null,
+      batch_lot_number: batchLotNumber ? batchLotNumber.trim() : null,
       ai_document_metadata: paperworkMetadata || null,
       photoCount: photoFiles.length,
       paperworkCount: paperworkPhotos.length,
@@ -1619,6 +1635,8 @@ export default function App() {
     const capturedPaperworkPhotos = [...paperworkPhotos];
     const capturedInvoiceDrNumber = invoiceDrNumber;
     const capturedStoreBranch = storeBranch;
+    const capturedExpiryDate = expiryDate || null;
+    const capturedBatchLotNumber = batchLotNumber ? batchLotNumber.trim() : null;
     const capturedPaperworkMetadata = paperworkMetadata;
     const capturedProduct = detectedProduct ? { ...detectedProduct, unit_name: finalUnit } : null;
     const capturedReason = selectedReason;
@@ -1638,6 +1656,8 @@ export default function App() {
     setPaperworkMetadata(null);
     setInvoiceDrNumber('');
     setStoreBranch('');
+    setExpiryDate('');
+    setBatchLotNumber('');
     setPaperworkError(null);
     setSelectedReportIds(new Set());
     setIsSubmitting(false);
@@ -1680,6 +1700,8 @@ export default function App() {
           paperwork_photos: uploadedPaperworkUrls,
           invoice_dr_number: capturedInvoiceDrNumber,
           store_branch: capturedStoreBranch,
+          expiry_date: capturedExpiryDate,
+          batch_lot_number: capturedBatchLotNumber,
           ai_document_metadata: capturedPaperworkMetadata,
           google_drive_folder_url: gdriveFolderUrl,
           google_drive_folder_id: gdriveFolderId,
@@ -2398,10 +2420,76 @@ export default function App() {
                   )}
                 </div>
 
-                {/* 3. REASON FOR RETURN */}
+                {/* 3. ORIGIN & DOCUMENT REFERENCE (ENTERPRISE LOGISTICS) */}
+                <div className="space-y-3 pt-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      3. Origin & Logistics Reference
+                    </label>
+                    <span className="text-[10px] text-slate-400 font-medium">FMCG Wholesale Intake</span>
+                  </div>
+
+                  {/* Origin / Location (Required) */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <Building className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Store / Branch / Warehouse Location *</span>
+                      </label>
+                      <span className="text-[10px] font-bold text-rose-500">• Required</span>
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      value={storeBranch}
+                      onChange={(e) => setStoreBranch(e.target.value)}
+                      placeholder="e.g., Savemore Taguig, Puregold Cubao, or Dock Bay 4"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 transition-colors"
+                    />
+                  </div>
+
+                  {/* DR Reference & Batch / Lot Number side by side */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <FileText className="w-3.5 h-3.5 text-violet-600" />
+                          <span>Sales Invoice (SI) / DR #</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400">Optional</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={invoiceDrNumber}
+                        onChange={(e) => setInvoiceDrNumber(e.target.value)}
+                        placeholder="e.g., DR-2026-8891 (leave blank if unknown)"
+                        className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-mono font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 transition-colors"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <Layers className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Batch / Lot Number</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400">Optional</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={batchLotNumber}
+                        onChange={(e) => setBatchLotNumber(e.target.value)}
+                        placeholder="e.g., LOT-B42 (printed on box/can)"
+                        className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-mono font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 transition-colors"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. REASON FOR RETURN */}
                 <div className="space-y-2">
                   <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                    3. Why are you returning this item? *
+                    4. Why are you returning this item? *
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {DEFECT_REASONS.map(reason => (
@@ -2420,6 +2508,31 @@ export default function App() {
                     ))}
                   </div>
 
+                  {/* Smart Conditional Expiry Date when Expired reason is selected */}
+                  {selectedReason.toLowerCase().includes('expired') && (
+                    <div className="p-3.5 bg-amber-50/90 dark:bg-amber-950/40 border-2 border-amber-300 dark:border-amber-700/80 rounded-2xl space-y-1.5 animate-in fade-in slide-in-from-top-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-black text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                          <Calendar className="w-4 h-4 text-amber-600" />
+                          <span>Product Expiry Date *</span>
+                        </label>
+                        <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-200/60 dark:bg-amber-900/60 px-2 py-0.5 rounded-full">
+                          Required for Expiry Claims
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                        Enter the date printed on the item packaging to validate expiry claim against vendor agreements.
+                      </p>
+                      <input
+                        type="date"
+                        required
+                        value={expiryDate}
+                        onChange={(e) => setExpiryDate(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                  )}
+
                   <input
                     type="text"
                     value={explanation}
@@ -2429,10 +2542,10 @@ export default function App() {
                   />
                 </div>
 
-                {/* 4. REPORTER CONTACT INFORMATION */}
+                {/* 5. REPORTER CONTACT INFORMATION */}
                 <div className="space-y-2">
                   <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                    4. Reporter Information (Required) *
+                    5. Reporter Information (Required) *
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div className="relative">
@@ -3320,8 +3433,22 @@ export default function App() {
                                 </td>
 
                                 {/* 5. Item Name */}
-                                <td className="py-3 px-3.5 font-bold text-slate-900 dark:text-white max-w-[200px] truncate" title={resolvedName}>
-                                  {resolvedName}
+                                <td className="py-3 px-3.5 font-bold text-slate-900 dark:text-white max-w-[200px]" title={resolvedName}>
+                                  <div className="truncate">{resolvedName}</div>
+                                  {(item.batch_lot_number || item.expiry_date) && (
+                                    <div className="flex items-center gap-1.5 flex-wrap mt-0.5 font-normal">
+                                      {item.batch_lot_number && (
+                                        <span className="text-[10px] font-mono text-amber-700 dark:text-amber-300 font-semibold bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.2 rounded border border-amber-200/80 dark:border-amber-800">
+                                          Lot: {item.batch_lot_number}
+                                        </span>
+                                      )}
+                                      {item.expiry_date && (
+                                        <span className="text-[10px] font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-1.5 py-0.2 rounded border border-rose-200/80 dark:border-rose-800">
+                                          Exp: {item.expiry_date}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
                                 </td>
 
                                 {/* 6. Reason */}
@@ -3339,6 +3466,16 @@ export default function App() {
                                   {item.reporter_contact && (
                                     <div className="font-mono text-slate-500 dark:text-slate-400 text-[10px]">
                                       {item.reporter_contact}
+                                    </div>
+                                  )}
+                                  {item.store_branch && (
+                                    <div className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-0.5 mt-0.5 max-w-[150px] truncate" title={item.store_branch}>
+                                      📍 {item.store_branch}
+                                    </div>
+                                  )}
+                                  {item.invoice_dr_number && (
+                                    <div className="text-[10px] font-mono text-violet-600 dark:text-violet-400 font-bold">
+                                      DR: {item.invoice_dr_number}
                                     </div>
                                   )}
                                 </td>
@@ -3706,6 +3843,32 @@ export default function App() {
                               <span>Reported by: <strong className="text-slate-800 dark:text-slate-200">{item.reporter_name || item.reported_by}</strong></span>
                               <span className="font-mono text-slate-600 dark:text-slate-400">{item.reporter_contact || ''}</span>
                             </div>
+
+                            {/* Enterprise Logistics Badges (Store Branch, DR#, Batch/Lot, Expiry) */}
+                            {(item.store_branch || item.invoice_dr_number || item.batch_lot_number || item.expiry_date) && (
+                              <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[10px]">
+                                {item.store_branch && (
+                                  <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-semibold flex items-center gap-1">
+                                    📍 {item.store_branch}
+                                  </span>
+                                )}
+                                {item.invoice_dr_number && (
+                                  <span className="px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-mono font-bold">
+                                    DR: {item.invoice_dr_number}
+                                  </span>
+                                )}
+                                {item.batch_lot_number && (
+                                  <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-mono font-semibold">
+                                    Lot: {item.batch_lot_number}
+                                  </span>
+                                )}
+                                {item.expiry_date && (
+                                  <span className="px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-medium">
+                                    Exp: {item.expiry_date}
+                                  </span>
+                                )}
+                              </div>
+                            )}
 
                             {/* Photos preview with click-to-zoom multi-image */}
                             {photoList.length > 0 && (

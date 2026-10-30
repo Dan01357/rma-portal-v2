@@ -156,7 +156,14 @@ When a delivery truck, return pallet, or customer shipment arrives at the wareho
    * **Automatic Client-Side Image Compression**: High-resolution mobile photos (often 5–15 MB) are automatically compressed in-memory via HTML5 Canvas to a maximum dimension of 1600px at 82% JPEG quality. This cuts upload times from 15 seconds to under 400ms while preserving defect visual clarity.
    * Compressed binary blobs are uploaded directly to the Supabase Storage bucket **`rma-photos`** under unique timestamps: `rma_proofs/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`.
 
-4. **Accurate Dock GPS Geofencing Threshold Check**:
+4. **Enterprise Logistics Details & Origin Validation**:
+   * **Store / Branch / Warehouse Location (Required)**: Identifies which physical branch or dock initiated the return (e.g. `Savemore Taguig`, `Puregold Cubao`, `Dock Bay 4`). Form submission is blocked if empty.
+   * **Sales Invoice (SI) / Delivery Receipt (DR) Reference (Optional / Recommended)**: Links the physical return directly to original wholesale billing for Finance and Accounting credit memo issuance.
+   * **Smart Conditional Expiry Date**: When defect reason `2- Expired / Near Expiry Date` is selected, the portal dynamically reveals the `Product Expiry Date *` date selector. Required for wholesale FMCG returns to substantiate vendor credit claims.
+   * **Batch / Lot Number (Optional)**: Records manufacturing batch or lot codes (e.g., `LOT-B42`) printed on cartons/cans for supplier quality recall tracking.
+   * **Gemini Flash AI Paperwork OCR**: When a delivery receipt or invoice photo is attached, Google Gemini Flash AI validates authenticity, inspects the document, and automatically populates the DR# and Store Branch with zero manual typing required.
+
+5. **Accurate Dock GPS Geofencing Threshold Check**:
    * The portal invokes `navigator.geolocation.getCurrentPosition()` with `{ enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }`.
    * **Anti-False Coordinate Filter**: Desktop computers and office Wi-Fi routers frequently return cellular/IP-approximated coordinates with inaccuracies exceeding 500–5,000 meters. The portal strictly enforces an accuracy threshold:
      ```javascript
@@ -165,7 +172,7 @@ When a delivery truck, return pallet, or customer shipment arrives at the wareho
    * If accuracy is within 150m (physical mobile hardware GPS at the dock), `gps_latitude` and `gps_longitude` are recorded.
    * If accuracy exceeds 150m, false coordinates are rejected and stored as `null` to maintain 100% audit integrity.
 
-5. **RMA Authorization Generation**:
+6. **RMA Authorization Generation**:
    * Upon submission, the database generates an enterprise RMA number formatted as:
      `RMA-YYYY-MMDD-XXXX` (e.g., `RMA-2026-1028-9B2F`).
    * The record is committed to `public.rma_reports` with initial status `received_at_dock` (or `pending_admin_details` if uncatalogued).
@@ -179,7 +186,7 @@ When a delivery truck, return pallet, or customer shipment arrives at the wareho
      }
      ```
 
-6. **Instant Box QR Sticker**:
+7. **Instant Box QR Sticker**:
    * The success screen provides an immediate **"Save Sticker (PNG)"** button.
    * Renders a 1200x1600 canvas sticker with:
      * High-contrast QR code pointing to `https://rma-portal-v2.vercel.app/?rma=RMA-...`

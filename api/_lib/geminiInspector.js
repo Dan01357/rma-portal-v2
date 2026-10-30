@@ -153,3 +153,4 @@ Return ONLY valid JSON matching this schema. No markdown formatting, no code fen
   // If all models failed
   throw new Error(`Gemini inspection failed: ${lastError?.message || 'Unknown error'}`);
 }
+

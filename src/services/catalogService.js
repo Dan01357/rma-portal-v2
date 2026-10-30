@@ -972,6 +972,8 @@ export const catalogService = {
     paperwork_photos = [],
     invoice_dr_number = null,
     store_branch = null,
+    expiry_date = null,
+    batch_lot_number = null,
     ai_document_metadata = null,
     google_drive_folder_url = null,
     google_drive_folder_id = null,
@@ -1075,6 +1077,8 @@ export const catalogService = {
       paperwork_photos: Array.isArray(paperwork_photos) ? paperwork_photos : (paperwork_photos ? [paperwork_photos] : []),
       invoice_dr_number: invoice_dr_number || null,
       store_branch: store_branch || null,
+      expiry_date: expiry_date || null,
+      batch_lot_number: batch_lot_number ? String(batch_lot_number).trim() : null,
       ai_document_metadata: ai_document_metadata || null,
       google_drive_folder_url: google_drive_folder_url || null,
       google_drive_folder_id: google_drive_folder_id || null,
@@ -1110,6 +1114,8 @@ export const catalogService = {
       delete fallbackRow.paperwork_photos;
       delete fallbackRow.invoice_dr_number;
       delete fallbackRow.store_branch;
+      delete fallbackRow.expiry_date;
+      delete fallbackRow.batch_lot_number;
       delete fallbackRow.ai_document_metadata;
       delete fallbackRow.google_drive_folder_url;
       delete fallbackRow.google_drive_folder_id;

@@ -52,6 +52,10 @@ export const RMAReportSchema = z.object({
   reporter_name: z.string().nullable().optional().openapi({ example: 'Juan Dela Cruz' }),
   reporter_contact: z.string().nullable().optional().openapi({ example: '09171234567' }),
   reported_by: z.string().openapi({ example: 'Jarmen (API)' }),
+  store_branch: z.string().nullable().optional().openapi({ example: 'Savemore Taguig - Branch 14' }),
+  invoice_dr_number: z.string().nullable().optional().openapi({ example: 'DR-2026-8891' }),
+  expiry_date: z.string().nullable().optional().openapi({ example: '2026-12-31' }),
+  batch_lot_number: z.string().nullable().optional().openapi({ example: 'LOT-B42' }),
   notes: z.string().nullable().optional().openapi({ example: 'Customer returned item with receipt' }),
   created_at: z.string().datetime().openapi({ example: '2026-10-26T14:30:00.000Z' })
 }).openapi('RMAReport');
@@ -75,6 +79,10 @@ export const CreateRMAReportSchema = z.object({
   photos: z.array(z.string().url()).optional().default([]).openapi({ example: ['https://example.com/box1.jpg'] }),
   reporter_name: z.string().optional().openapi({ example: 'Warehouse Lead' }),
   reporter_contact: z.string().optional().openapi({ example: '09170001122' }),
+  store_branch: z.string().optional().openapi({ example: 'Savemore Taguig - Branch 14' }),
+  invoice_dr_number: z.string().optional().openapi({ example: 'DR-2026-8891' }),
+  expiry_date: z.string().optional().openapi({ example: '2026-12-31' }),
+  batch_lot_number: z.string().optional().openapi({ example: 'LOT-B42' }),
   notes: z.string().optional().openapi({ example: 'Submitted via REST API' })
 }).openapi('CreateRMAReportRequest');
 
@@ -85,6 +93,10 @@ export const UpdateRMAReportSchema = z.object({
   warehouse_location: z.string().optional().openapi({ example: 'RACK-03-BIN-A' }),
   inspected_by: z.string().optional().openapi({ example: 'Supervisor Danilo' }),
   quantity: z.number().int().min(1).optional().openapi({ example: 3 }),
+  store_branch: z.string().optional().openapi({ example: 'Savemore Taguig - Branch 14' }),
+  invoice_dr_number: z.string().optional().openapi({ example: 'DR-2026-8891' }),
+  expiry_date: z.string().optional().openapi({ example: '2026-12-31' }),
+  batch_lot_number: z.string().optional().openapi({ example: 'LOT-B42' }),
   notes: z.string().optional().openapi({ example: 'Inspection verified by supervisor' }),
   explanation: z.string().optional().openapi({ example: 'Replacement voucher issued' }),
   price: z.number().optional().openapi({ example: 25.00 }),

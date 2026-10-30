@@ -439,14 +439,18 @@ export default function QuickRMAActionModal({
   const aiMetadata = report?.ai_document_metadata || null;
   const [adminDrNumber, setAdminDrNumber] = useState(report?.invoice_dr_number || aiMetadata?.invoice_dr_number || '');
   const [adminStoreBranch, setAdminStoreBranch] = useState(report?.store_branch || aiMetadata?.store_branch || '');
+  const [adminExpiryDate, setAdminExpiryDate] = useState(report?.expiry_date || '');
+  const [adminBatchLot, setAdminBatchLot] = useState(report?.batch_lot_number || '');
   const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
   const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
 
   useEffect(() => {
     setAdminDrNumber(report?.invoice_dr_number || report?.ai_document_metadata?.invoice_dr_number || '');
     setAdminStoreBranch(report?.store_branch || report?.ai_document_metadata?.store_branch || '');
+    setAdminExpiryDate(report?.expiry_date || '');
+    setAdminBatchLot(report?.batch_lot_number || '');
     setIsEditingAiDetails(false);
-  }, [report?.id, report?.invoice_dr_number, report?.store_branch]);
+  }, [report?.id, report?.invoice_dr_number, report?.store_branch, report?.expiry_date, report?.batch_lot_number]);
 
   const handleSaveAiDetails = async () => {
     if (!report?.id) return;
@@ -456,18 +460,24 @@ export default function QuickRMAActionModal({
         .from('rma_reports')
         .update({
           invoice_dr_number: adminDrNumber.trim() || null,
-          store_branch: adminStoreBranch.trim() || null
+          store_branch: adminStoreBranch.trim() || null,
+          expiry_date: adminExpiryDate || null,
+          batch_lot_number: adminBatchLot.trim() || null
         })
         .eq('id', report.id);
 
       if (error) throw error;
       report.invoice_dr_number = adminDrNumber.trim();
       report.store_branch = adminStoreBranch.trim();
+      report.expiry_date = adminExpiryDate || null;
+      report.batch_lot_number = adminBatchLot.trim() || null;
       setIsEditingAiDetails(false);
       onReportUpdated && onReportUpdated({
         ...report,
         invoice_dr_number: adminDrNumber.trim(),
-        store_branch: adminStoreBranch.trim()
+        store_branch: adminStoreBranch.trim(),
+        expiry_date: adminExpiryDate || null,
+        batch_lot_number: adminBatchLot.trim() || null
       });
     } catch (e) {
       console.error('Failed to update AI details:', e);
@@ -718,6 +728,18 @@ export default function QuickRMAActionModal({
                           <strong className="text-slate-800 dark:text-slate-200 truncate">{adminStoreBranch || report.store_branch}</strong>
                         </div>
                       )}
+                      {(adminBatchLot || report.batch_lot_number) && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold">Batch / Lot #:</span>
+                          <strong className="font-mono text-amber-700 dark:text-amber-300 font-bold">{adminBatchLot || report.batch_lot_number}</strong>
+                        </div>
+                      )}
+                      {(adminExpiryDate || report.expiry_date) && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold">Expiry Date:</span>
+                          <strong className="text-rose-600 dark:text-rose-400 font-bold">{adminExpiryDate || report.expiry_date}</strong>
+                        </div>
+                      )}
                       {aiMetadata?.vendor_name && (
                         <div className="text-[10px] text-slate-500 truncate">
                           Vendor: <span className="font-semibold text-slate-700 dark:text-slate-300">{aiMetadata.vendor_name}</span>
@@ -748,6 +770,25 @@ export default function QuickRMAActionModal({
                             type="text"
                             value={adminStoreBranch}
                             onChange={(e) => setAdminStoreBranch(e.target.value)}
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Batch / Lot #</label>
+                          <input
+                            type="text"
+                            value={adminBatchLot}
+                            onChange={(e) => setAdminBatchLot(e.target.value)}
+                            placeholder="e.g. LOT-B42"
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Product Expiry Date</label>
+                          <input
+                            type="date"
+                            value={adminExpiryDate}
+                            onChange={(e) => setAdminExpiryDate(e.target.value)}
                             className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
                           />
                         </div>

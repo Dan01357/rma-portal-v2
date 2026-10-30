@@ -37,6 +37,10 @@ export function exportRMAReportsToCSV(reports, filename = null) {
     'SN',
     'RMA Number',
     'Date Logged',
+    'Store / Branch',
+    'Invoice / DR #',
+    'Batch / Lot #',
+    'Expiry Date',
     'Status',
     'Disposition',
     'Condition Grade',
@@ -54,6 +58,7 @@ export function exportRMAReportsToCSV(reports, filename = null) {
     'Reported By',
     'Inspected By',
     'Defect Reason',
+    'Google Drive Folder',
     'Notes'
   ];
 
@@ -67,6 +72,10 @@ export function exportRMAReportsToCSV(reports, filename = null) {
       escapeCsvCell(index + 1),
       escapeCsvCell(r.rma_number),
       escapeCsvCell(dateStr),
+      escapeCsvCell(r.store_branch || ''),
+      escapeCsvCell(r.invoice_dr_number || ''),
+      escapeCsvCell(r.batch_lot_number || ''),
+      escapeCsvCell(r.expiry_date || ''),
       escapeCsvCell(r.status || 'pending'),
       escapeCsvCell(r.disposition || 'Pending Triage'),
       escapeCsvCell(r.condition_grade || 'Unassessed'),
@@ -84,6 +93,7 @@ export function exportRMAReportsToCSV(reports, filename = null) {
       escapeCsvCell(r.reported_by || ''),
       escapeCsvCell(r.inspected_by || ''),
       escapeCsvCell(r.reason || ''),
+      escapeCsvCell(r.google_drive_folder_url || ''),
       escapeCsvCell(r.notes || '')
     ].join(',');
   });

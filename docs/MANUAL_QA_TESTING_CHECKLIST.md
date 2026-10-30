@@ -180,22 +180,47 @@ Each test scenario defines:
 
 ---
 
-### 1.4 Defect Reason, Reporter Specs & GPS Geofence
+### 1.4 Enterprise Wholesale Intake Fields (FMCG Logistics Alignment)
+- [ ] **TC-PUB-09A (Origin / Store / Branch / Warehouse Location - Required)**
+  * **Location**: Section 3: `Origin & Logistics Reference` -> Input `Store / Branch / Warehouse Location *`
+  * **Action**: Attempt to submit intake report with `Store / Branch` left empty.
+  * **Expected Behavior**: Form triggers validation error and warns: *"Store / Branch / Warehouse Location is required."* Report submission is blocked until filled.
+  * **Auto-Fill Verification**: When official paperwork is uploaded, Gemini Flash AI extracts store name and automatically populates this field.
+
+- [ ] **TC-PUB-09B (Sales Invoice SI / Delivery Receipt DR Reference - Optional / Recommended)**
+  * **Location**: Section 3: `Origin & Logistics Reference` -> Input `Sales Invoice (SI) / DR #`
+  * **Action**: Enter `DR-2026-8891` or let Gemini Flash AI auto-fill from receipt photo.
+  * **Expected Behavior**: Value is recorded in `rma_reports.invoice_dr_number`, displayed in Admin Return Reports table, and rendered in Quick RMA Action Modal for finance reconciliation.
+
+- [ ] **TC-PUB-09C (Smart Conditional Product Expiry Date Selector)**
+  * **Location**: Section 4: `Why are you returning this item?`
+  * **Action**: Select reason `2- Expired / Near Expiry Date`.
+  * **Expected Behavior**: Form dynamically reveals the `Product Expiry Date *` date-picker card. If user attempts submission without choosing an expiry date, form alerts: *"Product expiry date is required when returning expired items."*
+  * **Positive Path**: Selecting a date saves to `rma_reports.expiry_date`, visible on Admin table/card badges and CSV export.
+
+- [ ] **TC-PUB-09D (Batch / Lot Number Quality Control Tracking)**
+  * **Location**: Section 3: `Origin & Logistics Reference` -> Input `Batch / Lot Number`
+  * **Action**: Enter batch code `LOT-B42`.
+  * **Expected Behavior**: Value persists into `rma_reports.batch_lot_number`, appears in admin table as `Lot: LOT-B42`, and exports in column 6 of the CSV.
+
+---
+
+### 1.5 Defect Reason, Reporter Specs & GPS Geofence
 - [ ] **TC-PUB-09 (Defect Reason Chips)**
-  * **Location**: Section 3: `WHY ARE YOU RETURNING THIS ITEM?`
-  * **Action**: Click **"Damaged Box / Crushed Packaging"**.
+  * **Location**: Section 4: `Why are you returning this item?`
+  * **Action**: Click **"1- Damaged Box / Crushed Packaging"**.
   * **Expected Behavior**: Chip highlights with bold rose border and checkmark icon. Selected reason is stored in submission payload.
-  * **Edge Case**: Click **"Other Reason"**. Additional textarea appears requesting custom defect explanation.
+  * **Edge Case**: Click **"6- Other Defect"**. Additional textarea appears requesting custom defect explanation.
 
 - [ ] **TC-PUB-10 (Dock GPS Accuracy Filter)**
-  * **Location**: Section 4: `YOUR CONTACT DETAILS`
+  * **Location**: Section 5: `Reporter Information (Required) *`
   * **Action**: Allow browser location permissions when prompted.
   * **Expected Behavior**: If GPS accuracy is within $\le$ 150m (mobile GPS), green badge displays: `✓ Dock Coordinates Verified (±18m)`.
   * **Edge Case**: On a desktop device where Wi-Fi geolocation accuracy is $\pm 800\text{m}$, badge displays: `Coordinates Filtered (Inaccurate Geolocation)`. `gps_latitude` and `gps_longitude` are sent as `null` to prevent false data corruption.
 
 ---
 
-### 1.5 Submission & Box QR Sticker Generation
+### 1.6 Submission & Box QR Sticker Generation
 - [ ] **TC-PUB-11 (Submit Return Report)**
   * **Location**: Button **"Submit Return Report"**
   * **Action**: Click button with valid barcode, photo, reason, and reporter name.
