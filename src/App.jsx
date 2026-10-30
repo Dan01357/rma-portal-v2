@@ -2258,241 +2258,350 @@ export default function App() {
 
                 {/* 2. DUAL-ZONE PHOTO CAPTURE (TAP-FIRST ZERO-TYPING) */}
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                      2. Proof & Paperwork Photos
-                    </label>
-                    <span className="text-[10px] text-slate-400 font-bold">Tap to capture or upload</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <div>
+                      <label className="block text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                        <span>2. Proof & Paperwork Photos</span>
+                        <span className="text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/70 border border-rose-200 dark:border-rose-900/60 px-2 py-0.5 rounded-full">
+                          Both Required
+                        </span>
+                      </label>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Upload clear photos of the damaged merchandise and the official delivery paperwork.
+                      </p>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-bold self-start sm:self-auto">
+                      Up to 3 photos each
+                    </span>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Unified Visibility & Quality Reminder Banner */}
+                  <div className="p-2.5 bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200/90 dark:border-amber-800/60 rounded-xl flex items-start sm:items-center gap-2.5 text-xs text-amber-900 dark:text-amber-200 shadow-2xs">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
+                    <div className="text-[11px] leading-snug flex-1">
+                      <strong>Photo Quality Reminder:</strong> Use clear lighting without glare. In the paperwork photo, ensure the <strong>Sales Invoice #, DR #, or PO #</strong> is sharply in focus and uncropped.
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 items-stretch">
                     {/* ZONE 1: PHOTO OF DAMAGED PRODUCT (REQUIRED) */}
-                    <div className={`p-3.5 rounded-2xl border-2 transition-all space-y-2.5 ${
+                    <div className={`p-4 rounded-2xl border-2 transition-all flex flex-col justify-between space-y-3 ${
                       photoFiles.length > 0
-                        ? 'bg-rose-50/30 dark:bg-rose-950/20 border-rose-300 dark:border-rose-800'
-                        : 'bg-white dark:bg-slate-800/80 border-dashed border-rose-300 dark:border-rose-800/70 hover:border-rose-500'
+                        ? 'bg-rose-50/30 dark:bg-rose-950/20 border-rose-300 dark:border-rose-800 shadow-2xs'
+                        : 'bg-white dark:bg-slate-850 border-slate-200 dark:border-slate-700/80 hover:border-rose-400 shadow-2xs'
                     }`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <div className="p-2 rounded-xl bg-rose-500 text-white shadow-2xs shrink-0">
-                            <Package className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <h4 className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
-                              <span>Photo of Damaged Product *</span>
-                              <span className="text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-100 dark:bg-rose-950/70 px-1.5 py-0.2 rounded-full">
-                                Required ({photoFiles.length}/3)
-                              </span>
-                            </h4>
-                            <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                              Snap damaged box, carton, or broken item (Max 3)
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Thumbnails of damaged photos */}
-                      {photoFiles.length > 0 && (
-                        <div className="grid grid-cols-3 gap-2 pt-1">
-                          {photoFiles.map((item, idx) => (
-                            <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 group shadow-2xs bg-slate-100 dark:bg-slate-800">
-                              <button
-                                type="button"
-                                onClick={() => setLightboxPhoto({
-                                  images: photoFiles.map(p => p.previewUrl),
-                                  initialIndex: idx,
-                                  url: item.previewUrl,
-                                  title: 'Damaged Product Photo',
-                                  subtitle: `Photo ${idx + 1} of ${photoFiles.length}`
-                                })}
-                                className="w-full h-full block cursor-zoom-in"
-                                title="Click to preview enlarged photo"
-                              >
-                                <img src={item.previewUrl} alt="Damaged Item" className="w-full h-full object-cover" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); removePhoto(idx); }}
-                                className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full opacity-90 hover:opacity-100 transition-opacity z-10"
-                                title="Remove photo"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
+                      <div>
+                        {/* Header Row */}
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="p-2 rounded-xl bg-gradient-to-br from-rose-500 to-rose-600 text-white shadow-xs shrink-0">
+                              <Package className="w-4 h-4" />
                             </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Snap Button if < 3 photos */}
-                      {photoFiles.length < 3 && (
-                        <label className="w-full py-3.5 px-4 border-2 border-dashed border-rose-300 dark:border-rose-700 hover:border-rose-500 bg-rose-50/60 dark:bg-rose-950/30 hover:bg-rose-100/60 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99] text-center">
-                          <Camera className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
-                          <span className="text-xs font-black text-rose-900 dark:text-rose-200">
-                            {photoFiles.length === 0 ? '📸 Snap Photo of Damaged Product' : `+ Add Another Photo (${photoFiles.length}/3)`}
+                            <div className="min-w-0">
+                              <h4 className="text-xs font-black text-slate-900 dark:text-white truncate">
+                                Damaged Product Photo
+                              </h4>
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                                Carton, seal, or broken merchandise
+                              </p>
+                            </div>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                            photoFiles.length > 0
+                              ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                              : 'bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-900'
+                          }`}>
+                            {photoFiles.length > 0 ? `✓ ${photoFiles.length}/3 Added` : 'Required (0/3)'}
                           </span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            capture="environment"
-                            onChange={handlePhotoSelect}
-                            className="hidden"
-                          />
-                        </label>
-                      )}
+                        </div>
+
+                        {/* Mode Toggle Bar */}
+                        <div className="flex items-center justify-between py-1 px-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700/60 mb-2.5">
+                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                            Capture Mode:
+                          </span>
+                          <div className="inline-flex p-0.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs">
+                            <button
+                              type="button"
+                              onClick={() => setPhotoCaptureMode('single')}
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${
+                                photoCaptureMode === 'single'
+                                  ? 'bg-rose-600 text-white shadow-xs'
+                                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                              }`}
+                              title="Direct camera snap (solo photo)"
+                            >
+                              <Camera className="w-3 h-3" />
+                              <span>Camera</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPhotoCaptureMode('batch')}
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${
+                                photoCaptureMode === 'batch'
+                                  ? 'bg-rose-600 text-white shadow-xs'
+                                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                              }`}
+                              title="Select multiple photos from gallery"
+                            >
+                              <Upload className="w-3 h-3" />
+                              <span>Gallery (Batch)</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Photos Grid & Upload Action */}
+                        {photoFiles.length === 0 ? (
+                          <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-rose-300 dark:border-rose-800/80 hover:border-rose-500 rounded-2xl bg-rose-50/30 dark:bg-rose-950/20 hover:bg-rose-50/60 dark:hover:bg-rose-950/40 cursor-pointer transition-all active:scale-[0.99] text-center group min-h-[140px]">
+                            <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-300 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform shadow-xs">
+                              <Camera className="w-5 h-5" />
+                            </div>
+                            <span className="text-xs font-black text-rose-950 dark:text-rose-200">
+                              Snap Photo of Damaged Product
+                            </span>
+                            <span className="text-[10px] text-rose-600/80 dark:text-rose-400 mt-0.5">
+                              {photoCaptureMode === 'single' ? 'Tap to open camera' : 'Tap to select photos from gallery'}
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple={photoCaptureMode === 'batch'}
+                              capture={photoCaptureMode === 'single' ? 'environment' : undefined}
+                              onChange={handlePhotoSelect}
+                              className="hidden"
+                            />
+                          </label>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-3 gap-2">
+                              {photoFiles.map((item, idx) => (
+                                <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border-2 border-rose-200 dark:border-rose-800 group shadow-2xs bg-slate-100 dark:bg-slate-800">
+                                  <button
+                                    type="button"
+                                    onClick={() => setLightboxPhoto({
+                                      images: photoFiles.map(p => p.previewUrl),
+                                      initialIndex: idx,
+                                      url: item.previewUrl,
+                                      title: 'Damaged Product Photo',
+                                      subtitle: `Photo ${idx + 1} of ${photoFiles.length}`
+                                    })}
+                                    className="w-full h-full block cursor-zoom-in"
+                                    title="Click to view enlarged photo"
+                                  >
+                                    <img src={item.previewUrl} alt="Damaged Item" className="w-full h-full object-cover" />
+                                  </button>
+                                  <span className="absolute bottom-1 left-1 px-1 py-0.2 rounded text-[8px] font-black bg-slate-900/80 text-white shadow-xs">
+                                    #{idx + 1}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); removePhoto(idx); }}
+                                    className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full opacity-90 hover:opacity-100 transition-opacity z-10 cursor-pointer shadow-xs"
+                                    title="Remove photo"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ))}
+
+                              {/* Slot for + Add Photo if < 3 */}
+                              {photoFiles.length < 3 && (
+                                <label className="relative aspect-square rounded-xl border-2 border-dashed border-rose-300 dark:border-rose-700 hover:border-rose-500 bg-rose-50/50 dark:bg-rose-950/30 hover:bg-rose-100/60 flex flex-col items-center justify-center cursor-pointer transition-all active:scale-95 text-center group">
+                                  <Camera className="w-4 h-4 text-rose-600 dark:text-rose-400 group-hover:scale-110 transition-transform" />
+                                  <span className="text-[10px] font-black text-rose-700 dark:text-rose-300 mt-1">
+                                    + Add ({photoFiles.length}/3)
+                                  </span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple={photoCaptureMode === 'batch'}
+                                    capture={photoCaptureMode === 'single' ? 'environment' : undefined}
+                                    onChange={handlePhotoSelect}
+                                    className="hidden"
+                                  />
+                                </label>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {/* ZONE 2: PHOTO OF DELIVERY RECEIPT / DR / INVOICE (REQUIRED - MULTI-PHOTO UP TO 3) */}
-                    <div className={`p-3.5 rounded-2xl border-2 transition-all space-y-2.5 ${
+                    <div className={`p-4 rounded-2xl border-2 transition-all flex flex-col justify-between space-y-3 ${
                       paperworkShake ? 'animate-shake border-rose-500 bg-rose-50 dark:bg-rose-950/40' :
                       paperworkPhotos.length > 0
-                        ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-400 dark:border-emerald-700'
-                        : 'bg-white dark:bg-slate-800/80 border-dashed border-violet-300 dark:border-violet-800/70 hover:border-violet-500'
+                        ? 'bg-emerald-50/30 dark:bg-emerald-950/20 border-emerald-400 dark:border-emerald-700 shadow-2xs'
+                        : 'bg-white dark:bg-slate-855 border-slate-200 dark:border-slate-700/80 hover:border-violet-400 shadow-2xs'
                     }`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <div className="p-2 rounded-xl bg-violet-600 text-white shadow-2xs shrink-0">
-                            <FileText className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <h4 className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
-                              <span>Photo of DR / Invoice / PO</span>
-                              <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 flex items-center gap-0.5">
-                                <Sparkles className="w-2.5 h-2.5" />
-                                Gemini Flash AI
-                              </span>
-                            </h4>
-                            <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                              Snap up to 3 photos of delivery receipt, sales invoice, or PO.
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Capture Mode Toggle */}
-                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => setPaperworkCaptureMode('single')}
-                            className={`px-2 py-0.5 rounded-lg text-[9px] font-black flex items-center gap-0.5 cursor-pointer transition-all ${
-                              paperworkCaptureMode === 'single'
-                                ? 'bg-white dark:bg-slate-700 text-violet-700 dark:text-violet-300 shadow-2xs'
-                                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                            }`}
-                            title="Single camera photo snap"
-                          >
-                            <Camera className="w-3 h-3" />
-                            <span>Snap</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPaperworkCaptureMode('batch')}
-                            className={`px-2 py-0.5 rounded-lg text-[9px] font-black flex items-center gap-0.5 cursor-pointer transition-all ${
-                              paperworkCaptureMode === 'batch'
-                                ? 'bg-white dark:bg-slate-700 text-violet-700 dark:text-violet-300 shadow-2xs'
-                                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                            }`}
-                            title="Multi-file upload (up to 3)"
-                          >
-                            <Layers className="w-3 h-3" />
-                            <span>Batch</span>
-                          </button>
-                          <span className="text-[10px] font-bold text-rose-500 ml-1">• Required</span>
-                        </div>
-                      </div>
-
-                      {/* Prominent Quality Reminder Banner */}
-                      <div className="p-2 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-[10px] text-amber-900 dark:text-amber-200 flex items-start gap-1.5">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                        <span>
-                          <strong>Visibility Reminder:</strong> Ensure the <strong>Sales Invoice #, DR #, or PO #</strong> is completely legible, well-lit, and uncropped. Blurry, cut-off, or non-logistics photos will be rejected.
-                        </span>
-                      </div>
-
-                      {/* Inspecting Radar State */}
-                      {isInspectingPaperwork && (
-                        <div className="py-4 px-3 border border-violet-300 dark:border-violet-700 bg-violet-50/80 dark:bg-violet-950/50 rounded-xl flex items-center justify-center gap-2.5 text-center animate-pulse">
-                          <RefreshCw className="w-4 h-4 animate-spin text-violet-600 dark:text-violet-400 shrink-0" />
-                          <span className="text-xs font-black text-violet-900 dark:text-violet-200">
-                            Gemini Flash Inspecting & Validating Commercial Paperwork...
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Paperwork Photos Thumbnails Grid (Up to 3 Photos) */}
-                      {paperworkPhotos.length > 0 && (
-                        <div className="space-y-2">
-                          <div className="grid grid-cols-3 gap-2 pt-1">
-                            {paperworkPhotos.map((item, idx) => (
-                              <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border-2 border-emerald-400 dark:border-emerald-700 group shadow-2xs bg-slate-100 dark:bg-slate-800">
-                                <button
-                                  type="button"
-                                  onClick={() => setLightboxPhoto({
-                                    images: paperworkPhotos.map(p => p.previewUrl),
-                                    initialIndex: idx,
-                                    url: item.previewUrl,
-                                    title: item.metadata?.document_type || 'Official Paperwork',
-                                    subtitle: `Photo ${idx + 1} of ${paperworkPhotos.length} • ${item.metadata?.invoice_dr_number || ''}`
-                                  })}
-                                  className="w-full h-full block cursor-zoom-in"
-                                  title="Click to view enlarged document"
-                                >
-                                  <img src={item.previewUrl} alt="Paperwork" className="w-full h-full object-cover" />
-                                </button>
-                                <span className="absolute bottom-1 left-1 px-1 py-0.2 rounded text-[8px] font-black bg-emerald-600 text-white shadow-xs">
-                                  ✓ P{idx + 1}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); removePaperworkPhoto(idx); }}
-                                  className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full opacity-90 hover:opacity-100 transition-opacity z-10 cursor-pointer"
-                                  title="Remove paperwork photo"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-
-                          {/* Paperwork Summary Badge */}
-                          {paperworkMetadata && (
-                            <div className="p-2 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 rounded-xl text-xs flex items-center justify-between gap-2">
-                              <span className="text-[11px] font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5 truncate">
-                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                <span>Verified {paperworkMetadata.document_type || 'Commercial Document'} ({paperworkPhotos.length}/3 photos attached)</span>
-                              </span>
+                      <div>
+                        {/* Header Row */}
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="p-2 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white shadow-xs shrink-0">
+                              <FileText className="w-4 h-4" />
                             </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Snap / Add Paperwork Photo Button (if < 3) */}
-                      {paperworkPhotos.length < 3 && !isInspectingPaperwork && (
-                        <label className="w-full py-3.5 px-4 border-2 border-dashed border-violet-300 dark:border-violet-700 hover:border-violet-500 bg-violet-50/60 dark:bg-violet-950/30 hover:bg-violet-100/60 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99] text-center">
-                          <FileText className="w-5 h-5 text-violet-600 dark:text-violet-400 shrink-0" />
-                          <span className="text-xs font-black text-violet-900 dark:text-violet-200">
-                            {paperworkPhotos.length === 0
-                              ? '📄 Snap Photo of DR / Invoice / PO'
-                              : `+ Add Another Paperwork Photo (${paperworkPhotos.length}/3)`}
+                            <div className="min-w-0">
+                              <h4 className="text-xs font-black text-slate-900 dark:text-white truncate">
+                                DR / Invoice / PO Paperwork
+                              </h4>
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                                Auto-verified by Gemini Flash AI
+                              </p>
+                            </div>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                            paperworkPhotos.length > 0
+                              ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                              : 'bg-violet-100 dark:bg-violet-950/70 text-violet-800 dark:text-violet-300 border border-violet-200 dark:border-violet-800'
+                          }`}>
+                            {paperworkPhotos.length > 0 ? `✓ ${paperworkPhotos.length}/3 Verified` : 'Required (0/3)'}
                           </span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            multiple={paperworkCaptureMode === 'batch'}
-                            capture={paperworkCaptureMode === 'single' ? 'environment' : undefined}
-                            onChange={handlePaperworkSelect}
-                            className="hidden"
-                          />
-                        </label>
-                      )}
+                        </div>
 
-                      {/* Paperwork Error Alert */}
-                      {paperworkError && (
-                        <div className="p-2.5 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 rounded-xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2 animate-in fade-in">
-                          <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
-                          <div className="text-[11px] leading-tight">
-                            <strong className="font-bold">Paperwork rejected:</strong> {paperworkError}
+                        {/* Mode Toggle Bar */}
+                        <div className="flex items-center justify-between py-1 px-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700/60 mb-2.5">
+                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                            Capture Mode:
+                          </span>
+                          <div className="inline-flex p-0.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs">
+                            <button
+                              type="button"
+                              onClick={() => setPaperworkCaptureMode('single')}
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${
+                                paperworkCaptureMode === 'single'
+                                  ? 'bg-violet-600 text-white shadow-xs'
+                                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                              }`}
+                              title="Direct camera snap (solo photo)"
+                            >
+                              <Camera className="w-3 h-3" />
+                              <span>Camera</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPaperworkCaptureMode('batch')}
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${
+                                paperworkCaptureMode === 'batch'
+                                  ? 'bg-violet-600 text-white shadow-xs'
+                                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                              }`}
+                              title="Select multiple photos from gallery"
+                            >
+                              <Upload className="w-3 h-3" />
+                              <span>Gallery (Batch)</span>
+                            </button>
                           </div>
                         </div>
-                      )}
+
+                        {/* Inspecting Radar State */}
+                        {isInspectingPaperwork && (
+                          <div className="py-5 px-3 border border-violet-300 dark:border-violet-700 bg-violet-50/90 dark:bg-violet-950/50 rounded-2xl flex flex-col items-center justify-center gap-2 text-center animate-pulse min-h-[140px]">
+                            <RefreshCw className="w-5 h-5 animate-spin text-violet-600 dark:text-violet-400 shrink-0" />
+                            <span className="text-xs font-black text-violet-900 dark:text-violet-200">
+                              Gemini Flash Inspecting & Validating Paperwork...
+                            </span>
+                            <span className="text-[10px] text-violet-600 dark:text-violet-400">
+                              Verifying authentic DR / SI / PO and extracting numbers
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Photos Grid & Upload Action (when not inspecting) */}
+                        {!isInspectingPaperwork && (paperworkPhotos.length === 0 ? (
+                          <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-violet-300 dark:border-violet-800/80 hover:border-violet-500 rounded-2xl bg-violet-50/30 dark:bg-violet-950/20 hover:bg-violet-50/60 dark:hover:bg-violet-950/40 cursor-pointer transition-all active:scale-[0.99] text-center group min-h-[140px]">
+                            <div className="w-10 h-10 rounded-xl bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-300 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform shadow-xs">
+                              <FileText className="w-5 h-5" />
+                            </div>
+                            <span className="text-xs font-black text-violet-900 dark:text-violet-200">
+                              Snap Photo of DR / Invoice / PO
+                            </span>
+                            <span className="text-[10px] text-violet-600/80 dark:text-violet-400 mt-0.5">
+                              {paperworkCaptureMode === 'single' ? 'Tap to open camera' : 'Tap to select paperwork from gallery'}
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple={paperworkCaptureMode === 'batch'}
+                              capture={paperworkCaptureMode === 'single' ? 'environment' : undefined}
+                              onChange={handlePaperworkSelect}
+                              className="hidden"
+                            />
+                          </label>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-3 gap-2">
+                              {paperworkPhotos.map((item, idx) => (
+                                <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border-2 border-emerald-400 dark:border-emerald-700 group shadow-2xs bg-slate-100 dark:bg-slate-800">
+                                  <button
+                                    type="button"
+                                    onClick={() => setLightboxPhoto({
+                                      images: paperworkPhotos.map(p => p.previewUrl),
+                                      initialIndex: idx,
+                                      url: item.previewUrl,
+                                      title: item.metadata?.document_type || 'Official Paperwork',
+                                      subtitle: `Photo ${idx + 1} of ${paperworkPhotos.length} • ${item.metadata?.invoice_dr_number || ''}`
+                                    })}
+                                    className="w-full h-full block cursor-zoom-in"
+                                    title="Click to view enlarged document"
+                                  >
+                                    <img src={item.previewUrl} alt="Paperwork" className="w-full h-full object-cover" />
+                                  </button>
+                                  <span className="absolute bottom-1 left-1 px-1 py-0.2 rounded text-[8px] font-black bg-emerald-600 text-white shadow-xs">
+                                    ✓ P{idx + 1}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); removePaperworkPhoto(idx); }}
+                                    className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full opacity-90 hover:opacity-100 transition-opacity z-10 cursor-pointer shadow-xs"
+                                    title="Remove paperwork photo"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ))}
+
+                              {/* Slot for + Add Photo if < 3 */}
+                              {paperworkPhotos.length < 3 && (
+                                <label className="relative aspect-square rounded-xl border-2 border-dashed border-violet-300 dark:border-violet-700 hover:border-violet-500 bg-violet-50/50 dark:bg-violet-950/30 hover:bg-violet-100/60 flex flex-col items-center justify-center cursor-pointer transition-all active:scale-95 text-center group">
+                                  <FileText className="w-4 h-4 text-violet-600 dark:text-violet-400 group-hover:scale-110 transition-transform" />
+                                  <span className="text-[10px] font-black text-violet-700 dark:text-violet-300 mt-1">
+                                    + Add ({paperworkPhotos.length}/3)
+                                  </span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple={paperworkCaptureMode === 'batch'}
+                                    capture={paperworkCaptureMode === 'single' ? 'environment' : undefined}
+                                    onChange={handlePaperworkSelect}
+                                    className="hidden"
+                                  />
+                                </label>
+                              )}
+                            </div>
+
+                            {/* Paperwork Summary Badge */}
+                            {paperworkMetadata && (
+                              <div className="p-2 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 rounded-xl text-xs flex items-center justify-between gap-2">
+                                <span className="text-[10px] sm:text-[11px] font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5 truncate">
+                                  <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span>Verified {paperworkMetadata.document_type || 'Commercial Document'} ({paperworkPhotos.length}/3 attached)</span>
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+
+                        {/* Paperwork Error Alert */}
+                        {paperworkError && (
+                          <div className="mt-2 p-2.5 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 rounded-xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2 animate-in fade-in">
+                            <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                            <div className="text-[11px] leading-tight">
+                              <strong className="font-bold">Paperwork rejected:</strong> {paperworkError}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2608,24 +2717,6 @@ export default function App() {
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">
                     Type your store branch or let Gemini Flash detect it automatically from the attached receipt / invoice.
                   </p>
-
-                  {/* Optional Lot / Batch Number */}
-                  <div className="pt-1">
-                    <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 mb-1">
-                      <span className="font-semibold flex items-center gap-1">
-                        <Layers className="w-3.5 h-3.5 text-amber-600" />
-                        <span>Batch / Lot Number (Optional):</span>
-                      </span>
-                      <span className="text-[10px]">Printed on can/box</span>
-                    </div>
-                    <input
-                      type="text"
-                      value={batchLotNumber}
-                      onChange={(e) => setBatchLotNumber(e.target.value)}
-                      placeholder="e.g., LOT-B42 (leave blank if not visible)"
-                      className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600"
-                    />
-                  </div>
                 </div>
 
                 {/* 4. REASON FOR RETURN */}
