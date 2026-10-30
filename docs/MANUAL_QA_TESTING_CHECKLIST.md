@@ -329,6 +329,27 @@ Each test scenario defines:
     3. **"Triage"** button (launches Quick Processing modal).
     4. **"Assign SKU"** button (if uncatalogued).
 
+### 4.1 Mobile Viewport & Zero-Overflow Safeguards (Portrait & Landscape)
+- [ ] **Return Reports Header Actions Wrap Test (Portrait 360px-420px)**
+  * **Location**: Tab 2 Incoming Return Reports Header on Mobile (< 640px viewport, e.g. iPhone / Galaxy portrait 390px).
+  * **Action**: Resize browser to 390px width.
+  * **Expected Behavior**: Header title and count wrap cleanly. The action toolbar divides into two neat rows: `Rows List / Cards` view toggle on one side, and `Full Audit Log` + `Export CSV` grouped together with compact padding. Zero buttons bleed beyond the right edge of the screen.
+
+- [ ] **Filter Controls Grid Wrap Test (No right-edge clipping)**
+  * **Location**: Tab 2 Filter Controls Toolbar on Mobile (< 640px).
+  * **Action**: Inspect search input, Reason dropdown, Condition Grade dropdown, Status dropdown, and Date Range inputs at 390px width.
+  * **Expected Behavior**: Search input spans full width. Dropdowns dynamically occupy responsive grid columns with `box-border` and `truncate`. The `From` and `To` date pickers sit cleanly side-by-side in a 2-column grid without stretching the container horizontally.
+
+- [ ] **Disposition Horizontal Touch-Scroll Swipe Test**
+  * **Location**: Tab 2 Quick-Filter Disposition Pill Bar on Mobile Touchscreen.
+  * **Action**: In mobile viewport, swipe horizontally across the disposition pill chips (`All Dispositions`, `Pending Triage`, `Restock`, `RTV`, `Quarantine`, `Scrap`).
+  * **Expected Behavior**: Pills have `shrink-0 whitespace-nowrap` and do not wrap or crush text. The container smoothly scrolls horizontally with native touch momentum (`overflow-x-auto scroll-smooth no-scrollbar`). No elements clip outside the viewport.
+
+- [ ] **Landscape Mode (840px) Viewport Boundary Check**
+  * **Location**: Admin Dashboard across all tabs (Saved Products, Return Reports, Credit Memos, Claims, Settings) in Landscape (~840px width).
+  * **Action**: Rotate mobile device or set viewport to 840px width x 390px height.
+  * **Expected Behavior**: Root container safeguards (`w-full max-w-full overflow-x-hidden box-border min-w-0`) prevent any horizontal page scrolling. Headers, tables, and cards adapt fluidly within viewport bounds.
+
 - [ ] **TC-REP-07 (Multi-Select & Bulk Delete)**
   * **Location**: Table row checkboxes
   * **Action**: Select 3 reports; click floating bar button **"Delete Selected (3)"**.

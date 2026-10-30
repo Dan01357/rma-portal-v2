@@ -367,30 +367,30 @@ export default function CreditMemosTab({
       </div>
 
       {/* Main Table Card */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 w-full min-w-0 box-border">
         
         {/* Title and Top Actions */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full min-w-0">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
                 Finance Credit Memorandum Section
               </h2>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-mono">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-mono shrink-0">
                 {creditMemosList.length} Total
               </span>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
+            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
               Manage approved customer deductions, pull-out receipts, credit amounts, and printable accounting vouchers.
             </p>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap shrink-0">
             {creditMemosList.length > 0 && (
               <button
                 type="button"
                 onClick={handleExportCsv}
-                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                className="px-3 py-1.5 sm:px-3.5 sm:py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs shrink-0"
                 title="Export all credit memos to Excel CSV"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -402,7 +402,7 @@ export default function CreditMemosTab({
               <button
                 type="button"
                 onClick={onOpenCreateModal}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-sm shadow-emerald-600/20 transition-all cursor-pointer"
+                className="px-3.5 sm:px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-sm shadow-emerald-600/20 transition-all cursor-pointer shrink-0"
               >
                 <Plus className="w-4 h-4" />
                 <span>Issue Credit Memo</span>
@@ -412,32 +412,11 @@ export default function CreditMemosTab({
         </div>
 
         {/* Search & Date Range Toolbar */}
-        <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-3.5 space-y-2.5">
-          <div className="flex flex-col md:flex-row md:items-center gap-2.5">
-            {/* Supplier Filter Dropdown */}
-            <div className="flex items-center gap-1.5 shrink-0">
-              <label className="text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0">
-                Supplier:
-              </label>
-              <select
-                value={supplierFilter}
-                onChange={(e) => {
-                  setSupplierFilter(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 cursor-pointer shadow-2xs max-w-[180px]"
-                title="Filter by Supplier"
-              >
-                {suppliers.map(sup => (
-                  <option key={sup} value={sup}>
-                    {sup === 'All' ? 'All Suppliers' : sup}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+        <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 sm:p-3.5 space-y-2.5 w-full min-w-0 box-border">
+          <div className="flex flex-col md:flex-row md:items-center gap-2.5 w-full min-w-0">
+            {/* Search Input */}
+            <div className="relative w-full md:flex-1 min-w-0">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 shrink-0" />
               <input
                 type="text"
                 value={searchQuery}
@@ -446,7 +425,7 @@ export default function CreditMemosTab({
                   setCurrentPage(1);
                 }}
                 placeholder="Search by CM #, RMA #, barcode, item name, pull-out ref, or issuer..."
-                className="w-full pl-10 pr-9 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-600 transition-all"
+                className="w-full min-w-0 pl-10 pr-9 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-600 transition-all box-border"
               />
               {searchQuery && (
                 <button
@@ -462,48 +441,73 @@ export default function CreditMemosTab({
               )}
             </div>
 
-            {/* Custom Date Range Filter */}
-            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2.5 py-1 rounded-xl text-xs shrink-0">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">From:</span>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => {
-                  setDateFrom(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="bg-transparent text-slate-900 dark:text-white font-mono text-xs focus:outline-none cursor-pointer"
-                title="Filter credit memos from date"
-              />
-              <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">To:</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => {
-                  setDateTo(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="bg-transparent text-slate-900 dark:text-white font-mono text-xs focus:outline-none cursor-pointer"
-                title="Filter credit memos to date"
-              />
-            </div>
+            {/* Filter Controls Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:flex md:items-center gap-2 w-full md:w-auto min-w-0">
+              {/* Supplier Filter Dropdown */}
+              <div className="flex items-center gap-1.5 w-full md:w-auto min-w-0">
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0">
+                  Supplier:
+                </label>
+                <select
+                  value={supplierFilter}
+                  onChange={(e) => {
+                    setSupplierFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full md:w-auto px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 cursor-pointer shadow-2xs truncate box-border"
+                  title="Filter by Supplier"
+                >
+                  {suppliers.map(sup => (
+                    <option key={sup} value={sup}>
+                      {sup === 'All' ? 'All Suppliers' : sup}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            {(searchQuery || dateFrom || dateTo || supplierFilter !== 'All') && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery('');
-                  setSupplierFilter('All');
-                  setDateFrom('');
-                  setDateTo('');
-                  setCurrentPage(1);
-                }}
-                className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0 cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset</span>
-              </button>
-            )}
+              {/* Custom Date Range Filter */}
+              <div className="grid grid-cols-2 gap-1 w-full sm:w-auto min-w-0">
+                <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1.5 rounded-xl text-xs min-w-0 box-border">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">From</span>
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => {
+                      setDateFrom(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
+                    title="Filter credit memos from date"
+                  />
+                </div>
+                <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1.5 rounded-xl text-xs min-w-0 box-border">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">To</span>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => {
+                      setDateTo(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
+                    title="Filter credit memos to date"
+                  />
+                </div>
+              </div>
+
+              {/* Reset Filters */}
+              {(searchQuery || supplierFilter !== 'All' || dateFrom || dateTo) && (
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="w-full sm:w-auto px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-colors shrink-0 cursor-pointer box-border"
+                  title="Reset all filters"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                  <span>Reset</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">

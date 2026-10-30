@@ -1591,9 +1591,9 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-dvh bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 lg:p-8 pt-safe pb-safe transition-colors duration-200 overflow-x-clip">
+    <div className="min-h-dvh w-full max-w-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 lg:p-8 pt-safe pb-safe transition-colors duration-200 overflow-x-hidden box-border">
       {/* Dynamic container width: clean mobile intake for public reporter, spacious SaaS for admin */}
-      <div id="app-main-view-container" className={`${isAdminView ? 'w-full max-w-7xl' : 'w-full max-w-xl'} mx-auto space-y-4 sm:space-y-6 transition-all duration-300`}>
+      <div id="app-main-view-container" className={`${isAdminView ? 'w-full max-w-7xl' : 'w-full max-w-xl'} mx-auto space-y-4 sm:space-y-6 transition-all duration-300 min-w-0 box-border`}>
 
         {/* ================================================================= */}
         {/* 1. PUBLIC REPORTER PORTAL (Accessible at '/' or default)          */}
@@ -2154,26 +2154,26 @@ export default function App() {
           <div className="space-y-5 animate-in fade-in duration-200">
 
             {/* Production-Level SaaS Header */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex flex-wrap items-center gap-2.5">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 w-full min-w-0 box-border">
+              <div className="space-y-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
                   <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
                     <span>🏢 Wholesale RMA Operations</span>
                   </h1>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 shrink-0">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                     Live Auto-Sync
                   </span>
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800 shrink-0">
                     {currentUser?.role === 'super_admin' ? '👑 Super Admin' : (currentUser?.role || 'Staff')}
                   </span>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
+                <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                   Logged in as <strong className="text-slate-800 dark:text-slate-200">{currentUser?.name || 'Authorized Staff'}</strong> • {currentUser?.email || 'Portal Access'}
                 </p>
               </div>
 
-              <div className="flex items-center gap-2 self-start md:self-auto flex-wrap">
+              <div className="flex items-center gap-2 self-start md:self-auto flex-wrap w-full md:w-auto justify-start md:justify-end min-w-0">
                 {/* NOTIFICATION BELL */}
                 <NotificationBell
                   notifications={notifications}
@@ -2447,41 +2447,44 @@ export default function App() {
 
             {/* TAB 2: INCOMING RETURN REPORTS */}
             {adminActiveTab === 'reports' && (
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 w-full min-w-0 box-border">
+                {/* Header & Responsive Action Toolbar */}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 w-full min-w-0">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
                         Incoming Return Reports
                       </h3>
-                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0">
                         {recentReportsList.length} Total
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                       Recent RMA submissions from warehouse & customer returns.
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                  {/* Responsive Action Toolbar */}
+                  <div className="flex items-center justify-between sm:justify-end gap-2 flex-wrap w-full lg:w-auto min-w-0">
                     {/* View Switcher: Rows vs Cards */}
-                    <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200/80 dark:border-slate-700">
+                    <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 sm:p-1 rounded-xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-700 shrink-0">
                       <button
                         type="button"
                         onClick={() => handleSetReportsViewMode('table')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${reportsViewMode === 'table'
+                        className={`px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${reportsViewMode === 'table'
                             ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
                             : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                           }`}
-                        title="Rows / Table View (with SN column)"
+                        title="Rows / Table View"
                       >
                         <List className="w-3.5 h-3.5" />
-                        <span>Rows List</span>
+                        <span className="hidden xs:inline">Rows List</span>
+                        <span className="xs:hidden">Rows</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => handleSetReportsViewMode('grid')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${reportsViewMode === 'grid'
+                        className={`px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${reportsViewMode === 'grid'
                             ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
                             : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                           }`}
@@ -2492,57 +2495,64 @@ export default function App() {
                       </button>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setIsReportsModalOpen(true)}
-                      className="px-3.5 py-2 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold rounded-xl text-xs flex items-center gap-1 transition-colors shrink-0 cursor-pointer"
-                    >
-                      <span>Full Audit Log</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setIsReportsModalOpen(true)}
+                        className="px-2.5 py-1.5 sm:px-3.5 sm:py-2 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold rounded-xl text-xs flex items-center gap-1 transition-colors shrink-0 cursor-pointer"
+                        title="Open Full Audit Log"
+                      >
+                        <FileText className="w-3.5 h-3.5 sm:hidden" />
+                        <span className="hidden sm:inline">Full Audit Log</span>
+                        <span className="sm:hidden">Audit Log</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
 
-                    <button
-                      type="button"
-                      onClick={() => exportRMAReportsToCSV(processedReports)}
-                      className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
-                      title="Export filtered reports to CSV with financial & triage data"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Export CSV</span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => exportRMAReportsToCSV(processedReports)}
+                        className="px-2.5 py-1.5 sm:px-3.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
+                        title="Export filtered reports to CSV with financial & triage data"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Export CSV</span>
+                        <span className="sm:hidden">Export</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
                 {/* Filter / Search & Sort Controls Toolbar */}
-                <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-3.5 space-y-2.5">
-                  <div className="flex flex-col md:flex-row md:items-center gap-2.5">
-                    {/* Search Input */}
-                    <div className="relative flex-1">
-                      <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                      <input
-                        type="text"
-                        value={reportsSearchQuery}
-                        onChange={(e) => {
-                          setReportsSearchQuery(e.target.value);
+                <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 sm:p-3.5 space-y-2.5 w-full min-w-0 box-border">
+                  {/* Search Input: Full width row */}
+                  <div className="relative w-full min-w-0">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 shrink-0" />
+                    <input
+                      type="text"
+                      value={reportsSearchQuery}
+                      onChange={(e) => {
+                        setReportsSearchQuery(e.target.value);
+                        setReportsCurrentPage(1);
+                      }}
+                      placeholder="Search by SN (#), RMA #, barcode, item name, reporter, or bin location..."
+                      className="w-full min-w-0 pl-10 pr-9 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600 transition-all box-border"
+                    />
+                    {reportsSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReportsSearchQuery('');
                           setReportsCurrentPage(1);
                         }}
-                        placeholder="Search by SN (#), RMA #, barcode, item name, reporter, or bin location..."
-                        className="w-full pl-10 pr-9 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600 transition-all"
-                      />
-                      {reportsSearchQuery && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setReportsSearchQuery('');
-                            setReportsCurrentPage(1);
-                          }}
-                          className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
+                        className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
 
+                  {/* Dropdown Filters & Date Pickers in responsive grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-2 w-full min-w-0">
                     {/* Reason Filter Dropdown */}
                     <select
                       value={reportsReasonFilter}
@@ -2550,7 +2560,7 @@ export default function App() {
                         setReportsReasonFilter(e.target.value);
                         setReportsCurrentPage(1);
                       }}
-                      className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer"
+                      className="w-full min-w-0 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer truncate box-border"
                     >
                       <option value="all">All Reasons</option>
                       {DEFECT_REASONS.map(r => (
@@ -2565,7 +2575,7 @@ export default function App() {
                         setReportsConditionGradeFilter(e.target.value);
                         setReportsCurrentPage(1);
                       }}
-                      className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer"
+                      className="w-full min-w-0 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer truncate box-border"
                     >
                       <option value="all">All Grades</option>
                       <option value="A">Grade A - Like New</option>
@@ -2581,7 +2591,7 @@ export default function App() {
                         setReportsStatusFilter(e.target.value);
                         setReportsCurrentPage(1);
                       }}
-                      className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer"
+                      className="w-full min-w-0 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer truncate box-border"
                     >
                       <option value="all">All Status & Stages</option>
                       <option value="received_at_dock">Received at Dock</option>
@@ -2594,30 +2604,34 @@ export default function App() {
                       <option value="unknown">Catalog: Unknown Barcode</option>
                     </select>
 
-                    {/* Date Range Picker */}
-                    <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2.5 py-1 rounded-xl text-xs">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">From:</span>
-                      <input
-                        type="date"
-                        value={reportsDateFrom}
-                        onChange={(e) => {
-                          setReportsDateFrom(e.target.value);
-                          setReportsCurrentPage(1);
-                        }}
-                        className="bg-transparent text-slate-900 dark:text-white font-mono text-xs focus:outline-none cursor-pointer"
-                        title="Filter records from date"
-                      />
-                      <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">To:</span>
-                      <input
-                        type="date"
-                        value={reportsDateTo}
-                        onChange={(e) => {
-                          setReportsDateTo(e.target.value);
-                          setReportsCurrentPage(1);
-                        }}
-                        className="bg-transparent text-slate-900 dark:text-white font-mono text-xs focus:outline-none cursor-pointer"
-                        title="Filter records to date"
-                      />
+                    {/* Date Range Picker: Neatly split in 2 columns */}
+                    <div className="grid grid-cols-2 gap-1.5 w-full min-w-0 col-span-1 sm:col-span-2 md:col-span-1 lg:col-span-1">
+                      <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1.5 rounded-xl text-xs min-w-0 box-border">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">From</span>
+                        <input
+                          type="date"
+                          value={reportsDateFrom}
+                          onChange={(e) => {
+                            setReportsDateFrom(e.target.value);
+                            setReportsCurrentPage(1);
+                          }}
+                          className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
+                          title="Filter records from date"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1.5 rounded-xl text-xs min-w-0 box-border">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">To</span>
+                        <input
+                          type="date"
+                          value={reportsDateTo}
+                          onChange={(e) => {
+                            setReportsDateTo(e.target.value);
+                            setReportsCurrentPage(1);
+                          }}
+                          className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
+                          title="Filter records to date"
+                        />
+                      </div>
                     </div>
 
                     {/* Reset Filters */}
@@ -2625,46 +2639,48 @@ export default function App() {
                       <button
                         type="button"
                         onClick={resetReportsFilters}
-                        className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0 cursor-pointer"
+                        className="w-full sm:w-auto px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-colors shrink-0 cursor-pointer box-border"
                       >
-                        <RotateCcw className="w-3.5 h-3.5" />
+                        <RotateCcw className="w-3.5 h-3.5 shrink-0" />
                         <span>Reset</span>
                       </button>
                     )}
                   </div>
 
-                  {/* Quick-Filter Chips for Warehouse Disposition */}
-                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-2 border-t border-slate-200 dark:border-slate-700/80">
-                    <span className="text-[10px] uppercase font-black text-slate-400 shrink-0 mr-1 flex items-center gap-1">
-                      <Layers className="w-3 h-3 text-blue-500" />
-                      Disposition:
-                    </span>
-                    {[
-                      { id: 'all', label: 'All Dispositions' },
-                      { id: 'Pending Triage', label: 'Pending Triage' },
-                      { id: 'Restock to Inventory', label: 'Restock' },
-                      { id: 'Return to Vendor (RTV)', label: 'Return to Vendor (RTV)' },
-                      { id: 'Quarantine', label: 'Quarantine' },
-                      { id: 'Scrap / Dispose', label: 'Scrap / Dispose' }
-                    ].map(chip => {
-                      const isActive = reportsDispositionFilter.toLowerCase() === chip.id.toLowerCase();
-                      return (
-                        <button
-                          key={chip.id}
-                          type="button"
-                          onClick={() => {
-                            setReportsDispositionFilter(chip.id);
-                            setReportsCurrentPage(1);
-                          }}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 transition-all cursor-pointer ${isActive
-                              ? 'bg-blue-600 text-white shadow-2xs font-black'
-                              : 'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                            }`}
-                        >
-                          {chip.label}
-                        </button>
-                      );
-                    })}
+                  {/* Quick-Filter Chips for Warehouse Disposition: Swipeable with touch momentum */}
+                  <div className="relative w-full min-w-0 pt-2 border-t border-slate-200 dark:border-slate-700/80">
+                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-0.5 w-full scroll-smooth min-w-0 -mx-0.5 sm:mx-0">
+                      <span className="text-[10px] uppercase font-black text-slate-400 shrink-0 mr-1 flex items-center gap-1 whitespace-nowrap">
+                        <Layers className="w-3 h-3 text-blue-500 shrink-0" />
+                        Disposition:
+                      </span>
+                      {[
+                        { id: 'all', label: 'All Dispositions' },
+                        { id: 'Pending Triage', label: 'Pending Triage' },
+                        { id: 'Restock to Inventory', label: 'Restock' },
+                        { id: 'Return to Vendor (RTV)', label: 'Return to Vendor (RTV)' },
+                        { id: 'Quarantine', label: 'Quarantine' },
+                        { id: 'Scrap / Dispose', label: 'Scrap / Dispose' }
+                      ].map(chip => {
+                        const isActive = reportsDispositionFilter.toLowerCase() === chip.id.toLowerCase();
+                        return (
+                          <button
+                            key={chip.id}
+                            type="button"
+                            onClick={() => {
+                              setReportsDispositionFilter(chip.id);
+                              setReportsCurrentPage(1);
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 whitespace-nowrap transition-all cursor-pointer ${isActive
+                                ? 'bg-blue-600 text-white shadow-2xs font-black'
+                                : 'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                              }`}
+                          >
+                            {chip.label}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
