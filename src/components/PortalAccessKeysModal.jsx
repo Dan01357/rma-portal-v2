@@ -33,24 +33,24 @@ export function formatDurationLabel(hours) {
   const h = Number(hours || 0);
   if (h <= 0) return 'Permanent (0h)';
   const totalMins = Math.round(h * 60);
-  if (totalMins < 60) return `${totalMins} Minutes`;
+  if (totalMins < 60) return `${totalMins} Minute${totalMins === 1 ? '' : 's'}`;
   if (totalMins % 60 === 0) {
     const hoursNum = totalMins / 60;
     return `${hoursNum} Hour${hoursNum === 1 ? '' : 's'}`;
   }
-  return `${h.toFixed(1)} Hours (${totalMins}m)`;
+  return `${totalMins} Minutes`;
 }
 
 export function formatCooldownLabel(hours) {
   const h = Number(hours || 0);
   if (h <= 0) return 'Disabled (0h)';
   const totalMins = Math.round(h * 60);
-  if (totalMins < 60) return `${totalMins} Minutes`;
+  if (totalMins < 60) return `${totalMins} Minute${totalMins === 1 ? '' : 's'}`;
   if (totalMins % 60 === 0) {
     const hoursNum = totalMins / 60;
     return `${hoursNum} Hour${hoursNum === 1 ? '' : 's'}`;
   }
-  return `${h.toFixed(1)} Hours (${totalMins}m)`;
+  return `${totalMins} Minutes`;
 }
 
 export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, onOpenPinRequests }) {

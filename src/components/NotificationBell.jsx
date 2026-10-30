@@ -10,7 +10,8 @@ import {
   Info, 
   ExternalLink,
   X,
-  Sparkles
+  Sparkles,
+  KeyRound
 } from 'lucide-react';
 
 export default function NotificationBell({ 
@@ -91,6 +92,12 @@ export default function NotificationBell({
         return (
           <div className="w-9 h-9 rounded-full bg-rose-100 dark:bg-rose-900/50 text-rose-600 dark:text-rose-300 flex items-center justify-center shrink-0">
             <Trash2 className="w-4 h-4" />
+          </div>
+        );
+      case 'pin_request':
+        return (
+          <div className="w-9 h-9 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800 flex items-center justify-center shrink-0">
+            <KeyRound className="w-4 h-4" />
           </div>
         );
       default:

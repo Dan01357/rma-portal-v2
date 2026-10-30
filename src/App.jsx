@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Barcode,
   Search,
@@ -205,26 +205,6 @@ export default function App() {
   const [isPinRequestsModalOpen, setIsPinRequestsModalOpen] = useState(false);
   const [pendingPinRequestsCount, setPendingPinRequestsCount] = useState(0);
 
-  // Sync Pending PIN Requests count for live badge
-  useEffect(() => {
-    let isMounted = true;
-    const updatePendingCount = async () => {
-      try {
-        const count = await pinRequestService.getPendingCount();
-        if (isMounted) setPendingPinRequestsCount(count);
-      } catch (e) {}
-    };
-
-    updatePendingCount();
-
-    const handleChanged = () => updatePendingCount();
-    window.addEventListener('rma-pin-requests-changed', handleChanged);
-    return () => {
-      isMounted = false;
-      window.removeEventListener('rma-pin-requests-changed', handleChanged);
-    };
-  }, []);
-
   // Role-Based QR Code & 6-Digit PIN Gatekeeper Engine
   const [intakeSlug, setIntakeSlug] = useState(() => getIntakeSlugFromUrl());
   const [gateSession, setGateSession] = useState(() => {
@@ -232,9 +212,31 @@ export default function App() {
     return accessKeyService.getActiveSession(slug);
   });
 
+  // Active Real-Time Watchdog for Gatekeeper Session Expiration (Unbypassable live enforcement)
+  useEffect(() => {
+    if (!gateSession?.expiresAt) return;
+
+    const checkExpiration = () => {
+      const expTime = new Date(gateSession.expiresAt).getTime();
+      const now = Date.now();
+      if (now >= expTime) {
+        // Session reached expiration!
+        const slug = gateSession.slug;
+        accessKeyService.clearSession(slug);
+        setGateSession(null);
+        setIntakeSlug(slug);
+        showToast('Your return session has expired. Device locked.', 'warning');
+      }
+    };
+
+    checkExpiration();
+    const interval = setInterval(checkExpiration, 1000);
+    return () => clearInterval(interval);
+  }, [gateSession]);
+
   const handleLockStation = () => {
     const slug = gateSession?.slug || intakeSlug || 'dock';
-    accessKeyService.clearSession();
+    accessKeyService.clearSession(slug);
     setGateSession(null);
     setIntakeSlug(slug);
     showToast('Device locked. Enter 6-digit PIN to unlock station.', 'info');
@@ -580,7 +582,14 @@ export default function App() {
     showToast('All notifications cleared.', 'success');
   };
 
+  const notifiedPinRequestIds = useRef(new Set());
+
   const handleSelectNotification = (notif) => {
+    if (notif.type === 'pin_request') {
+      setIsPinRequestsModalOpen(true);
+      handleMarkAsRead(notif.id);
+      return;
+    }
     if (notif.type === 'rma') {
       if (isAdminView) {
         setAdminActiveTab('reports');
@@ -595,6 +604,86 @@ export default function App() {
       }
     }
   };
+
+  // Real-time synchronization for PIN requests & Notification Bell alerts
+  useEffect(() => {
+    let isMounted = true;
+
+    // Load initial count and initialize known request IDs
+    pinRequestService.getRequests().then(reqs => {
+      if (!isMounted) return;
+      reqs.forEach(r => notifiedPinRequestIds.current.add(r.id));
+      setPendingPinRequestsCount(reqs.filter(r => r.status === 'pending').length);
+    }).catch(() => {});
+
+    const refreshRequests = async () => {
+      try {
+        const reqs = await pinRequestService.getRequests();
+        if (!isMounted) return;
+        const pendingCount = reqs.filter(r => r.status === 'pending').length;
+        setPendingPinRequestsCount(pendingCount);
+
+        // Check for any new pending requests not yet in notification bell
+        reqs.forEach(r => {
+          if (r.status === 'pending' && !notifiedPinRequestIds.current.has(r.id)) {
+            notifiedPinRequestIds.current.add(r.id);
+            addNotification({
+              id: `pin-req-${r.id}`,
+              type: 'pin_request',
+              title: `New PIN Request: ${r.requester_name}`,
+              message: `${r.organization_name ? r.organization_name + ' • ' : ''}Requested authorization PIN for /${r.access_slug}`,
+              subtext: r.notes ? `Note: ${r.notes}` : 'Return Authorization Request',
+              timestamp: r.created_at || new Date().toISOString(),
+              read: false,
+              requestId: r.id
+            });
+            if (isAdminView) {
+              showToast(`New PIN request: ${r.requester_name} (/${r.access_slug})`, 'info');
+            }
+          }
+        });
+      } catch (e) {}
+    };
+
+    // 1. Supabase Postgres Realtime Subscription on public.pin_requests
+    let pinChannel = null;
+    try {
+      pinChannel = supabase
+        .channel('public:pin_requests_realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'pin_requests' }, () => {
+          refreshRequests();
+        })
+        .subscribe();
+    } catch (e) {}
+
+    // 2. BroadcastChannel for cross-tab instant sync
+    let bc = null;
+    try {
+      if (typeof window !== 'undefined' && window.BroadcastChannel) {
+        bc = new BroadcastChannel('rma_portal_sync_bus');
+        bc.onmessage = (evt) => {
+          if (evt.data?.type === 'pin-requests-changed' || evt.data?.type === 'pin-request-created') {
+            refreshRequests();
+          }
+        };
+      }
+    } catch (e) {}
+
+    // 3. Local window event listener
+    const handleLocalEvent = () => refreshRequests();
+    window.addEventListener('rma-pin-requests-changed', handleLocalEvent);
+
+    // 4. Polling watchdog (every 6 seconds for guaranteed freshness)
+    const pollTimer = setInterval(refreshRequests, 6000);
+
+    return () => {
+      isMounted = false;
+      if (pinChannel) supabase.removeChannel(pinChannel);
+      if (bc) bc.close();
+      window.removeEventListener('rma-pin-requests-changed', handleLocalEvent);
+      clearInterval(pollTimer);
+    };
+  }, [isAdminView]);
 
   // Role Permissions
   const canManageRoles = currentUser?.role === 'super_admin';
@@ -1393,6 +1482,17 @@ export default function App() {
   // Submit RMA Report Handler - INSTANT response (<0.15s) with background sync
   const handleSubmitReport = (e) => {
     e.preventDefault();
+
+    // Unbypassable Gatekeeper Expiration Check
+    if (!isAdminView && !currentUser && (intakeSlug || gateSession)) {
+      const active = accessKeyService.getActiveSession(intakeSlug || gateSession?.slug);
+      if (!active) {
+        showToast('Your return session has expired. You cannot submit this report.', 'error');
+        setGateSession(null);
+        return;
+      }
+    }
+
     const cleanBarcode = barcodeInput.trim();
     if (!cleanBarcode) {
       showToast('Please scan or enter a product barcode.', 'warning');
@@ -1520,7 +1620,15 @@ export default function App() {
                   </div>
                   <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
                     {gateSession 
-                      ? (gateSession.expiresAt ? `Session active (~${Math.max(1, Math.round((new Date(gateSession.expiresAt).getTime() - Date.now()) / (60 * 1000)))}m remaining)` : 'Permanent Station Unlock')
+                      ? (gateSession.expiresAt ? (() => {
+                          const remainingMs = Math.max(0, new Date(gateSession.expiresAt).getTime() - Date.now());
+                          const remainingMins = Math.max(1, Math.round(remainingMs / (60 * 1000)));
+                          if (remainingMins < 60) {
+                            return `Session active (~${remainingMins}m remaining)`;
+                          }
+                          const hrs = (remainingMins / 60).toFixed(1).replace('.0', '');
+                          return `Session active (~${hrs}h remaining)`;
+                        })() : 'Permanent Station Unlock')
                       : 'Wholesale RMA Return Intake'}
                   </div>
                 </div>

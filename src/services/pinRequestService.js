@@ -1,11 +1,18 @@
 import { supabase } from '../supabaseClient';
+import { notificationService } from './notificationService';
 
 const STORAGE_KEY = 'rma_pin_requests_v2';
 const SETTINGS_KEY = 'pin_requests_store';
 
-function notifyPinRequestsChanged() {
+function notifyPinRequestsChanged(record = null) {
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('rma-pin-requests-changed'));
+    window.dispatchEvent(new CustomEvent('rma-pin-requests-changed', { detail: { record } }));
+    try {
+      if (window.BroadcastChannel) {
+        const ch = new BroadcastChannel('rma_portal_sync_bus');
+        ch.postMessage({ type: 'pin-requests-changed', record });
+      }
+    } catch (e) {}
   }
 }
 
@@ -86,7 +93,8 @@ export const pinRequestService = {
     requesterEmail,
     requesterName,
     organizationName = '',
-    notes = ''
+    notes = '',
+    isTestMode = false
   }) {
     if (!accessSlug || !requesterEmail || !requesterName) {
       throw new Error('Please provide Access Slug, Email, and Name.');
@@ -143,8 +151,137 @@ export const pinRequestService = {
       } catch (e) {}
     }
 
-    notifyPinRequestsChanged();
+    // 3. Dispatch automated alert email to Admin team (recipients same as RMA reports, strictly EXCLUDING AE email)
+    this.sendPinRequestAlertEmail(newRecord, Boolean(isTestMode)).catch(err => {
+      console.warn('Non-blocking PIN request email notification error:', err);
+    });
+
+    notifyPinRequestsChanged(newRecord);
     return { success: true, data: newRecord };
+  },
+
+  /**
+   * DISPATCH ALERT EMAIL TO ADMINS ON NEW PIN REQUEST
+   * Recipients: Same recipients as RMA reports, strictly EXCLUDING AE email.
+   */
+  async sendPinRequestAlertEmail(requestRecord, isTestMode = false) {
+    try {
+      const emailSettings = notificationService.getEmailSettings();
+      const toEmail = String(emailSettings?.toEmail || 'azgodev@gmail.com').trim();
+      const baseCcList = Array.isArray(emailSettings?.baseCcList) ? emailSettings.baseCcList : [
+        'mgan@pingconmarketing.com',
+        'marketing@pingconmarketing.com',
+        'azgan@pingconmarketing.com',
+        'jaezelle.benito@pingconmarketing.com'
+      ];
+
+      // Filter valid email addresses and ensure NO Account Executive email is included
+      const cleanCcList = baseCcList.filter(e => typeof e === 'string' && e.includes('@'));
+
+      const subject = isTestMode
+        ? `Test - [Action Required] New Return PIN Authorization Request: ${requestRecord.requester_name} (${requestRecord.organization_name || requestRecord.access_slug})`
+        : `[Action Required] New Return PIN Authorization Request: ${requestRecord.requester_name} (${requestRecord.organization_name || requestRecord.access_slug})`;
+
+      const portalUrl = typeof window !== 'undefined' && window.location?.origin 
+        ? `${window.location.origin}/admin` 
+        : 'https://rma-portal-v2.vercel.app/admin';
+
+      const htmlBody = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b; }
+            .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+            .header { background: #1e3a8a; padding: 24px 28px; color: #ffffff; }
+            .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; background: #f59e0b; color: #78350f; margin-bottom: 8px; }
+            .title { margin: 0; font-size: 20px; font-weight: 800; line-height: 1.3; }
+            .content { padding: 28px; }
+            .card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin: 18px 0; }
+            .grid { display: table; width: 100%; border-collapse: collapse; }
+            .row { display: table-row; }
+            .col-label { display: table-cell; width: 35%; padding: 7px 0; font-size: 12px; color: #64748b; font-weight: 600; }
+            .col-val { display: table-cell; padding: 7px 0; font-size: 13px; color: #0f172a; font-weight: 700; }
+            .btn { display: inline-block; padding: 12px 24px; background-color: #2563eb; color: #ffffff !important; text-decoration: none; border-radius: 10px; font-weight: 800; font-size: 13px; margin-top: 14px; text-align: center; }
+            .footer { background: #f1f5f9; padding: 16px 28px; font-size: 11px; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <span class="badge">Return Authorization Request</span>
+              <h1 class="title">${isTestMode ? 'Test - ' : ''}New PIN Code Request Pending Review</h1>
+              <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Wholesale RMA Return Gatekeeper</div>
+            </div>
+            <div class="content">
+              <p style="font-size: 14px; line-height: 1.5; margin-top: 0; color: #334155;">
+                A customer or warehouse staff member scanned the QR code at <strong>/${requestRecord.access_slug}</strong> and requested a 6-digit authorization PIN to unlock the return intake form.
+              </p>
+              <div class="card">
+                <div class="grid">
+                  <div class="row">
+                    <div class="col-label">Requester Name:</div>
+                    <div class="col-val">${requestRecord.requester_name}</div>
+                  </div>
+                  <div class="row">
+                    <div class="col-label">Requester Email:</div>
+                    <div class="col-val"><a href="mailto:${requestRecord.requester_email}" style="color: #2563eb;">${requestRecord.requester_email}</a></div>
+                  </div>
+                  <div class="row">
+                    <div class="col-label">Store / Company:</div>
+                    <div class="col-val">${requestRecord.organization_name || 'N/A'}</div>
+                  </div>
+                  <div class="row">
+                    <div class="col-label">QR Access Station:</div>
+                    <div class="col-val" style="font-family: monospace; color: #1e3a8a;">/${requestRecord.access_slug}</div>
+                  </div>
+                  <div class="row">
+                    <div class="col-label">Reason / Notes:</div>
+                    <div class="col-val" style="color: #475569; font-weight: 500;">${requestRecord.notes || 'No specific notes provided'}</div>
+                  </div>
+                  <div class="row">
+                    <div class="col-label">Time Requested:</div>
+                    <div class="col-val">${new Date(requestRecord.created_at).toLocaleString()}</div>
+                  </div>
+                </div>
+              </div>
+              <div style="text-align: center; margin-top: 24px;">
+                <a href="${portalUrl}" class="btn" style="color: #ffffff;">Review & Approve PIN in Admin Portal</a>
+              </div>
+              <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-top: 14px;">
+                Once approved, the system will automatically email the 6-digit PIN directly to ${requestRecord.requester_email}.
+              </p>
+            </div>
+            <div class="footer">
+              Wholesale RMA Operations Portal • Automated Security & Intake System
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const textBody = `${isTestMode ? 'Test - ' : ''}New Return PIN Authorization Request:\n\nRequester: ${requestRecord.requester_name} (${requestRecord.requester_email})\nStore/Branch: ${requestRecord.organization_name || 'N/A'}\nStation: /${requestRecord.access_slug}\nNotes: ${requestRecord.notes || 'None'}\n\nPlease review and approve in Admin Portal: ${portalUrl}`;
+
+      console.log(`[PIN Request Alert Dispatch] Sending alert to TO: "${toEmail}", CC: [${cleanCcList.join(', ')}], TestMode: ${isTestMode}`);
+
+      await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: 'finance2@keysysincorporated.com',
+          fromName: isTestMode ? '[TEST] Wholesale RMA Portal' : 'Wholesale RMA Portal',
+          to: toEmail,
+          cc: cleanCcList,
+          subject,
+          html: htmlBody,
+          text: textBody,
+          isTestMode
+        })
+      });
+    } catch (err) {
+      console.warn('Non-blocking error dispatching PIN request alert email:', err);
+    }
   },
 
   /**

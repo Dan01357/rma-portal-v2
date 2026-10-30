@@ -370,7 +370,12 @@ export const accessKeyService = {
       // HTTP 200: Successful authentication
       if (resp.ok && data.success && data.session) {
         try { localStorage.removeItem(attemptKey); } catch (e) {}
-        try { localStorage.setItem(SESSION_KEY, JSON.stringify(data.session)); } catch (e) {}
+        try { 
+          localStorage.setItem(SESSION_KEY, JSON.stringify(data.session)); 
+          if (data.session.cooldownUntil) {
+            localStorage.setItem(`rma_last_session_${data.session.slug?.toLowerCase()}`, JSON.stringify(data.session));
+          }
+        } catch (e) {}
         return { success: true, profile: data.profile || profile, session: data.session };
       }
 
@@ -489,9 +494,35 @@ export const accessKeyService = {
    */
   async checkDeviceCooldown(slug) {
     if (!slug) return null;
+    const cleanSlug = String(slug).trim().toLowerCase();
+
+    // 1. Fast local cache check
+    try {
+      const cached = localStorage.getItem(`rma_last_session_${cleanSlug}`);
+      if (cached) {
+        const s = JSON.parse(cached);
+        if (s.cooldownUntil && s.expiresAt) {
+          const now = Date.now();
+          const expTime = new Date(s.expiresAt).getTime();
+          const cdTime = new Date(s.cooldownUntil).getTime();
+          if (now >= expTime && now < cdTime) {
+            const diffMs = cdTime - now;
+            return {
+              isCooldownActive: true,
+              cooldownRemainingMinutes: Math.max(1, Math.ceil(diffMs / (60 * 1000))),
+              unlocksAt: s.cooldownUntil,
+              sessionExpiresAt: s.expiresAt,
+              profileName: s.profileName,
+              cooldownDurationHours: s.cooldownDurationHours || 6
+            };
+          }
+        }
+      }
+    } catch (e) {}
+
+    // 2. Hardware fingerprint & Supabase remote check
     try {
       const deviceFingerprint = await getDeviceFingerprint();
-      const cleanSlug = String(slug).trim().toLowerCase();
 
       const { data, error } = await supabase
         .from('device_intake_sessions')
@@ -528,7 +559,12 @@ export const accessKeyService = {
   async emergencyResetCooldowns(slug, profileId = null) {
     const cleanSlug = String(slug || '').trim().toLowerCase();
 
-    // 1. Call server route
+    // 1. Clear local session cache
+    try {
+      localStorage.removeItem(`rma_last_session_${cleanSlug}`);
+    } catch (e) {}
+
+    // 2. Call server route
     try {
       await fetch('/api/v1/auth/clear-cooldown', {
         method: 'POST',
@@ -537,7 +573,7 @@ export const accessKeyService = {
       });
     } catch (e) {}
 
-    // 2. Direct Supabase delete
+    // 3. Direct Supabase delete
     try {
       let query = supabase.from('device_intake_sessions').delete();
       if (cleanSlug) {
@@ -557,9 +593,14 @@ export const accessKeyService = {
   createSession(profile) {
     const now = Date.now();
     const durationHours = Number(profile.session_duration_hours || 0);
+    const cooldownHours = Number(profile.cooldown_duration_hours !== undefined ? profile.cooldown_duration_hours : 6);
     const expiresAt = durationHours > 0 
       ? new Date(now + (durationHours * 3600 * 1000)).toISOString() 
       : null; // null = No Expiry (Permanent)
+
+    const cooldownUntil = (durationHours > 0 && cooldownHours > 0 && expiresAt)
+      ? new Date(new Date(expiresAt).getTime() + (cooldownHours * 3600 * 1000)).toISOString()
+      : null;
 
     const token = `gate_${profile.access_slug}_${now.toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
 
@@ -570,12 +611,17 @@ export const accessKeyService = {
       profileName: profile.name,
       type: profile.type,
       durationHours,
+      cooldownDurationHours: cooldownHours,
       unlockedAt: new Date(now).toISOString(),
-      expiresAt
+      expiresAt,
+      cooldownUntil
     };
 
     try {
       localStorage.setItem(SESSION_KEY, JSON.stringify(sessionPayload));
+      if (cooldownUntil) {
+        localStorage.setItem(`rma_last_session_${profile.access_slug.toLowerCase()}`, JSON.stringify(sessionPayload));
+      }
     } catch (e) {}
 
     return sessionPayload;
@@ -601,7 +647,13 @@ export const accessKeyService = {
       if (session.expiresAt) {
         const expTime = new Date(session.expiresAt).getTime();
         if (Date.now() >= expTime) {
-          // Expired -> Clean up
+          // If session expired and cooldown applies, ensure last session cache is preserved
+          if (session.cooldownUntil) {
+            try {
+              localStorage.setItem(`rma_last_session_${session.slug?.toLowerCase()}`, JSON.stringify(session));
+            } catch (e) {}
+          }
+          // Expired -> Clean up active session
           localStorage.removeItem(SESSION_KEY);
           return null;
         }
@@ -616,8 +668,15 @@ export const accessKeyService = {
   /**
    * CLEAR SESSION (LOGOUT DEVICE FROM GATEKEEPER)
    */
-  clearSession() {
+  clearSession(slug = null) {
     try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      if (raw) {
+        const session = JSON.parse(raw);
+        if (session && session.slug && session.cooldownUntil) {
+          localStorage.setItem(`rma_last_session_${session.slug.toLowerCase()}`, JSON.stringify(session));
+        }
+      }
       localStorage.removeItem(SESSION_KEY);
     } catch (e) {}
   },

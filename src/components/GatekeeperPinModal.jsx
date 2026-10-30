@@ -28,6 +28,18 @@ import { accessKeyService } from '../services/accessKeyService';
 import { pinRequestService } from '../services/pinRequestService';
 import { formatCooldownLabel } from './PortalAccessKeysModal';
 
+export function formatSessionBadgeLabel(hours) {
+  const h = Number(hours || 0);
+  if (h <= 0) return 'Permanent Device Unlock';
+  const totalMins = Math.round(h * 60);
+  if (totalMins < 60) return `${totalMins}m Active Session`;
+  if (totalMins % 60 === 0) {
+    const hoursNum = totalMins / 60;
+    return `${hoursNum} Hour${hoursNum === 1 ? '' : 's'} Active Session`;
+  }
+  return `${totalMins}m Active Session`;
+}
+
 export default function GatekeeperPinModal({
   isOpen,
   currentSlug,
@@ -325,7 +337,8 @@ export default function GatekeeperPinModal({
         requesterEmail: requestForm.email,
         requesterName: requestForm.name,
         organizationName: requestForm.organization,
-        notes: requestForm.notes
+        notes: requestForm.notes,
+        isTestMode: Boolean(isTestMode)
       });
       setIsSubmittingRequest(false);
       setRequestSuccess(true);
@@ -508,45 +521,6 @@ export default function GatekeeperPinModal({
                 Unlocks At: {new Date(cooldownInfo.unlocksAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}, {new Date(cooldownInfo.unlocksAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
               </div>
             </div>
-
-            {/* Profile Info Pill */}
-            <div className="flex items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono">
-              <span className="truncate">Station: <strong>{profile?.name || currentSlug}</strong></span>
-              <span>•</span>
-              <span>Cooldown: <strong>{formatCooldownLabel(cooldownInfo.cooldownDurationHours || profile?.cooldown_duration_hours || 6)}</strong></span>
-            </div>
-
-            {/* Actions: Refresh & Contact Support & Supervisor Override */}
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2 text-xs">
-              <button
-                type="button"
-                onClick={handleRefreshCooldown}
-                disabled={isVerifying}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-black transition-all shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isVerifying ? 'animate-spin' : ''}`} />
-                <span>{isVerifying ? 'Checking Status...' : 'Refresh Lockout Status'}</span>
-              </button>
-
-              <div className="flex items-center justify-between pt-1 font-bold">
-                <a
-                  href="mailto:finance2@keysysincorporated.com?subject=Urgent%20RMA%20Portal%20Unlock%20Request"
-                  className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1"
-                >
-                  <Mail className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Contact Support / AE</span>
-                </a>
-
-                <button
-                  type="button"
-                  onClick={onOpenAdminLogin}
-                  className="text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
-                >
-                  <KeyRound className="w-3.5 h-3.5" />
-                  <span>Supervisor Override</span>
-                </button>
-              </div>
-            </div>
           </div>
         ) : (
           /* ================================================================= */
@@ -578,7 +552,7 @@ export default function GatekeeperPinModal({
 
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                     <Clock className="w-3 h-3" />
-                    {profile.session_duration_hours === 0 ? 'Permanent Device Unlock' : `${profile.session_duration_hours}h Active Session`}
+                    {formatSessionBadgeLabel(profile.session_duration_hours)}
                   </span>
                 </div>
 
