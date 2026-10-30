@@ -30,6 +30,15 @@ flowchart TD
     L --> M["6. Headless REST API Sync\nPrimary System, Jarmen, Jelo, Arlito\nvia SHA-256 API Key Vault"]
 ```
 
+### Consolidated Enterprise Operational Architecture
+
+The Admin Workspace provides 4 crystal-clear, segregated operational hubs:
+1. **Saved Products Catalog** (`adminActiveTab === 'products'`): Verified master SKU catalog with multi-vendor auto-suggest and ERP sync.
+2. **Customer RMA Hub (Inbound Logistics)** (`adminActiveTab === 'customer_reports'`): Dedicated to supermarket and store branch returns (`rma_type: 'customer_inbound'`), billing document matching (SI#/DR#/PO#), and Customer Credit Memo issuance.
+3. **Supplier Hub (RTV Claims)** (`adminActiveTab === 'supplier_claims'`): Unified vendor reverse logistics for warehouse floor defects (`rma_type: 'supplier_outbound'`) and RTV dispositions (`SupplierClaimsTab.jsx`), supporting single and batch vendor debit notes with sequential RTV IDs.
+4. **Finance Credit Memos** (`adminActiveTab === 'credit_memos'`): Official accounting credit memorandum ledger, 12% VAT calculations, and printable vouchers.
+5. **Settings & SMTP** (`adminActiveTab === 'settings'`, Super Admin Only): API key vault, Google SMTP notification configuration, and system diagnostics.
+
 ---
 
 ## Chapter 1: Unified Role-Based QR Code & 6-Digit PIN Gatekeeper Engine

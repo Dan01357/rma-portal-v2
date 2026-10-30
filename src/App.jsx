@@ -3155,11 +3155,12 @@ export default function App() {
 
             {/* Production-Level Tab Segmented Switcher: Horizontally scrollable on mobile, wrapping on desktop */}
             <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-200/70 dark:bg-slate-800/80 p-1.5 rounded-2xl overflow-x-auto no-scrollbar sm:flex-wrap">
+              {/* Tab 1: Saved Products */}
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('products')}
                 className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'products'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
               >
@@ -3167,11 +3168,12 @@ export default function App() {
                 <span>Saved Products ({savedProductsList.length})</span>
               </button>
 
+              {/* Tab 2: Customer RMA Hub (Inbound) */}
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('customer_reports')}
                 className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                    ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
               >
@@ -3179,23 +3181,25 @@ export default function App() {
                 <span>Customer RMA Hub ({customerInboundReports.length})</span>
               </button>
 
+              {/* Tab 3: Supplier Hub (RTV Claims) */}
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('supplier_claims')}
                 className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'supplier_claims'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                    ? 'bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
               >
                 <Building2 className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
-                <span>Supplier RMA Hub ({supplierOutboundReports.length})</span>
+                <span>Supplier Hub (RTV Claims) ({supplierOutboundReports.length})</span>
               </button>
 
+              {/* Tab 4: Credit Memos */}
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('credit_memos')}
                 className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'credit_memos'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                    ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
               >
@@ -3203,24 +3207,13 @@ export default function App() {
                 <span>Credit Memos ({creditMemosList.length})</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => setAdminActiveTab('supplier_claims')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'supplier_claims'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-              >
-                <Building2 className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
-                <span>Supplier Claims (RTV)</span>
-              </button>
-
+              {/* Tab 5: Settings & SMTP (Super Admin Only) */}
               {currentUser?.role === 'super_admin' && (
                 <button
                   type="button"
                   onClick={() => setAdminActiveTab('settings')}
                   className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'settings'
-                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                      ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                     }`}
                 >

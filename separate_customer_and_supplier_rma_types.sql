@@ -35,3 +35,4 @@ CREATE INDEX IF NOT EXISTS idx_rma_reports_type_created
 -- 4. Verify Schema Mutation
 COMMENT ON COLUMN public.rma_reports.rma_type IS 
   'Logistics classification: customer_inbound (customer/store return) or supplier_outbound (warehouse vendor return/RTV claim)';
+

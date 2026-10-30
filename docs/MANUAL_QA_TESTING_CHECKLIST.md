@@ -301,21 +301,31 @@ Each test scenario defines:
   * **Action**: Click button.
   * **Expected Behavior**: `PortalAccessQRModal` opens with large high-contrast QR code pointing to `https://rma-portal-v2.vercel.app/`, dock worker instructions, and **"Download Printable A4 Poster"** button.
 
-- [ ] **TC-NAV-04 (5 Live KPI Dashboard Counters)**
-  * **Location**: Dashboard Header KPI Section
-  * **Action**: Observe the 5 metric cards:
-    1. **Total Incoming RMA**: Sum of active return tickets.
-    2. **Verified Catalog Products**: Count of active SKUs in `products` table.
-    3. **Pending Unknown Barcodes**: Count of returns with `pending_admin_details`.
-    4. **Finance Credit Memos**: Count of issued credit memos.
-    5. **Supplier Claims (RTV)**: Count of vendor debit claims.
-  * **Expected Behavior**: Numbers accurately match `rma_reports`, `products`, and `credit_memos` database rows.
+- [ ] **TC-NAV-04 (6 Operational KPI Cards Synchronization)**
+  * **Location**: Dashboard Top Metric Cards
+  * **Action**: Click each of the 6 KPI cards:
+    1. **Saved Products Card**: Switches to `products` tab.
+    2. **Customer Inbound Card**: Switches to `customer_reports` tab (`Customer RMA Hub`).
+    3. **Supplier RTVs Card**: Switches to `supplier_claims` tab (`Supplier Hub (RTV Claims)`).
+    4. **Credit Memos Card**: Switches to `credit_memos` tab.
+    5. **Pending Barcodes Card**: Opens `PendingBarcodesModal`.
+    6. **Staff Directory Card**: Opens `EmployeeManagementModal` (Super Admin).
 
 - [ ] **TC-NAV-05 (Instant Cross-Tab Logout Synchronization)**
   * **Location**: Global Application State
   * **Action**: Open `https://rma-portal-v2.vercel.app/admin` in Tab A (authenticated). Open the same URL in Tab B. Click **"Logout"** in Tab A.
   * **Expected Behavior**: Tab A logs out and resets URL to `/`. Tab B **instantly** receives the `BroadcastChannel('rma_auth_bus')` event, resets to `/`, clears all session modals, and destroys all cached admin tokens.
   * **Edge Case**: Copy the previous logged-in `/admin` URL and paste into a new browser tab; verifies the user remains unauthenticated and is prompted with the login gate.
+
+- [ ] **TC-NAV-06 (4 Consolidated Operational Navigation Tabs)**
+  * **Location**: Admin Top Tab Switcher
+  * **Action**: Inspect the tab strip to verify exact consolidation with zero duplicate buttons:
+    * `[ ] Saved Products Tab` (`adminActiveTab === 'products'`)
+    * `[ ] Customer RMA Hub (Inbound)` (`adminActiveTab === 'customer_reports'`)
+    * `[ ] Supplier Hub (RTV Claims)` (`adminActiveTab === 'supplier_claims'`)
+    * `[ ] Finance Credit Memos` (`adminActiveTab === 'credit_memos'`)
+    * `[ ] Settings & SMTP` (`adminActiveTab === 'settings'`, Super Admin only)
+  * **Expected Behavior**: Only one unified "Supplier Hub (RTV Claims)" button exists. Active tab highlights cleanly with appropriate theme accents.
 
 ---
 
