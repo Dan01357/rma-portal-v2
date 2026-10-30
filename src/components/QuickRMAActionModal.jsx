@@ -27,7 +27,8 @@ import {
   Tag,
   Shield,
   KeyRound,
-  ArrowLeft
+  ArrowLeft,
+  Folder
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
@@ -431,6 +432,51 @@ export default function QuickRMAActionModal({
   const reporterName = report?.reporter_name || report?.reported_by || report?.customer_name || 'Staff / Customer';
   const reporterContact = report?.reporter_contact || report?.reporter_phone || report?.phone || '';
 
+  // Paperwork & AI Verification Details
+  const paperworkList = report?.paperwork_photos
+    ? (Array.isArray(report.paperwork_photos) ? report.paperwork_photos : [report.paperwork_photos])
+    : [];
+  const aiMetadata = report?.ai_document_metadata || null;
+  const [adminDrNumber, setAdminDrNumber] = useState(report?.invoice_dr_number || aiMetadata?.invoice_dr_number || '');
+  const [adminStoreBranch, setAdminStoreBranch] = useState(report?.store_branch || aiMetadata?.store_branch || '');
+  const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
+  const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
+
+  useEffect(() => {
+    setAdminDrNumber(report?.invoice_dr_number || report?.ai_document_metadata?.invoice_dr_number || '');
+    setAdminStoreBranch(report?.store_branch || report?.ai_document_metadata?.store_branch || '');
+    setIsEditingAiDetails(false);
+  }, [report?.id, report?.invoice_dr_number, report?.store_branch]);
+
+  const handleSaveAiDetails = async () => {
+    if (!report?.id) return;
+    setIsSavingAiDetails(true);
+    try {
+      const { error } = await supabase
+        .from('rma_reports')
+        .update({
+          invoice_dr_number: adminDrNumber.trim() || null,
+          store_branch: adminStoreBranch.trim() || null
+        })
+        .eq('id', report.id);
+
+      if (error) throw error;
+      report.invoice_dr_number = adminDrNumber.trim();
+      report.store_branch = adminStoreBranch.trim();
+      setIsEditingAiDetails(false);
+      onReportUpdated && onReportUpdated({
+        ...report,
+        invoice_dr_number: adminDrNumber.trim(),
+        store_branch: adminStoreBranch.trim()
+      });
+    } catch (e) {
+      console.error('Failed to update AI details:', e);
+      alert('Failed to save updated DR/Branch details.');
+    } finally {
+      setIsSavingAiDetails(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden my-0 sm:my-auto max-h-[92dvh] sm:max-h-[92vh] flex flex-col">
@@ -597,6 +643,125 @@ export default function QuickRMAActionModal({
                   >
                     <img src={photoList[0]} alt="Proof" className="w-full h-full object-cover" />
                   </button>
+                </div>
+              )}
+
+              {/* Direct Google Drive Folder Link */}
+              {report?.google_drive_folder_url && (
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase text-slate-400">Drive Storage:</span>
+                  <a
+                    href={report.google_drive_folder_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                    title="Open organized Google Drive folder with Damaged Items & Paperwork subfolders"
+                  >
+                    <Folder className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    <span>Open RMA Drive Folder</span>
+                    <ExternalLink className="w-3 h-3 text-amber-500" />
+                  </a>
+                </div>
+              )}
+
+              {/* Official Logistics Paperwork & AI Verification Details */}
+              {(paperworkList.length > 0 || report.invoice_dr_number || report.store_branch || aiMetadata) && (
+                <div className="pt-2.5 border-t border-slate-200 dark:border-slate-700 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <span className="px-2 py-0.5 rounded-lg text-[10px] font-black uppercase bg-violet-100 dark:bg-violet-950/60 text-violet-800 dark:text-violet-300 border border-violet-200 dark:border-violet-800 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" />
+                        AI Verified {aiMetadata?.document_type || 'Paperwork'}
+                      </span>
+                      {aiMetadata?.confidence && (
+                        <span className="text-[10px] font-mono font-bold text-slate-400">
+                          {Math.round(aiMetadata.confidence * 100)}%
+                        </span>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingAiDetails(!isEditingAiDetails)}
+                      className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                    >
+                      {isEditingAiDetails ? 'Cancel Edit' : 'Edit DR# / Branch'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-start gap-3 bg-violet-50/50 dark:bg-violet-950/20 p-2.5 rounded-2xl border border-violet-100 dark:border-violet-900/50">
+                    {paperworkList.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenLightbox && onOpenLightbox({
+                          images: paperworkList,
+                          initialIndex: 0,
+                          url: paperworkList[0],
+                          title: aiMetadata?.document_type || 'Paperwork Document',
+                          subtitle: `DR #${adminDrNumber || report.invoice_dr_number || 'N/A'} • ${adminStoreBranch || report.store_branch || ''}`
+                        })}
+                        className="w-12 h-12 rounded-xl overflow-hidden border border-violet-200 dark:border-violet-800 hover:scale-105 shadow-xs transition-transform cursor-zoom-in shrink-0"
+                        title="Click to view paperwork photo"
+                      >
+                        <img src={paperworkList[0]} alt="Paperwork" className="w-full h-full object-cover" />
+                      </button>
+                    )}
+
+                    <div className="flex-1 min-w-0 text-xs space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-400 text-[10px] uppercase font-bold">DR / Invoice:</span>
+                        <strong className="font-mono text-slate-900 dark:text-white font-black">{adminDrNumber || report.invoice_dr_number || 'None assigned'}</strong>
+                      </div>
+                      {(adminStoreBranch || report.store_branch) && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold">Store Branch:</span>
+                          <strong className="text-slate-800 dark:text-slate-200 truncate">{adminStoreBranch || report.store_branch}</strong>
+                        </div>
+                      )}
+                      {aiMetadata?.vendor_name && (
+                        <div className="text-[10px] text-slate-500 truncate">
+                          Vendor: <span className="font-semibold text-slate-700 dark:text-slate-300">{aiMetadata.vendor_name}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Manual Override Editor for Admin */}
+                  {isEditingAiDetails && (
+                    <div className="p-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl space-y-2 animate-in fade-in">
+                      <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                        Manual Override (Edit handwritten or OCR misread values):
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 block mb-0.5">DR / Invoice #</label>
+                          <input
+                            type="text"
+                            value={adminDrNumber}
+                            onChange={(e) => setAdminDrNumber(e.target.value)}
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Store Branch</label>
+                          <input
+                            type="text"
+                            value={adminStoreBranch}
+                            onChange={(e) => setAdminStoreBranch(e.target.value)}
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                          />
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isSavingAiDetails}
+                        onClick={handleSaveAiDetails}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                      >
+                        {isSavingAiDetails ? 'Saving...' : 'Save Updated Details'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

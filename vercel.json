@@ -2,6 +2,7 @@
   "rewrites": [
     { "source": "/docs", "destination": "/api/docs" },
     { "source": "/api/openapi.json", "destination": "/api/docs?format=json" },
+    { "source": "/api/v1/ai/inspect-paperwork", "destination": "/api/upload-photo?action=inspect-paperwork" },
     { "source": "/api/v1/auth/verify-pin", "destination": "/api/v1/api-keys?action=verify-pin" },
     { "source": "/api/v1/auth/clear-cooldown", "destination": "/api/v1/api-keys?action=clear-cooldown" },
     { "source": "/api/v1/api-keys/:id", "destination": "/api/v1/api-keys/[id]?id=:id" },

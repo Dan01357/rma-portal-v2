@@ -176,7 +176,15 @@ export const catalogService = {
    * 3. Fallback: If Google Drive credentials are not yet set or offline, uploads to Supabase Storage ('rma-photos').
    * 4. Tertiary Fallback: Offline Base64 Data URL so user never loses their submission.
    */
-  async uploadPhoto(file, rmaNumber = 'GENERAL') {
+  async uploadPhoto(file, rmaNumber = 'GENERAL', category = 'damaged_items') {
+    const details = await this.uploadPhotoWithDetails(file, rmaNumber, category);
+    return details?.url || details;
+  },
+
+  /**
+   * Upload photo and return full details including Google Drive folder URLs
+   */
+  async uploadPhotoWithDetails(file, rmaNumber = 'GENERAL', category = 'damaged_items') {
     if (!file) return null;
     try {
       // 1. Client-Side Aggressive WebP Compression
@@ -190,16 +198,24 @@ export const catalogService = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             fileData: base64Data,
-            fileName: compressed.name || `RMA_${rmaNumber}_${Date.now()}.webp`,
+            fileName: compressed.name || `RMA_${rmaNumber}_${category}_${Date.now()}.webp`,
             mimeType: compressed.type || 'image/webp',
-            rmaNumber
+            rmaNumber,
+            category
           })
         });
 
         if (gdriveRes.ok) {
           const gdriveJson = await gdriveRes.json();
           if (gdriveJson.success && (gdriveJson.url || gdriveJson.previewUrl)) {
-            return gdriveJson.url || gdriveJson.previewUrl;
+            return {
+              url: gdriveJson.url || gdriveJson.previewUrl,
+              previewUrl: gdriveJson.previewUrl || gdriveJson.url,
+              rmaFolderUrl: gdriveJson.rmaFolderUrl || null,
+              rmaFolderId: gdriveJson.rmaFolderId || null,
+              fileId: gdriveJson.fileId || null,
+              provider: 'google_drive'
+            };
           }
         }
       } catch (gdriveErr) {
@@ -208,7 +224,8 @@ export const catalogService = {
 
       // 3. Secondary Fallback: Supabase Storage ('rma-photos' bucket)
       const cleanName = compressed.name ? compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_') : 'photo.webp';
-      const filePath = `reports/${Date.now()}-${Math.floor(Math.random() * 1000)}_${cleanName}`;
+      const folderPrefix = category === 'official_paperwork' ? 'paperwork' : 'reports';
+      const filePath = `${folderPrefix}/${Date.now()}-${Math.floor(Math.random() * 1000)}_${cleanName}`;
       
       const { data, error } = await supabase.storage
         .from('rma-photos')
@@ -224,16 +241,70 @@ export const catalogService = {
           .getPublicUrl(filePath);
 
         if (publicUrlData?.publicUrl) {
-          return publicUrlData.publicUrl;
+          return {
+            url: publicUrlData.publicUrl,
+            previewUrl: publicUrlData.publicUrl,
+            provider: 'supabase'
+          };
         }
       }
 
       // 4. Tertiary Fallback: Base64 Data URL
-      return base64Data;
+      return {
+        url: base64Data,
+        previewUrl: base64Data,
+        provider: 'local_base64'
+      };
     } catch (err) {
       console.warn('Photo upload exception (falling back to data URL):', err.message);
-      return await this.fileToBase64(file);
+      const b64 = await this.fileToBase64(file);
+      return {
+        url: b64,
+        previewUrl: b64,
+        provider: 'local_base64'
+      };
     }
+  },
+
+  /**
+   * Inspect paperwork photo using Google Gemini Flash OCR service
+   * Returns verification flag, document type, DR number, store branch, etc.
+   */
+  async inspectPaperwork(fileOrBase64) {
+    let base64Data = '';
+    let mimeType = 'image/jpeg';
+
+    if (typeof fileOrBase64 === 'string') {
+      base64Data = fileOrBase64;
+      if (fileOrBase64.startsWith('data:image/')) {
+        mimeType = fileOrBase64.substring(5, fileOrBase64.indexOf(';'));
+      }
+    } else if (fileOrBase64 instanceof File || fileOrBase64 instanceof Blob) {
+      mimeType = fileOrBase64.type || 'image/jpeg';
+      base64Data = await this.fileToBase64(fileOrBase64);
+    } else {
+      throw new Error('Invalid file or image provided for paperwork inspection.');
+    }
+
+    const res = await fetch('/api/v1/ai/inspect-paperwork', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileData: base64Data,
+        mimeType
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      try {
+        return JSON.parse(errText);
+      } catch (e) {
+        throw new Error(`Paperwork inspection error (${res.status}): ${errText}`);
+      }
+    }
+
+    return await res.json();
   },
 
   fileToBase64(file) {
@@ -898,6 +969,12 @@ export const catalogService = {
     reason = 'Damaged Box / Crushed Packaging',
     explanation = '',
     photos = [],
+    paperwork_photos = [],
+    invoice_dr_number = null,
+    store_branch = null,
+    ai_document_metadata = null,
+    google_drive_folder_url = null,
+    google_drive_folder_id = null,
     gps = null 
   }) {
     const cleanBarcode = String(barcode || '').trim();
@@ -995,6 +1072,12 @@ export const catalogService = {
       reason: reason || 'Damaged Box / Crushed Packaging',
       explanation: explanation || null,
       photos: Array.isArray(photos) ? photos : [photos],
+      paperwork_photos: Array.isArray(paperwork_photos) ? paperwork_photos : (paperwork_photos ? [paperwork_photos] : []),
+      invoice_dr_number: invoice_dr_number || null,
+      store_branch: store_branch || null,
+      ai_document_metadata: ai_document_metadata || null,
+      google_drive_folder_url: google_drive_folder_url || null,
+      google_drive_folder_id: google_drive_folder_id || null,
       gps_latitude: isAccurateGps ? Number(gps.latitude) : null,
       gps_longitude: isAccurateGps ? Number(gps.longitude) : null,
       gps_accuracy: isAccurateGps ? Number(gps.accuracy) : null,
@@ -1013,16 +1096,34 @@ export const catalogService = {
       audit_trail: []
     };
 
-    // 1. Insert into rma_reports
-    const { data: insertedReport, error: reportError } = await supabase
+    // 1. Insert into rma_reports with graceful fallback if columns not yet migrated
+    let insertedReport = null;
+    let { data: insertedData, error: reportError } = await supabase
       .from('rma_reports')
       .insert([reportRow])
       .select()
       .single();
 
-    if (reportError) {
+    if (reportError && (reportError.message?.includes('paperwork_photos') || reportError.message?.includes('invoice_dr_number') || reportError.message?.includes('column'))) {
+      console.warn('Retrying insert without new AI/Drive columns (pending SQL migration):', reportError.message);
+      const fallbackRow = { ...reportRow };
+      delete fallbackRow.paperwork_photos;
+      delete fallbackRow.invoice_dr_number;
+      delete fallbackRow.store_branch;
+      delete fallbackRow.ai_document_metadata;
+      delete fallbackRow.google_drive_folder_url;
+      delete fallbackRow.google_drive_folder_id;
+      const retry = await supabase.from('rma_reports').insert([fallbackRow]).select().single();
+      if (!retry.error) {
+        insertedReport = retry.data;
+      } else {
+        throw new Error(`Database error saving return report: ${retry.error.message}`);
+      }
+    } else if (reportError) {
       console.error('Failed to insert rma_report to Supabase:', reportError);
       throw new Error(`Database error saving return report: ${reportError.message}`);
+    } else {
+      insertedReport = insertedData;
     }
 
     const finalReport = insertedReport || reportRow;

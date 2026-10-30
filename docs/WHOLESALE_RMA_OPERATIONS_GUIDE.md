@@ -437,3 +437,44 @@ For rapid developer and QA testing:
 - When **Test Mode: ON** is active, submitting a PIN request immediately reveals the station's active 6-digit PIN on-screen in an amber sandbox banner with an *Auto-Fill PIN & Unlock Now* shortcut.
 - Dispatched emails in Test Mode are safely rerouted exclusively to `finance2@keysysincorporated.com`.
 
+---
+
+## Chapter 9: Gemini Flash Paperwork Inspection & Hierarchical Google Drive Storage
+
+To eliminate manual data entry for warehouse handlers and prevent fraudulent or invalid return claims, the portal integrates **Google Gemini Flash** multimodal AI with structured Google Workspace Drive storage.
+
+### 9.1 Gemini Flash Paperwork Validator & OCR Engine
+- **Endpoint**: `/api/v1/ai/inspect-paperwork` (powered by `@google/genai` and `gemini-2.5-flash`).
+- **Input**: Base64 or URL of captured paperwork image.
+- **Strict Verification Rules**:
+  1. **Valid Document Criteria**: The uploaded image must be an authentic logistics document:
+     - Delivery Receipt (DR)
+     - Sales Invoice (SI)
+     - Purchase Order (PO)
+     - Official Pull-Out / Credit Slip
+  2. **Automated Rejection**: If the user uploads a selfie, face, floor, furniture, food produce only, or blank box without paperwork, Gemini returns `is_valid_document: false` with a clear explanation:
+     > *"Photo does not appear to be an official invoice, DR, or PO."*
+  3. **Frontend Rejection Behavior**: The uploader card performs a CSS shake animation (`.animate-shake`), highlights in red, and displays:
+     > *"Invalid document photo: Please take a clear picture of the paper delivery receipt or invoice."*
+  4. **Zero-Typing UX**: For valid documents, Gemini extracts the `invoice_dr_number`, `store_branch`, `detected_date`, and `vendor_name`, displaying a verified green badge:
+     > `✓ Verified Delivery Receipt (DR-2026-8812) • 95% AI Confidence`
+     The DR number and store branch are auto-filled into the return ticket behind the scenes.
+
+### 9.2 Structured Google Drive Storage Hierarchy
+Rather than saving proof photos in a flat unorganized folder, the upload service (`/api/upload-photo`) organizes all incoming media in a structured directory tree:
+
+```
+Root Folder: "Wholesale RMA Records"
+  └── [YYYY-MM] (e.g. 2026-10)
+      └── [RMA_NUMBER] (e.g. RMA-20261030-9841)
+          ├── 01_Damaged_Items/ (stores photos of defective goods)
+          └── 02_Official_Paperwork/ (stores verified DR, SI, and PO photos)
+```
+
+- **Database Preservation**:
+  - `rma_reports.photos`: Array of URLs for damaged item photos.
+  - `rma_reports.paperwork_photos`: Array of URLs for verified paperwork documents.
+  - `rma_reports.google_drive_folder_url`: Direct link to the RMA folder in Google Drive.
+- **Admin Portal Access**: In `QuickRMAActionModal`, warehouse supervisors and finance managers can click **"Open RMA Drive Folder"** to inspect the organized media and view the AI-extracted metadata.
+- **Manual Override**: If Gemini misread a handwritten digit on a carbon copy receipt, Admins can click **"Edit DR# / Branch"** to manually update the record with instant database synchronization.
+

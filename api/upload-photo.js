@@ -1,12 +1,13 @@
 import crypto from 'crypto';
 import { setCorsHeaders } from './_lib/auth.js';
+import { inspectPaperworkWithGemini } from './_lib/geminiInspector.js';
 
 /**
  * Cache access token across warm lambda invocations
  */
 let cachedToken = null;
 let tokenExpiresAt = 0;
-let cachedMonthlyFolder = { yearMonth: '', folderId: '' };
+const folderCache = new Map();
 
 /**
  * Extracts Google Service Account credentials from environment variables
@@ -194,6 +195,101 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
 }
 
 /**
+ * Cached version of findOrCreateFolder to avoid redundant API queries
+ */
+async function findOrCreateFolderCached(folderName, parentFolderId, accessToken, signal) {
+  if (!parentFolderId) return null;
+  const cacheKey = `${parentFolderId}::${folderName}`;
+  if (folderCache.has(cacheKey)) {
+    return folderCache.get(cacheKey);
+  }
+  const folderId = await findOrCreateFolder(folderName, parentFolderId, accessToken, signal);
+  if (folderId) {
+    folderCache.set(cacheKey, folderId);
+  }
+  return folderId;
+}
+
+/**
+ * Resolves structured folder hierarchy:
+ * Wholesale RMA Records
+ *   └── [YYYY-MM]
+ *       └── [RMA_NUMBER]
+ *           ├── 01_Damaged_Items/
+ *           └── 02_Official_Paperwork/
+ */
+async function resolveRmaHierarchy({ rootFolderId, rmaNumber, category, accessToken, signal }) {
+  const now = new Date();
+  const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  let currentParentId = rootFolderId;
+
+  // 1. Root folder: "Wholesale RMA Records"
+  if (!currentParentId) {
+    try {
+      const searchRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and name = 'Wholesale RMA Records' and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+        { headers: { Authorization: `Bearer ${accessToken}` }, signal }
+      );
+      if (searchRes.ok) {
+        const sData = await searchRes.json();
+        if (sData.files && sData.files.length > 0) {
+          currentParentId = sData.files[0].id;
+        }
+      }
+    } catch (e) {
+      console.warn('[Google Drive] Root search notice:', e.message);
+    }
+  }
+
+  if (currentParentId) {
+    try {
+      const infoRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${currentParentId}?fields=id,name&supportsAllDrives=true`,
+        { headers: { Authorization: `Bearer ${accessToken}` }, signal }
+      );
+      if (infoRes.ok) {
+        const info = await infoRes.json();
+        if (info.name !== 'Wholesale RMA Records') {
+          const subRoot = await findOrCreateFolderCached('Wholesale RMA Records', currentParentId, accessToken, signal);
+          if (subRoot) currentParentId = subRoot;
+        }
+      }
+    } catch (e) {
+      console.warn('[Google Drive] Root verification notice:', e.message);
+    }
+  }
+
+  // 2. Monthly: [YYYY-MM]
+  const monthFolderId = await findOrCreateFolderCached(yearMonth, currentParentId, accessToken, signal);
+  if (monthFolderId) {
+    currentParentId = monthFolderId;
+  }
+
+  // 3. RMA Number: [RMA_NUMBER]
+  const cleanRma = (rmaNumber && rmaNumber !== 'GENERAL') ? String(rmaNumber).trim() : 'General_Intake';
+  const rmaFolderId = await findOrCreateFolderCached(cleanRma, currentParentId, accessToken, signal);
+  if (rmaFolderId) {
+    currentParentId = rmaFolderId;
+  }
+
+  // 4. Subfolder: 01_Damaged_Items or 02_Official_Paperwork
+  const isPaperwork = category === 'official_paperwork' || category === 'paperwork';
+  const subFolderName = isPaperwork ? '02_Official_Paperwork' : '01_Damaged_Items';
+  const targetSubfolderId = await findOrCreateFolderCached(subFolderName, currentParentId, accessToken, signal);
+
+  const rmaFolderUrl = rmaFolderId
+    ? `https://drive.google.com/drive/folders/${rmaFolderId}`
+    : (currentParentId ? `https://drive.google.com/drive/folders/${currentParentId}` : null);
+
+  return {
+    targetFolderId: targetSubfolderId || currentParentId,
+    rmaFolderId: rmaFolderId || currentParentId,
+    rmaFolderUrl
+  };
+}
+
+/**
  * Serverless Upload Handler:
  * Uploads compressed WebP proof photo directly to Google Workspace Drive
  * with automatic Supabase Storage fallback.
@@ -346,7 +442,28 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: 'METHOD_NOT_ALLOWED' });
   }
 
-  // 1. Check if Google Drive credentials exist
+  // 1. Handle Gemini Flash Paperwork Inspection
+  if (req.query?.action === 'inspect-paperwork' || req.body?.action === 'inspect-paperwork') {
+    try {
+      const { fileData, imageUrl, mimeType } = req.body || {};
+      const result = await inspectPaperworkWithGemini({
+        fileData: fileData || req.body?.image || req.body?.photo,
+        imageUrl: imageUrl || req.body?.url,
+        mimeType: mimeType || 'image/jpeg'
+      });
+      return res.status(200).json(result);
+    } catch (err) {
+      console.error('[Gemini Paperwork Inspection Error]:', err);
+      return res.status(500).json({
+        is_valid_document: false,
+        confidence: 0,
+        error: err.message,
+        rejection_reason: `AI inspection error: ${err.message}`
+      });
+    }
+  }
+
+  // 2. Check if Google Drive credentials exist
   const creds = getGoogleCredentials();
   if (!creds) {
     return res.status(200).json({
@@ -356,8 +473,14 @@ export default async function handler(req, res) {
     });
   }
 
-  // 2. Parse body: expect base64 fileData
-  const { fileData, fileName, mimeType = 'image/webp', rmaNumber = 'GENERAL' } = req.body || {};
+  // 3. Parse body: expect base64 fileData, rmaNumber, and category ('damaged_items' | 'official_paperwork')
+  const {
+    fileData,
+    fileName,
+    mimeType = 'image/webp',
+    rmaNumber = 'GENERAL',
+    category = 'damaged_items'
+  } = req.body || {};
 
   if (!fileData) {
     return res.status(400).json({
@@ -378,84 +501,36 @@ export default async function handler(req, res) {
   try {
     const accessToken = await getGoogleAccessToken(creds, controller.signal);
 
-    // 3. Resolve target folder in Google Drive with warm cache
-    const now = new Date();
-    const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    
-    let targetFolderId = creds.folderId;
-
-    if (cachedMonthlyFolder.yearMonth === yearMonth && cachedMonthlyFolder.folderId) {
-      targetFolderId = cachedMonthlyFolder.folderId;
-    } else {
-      // If folderId is not specified, attempt to auto-discover "Wholesale RMA Photos"
-      if (!targetFolderId) {
-        try {
-          const searchShared = await fetch(
-            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Wholesale RMA Photos' or name = '" + yearMonth + "') and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
-            {
-              headers: { Authorization: `Bearer ${accessToken}` },
-              signal: controller.signal
-            }
-          );
-          if (searchShared.ok) {
-            const sData = await searchShared.json();
-            if (sData.files && sData.files.length > 0) {
-              targetFolderId = sData.files[0].id;
-            }
-          }
-        } catch (sErr) {
-          console.warn('[Google Drive] Auto-discovery notice:', sErr.message);
-        }
-      }
-
-      if (targetFolderId) {
-        try {
-          // Check if target folder is already named after the current month
-          const infoRes = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${targetFolderId}?fields=id,name&supportsAllDrives=true`,
-            {
-              headers: { Authorization: `Bearer ${accessToken}` },
-              signal: controller.signal
-            }
-          );
-          let isAlreadyMonthly = false;
-          if (infoRes.ok) {
-            const info = await infoRes.json();
-            if (info.name === yearMonth || info.name.includes(yearMonth)) {
-              isAlreadyMonthly = true;
-            }
-          }
-
-          if (!isAlreadyMonthly) {
-            const subfolderId = await findOrCreateFolder(yearMonth, targetFolderId, accessToken, controller.signal);
-            if (subfolderId) targetFolderId = subfolderId;
-          }
-        } catch (fErr) {
-          console.warn('[Google Drive] Monthly subfolder check notice, uploading to target folder:', fErr.message);
-        }
-      }
-
-      if (targetFolderId) {
-        cachedMonthlyFolder = { yearMonth, folderId: targetFolderId };
-      }
-    }
+    // 4. Resolve target folder in Google Drive with clean hierarchical structure:
+    // Wholesale RMA Records / [YYYY-MM] / [RMA_NUMBER] / [01_Damaged_Items | 02_Official_Paperwork]
+    const {
+      targetFolderId,
+      rmaFolderId,
+      rmaFolderUrl
+    } = await resolveRmaHierarchy({
+      rootFolderId: creds.folderId,
+      rmaNumber,
+      category,
+      accessToken,
+      signal: controller.signal
+    });
 
     if (!targetFolderId) {
       return res.status(400).json({
         success: false,
         error: 'MISSING_TARGET_FOLDER',
-        message: 'Google Drive Service Account requires GOOGLE_DRIVE_FOLDER_ID or a shared folder ("Wholesale RMA Photos") to store files without quota limits.'
+        message: 'Google Drive requires a valid root folder or shared drive to store files without quota limits.'
       });
     }
 
-    // 4. Construct Multipart Upload to Drive v3 with supportsAllDrives=true
-    const safeName = fileName || `RMA_${rmaNumber}_${Date.now()}.webp`;
+    // 5. Construct Multipart Upload to Drive v3 with supportsAllDrives=true
+    const safeName = fileName || `RMA_${rmaNumber}_${category}_${Date.now()}.webp`;
     const boundary = `----RmaPhotoBoundary${Date.now()}`;
 
     const metadataPart = JSON.stringify({
       name: safeName,
       parents: targetFolderId ? [targetFolderId] : undefined,
-      description: `Wholesale RMA Proof Photo for ${rmaNumber} - Uploaded ${now.toISOString()}`,
+      description: `Wholesale RMA ${category} for ${rmaNumber} - Uploaded ${new Date().toISOString()}`,
     });
 
     const bodyParts = [
@@ -523,6 +598,9 @@ export default async function handler(req, res) {
       url: directCdnUrl,
       previewUrl: directCdnUrl,
       webViewLink,
+      rmaFolderUrl,
+      rmaFolderId,
+      category,
       fileName: safeName,
       sizeBytes: buffer.length,
     });

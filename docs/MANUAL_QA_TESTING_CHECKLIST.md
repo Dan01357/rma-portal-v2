@@ -720,6 +720,59 @@ Each test scenario defines:
 
 ---
 
+## Section 10: Google Gemini Flash Paperwork OCR & Hierarchical Google Drive Storage
+
+### 10.1 Gemini Flash Paperwork Validation & Rejection
+- [ ] **TC-AI-OCR-01 (Valid Delivery Receipt / Sales Invoice Validation & Auto-Fill)**
+  * **Location**: Public Intake Form -> Section 2.1 "Official Paperwork (DR / Invoice / PO)"
+  * **Action**: Upload or snap a clear photo of an authentic logistics Delivery Receipt (DR) or Sales Invoice (SI).
+  * **Expected Behavior**:
+    1. UI enters scanning radar state: *"Gemini Flash Inspecting Paperwork..."*
+    2. Endpoint `/api/v1/ai/inspect-paperwork` analyzes the image via `@google/genai` and `gemini-2.5-flash`.
+    3. Document is validated with `is_valid_document: true` and confidence score >= 0.70.
+    4. Small green badge displays: `✓ Verified Delivery Receipt (DR-XXXX-XXXX) • XX% AI Confidence`.
+    5. Form fields `invoice_dr_number` and `store_branch` are auto-populated behind the scenes for zero-typing UX.
+  * **Edge Case**: Verify handwritten or stamped DR numbers are extracted accurately. Clicking "Edit" allows manual adjustments.
+
+- [ ] **TC-AI-OCR-02 (Invalid Non-Paperwork Photo Rejection & Card Shake Animation)**
+  * **Location**: Public Intake Form -> Section 2.1 "Official Paperwork (DR / Invoice / PO)"
+  * **Action**: Upload an invalid photo (e.g., person's selfie, empty warehouse floor, food item, or damaged box with no paper document).
+  * **Expected Behavior**:
+    1. Endpoint rejects with `is_valid_document: false` and `rejection_reason: "Photo does not appear to be an official invoice, DR, or PO."`
+    2. Frontend triggers CSS shake animation (`.animate-shake`) on the upload card.
+    3. Prominent warning alert is displayed: *"Invalid document photo: Please take a clear picture of the paper delivery receipt or invoice."*
+    4. The invalid photo is discarded and not added to paperwork attachments.
+
+- [ ] **TC-AI-OCR-03 (Admin Manual Override in Quick RMA Action Modal)**
+  * **Location**: Admin Dashboard -> Click any RMA row -> `QuickRMAActionModal`
+  * **Action**: Inspect the "Official Logistics Paperwork & AI Verification" section. Click **"Edit DR# / Branch"**, modify handwritten DR number, and click **"Save Updated Details"**.
+  * **Expected Behavior**:
+    1. Mutates `public.rma_reports` (`invoice_dr_number` and `store_branch`) via Supabase update.
+    2. Real-time state updates without page reload.
+    3. Audit trail records update event.
+
+### 10.2 Structured Google Drive Storage Hierarchy Verification
+- [ ] **TC-GDRIVE-HIERARCHY-01 (Automated Subfolder Creation & Separation)**
+  * **Location**: Google Workspace Drive Service (`/api/upload-photo`)
+  * **Action**: Submit an RMA report with 2 damaged merchandise photos and 1 verified paperwork photo.
+  * **Expected Behavior**:
+    1. Upload utility automatically discovers or creates the root folder: `Wholesale RMA Records`.
+    2. Creates current monthly subfolder: `[YYYY-MM]` (e.g. `2026-10`).
+    3. Creates dedicated RMA subfolder: `[RMA_NUMBER]` (e.g. `RMA-20261030-9841`).
+    4. Creates category subfolders inside RMA folder:
+       - `01_Damaged_Items/` (stores photos of defective goods)
+       - `02_Official_Paperwork/` (stores verified DR/SI/PO photos)
+    5. Database saves `rma_reports.photos` array pointing to `01_Damaged_Items` URLs and `rma_reports.paperwork_photos` array pointing to `02_Official_Paperwork` URLs.
+    6. `rma_reports.google_drive_folder_url` stores the direct URL to the `[RMA_NUMBER]` parent folder.
+
+- [ ] **TC-GDRIVE-HIERARCHY-02 (Direct Link to Organized RMA Folder in Admin Modal)**
+  * **Location**: `QuickRMAActionModal` -> Ticket Details
+  * **Action**: Click the **"Open RMA Drive Folder"** button with amber Folder icon.
+  * **Expected Behavior**: Directly opens the specific `[RMA_NUMBER]` folder in Google Drive in a new tab, displaying `01_Damaged_Items` and `02_Official_Paperwork` neatly organized.
+
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |

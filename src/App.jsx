@@ -50,7 +50,8 @@ import {
   ToggleRight,
   ToggleLeft,
   ClipboardCheck,
-  KeyRound
+  KeyRound,
+  Sparkles
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
@@ -961,6 +962,16 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccessReport, setSubmitSuccessReport] = useState(null);
 
+  // Official Logistics Paperwork (DR / Invoice / PO) & Gemini Flash AI OCR
+  const [paperworkPhotos, setPaperworkPhotos] = useState([]); // Array of { file, previewUrl }
+  const [paperworkMetadata, setPaperworkMetadata] = useState(null);
+  const [isInspectingPaperwork, setIsInspectingPaperwork] = useState(false);
+  const [paperworkShake, setPaperworkShake] = useState(false);
+  const [paperworkError, setPaperworkError] = useState(null);
+  const [invoiceDrNumber, setInvoiceDrNumber] = useState('');
+  const [storeBranch, setStoreBranch] = useState('');
+  const [isEditingPaperworkDetails, setIsEditingPaperworkDetails] = useState(false);
+
   // Modals & Queues
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isPendingModalOpen, setIsPendingModalOpen] = useState(false);
@@ -1484,6 +1495,64 @@ export default function App() {
     });
   };
 
+  // Official Logistics Paperwork (DR / Invoice / PO) Photo Handler with Gemini Flash AI OCR
+  const handlePaperworkSelect = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const file = files[0];
+    const previewUrl = URL.createObjectURL(file);
+    setPaperworkError(null);
+    setIsInspectingPaperwork(true);
+
+    try {
+      // 1. Inspect paperwork with Gemini Flash via /api/v1/ai/inspect-paperwork
+      const inspectionResult = await catalogService.inspectPaperwork(file);
+
+      // 2. Strict Rejection Check
+      if (!inspectionResult || !inspectionResult.is_valid_document) {
+        setPaperworkShake(true);
+        setTimeout(() => setPaperworkShake(false), 900);
+        const reason = inspectionResult?.rejection_reason || 'Photo does not appear to be an official invoice, DR, or PO.';
+        setPaperworkError(reason);
+        showToast(`Invalid document photo: Please take a clear picture of the paper delivery receipt or invoice. (${reason})`, 'warning');
+        return;
+      }
+
+      // 3. Accepted Document: Auto-fill fields for zero-typing UX!
+      setPaperworkMetadata(inspectionResult);
+      if (inspectionResult.invoice_dr_number) {
+        setInvoiceDrNumber(inspectionResult.invoice_dr_number);
+      }
+      if (inspectionResult.store_branch) {
+        setStoreBranch(inspectionResult.store_branch);
+      }
+
+      setPaperworkPhotos([{ file, previewUrl }]);
+      showToast(`✓ Verified ${inspectionResult.document_type || 'Delivery Receipt'} (${inspectionResult.invoice_dr_number || 'Detected'})`, 'success');
+    } catch (err) {
+      console.error('Paperwork inspection error:', err);
+      setPaperworkShake(true);
+      setTimeout(() => setPaperworkShake(false), 900);
+      setPaperworkError('Could not verify paperwork photo. Please try again with clear lighting.');
+      showToast('Paperwork inspection failed. Please ensure the document is flat and readable.', 'warning');
+    } finally {
+      setIsInspectingPaperwork(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const removePaperworkPhoto = () => {
+    if (paperworkPhotos[0]?.previewUrl) {
+      URL.revokeObjectURL(paperworkPhotos[0].previewUrl);
+    }
+    setPaperworkPhotos([]);
+    setPaperworkMetadata(null);
+    setInvoiceDrNumber('');
+    setStoreBranch('');
+    setPaperworkError(null);
+  };
+
   // Submit RMA Report Handler - INSTANT response (<0.15s) with background sync
   const handleSubmitReport = (e) => {
     e.preventDefault();
@@ -1536,13 +1605,21 @@ export default function App() {
       reason: selectedReason,
       reporter_name: reporterName || 'Staff',
       reporter_contact: reporterContact || '',
+      invoice_dr_number: invoiceDrNumber || null,
+      store_branch: storeBranch || null,
+      ai_document_metadata: paperworkMetadata || null,
       photoCount: photoFiles.length,
+      paperworkCount: paperworkPhotos.length,
       hasGps: gpsLocation.isAccurate,
       created_at: new Date().toISOString()
     });
 
     // 3. Reset form fields immediately so UI is completely responsive
     const capturedPhotos = [...photoFiles];
+    const capturedPaperworkPhotos = [...paperworkPhotos];
+    const capturedInvoiceDrNumber = invoiceDrNumber;
+    const capturedStoreBranch = storeBranch;
+    const capturedPaperworkMetadata = paperworkMetadata;
     const capturedProduct = detectedProduct ? { ...detectedProduct, unit_name: finalUnit } : null;
     const capturedReason = selectedReason;
     const capturedExplanation = explanation;
@@ -1557,19 +1634,38 @@ export default function App() {
     setSelectedReason(DEFECT_REASONS[0]);
     setExplanation('');
     setPhotoFiles([]);
+    setPaperworkPhotos([]);
+    setPaperworkMetadata(null);
+    setInvoiceDrNumber('');
+    setStoreBranch('');
+    setPaperworkError(null);
     setSelectedReportIds(new Set());
     setIsSubmitting(false);
 
-    // 4. Background execution: wait for uploads, insert to Supabase, send email, refresh
+    // 4. Background execution: hierarchical Google Drive upload, Supabase insertion, email
     (async () => {
       try {
-        const uploadPromises = capturedPhotos.map(item => {
-          if (item.uploadPromise) return item.uploadPromise;
-          if (item.file) return catalogService.uploadPhoto(item.file, cleanBarcode);
+        // Upload damaged item photos to 01_Damaged_Items
+        const damagedUploadPromises = capturedPhotos.map(item => {
+          if (item.file) return catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'damaged_items');
           return null;
         }).filter(Boolean);
 
-        const uploadedUrls = (await Promise.all(uploadPromises)).filter(Boolean);
+        // Upload official paperwork photos to 02_Official_Paperwork
+        const paperworkUploadPromises = capturedPaperworkPhotos.map(item => {
+          if (item.file) return catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'official_paperwork');
+          return null;
+        }).filter(Boolean);
+
+        const [damagedResults, paperworkResults] = await Promise.all([
+          Promise.all(damagedUploadPromises),
+          Promise.all(paperworkUploadPromises)
+        ]);
+
+        const uploadedDamagedUrls = damagedResults.map(r => r?.url).filter(Boolean);
+        const uploadedPaperworkUrls = paperworkResults.map(r => r?.url).filter(Boolean);
+        const gdriveFolderUrl = damagedResults[0]?.rmaFolderUrl || paperworkResults[0]?.rmaFolderUrl || null;
+        const gdriveFolderId = damagedResults[0]?.rmaFolderId || paperworkResults[0]?.rmaFolderId || null;
 
         const res = await catalogService.submitReport({
           rmaNumber,
@@ -1580,7 +1676,13 @@ export default function App() {
           reporterContact: capturedReporterContact,
           reason: capturedReason,
           explanation: capturedExplanation,
-          photos: uploadedUrls.length > 0 ? uploadedUrls : ['https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800&auto=format&fit=crop&q=80'],
+          photos: uploadedDamagedUrls.length > 0 ? uploadedDamagedUrls : ['https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800&auto=format&fit=crop&q=80'],
+          paperwork_photos: uploadedPaperworkUrls,
+          invoice_dr_number: capturedInvoiceDrNumber,
+          store_branch: capturedStoreBranch,
+          ai_document_metadata: capturedPaperworkMetadata,
+          google_drive_folder_url: gdriveFolderUrl,
+          google_drive_folder_id: gdriveFolderId,
           gps: capturedGps
         });
 
@@ -1804,6 +1906,9 @@ export default function App() {
                     <div className="text-[10px] text-slate-500 dark:text-slate-400 space-y-0.5 pt-1 border-t border-slate-100 dark:border-slate-800">
                       <div>Reported by: <strong className="text-slate-700 dark:text-slate-300">{submitSuccessReport.reporter_name || 'Staff'}</strong></div>
                       {submitSuccessReport.reporter_contact && <div>Contact: <strong className="font-mono text-slate-700 dark:text-slate-300">{submitSuccessReport.reporter_contact}</strong></div>}
+                      {submitSuccessReport.invoice_dr_number && (
+                        <div>DR/Invoice #: <strong className="font-mono text-violet-700 dark:text-violet-300">{submitSuccessReport.invoice_dr_number}</strong> {submitSuccessReport.store_branch ? `(${submitSuccessReport.store_branch})` : ''}</div>
+                      )}
                       <div>Date & Time: <span className="font-mono">{new Date(submitSuccessReport.created_at || Date.now()).toLocaleString()}</span></div>
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -2134,6 +2239,163 @@ export default function App() {
                       )}
                     </label>
                   </div>
+                </div>
+
+                {/* 2.1 OFFICIAL PAPERWORK (DELIVERY RECEIPT / INVOICE / PO) WITH GEMINI FLASH OCR */}
+                <div className="space-y-2.5 pt-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <div className="flex items-center gap-2">
+                      <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                        Official Paperwork (DR / Invoice / PO)
+                      </label>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 flex items-center gap-1 shrink-0">
+                        <Sparkles className="w-2.5 h-2.5" />
+                        Gemini Flash AI
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-medium">Auto-fills DR# & Branch</span>
+                  </div>
+
+                  {/* Rejection Alert if non-paperwork was uploaded */}
+                  {paperworkError && (
+                    <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 rounded-2xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5 animate-in fade-in">
+                      <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <div className="font-black text-rose-900 dark:text-rose-100">
+                          Invalid document photo rejected
+                        </div>
+                        <p className="text-[11px] text-rose-700 dark:text-rose-300 leading-relaxed">
+                          Please take a clear picture of the paper delivery receipt or invoice. ({paperworkError})
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Inspecting Radar State */}
+                  {isInspectingPaperwork ? (
+                    <div className="p-5 border-2 border-dashed border-violet-400 dark:border-violet-600 bg-violet-50/60 dark:bg-violet-950/30 rounded-2xl flex flex-col items-center justify-center text-center space-y-2 animate-pulse">
+                      <div className="w-10 h-10 rounded-2xl bg-violet-600 text-white flex items-center justify-center shadow-md animate-bounce">
+                        <Sparkles className="w-5 h-5" />
+                      </div>
+                      <div className="text-xs font-black text-violet-900 dark:text-violet-200">
+                        Gemini Flash Inspecting Paperwork...
+                      </div>
+                      <p className="text-[10px] text-violet-700 dark:text-violet-400 max-w-xs">
+                        Validating authentic wholesale invoice / DR and extracting document metadata...
+                      </p>
+                    </div>
+                  ) : paperworkPhotos.length === 0 ? (
+                    /* Initial Empty Upload State */
+                    <label className={`block border-2 border-dashed rounded-2xl p-4 text-center cursor-pointer transition-all ${
+                      paperworkShake
+                        ? 'border-rose-500 bg-rose-50 dark:bg-rose-950/40 animate-shake'
+                        : 'border-violet-300 dark:border-violet-800/80 hover:border-violet-500 bg-violet-50/40 dark:bg-violet-950/20 hover:bg-violet-50/80'
+                    }`}>
+                      <FileText className="w-7 h-7 text-violet-600 dark:text-violet-400 mx-auto mb-1.5" />
+                      <span className="text-xs font-extrabold text-slate-800 dark:text-white block">
+                        Snap or Upload Delivery Receipt (DR) / Invoice
+                      </span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                        Gemini Flash AI will inspect the photo and extract DR# & Store Branch (Zero typing!)
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handlePaperworkSelect}
+                        className="hidden"
+                      />
+                    </label>
+                  ) : (
+                    /* Verified Paperwork Badge & Auto-Filled Details */
+                    <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/50 border-2 border-emerald-400 dark:border-emerald-700 rounded-2xl shadow-xs space-y-2.5 animate-in fade-in">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-wrap min-w-0">
+                          <span className="px-2.5 py-1 rounded-xl text-xs font-black bg-emerald-600 text-white flex items-center gap-1.5 shadow-2xs">
+                            <CheckCircle className="w-3.5 h-3.5" />
+                            ✓ Verified {paperworkMetadata?.document_type || 'Delivery Receipt'} ({invoiceDrNumber || 'DR Detected'})
+                          </span>
+                          <span className="text-[10px] font-mono font-bold text-emerald-800 dark:text-emerald-300">
+                            {Math.round((paperworkMetadata?.confidence || 0.95) * 100)}% AI Confidence
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={removePaperworkPhoto}
+                          className="text-xs text-slate-400 hover:text-rose-600 font-bold p-1 rounded-lg transition-colors cursor-pointer shrink-0"
+                          title="Remove and retake paperwork photo"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        {paperworkPhotos[0]?.previewUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setLightboxPhoto({
+                              images: [paperworkPhotos[0].previewUrl],
+                              initialIndex: 0,
+                              url: paperworkPhotos[0].previewUrl,
+                              title: paperworkMetadata?.document_type || 'Official Paperwork',
+                              subtitle: `DR #${invoiceDrNumber} • ${storeBranch}`
+                            })}
+                            className="w-14 h-14 rounded-xl overflow-hidden border border-emerald-300 dark:border-emerald-700 shrink-0 cursor-zoom-in"
+                            title="Click to preview paperwork"
+                          >
+                            <img src={paperworkPhotos[0].previewUrl} alt="Paperwork Preview" className="w-full h-full object-cover" />
+                          </button>
+                        )}
+
+                        <div className="flex-1 min-w-0 text-xs space-y-0.5">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="text-slate-500 dark:text-slate-400 text-[11px]">DR/Invoice #:</span>
+                            <strong className="font-mono text-slate-900 dark:text-white font-black">{invoiceDrNumber || 'N/A'}</strong>
+                          </div>
+                          {storeBranch && (
+                            <div className="flex items-center gap-1.5 truncate">
+                              <span className="text-slate-500 dark:text-slate-400 text-[11px]">Store Branch:</span>
+                              <strong className="text-slate-800 dark:text-slate-200">{storeBranch}</strong>
+                            </div>
+                          )}
+                          <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">
+                            ✓ Auto-filled by Gemini Flash (Zero typing)
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingPaperworkDetails(!isEditingPaperworkDetails)}
+                          className="text-[11px] font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white underline cursor-pointer shrink-0"
+                        >
+                          {isEditingPaperworkDetails ? 'Done' : 'Edit'}
+                        </button>
+                      </div>
+
+                      {/* Manual Override inputs if Admin/User needs to tweak handwritten digits */}
+                      {isEditingPaperworkDetails && (
+                        <div className="pt-2 border-t border-emerald-200 dark:border-emerald-800 grid grid-cols-1 sm:grid-cols-2 gap-2 animate-in fade-in">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Edit DR/Invoice #:</label>
+                            <input
+                              type="text"
+                              value={invoiceDrNumber}
+                              onChange={(e) => setInvoiceDrNumber(e.target.value)}
+                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Edit Store Branch:</label>
+                            <input
+                              type="text"
+                              value={storeBranch}
+                              onChange={(e) => setStoreBranch(e.target.value)}
+                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* 3. REASON FOR RETURN */}
@@ -2954,7 +3216,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                          {paginatedReports.map(item => {
+                          {paginatedReports.map((item, index) => {
                             const photoList = Array.isArray(item.photos)
                               ? item.photos
                               : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
@@ -3298,7 +3560,7 @@ export default function App() {
                   /* ============================================================ */
                   <div className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {paginatedReports.map(item => {
+                      {paginatedReports.map((item, index) => {
                         const photoList = Array.isArray(item.photos)
                           ? item.photos
                           : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
