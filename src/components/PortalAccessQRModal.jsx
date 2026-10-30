@@ -187,9 +187,9 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
                   1
                 </div>
                 <div>
-                  <div className="font-bold text-slate-900 dark:text-white">Step 1: Scan QR with Phone</div>
+                  <div className="font-bold text-slate-900 dark:text-white">Step 1: Scan QR with Google Lens</div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
-                    Open your smartphone camera or scanner and point at this QR code to launch the reporting portal.
+                    Open Google Lens (or QR scanner app) on your phone and point at this QR code to launch the reporting portal.
                   </p>
                 </div>
               </div>
