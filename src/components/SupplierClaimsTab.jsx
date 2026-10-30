@@ -88,7 +88,7 @@ export default function SupplierClaimsTab({
         (r.supplier_name || 'Savemore').toLowerCase() === selectedSupplier.toLowerCase();
 
       const matchesDisposition = dispositionFilter === 'All' || 
-        (r.disposition || 'Pending Triage').toLowerCase() === dispositionFilter.toLowerCase();
+        (r.disposition || 'Pending Triage').replace(/^\d+-\s*/, '').toLowerCase() === dispositionFilter.replace(/^\d+-\s*/, '').toLowerCase();
 
       const q = searchTerm.toLowerCase().trim();
       const matchesSearch = !q || 
@@ -492,11 +492,11 @@ export default function SupplierClaimsTab({
                 title="Filter by Triage Disposition"
               >
                 <option value="All">All Dispositions</option>
-                <option value="Return to Vendor (RTV)">Return to Vendor (RTV)</option>
-                <option value="Restock to Inventory">Restock to Inventory</option>
-                <option value="Quarantine">Quarantine</option>
-                <option value="Scrap / Dispose">Scrap / Dispose</option>
-                <option value="Pending Triage">Pending Triage</option>
+                <option value="1- Pending Triage">1- Pending Triage</option>
+                <option value="2- Restock to Inventory">2- Restock to Inventory</option>
+                <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
+                <option value="4- Quarantine">4- Quarantine</option>
+                <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
               </select>
             </div>
 
@@ -641,6 +641,11 @@ export default function SupplierClaimsTab({
                     />
                   </th>
 
+                  {/* SN Column */}
+                  <th className="p-3 w-14 font-black text-slate-900 dark:text-white">
+                    SN
+                  </th>
+
                   {/* Photo Column */}
                   <th className="p-3 text-center w-12" title="Proof Photo">
                     <ImageIcon className="w-4 h-4 mx-auto text-slate-400" />
@@ -744,7 +749,7 @@ export default function SupplierClaimsTab({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {paginatedCandidates.map((r) => {
+                {paginatedCandidates.map((r, idx) => {
                   const id = r.id || r.rma_number;
                   const isSelected = selectedRmaIds.has(id);
                   const qty = Number(r.quantity || 1);
@@ -769,6 +774,13 @@ export default function SupplierClaimsTab({
                           onChange={() => handleToggleSelect(id)}
                           className="rounded-md border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
                         />
+                      </td>
+
+                      {/* SN Column */}
+                      <td className="p-3 font-mono">
+                        <span className="font-black text-amber-900 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded-lg text-xs">
+                          #{(currentPage - 1) * pageSize + idx + 1}
+                        </span>
                       </td>
 
                       {/* Photo Thumbnail */}

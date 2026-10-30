@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Printer,
   X,
@@ -90,14 +90,24 @@ export default function ThermalBoxLabelModal({
   const grade = report?.condition_grade || 'B - Damaged Packaging Only';
   const disposition = report?.disposition || 'Pending Triage';
   const inspectedBy = report?.inspected_by || report?.reported_by || 'Warehouse Dock';
-  const createdDate = report?.created_at ? new Date(report.created_at).toLocaleDateString('en-US', {
+  const reporterName = report?.reporter_name || report?.reported_by || inspectedBy || 'Warehouse Staff';
+  const reporterContact = report?.reporter_contact || report?.reporter_phone || report?.phone || (report?.reported_by && report.reported_by.includes('(') ? report.reported_by.replace(/.*\((.*)\).*/, '$1') : '') || 'N/A';
+  const createdDateObj = new Date(report?.created_at || Date.now());
+  const createdDateTime = createdDateObj.toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  const createdDate = createdDateObj.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric'
-  }) : new Date().toLocaleDateString();
+  });
 
   const qrPayload = typeof window !== 'undefined'
-    ? `${window.location.origin}/?rma=${encodeURIComponent(rmaNumber)}`
+    ? `${window.location.origin}/?rma=${encodeURIComponent(rmaNumber)}&rep=${encodeURIComponent(reporterName)}&contact=${encodeURIComponent(reporterContact)}&dt=${encodeURIComponent(createdDateTime)}`
     : rmaNumber;
 
   const handlePrint = async () => {
@@ -320,16 +330,26 @@ export default function ThermalBoxLabelModal({
                   </div>
                 </div>
 
-                <div className="text-[9px] text-black pt-1">
+                <div className="text-[9px] text-black pt-1 space-y-0.5">
                   <div>Vendor: <strong>{supplier}</strong></div>
-                  <div>Inspector: <strong>{inspectedBy}</strong></div>
+                  <div>Reported By: <strong>{reporterName}</strong></div>
+                  <div>Contact: <strong>{reporterContact}</strong></div>
+                  <div>Date & Time: <strong>{createdDateTime}</strong></div>
                 </div>
               </div>
 
               {/* 2D QR Code */}
               <div className="p-1 border-2 border-black bg-white shrink-0">
                 <QRCodeSVG
-                  value={JSON.stringify({ rma: rmaNumber, sku, bc: barcode, loc: location })}
+                  value={JSON.stringify({
+                    rma: rmaNumber,
+                    sku,
+                    bc: barcode,
+                    loc: location,
+                    rep: reporterName,
+                    contact: reporterContact,
+                    time: createdDateTime
+                  })}
                   size={76}
                   level="M"
                 />

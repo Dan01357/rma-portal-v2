@@ -519,7 +519,7 @@ export default function PinRequestsQueueModal({
 
               {/* Request Cards */}
               <div className="space-y-3">
-                {filteredRequests.map(req => {
+                {filteredRequests.map((req, idx) => {
                   const targetProfile = profileMap[req.access_slug?.toLowerCase()] || {
                     name: `Station /${req.access_slug}`,
                     pin_code: '123456',
@@ -559,6 +559,9 @@ export default function PinRequestsQueueModal({
 
                           <div className="space-y-1">
                             <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono font-black text-[10px] text-amber-900 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.5 rounded-md">
+                                #{idx + 1}
+                              </span>
                               <span className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
                                 <User className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                                 {req.requester_name}

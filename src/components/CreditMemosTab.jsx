@@ -248,6 +248,7 @@ export default function CreditMemosTab({
   const handleExportCsv = () => {
     if (!processedMemos.length) return;
     const headers = [
+      'SN',
       'Credit Memo #',
       'RMA #',
       'Issue Date',
@@ -266,13 +267,14 @@ export default function CreditMemosTab({
       'Customer AE'
     ];
 
-    const rows = processedMemos.map(m => {
+    const rows = processedMemos.map((m, idx) => {
       const totalAmt = Number(m.credit_amount) || Number(m.amount) || 0;
       const netPrice = totalAmt / 1.12;
       const vatAmt = totalAmt - netPrice;
       const dateStr = m.credit_issued_at ? new Date(m.credit_issued_at).toISOString().slice(0, 10) : '';
 
       return [
+        `"${idx + 1}"`,
         `"${m.credit_memo_number || ''}"`,
         `"${m.rma_number || ''}"`,
         `"${dateStr}"`,
@@ -612,6 +614,10 @@ export default function CreditMemosTab({
                       />
                     </th>
 
+                    <th className="py-3 px-3 w-14 font-black text-slate-900 dark:text-white">
+                      SN
+                    </th>
+
                     <th 
                       onClick={() => handleSort('credit_memo_number')}
                       className="py-3 px-3 font-black text-slate-900 dark:text-white cursor-pointer select-none hover:text-emerald-600 transition-colors"
@@ -704,7 +710,7 @@ export default function CreditMemosTab({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                  {paginatedMemos.map(memo => {
+                  {paginatedMemos.map((memo, idx) => {
                     const isSelected = selectedMemoNumbers.has(memo.credit_memo_number);
                     return (
                       <tr 
@@ -719,6 +725,13 @@ export default function CreditMemosTab({
                             onChange={() => toggleSelect(memo.credit_memo_number)}
                             className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                           />
+                        </td>
+
+                        {/* SN */}
+                        <td className="py-3 px-3 font-mono">
+                          <span className="font-black text-emerald-900 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-lg text-xs">
+                            #{(currentPage - 1) * pageSize + idx + 1}
+                          </span>
                         </td>
 
                         {/* CM # */}

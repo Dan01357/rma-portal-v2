@@ -375,7 +375,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                       No pending barcodes match "{searchQuery}"
                     </div>
                   ) : (
-                    paginatedList.map(item => (
+                    paginatedList.map((item, idx) => (
                       <div 
                         key={item.id || item.barcode}
                         className="p-3 bg-slate-50 dark:bg-slate-800/70 hover:bg-blue-50/50 dark:hover:bg-slate-700/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-between gap-3 transition-colors"
@@ -384,11 +384,9 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                           <Barcode className="w-6 h-6 text-slate-400 shrink-0" />
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
-                              {item.id && (
-                                <span className="font-mono font-black text-[10px] text-amber-900 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.5 rounded-md">
-                                  #{item.id}
-                                </span>
-                              )}
+                              <span className="font-mono font-black text-[10px] text-amber-900 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.5 rounded-md">
+                                #{(currentPage - 1) * pageSize + idx + 1}
+                              </span>
                               <span className="font-mono font-bold text-slate-900 dark:text-white text-xs truncate">
                                 {item.barcode}
                               </span>

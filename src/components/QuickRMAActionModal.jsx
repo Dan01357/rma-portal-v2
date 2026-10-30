@@ -36,6 +36,23 @@ import RMATimelineAudit from './RMATimelineAudit';
 
 const QUICK_AUTH_STORAGE_KEY = 'rma_quick_auth_admin';
 
+const DISPOSITION_OPTIONS = [
+  '1- Pending Triage',
+  '2- Restock to Inventory',
+  '3- Return to Vendor (RTV)',
+  '4- Quarantine',
+  '5- Scrap / Dispose'
+];
+
+function normalizeDispositionOption(disp) {
+  if (!disp) return '1- Pending Triage';
+  const found = DISPOSITION_OPTIONS.find(opt => 
+    opt.toLowerCase() === disp.toLowerCase() || 
+    opt.replace(/^\d+-\s*/, '').toLowerCase() === disp.replace(/^\d+-\s*/, '').toLowerCase()
+  );
+  return found || disp;
+}
+
 export default function QuickRMAActionModal({
   isOpen,
   onClose,
@@ -58,7 +75,7 @@ export default function QuickRMAActionModal({
 
   // Enterprise Warehouse Triage & Disposition State
   const [conditionGrade, setConditionGrade] = useState('B - Damaged Packaging Only');
-  const [disposition, setDisposition] = useState('Pending Triage');
+  const [disposition, setDisposition] = useState('1- Pending Triage');
   const [warehouseLocation, setWarehouseLocation] = useState('');
   const [rmaStatus, setRmaStatus] = useState('received_at_dock');
   const [isSavingTriage, setIsSavingTriage] = useState(false);
@@ -69,7 +86,7 @@ export default function QuickRMAActionModal({
   useEffect(() => {
     if (report) {
       setConditionGrade(report.condition_grade || 'B - Damaged Packaging Only');
-      setDisposition(report.disposition || 'Pending Triage');
+      setDisposition(normalizeDispositionOption(report.disposition));
       setWarehouseLocation(report.warehouse_location || '');
       setRmaStatus(report.status || 'received_at_dock');
     }
@@ -794,15 +811,15 @@ export default function QuickRMAActionModal({
                       Warehouse Disposition
                     </label>
                     <select
-                      value={disposition}
+                      value={normalizeDispositionOption(disposition)}
                       onChange={(e) => setDisposition(e.target.value)}
                       className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
                     >
-                      <option value="Pending Triage">Pending Triage</option>
-                      <option value="Restock to Inventory">Restock to Inventory</option>
-                      <option value="Return to Vendor (RTV)">Return to Vendor (RTV)</option>
-                      <option value="Quarantine">Quarantine</option>
-                      <option value="Scrap / Dispose">Scrap / Dispose</option>
+                      <option value="1- Pending Triage">1- Pending Triage</option>
+                      <option value="2- Restock to Inventory">2- Restock to Inventory</option>
+                      <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
+                      <option value="4- Quarantine">4- Quarantine</option>
+                      <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
                     </select>
                   </div>
 
@@ -833,13 +850,13 @@ export default function QuickRMAActionModal({
                       onChange={(e) => setRmaStatus(e.target.value)}
                       className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
                     >
-                      <option value="draft">Draft / Intake</option>
-                      <option value="received_at_dock">Received at Dock</option>
-                      <option value="under_inspection">Under Inspection</option>
-                      <option value="pending_finance_approval">Pending Finance Approval</option>
-                      <option value="credit_memo_issued">Credit Memo Issued</option>
-                      <option value="closed">Closed / Restocked</option>
-                      <option value="rejected">Rejected / Invalid Claim</option>
+                      <option value="draft">1- Draft / Intake</option>
+                      <option value="received_at_dock">2- Received at Dock</option>
+                      <option value="under_inspection">3- Under Inspection</option>
+                      <option value="pending_finance_approval">4- Pending Finance Approval</option>
+                      <option value="credit_memo_issued">5- Credit Memo Issued</option>
+                      <option value="closed">6- Closed / Restocked</option>
+                      <option value="rejected">7- Rejected / Invalid Claim</option>
                     </select>
                   </div>
                 </div>

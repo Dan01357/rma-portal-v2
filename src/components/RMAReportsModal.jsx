@@ -606,7 +606,7 @@ export default function RMAReportsModal({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60 font-medium">
-                  {paginatedReports.map((item) => {
+                  {paginatedReports.map((item, idx) => {
                     const photoList = Array.isArray(item.photos) 
                       ? item.photos 
                       : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
@@ -642,7 +642,7 @@ export default function RMAReportsModal({
                         {/* 1. SN COLUMN AT FAR LEFT */}
                         <td className="py-3 px-3.5 font-mono">
                           <span className="font-black text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg text-xs">
-                            #{item.id}
+                            #{(currentPage - 1) * pageSize + idx + 1}
                           </span>
                         </td>
 
@@ -913,7 +913,7 @@ export default function RMAReportsModal({
           /* ============================================================ */
           <div className="space-y-3.5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-              {paginatedReports.map((item) => {
+              {paginatedReports.map((item, idx) => {
                 const photoList = Array.isArray(item.photos) 
                   ? item.photos 
                   : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
@@ -946,7 +946,7 @@ export default function RMAReportsModal({
                             className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 cursor-pointer"
                           />
                           <span className="font-mono font-black text-xs text-blue-900 dark:text-blue-300 bg-blue-100/80 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 px-2 py-0.5 rounded-lg">
-                            SN #{item.id}
+                            SN #{(currentPage - 1) * pageSize + idx + 1}
                           </span>
                           <span className="font-mono font-black text-blue-700 dark:text-blue-400 text-sm">
                             {item.rma_number}

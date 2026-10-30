@@ -34,6 +34,7 @@ export function exportRMAReportsToCSV(reports, filename = null) {
   }
 
   const headers = [
+    'SN',
     'RMA Number',
     'Date Logged',
     'Status',
@@ -56,13 +57,14 @@ export function exportRMAReportsToCSV(reports, filename = null) {
     'Notes'
   ];
 
-  const rows = reports.map(r => {
+  const rows = reports.map((r, index) => {
     const qty = Number(r.quantity || 1);
     const unitPrice = Number(r.price_with_vat || r.price || 0);
     const totalVal = (qty * unitPrice).toFixed(2);
     const dateStr = r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '';
 
     return [
+      escapeCsvCell(index + 1),
       escapeCsvCell(r.rma_number),
       escapeCsvCell(dateStr),
       escapeCsvCell(r.status || 'pending'),
@@ -101,6 +103,7 @@ export function exportCreditMemosToCSV(memos, filename = null) {
   }
 
   const headers = [
+    'SN',
     'Credit Memo Number',
     'RMA Number',
     'Pull-Out Slip Ref',
@@ -122,8 +125,9 @@ export function exportCreditMemosToCSV(memos, filename = null) {
     'Notes'
   ];
 
-  const rows = memos.map(cm => {
+  const rows = memos.map((cm, index) => {
     return [
+      escapeCsvCell(index + 1),
       escapeCsvCell(cm.credit_memo_number),
       escapeCsvCell(cm.rma_number),
       escapeCsvCell(cm.pull_out_ref),

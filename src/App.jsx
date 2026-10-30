@@ -86,37 +86,37 @@ import { pinRequestService } from './services/pinRequestService';
 import { QRCodeSVG } from 'qrcode.react';
 
 const DEFECT_REASONS = [
-  'Damaged Box / Crushed Packaging',
-  'Expired / Near Expiry Date',
-  'Spoiled / Broken Seal / Leaking',
-  'Wrong Item / Incorrect Shipment',
-  'Customer Pull-out / Unsold',
-  'Other Defect'
+  '1- Damaged Box / Crushed Packaging',
+  '2- Expired / Near Expiry Date',
+  '3- Spoiled / Broken Seal / Leaking',
+  '4- Wrong Item / Incorrect Shipment',
+  '5- Customer Pull-out / Unsold',
+  '6- Other Defect'
 ];
 
 /**
  * Universal Lifecycle Stage Formatter & Color Resolver
  */
 function formatLifecycleStage(status) {
-  if (!status) return { label: 'Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
+  if (!status) return { label: '2- Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
   const s = String(status).toLowerCase();
   switch (s) {
     case 'draft':
-      return { label: 'Draft / Intake', color: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
+      return { label: '1- Draft / Intake', color: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
     case 'pending':
     case 'received_at_dock':
-      return { label: 'Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
+      return { label: '2- Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
     case 'under_inspection':
-      return { label: 'Under Inspection', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800' };
+      return { label: '3- Under Inspection', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800' };
     case 'pending_finance_approval':
-      return { label: 'Pending Finance', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
+      return { label: '4- Pending Finance Approval', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
     case 'credit_memo_issued':
-      return { label: 'Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
+      return { label: '5- Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
     case 'closed':
     case 'restocked':
-      return { label: 'Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+      return { label: '6- Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
     case 'rejected':
-      return { label: 'Rejected / Invalid', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+      return { label: '7- Rejected / Invalid Claim', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
     case 'pending_admin_details':
       return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
     default:
@@ -957,6 +957,7 @@ export default function App() {
   const [reporterName, setReporterName] = useState('');
   const [reporterContact, setReporterContact] = useState('');
   const [photoFiles, setPhotoFiles] = useState([]); // Array of { file, previewUrl }
+  const [photoCaptureMode, setPhotoCaptureMode] = useState('single'); // 'single' (Camera snap) | 'batch' (Multi-file select)
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccessReport, setSubmitSuccessReport] = useState(null);
 
@@ -1052,7 +1053,9 @@ export default function App() {
       }
 
       if (reportsReasonFilter !== 'all') {
-        if ((item.reason || '') !== reportsReasonFilter) return false;
+        const itemReasonNorm = (item.reason || '').replace(/^\d+-\s*/, '').toLowerCase().trim();
+        const filterReasonNorm = reportsReasonFilter.replace(/^\d+-\s*/, '').toLowerCase().trim();
+        if (itemReasonNorm !== filterReasonNorm) return false;
       }
 
       if (reportsStatusFilter !== 'all') {
@@ -1070,10 +1073,11 @@ export default function App() {
         }
       }
 
-      // Disposition filter
+      // Disposition filter (supports numbered prefix e.g. "1- Pending Triage")
       if (reportsDispositionFilter !== 'all') {
-        const itemDisp = item.disposition || 'Pending Triage';
-        if (itemDisp.toLowerCase() !== reportsDispositionFilter.toLowerCase()) return false;
+        const itemDispNorm = (item.disposition || 'Pending Triage').replace(/^\d+-\s*/, '').toLowerCase().trim();
+        const filterDispNorm = reportsDispositionFilter.replace(/^\d+-\s*/, '').toLowerCase().trim();
+        if (itemDispNorm !== filterDispNorm) return false;
       }
 
       // Condition Grade filter
@@ -1466,6 +1470,7 @@ export default function App() {
     });
 
     setPhotoFiles(prev => [...prev, ...newPhotos]);
+    if (e.target) e.target.value = ''; // Reset input value so subsequent snaps fire onChange reliably
   };
 
   const removePhoto = (index) => {
@@ -1530,6 +1535,7 @@ export default function App() {
       supplier: detectedProduct?.supplier_name || 'Warehouse',
       reason: selectedReason,
       reporter_name: reporterName || 'Staff',
+      reporter_contact: reporterContact || '',
       photoCount: photoFiles.length,
       hasGps: gpsLocation.isAccurate,
       created_at: new Date().toISOString()
@@ -1768,7 +1774,9 @@ export default function App() {
                   <div className="p-2.5 bg-white rounded-xl border border-slate-300 dark:border-slate-700 shadow-xs shrink-0 text-center">
                     <QRCodeSVG
                       id="filed-report-qr-svg"
-                      value={typeof window !== 'undefined' ? `${window.location.origin}/?rma=${encodeURIComponent(submitSuccessReport.rmaNumber)}` : submitSuccessReport.rmaNumber}
+                      value={typeof window !== 'undefined'
+                        ? `${window.location.origin}/?rma=${encodeURIComponent(submitSuccessReport.rmaNumber)}&rep=${encodeURIComponent(submitSuccessReport.reporter_name || 'Staff')}&contact=${encodeURIComponent(submitSuccessReport.reporter_contact || '')}&dt=${encodeURIComponent(new Date(submitSuccessReport.created_at || Date.now()).toLocaleString())}`
+                        : submitSuccessReport.rmaNumber}
                       size={110}
                       level="H"
                       includeMargin={false}
@@ -1793,6 +1801,11 @@ export default function App() {
                     <div className="font-bold text-slate-800 dark:text-slate-200 text-xs truncate">
                       {submitSuccessReport.productName}
                     </div>
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 space-y-0.5 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      <div>Reported by: <strong className="text-slate-700 dark:text-slate-300">{submitSuccessReport.reporter_name || 'Staff'}</strong></div>
+                      {submitSuccessReport.reporter_contact && <div>Contact: <strong className="font-mono text-slate-700 dark:text-slate-300">{submitSuccessReport.reporter_contact}</strong></div>}
+                      <div>Date & Time: <span className="font-mono">{new Date(submitSuccessReport.created_at || Date.now()).toLocaleString()}</span></div>
+                    </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
                       Download QR or print sticker to tape directly to the returned box for instant warehouse intake scanning.
                     </p>
@@ -1805,6 +1818,13 @@ export default function App() {
                     type="button"
                     onClick={async () => {
                       try {
+                        const dateFormatted = new Date(submitSuccessReport.created_at || Date.now()).toLocaleString('en-US', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        });
                         await downloadBoxStickerPng({
                           svgElementOrId: 'filed-report-qr-svg',
                           rmaNumber: submitSuccessReport.rmaNumber,
@@ -1816,7 +1836,8 @@ export default function App() {
                           unit: submitSuccessReport.unit_name || submitSuccessReport.unit || 'pc',
                           reason: submitSuccessReport.reason || 'Defective / Return',
                           reporter: submitSuccessReport.reporter_name || submitSuccessReport.reporter || 'Staff',
-                          dateFormatted: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+                          reporterContact: submitSuccessReport.reporter_contact || '',
+                          dateFormatted
                         });
                         showToast(`Official Box Sticker for ${submitSuccessReport.rmaNumber} downloaded!`, 'success');
                       } catch (err) {
@@ -1944,8 +1965,8 @@ export default function App() {
                           className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer shadow-2xs h-[38px]"
                           title="Select return unit (pc or case)"
                         >
-                          <option value="pc">pc (piece)</option>
-                          <option value="case">case (box)</option>
+                          <option value="pc">pc</option>
+                          <option value="case">case</option>
                         </select>
                       </div>
                     </div>
@@ -2001,13 +2022,45 @@ export default function App() {
                   ) : null}
                 </div>
 
-                {/* 2. PHOTO UPLOADER (REQUIRED) */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                      2. Proof Photos (Required) *
-                    </label>
-                    <span className="text-[10px] font-bold text-rose-500">At least 1 photo required</span>
+                {/* 2. PHOTO UPLOADER (REQUIRED) - WITH SINGLE OR BATCH MODE */}
+                <div className="space-y-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                        2. Proof Photos (Required) *
+                      </label>
+                      <span className="text-[10px] font-bold text-rose-500">• At least 1 photo required</span>
+                    </div>
+
+                    {/* Single vs Batch Camera Mode Toggle */}
+                    <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700 self-start sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => setPhotoCaptureMode('single')}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                          photoCaptureMode === 'single'
+                            ? 'bg-white dark:bg-slate-700 text-rose-600 dark:text-rose-400 shadow-xs font-black'
+                            : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                        }`}
+                        title="Single Photo Mode: Opens camera directly for individual snaps"
+                      >
+                        <Camera className="w-3 h-3" />
+                        <span>Single Photo</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPhotoCaptureMode('batch')}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                          photoCaptureMode === 'batch'
+                            ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-xs font-black'
+                            : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                        }`}
+                        title="Batch Mode: Multi-image select from gallery or file manager"
+                      >
+                        <Layers className="w-3 h-3" />
+                        <span>Batch / Multi</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-3 gap-2">
@@ -2037,20 +2090,48 @@ export default function App() {
                       </div>
                     ))}
 
-                    <label className="aspect-square border-2 border-dashed border-rose-300 dark:border-rose-800/80 hover:border-blue-500 dark:hover:border-blue-400 bg-rose-50/40 dark:bg-rose-950/20 hover:bg-blue-50/50 dark:hover:bg-blue-950/30 rounded-2xl flex flex-col items-center justify-center p-2 text-center cursor-pointer transition-all">
-                      <Upload className="w-6 h-6 text-rose-500 mb-1" />
-                      <span className="text-[11px] font-extrabold text-slate-700 dark:text-slate-200 leading-tight">
-                        Tap to Take Photo with Camera or Upload
-                      </span>
-                      <span className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">Shows damaged part, box, or defect (single or multiple)</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        multiple
-                        onChange={handlePhotoSelect}
-                        className="hidden"
-                      />
+                    <label className={`aspect-square border-2 border-dashed rounded-2xl flex flex-col items-center justify-center p-2 text-center cursor-pointer transition-all ${
+                      photoCaptureMode === 'single'
+                        ? 'border-rose-300 dark:border-rose-800/80 hover:border-rose-500 bg-rose-50/40 dark:bg-rose-950/20 hover:bg-rose-50/80'
+                        : 'border-blue-300 dark:border-blue-800/80 hover:border-blue-500 bg-blue-50/40 dark:bg-blue-950/20 hover:bg-blue-50/80'
+                    }`}>
+                      {photoCaptureMode === 'single' ? (
+                        <>
+                          <Camera className="w-6 h-6 text-rose-500 mb-1" />
+                          <span className="text-[11px] font-extrabold text-slate-800 dark:text-slate-100 leading-tight">
+                            Snap Photo
+                          </span>
+                          <span className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">
+                            Camera (Single Mode)
+                          </span>
+                          <input
+                            key="single-photo-input"
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={handlePhotoSelect}
+                            className="hidden"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <Layers className="w-6 h-6 text-blue-500 mb-1" />
+                          <span className="text-[11px] font-extrabold text-slate-800 dark:text-slate-100 leading-tight">
+                            Select Photos
+                          </span>
+                          <span className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">
+                            Batch / Multi Mode
+                          </span>
+                          <input
+                            key="batch-photo-input"
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={handlePhotoSelect}
+                            className="hidden"
+                          />
+                        </>
+                      )}
                     </label>
                   </div>
                 </div>
@@ -2465,58 +2546,56 @@ export default function App() {
                   </div>
 
                   {/* Responsive Action Toolbar */}
-                  <div className="flex items-center justify-between sm:justify-end gap-2 flex-wrap w-full lg:w-auto min-w-0">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 w-full lg:w-auto min-w-0">
                     {/* View Switcher: Rows vs Cards */}
-                    <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 sm:p-1 rounded-xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-700 shrink-0">
+                    <div className="flex items-center self-start sm:self-auto bg-slate-100 dark:bg-slate-800 p-0.5 sm:p-1 rounded-xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-700 shrink-0">
                       <button
                         type="button"
                         onClick={() => handleSetReportsViewMode('table')}
-                        className={`px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${reportsViewMode === 'table'
+                        className={`px-3 py-1.5 rounded-lg sm:rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${reportsViewMode === 'table'
                             ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
                             : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                           }`}
                         title="Rows / Table View"
                       >
-                        <List className="w-3.5 h-3.5" />
-                        <span className="hidden xs:inline">Rows List</span>
-                        <span className="xs:hidden">Rows</span>
+                        <List className="w-3.5 h-3.5 shrink-0" />
+                        <span>Rows List</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => handleSetReportsViewMode('grid')}
-                        className={`px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl text-xs font-black flex items-center gap-1.5 transition-all ${reportsViewMode === 'grid'
+                        className={`px-3 py-1.5 rounded-lg sm:rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${reportsViewMode === 'grid'
                             ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
                             : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                           }`}
                         title="Grid / Cards View"
                       >
-                        <LayoutGrid className="w-3.5 h-3.5" />
+                        <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
                         <span>Cards</span>
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                    {/* Action Buttons: 2-column grid on mobile (< sm), flex on sm+ */}
+                    <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto min-w-0">
                       <button
                         type="button"
                         onClick={() => setIsReportsModalOpen(true)}
-                        className="px-2.5 py-1.5 sm:px-3.5 sm:py-2 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold rounded-xl text-xs flex items-center gap-1 transition-colors shrink-0 cursor-pointer"
+                        className="w-full sm:w-auto justify-center px-3 py-2 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
                         title="Open Full Audit Log"
                       >
-                        <FileText className="w-3.5 h-3.5 sm:hidden" />
-                        <span className="hidden sm:inline">Full Audit Log</span>
-                        <span className="sm:hidden">Audit Log</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
+                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">Full Audit Log</span>
+                        <ChevronRight className="w-3.5 h-3.5 shrink-0 hidden sm:inline" />
                       </button>
 
                       <button
                         type="button"
                         onClick={() => exportRMAReportsToCSV(processedReports)}
-                        className="px-2.5 py-1.5 sm:px-3.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
+                        className="w-full sm:w-auto justify-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
                         title="Export filtered reports to CSV with financial & triage data"
                       >
-                        <Download className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Export CSV</span>
-                        <span className="sm:hidden">Export</span>
+                        <Download className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">Export CSV</span>
                       </button>
                     </div>
                   </div>
@@ -2593,13 +2672,14 @@ export default function App() {
                       }}
                       className="w-full min-w-0 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer truncate box-border"
                     >
-                      <option value="all">All Status & Stages</option>
-                      <option value="received_at_dock">Received at Dock</option>
-                      <option value="under_inspection">Under Inspection</option>
-                      <option value="pending_finance_approval">Pending Finance Approval</option>
-                      <option value="credit_memo_issued">Credit Memo Issued</option>
-                      <option value="closed">Closed / Restocked</option>
-                      <option value="rejected">Rejected / Invalid Claim</option>
+                      <option value="all">All Status &amp; Stages</option>
+                      <option value="draft">1- Draft / Intake</option>
+                      <option value="received_at_dock">2- Received at Dock</option>
+                      <option value="under_inspection">3- Under Inspection</option>
+                      <option value="pending_finance_approval">4- Pending Finance Approval</option>
+                      <option value="credit_memo_issued">5- Credit Memo Issued</option>
+                      <option value="closed">6- Closed / Restocked</option>
+                      <option value="rejected">7- Rejected / Invalid Claim</option>
                       <option value="logged">Catalog: Logged</option>
                       <option value="unknown">Catalog: Unknown Barcode</option>
                     </select>
@@ -2656,11 +2736,11 @@ export default function App() {
                       </span>
                       {[
                         { id: 'all', label: 'All Dispositions' },
-                        { id: 'Pending Triage', label: 'Pending Triage' },
-                        { id: 'Restock to Inventory', label: 'Restock' },
-                        { id: 'Return to Vendor (RTV)', label: 'Return to Vendor (RTV)' },
-                        { id: 'Quarantine', label: 'Quarantine' },
-                        { id: 'Scrap / Dispose', label: 'Scrap / Dispose' }
+                        { id: 'Pending Triage', label: '1- Pending Triage' },
+                        { id: 'Restock to Inventory', label: '2- Restock' },
+                        { id: 'Return to Vendor (RTV)', label: '3- Return to Vendor (RTV)' },
+                        { id: 'Quarantine', label: '4- Quarantine' },
+                        { id: 'Scrap / Dispose', label: '5- Scrap / Dispose' }
                       ].map(chip => {
                         const isActive = reportsDispositionFilter.toLowerCase() === chip.id.toLowerCase();
                         return (
@@ -2912,7 +2992,7 @@ export default function App() {
                                 {/* 1. SN COLUMN AT FAR LEFT */}
                                 <td className="py-3 px-3.5 font-mono">
                                   <span className="font-black text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg text-xs">
-                                    #{item.id}
+                                    #{(reportsCurrentPage - 1) * reportsPageSize + index + 1}
                                   </span>
                                 </td>
 
@@ -3247,7 +3327,7 @@ export default function App() {
                                     className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 cursor-pointer"
                                   />
                                   <span className="font-mono font-black text-xs text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg">
-                                    SN #{item.id}
+                                    SN #{(reportsCurrentPage - 1) * reportsPageSize + index + 1}
                                   </span>
                                   <button
                                     type="button"

@@ -526,7 +526,7 @@ export default function SavedProductsTab({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60 font-medium">
-                {paginatedProducts.map((product) => {
+                {paginatedProducts.map((product, idx) => {
                   const hasPhoto = Boolean(product.image_url || product.imageUrl);
                   const photoSrc = product.image_url || product.imageUrl;
                   const isCopied = copiedBarcode === product.barcode;
@@ -554,7 +554,7 @@ export default function SavedProductsTab({
                       {/* 1. SN (SERIAL NUMBER / DATABASE ID) COLUMN - AT FAR LEFT */}
                       <td className="py-3 px-4 font-mono">
                         <span className="font-black text-indigo-900 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/90 dark:border-indigo-800 px-2 py-0.5 rounded-lg text-xs tracking-tight shadow-xs">
-                          #{product.id}
+                          #{(currentPage - 1) * pageSize + idx + 1}
                         </span>
                       </td>
 
@@ -745,7 +745,7 @@ export default function SavedProductsTab({
         /* ============================================================ */
         <div className="space-y-3.5">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3.5">
-            {paginatedProducts.map((product) => {
+            {paginatedProducts.map((product, idx) => {
             const hasPhoto = Boolean(product.image_url || product.imageUrl);
             const photoSrc = product.image_url || product.imageUrl;
             const isSelected = selectedProductIds.has(product.id || product.barcode);
@@ -770,7 +770,7 @@ export default function SavedProductsTab({
                         className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-600 cursor-pointer"
                       />
                       <span className="font-mono font-black text-xs text-indigo-900 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 border border-indigo-200/80 dark:border-indigo-800 px-2 py-0.5 rounded-lg">
-                        SN #{product.id}
+                        SN #{(currentPage - 1) * pageSize + idx + 1}
                       </span>
                     </div>
                     <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">

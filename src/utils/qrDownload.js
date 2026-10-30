@@ -135,6 +135,9 @@ export async function downloadQrCodePng({
   rmaNumber = 'RMA-TICKET',
   productName = '',
   barcode = '',
+  reporter = '',
+  reporterContact = '',
+  dateFormatted = '',
   filename
 }) {
   const svgEl = typeof svgElementOrId === 'string'
@@ -217,6 +220,16 @@ export async function downloadQrCodePng({
         ctx.fillStyle = '#64748b';
         ctx.font = 'bold 28px "JetBrains Mono", Consolas, monospace';
         ctx.fillText(`Barcode: ${barcode}`, width / 2, nextY + 10);
+        nextY += 45;
+      }
+      if (reporter || reporterContact || dateFormatted) {
+        ctx.fillStyle = '#475569';
+        ctx.font = 'bold 24px "Inter", sans-serif';
+        const repInfo = reporter ? (reporterContact && reporterContact !== 'N/A' ? `${reporter} (${reporterContact})` : reporter) : '';
+        const metaLine = [repInfo, dateFormatted].filter(Boolean).join('  •  ');
+        if (metaLine) {
+          ctx.fillText(metaLine, width / 2, nextY + 10);
+        }
       }
     }
 
@@ -258,6 +271,7 @@ export async function generateBoxStickerCanvas({
   unit = 'pc',
   reason = 'Defective / Return',
   reporter = 'Warehouse Staff',
+  reporterContact = '',
   dateFormatted = ''
 }) {
   const svgEl = typeof svgElementOrId === 'string'
@@ -442,17 +456,20 @@ export async function generateBoxStickerCanvas({
     const row2HeaderY = div2Y + 45;
     ctx.fillStyle = '#64748b';
     ctx.font = 'bold 24px "Inter", sans-serif';
-    ctx.fillText('REPORTED BY', 120, row2HeaderY);
-    ctx.fillText('DATE RECORDED', 520, row2HeaderY);
+    ctx.fillText('REPORTED BY & CONTACT', 120, row2HeaderY);
+    ctx.fillText('DATE & TIME RECORDED', 520, row2HeaderY);
 
     const row2ValY = row2HeaderY + 45;
     ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 32px "Inter", sans-serif';
-    drawWrappedText(ctx, reporter || 'Warehouse Staff', 120, row2ValY, 360, 38, 2);
+    ctx.font = 'bold 30px "Inter", sans-serif';
+    const repInfo = reporterContact && reporterContact !== 'N/A'
+      ? `${reporter || 'Warehouse Staff'} (${reporterContact})`
+      : (reporter || 'Warehouse Staff');
+    drawWrappedText(ctx, repInfo, 120, row2ValY, 380, 36, 2);
 
     ctx.fillStyle = '#334155';
-    ctx.font = 'bold 30px "JetBrains Mono", Consolas, monospace';
-    ctx.fillText(dateFormatted || new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }), 520, row2ValY);
+    ctx.font = 'bold 26px "JetBrains Mono", Consolas, monospace';
+    ctx.fillText(dateFormatted || new Date().toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }), 520, row2ValY);
 
     // 7. Dashed Tear Line and Footer
     const cutLineY = 1495;

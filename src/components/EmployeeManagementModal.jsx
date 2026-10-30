@@ -423,7 +423,7 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
               <p className="text-[11px] text-slate-400 dark:text-slate-500">Try searching with a different name or company email address.</p>
             </div>
           ) : (
-            paginatedEmployees.map(emp => (
+            paginatedEmployees.map((emp, idx) => (
               <div
                 key={emp.email}
                 className={`p-3 sm:p-3.5 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
@@ -434,6 +434,9 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    <span className="font-mono font-black text-[10px] text-purple-900 dark:text-purple-300 bg-purple-100 dark:bg-purple-950/80 px-1.5 py-0.5 rounded-md">
+                      #{(currentPage - 1) * pageSize + idx + 1}
+                    </span>
                     <span className="font-bold text-slate-900 dark:text-white text-sm truncate">
                       {emp.name}
                     </span>

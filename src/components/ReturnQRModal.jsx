@@ -29,15 +29,22 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
   const supplier = report.supplier_name || report.supplier || 'Warehouse';
   const reason = report.reason || report.defect_category || 'Damaged / Return';
   const reporter = report.reporter_name || report.reported_by || 'Staff';
-  const dateFormatted = new Date(report.created_at || Date.now()).toLocaleDateString('en-US', {
+  const reporterContact = report.reporter_contact || report.reporter_phone || report.phone || (report.reported_by && report.reported_by.includes('(') ? report.reported_by.replace(/.*\((.*)\).*/, '$1') : '') || 'N/A';
+  const createdDateObj = new Date(report.created_at || Date.now());
+  const dateFormatted = createdDateObj.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric'
   });
+  const timeFormatted = createdDateObj.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  const dateTimeFormatted = `${dateFormatted} • ${timeFormatted}`;
 
   // Clean RMA URL payload: when scanned by smartphone camera or barcode gun, opens RMA Quick Action
   const qrPayload = typeof window !== 'undefined'
-    ? `${window.location.origin}/?rma=${encodeURIComponent(rmaNumber)}`
+    ? `${window.location.origin}/?rma=${encodeURIComponent(rmaNumber)}&rep=${encodeURIComponent(reporter)}&contact=${encodeURIComponent(reporterContact)}&dt=${encodeURIComponent(dateTimeFormatted)}`
     : rmaNumber;
 
   const handlePrint = async () => {
@@ -54,7 +61,8 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
         unit,
         reason,
         reporter,
-        dateFormatted,
+        reporterContact,
+        dateFormatted: dateTimeFormatted,
         documentTitle: `RMA-Verification-Label-${rmaNumber}`
       });
     } catch (err) {
@@ -73,7 +81,10 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
         svgElementOrId: 'rma-sticker-qr-svg',
         rmaNumber,
         productName: itemName,
-        barcode
+        barcode,
+        reporter,
+        reporterContact,
+        dateFormatted: dateTimeFormatted
       });
       setDownloadNotice('QR Code downloaded successfully!');
       setTimeout(() => setDownloadNotice(null), 3500);
@@ -100,7 +111,8 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
         unit,
         reason,
         reporter,
-        dateFormatted
+        reporterContact,
+        dateFormatted: dateTimeFormatted
       });
       setDownloadNotice('Box Sticker image downloaded!');
       setTimeout(() => setDownloadNotice(null), 3500);
@@ -232,13 +244,18 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
               </div>
             </div>
 
-            {/* Bottom Strip: Reporter & Date */}
-            <div className="flex items-center justify-between text-[10px] sm:text-[11px] text-slate-600 border-t border-slate-200 pt-2 font-medium">
-              <div className="truncate pr-2">
-                Reported by: <strong className="text-slate-900">{reporter}</strong>
+            {/* Bottom Strip: Reporter, Date/Time & Contact Number */}
+            <div className="border-t border-slate-200 pt-2 text-[10px] sm:text-[11px] text-slate-600 font-medium space-y-1">
+              <div className="flex items-center justify-between">
+                <div className="truncate pr-2">
+                  Reported by: <strong className="text-slate-900">{reporter}</strong>
+                </div>
+                <div className="font-mono text-[9px] sm:text-[10px] text-slate-500 shrink-0">
+                  {dateTimeFormatted}
+                </div>
               </div>
-              <div className="font-mono text-[9px] sm:text-[10px] text-slate-500 shrink-0">
-                {dateFormatted}
+              <div className="flex items-center justify-between text-[9px] sm:text-[10px] text-slate-500">
+                <span>Contact: <strong className="font-mono text-slate-800">{reporterContact}</strong></span>
               </div>
             </div>
 
