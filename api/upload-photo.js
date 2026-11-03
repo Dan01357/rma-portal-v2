@@ -157,7 +157,7 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
   }
 
   const searchRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
       signal,
@@ -167,7 +167,57 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
   if (searchRes.ok) {
     const data = await searchRes.json();
     if (data.files && data.files.length > 0) {
-      return data.files[0].id;
+      const primaryFolder = data.files[0];
+
+      // Auto-consolidate: If multiple duplicate folders exist under this parent, merge them into the primary folder
+      if (data.files.length > 1) {
+        for (let i = 1; i < data.files.length; i++) {
+          const dupFolder = data.files[i];
+          try {
+            const childrenRes = await fetch(
+              `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${dupFolder.id}' in parents and trashed = false`)}&fields=files(id)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+              { headers: { Authorization: `Bearer ${accessToken}` }, signal }
+            );
+            if (childrenRes.ok) {
+              const children = await childrenRes.json();
+              for (const child of (children.files || [])) {
+                await fetch(
+                  `https://www.googleapis.com/drive/v3/files/${child.id}?addParents=${primaryFolder.id}&removeParents=${dupFolder.id}&supportsAllDrives=true`,
+                  {
+                    method: 'PATCH',
+                    headers: { Authorization: `Bearer ${accessToken}` }
+                  }
+                );
+              }
+            }
+            // Rename duplicate to avoid future search matches
+            await fetch(
+              `https://www.googleapis.com/drive/v3/files/${dupFolder.id}?supportsAllDrives=true`,
+              {
+                method: 'PATCH',
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ name: `[Merged Duplicate] ${safeName}` })
+              }
+            ).catch(() => {});
+
+            // Remove the duplicate empty folder
+            await fetch(
+              `https://www.googleapis.com/drive/v3/files/${dupFolder.id}?supportsAllDrives=true`,
+              {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${accessToken}` }
+              }
+            ).catch(() => {});
+          } catch (mergeErr) {
+            console.warn('[Google Drive Duplicate Merge Notice]:', mergeErr.message);
+          }
+        }
+      }
+
+      return primaryFolder.id;
     }
   }
 
@@ -250,9 +300,17 @@ async function resolveTargetFolder({
   category,
   sku = null,
   productName = null,
+  targetFolderId = null,
   accessToken,
   signal
 }) {
+  if (targetFolderId) {
+    return {
+      targetFolderId,
+      rmaFolderId: targetFolderId,
+      rmaFolderUrl: `https://drive.google.com/drive/folders/${targetFolderId}`
+    };
+  }
   let rootId = rootFolderId;
   if (!rootId) {
     try {
@@ -368,8 +426,15 @@ export default async function handler(req, res) {
       const accessToken = await getGoogleAccessToken(creds);
       const deletedIds = [];
       const failed = [];
+      const SYSTEM_PROTECTED_FOLDERS = new Set([
+        'Wholesale RMA Reports',
+        'Wholesale RMA Photos',
+        'RMA-Reports-Item',
+        'RMA-Reports-SI/DR/PO',
+        'Products'
+      ]);
 
-      // 1. If RMA numbers provided, locate & delete/trash their specific folders in RMA-Reports-Item & RMA-Reports-SI/DR/PO
+      // 1. If RMA numbers provided, locate & delete/trash their specific folders AND all files inside them
       for (const rma of [...new Set(rmaNumbers.filter(Boolean))]) {
         try {
           const cleanRma = String(rma).replace(/'/g, "\\'").trim();
@@ -381,7 +446,22 @@ export default async function handler(req, res) {
           if (sRes.ok) {
             const sData = await sRes.json();
             for (const f of (sData.files || [])) {
-              if (f.id && f.id !== creds.folderId) {
+              if (f.id && f.id !== creds.folderId && !SYSTEM_PROTECTED_FOLDERS.has(f.name)) {
+                // Find and delete ALL files inside this RMA folder first
+                try {
+                  const childrenRes = await fetch(
+                    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${f.id}' in parents and trashed = false`)}&fields=files(id,name)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+                    { headers: { Authorization: `Bearer ${accessToken}` } }
+                  );
+                  if (childrenRes.ok) {
+                    const cData = await childrenRes.json();
+                    for (const child of (cData.files || [])) {
+                      rawUrlsOrIds.push(child.id);
+                    }
+                  }
+                } catch (cErr) {
+                  console.warn(`[Google Drive Folder Files Fetch Notice for ${f.id}]:`, cErr.message);
+                }
                 rawUrlsOrIds.push(f.id);
               }
             }
@@ -391,7 +471,7 @@ export default async function handler(req, res) {
         }
       }
 
-      // 2. If SKUs provided, locate & delete/trash their specific product folders in Products
+      // 2. If SKUs provided, locate & delete/trash their specific product folders AND all files inside them
       for (const skuItem of [...new Set(skus.filter(Boolean))]) {
         try {
           const cleanSku = String(skuItem).replace(/'/g, "\\'").trim();
@@ -403,7 +483,21 @@ export default async function handler(req, res) {
           if (sRes.ok) {
             const sData = await sRes.json();
             for (const f of (sData.files || [])) {
-              if (f.id && f.id !== creds.folderId) {
+              if (f.id && f.id !== creds.folderId && !SYSTEM_PROTECTED_FOLDERS.has(f.name)) {
+                try {
+                  const childrenRes = await fetch(
+                    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${f.id}' in parents and trashed = false`)}&fields=files(id,name)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+                    { headers: { Authorization: `Bearer ${accessToken}` } }
+                  );
+                  if (childrenRes.ok) {
+                    const cData = await childrenRes.json();
+                    for (const child of (cData.files || [])) {
+                      rawUrlsOrIds.push(child.id);
+                    }
+                  }
+                } catch (cErr) {
+                  console.warn(`[Google Drive Product Files Fetch Notice for ${f.id}]:`, cErr.message);
+                }
                 rawUrlsOrIds.push(f.id);
               }
             }
@@ -577,7 +671,8 @@ export default async function handler(req, res) {
     rmaType = 'customer_inbound',
     customerName = null,
     storeBranch = null,
-    supplierName = null
+    supplierName = null,
+    targetFolderId = null
   } = parsedBody || {};
 
   if (!fileData) {
@@ -611,6 +706,7 @@ export default async function handler(req, res) {
       category,
       sku: sku || code,
       productName: productName || name,
+      targetFolderId,
       accessToken,
       signal: controller.signal
     });

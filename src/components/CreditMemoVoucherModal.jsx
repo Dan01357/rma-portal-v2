@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, Printer, Receipt, CheckCircle2, Building2, UserCheck } from 'lucide-react';
+import { printIsolatedElement } from '../utils/printIsolatedElement';
 
 export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, creditMemos = [] }) {
   if (!isOpen) return null;
@@ -12,16 +13,60 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
   if (memosToRender.length === 0) return null;
 
   const handlePrint = () => {
-    const originalTitle = document.title;
-    if (memosToRender.length === 1 && memosToRender[0]?.credit_memo_number) {
-      document.title = `Credit-Memo-${memosToRender[0].credit_memo_number}`;
-    } else if (memosToRender.length > 1) {
-      document.title = `Batch-Credit-Memos-${memosToRender.length}-Vouchers`;
-    }
-    window.print();
-    setTimeout(() => {
-      document.title = originalTitle;
-    }, 1200);
+    const docTitle = (memosToRender.length === 1 && memosToRender[0]?.credit_memo_number)
+      ? `Credit-Memo-${memosToRender[0].credit_memo_number}`
+      : `Batch-Credit-Memos-${memosToRender.length}-Vouchers`;
+
+    printIsolatedElement({
+      elementId: 'credit-memo-voucher-print-root',
+      documentTitle: docTitle,
+      pageSize: 'portrait',
+      pageMargin: '0.35in',
+      customStyles: `
+        #credit-memo-voucher-print-root {
+          width: 100% !important;
+          max-width: 195mm !important;
+          margin: 0 auto !important;
+          padding: 0 !important;
+          box-shadow: none !important;
+          border: none !important;
+          background: #ffffff !important;
+          color: #0f172a !important;
+          max-height: none !important;
+          height: auto !important;
+          overflow: visible !important;
+        }
+        #credit-memo-voucher-print-root > div {
+          max-height: none !important;
+          height: auto !important;
+          overflow: visible !important;
+        }
+        .voucher-sheet {
+          page-break-after: always !important;
+          break-after: page !important;
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
+          padding: 12px 16px !important;
+          background: #ffffff !important;
+          border: none !important;
+          box-shadow: none !important;
+        }
+        .voucher-sheet:last-child {
+          page-break-after: auto !important;
+          break-after: auto !important;
+        }
+        .print-hidden, .print\\:hidden, .bottom-sheet-handle,
+        #credit-memo-voucher-print-root .print\\:hidden,
+        #credit-memo-voucher-print-root .bottom-sheet-handle {
+          display: none !important;
+        }
+        input {
+          border: none !important;
+          outline: none !important;
+          background: transparent !important;
+        }
+      `
+    });
   };
 
   const isBulk = memosToRender.length > 1;
@@ -103,7 +148,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
             <button
               type="button"
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-200 transition-colors"
+              className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-200 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>

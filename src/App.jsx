@@ -1855,27 +1855,46 @@ export default function App() {
           supplierName: capturedProduct?.supplier_name
         };
 
-        // Upload damaged item photos to Proof of Damage
-        const damagedUploadPromises = capturedPhotos.map(item => {
-          if (item.file) return catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'damaged_items', photoMeta);
-          return null;
-        }).filter(Boolean);
+        // 1. Upload damaged item photos sequentially so the folder is created once and reused for all photos
+        const damagedResults = [];
+        let rmaDamagedFolderId = null;
+        let rmaDamagedFolderUrl = null;
 
-        // Upload official paperwork photos to Invoice
-        const paperworkUploadPromises = capturedPaperworkPhotos.map(item => {
-          if (item.file) return catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'official_paperwork', photoMeta);
-          return null;
-        }).filter(Boolean);
+        for (const item of capturedPhotos) {
+          if (!item.file) continue;
+          const meta = { ...photoMeta, targetFolderId: rmaDamagedFolderId };
+          const res = await catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'damaged_items', meta);
+          if (res) {
+            damagedResults.push(res);
+            if (res.rmaFolderId && !rmaDamagedFolderId) {
+              rmaDamagedFolderId = res.rmaFolderId;
+              rmaDamagedFolderUrl = res.rmaFolderUrl;
+            }
+          }
+        }
 
-        const [damagedResults, paperworkResults] = await Promise.all([
-          Promise.all(damagedUploadPromises),
-          Promise.all(paperworkUploadPromises)
-        ]);
+        // 2. Upload official paperwork photos sequentially so that the paperwork folder is created once
+        const paperworkResults = [];
+        let rmaPaperworkFolderId = null;
+        let rmaPaperworkFolderUrl = null;
+
+        for (const item of capturedPaperworkPhotos) {
+          if (!item.file) continue;
+          const meta = { ...photoMeta, targetFolderId: rmaPaperworkFolderId };
+          const res = await catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'official_paperwork', meta);
+          if (res) {
+            paperworkResults.push(res);
+            if (res.rmaFolderId && !rmaPaperworkFolderId) {
+              rmaPaperworkFolderId = res.rmaFolderId;
+              rmaPaperworkFolderUrl = res.rmaFolderUrl;
+            }
+          }
+        }
 
         const uploadedDamagedUrls = damagedResults.map(r => r?.url).filter(Boolean);
         const uploadedPaperworkUrls = paperworkResults.map(r => r?.url).filter(Boolean);
-        const gdriveFolderUrl = damagedResults[0]?.rmaFolderUrl || paperworkResults[0]?.rmaFolderUrl || null;
-        const gdriveFolderId = damagedResults[0]?.rmaFolderId || paperworkResults[0]?.rmaFolderId || null;
+        const gdriveFolderUrl = rmaDamagedFolderUrl || rmaPaperworkFolderUrl || damagedResults[0]?.rmaFolderUrl || paperworkResults[0]?.rmaFolderUrl || null;
+        const gdriveFolderId = rmaDamagedFolderId || rmaPaperworkFolderId || damagedResults[0]?.rmaFolderId || paperworkResults[0]?.rmaFolderId || null;
 
         const res = await catalogService.submitReport({
           rmaNumber,

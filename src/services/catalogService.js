@@ -202,6 +202,7 @@ export const catalogService = {
             mimeType: compressed.type || 'image/webp',
             rmaNumber,
             category,
+            targetFolderId: extraMeta.targetFolderId || null,
             sku: extraMeta.sku || extraMeta.code || null,
             productName: extraMeta.name || extraMeta.productName || null,
             rmaType: extraMeta.rmaType || extraMeta.rma_type || 'customer_inbound',
@@ -370,7 +371,9 @@ export const catalogService = {
    * Supports cleaning up specific file URLs, folder IDs, RMA folders, and Product SKU folders
    */
   async deleteStoredImages(imageUrls, folderIds = [], folderUrls = [], extra = {}) {
-    const cleanList = Array.isArray(imageUrls) ? imageUrls.filter(u => u && typeof u === 'string') : [];
+    const cleanList = Array.isArray(imageUrls)
+      ? imageUrls.map(u => (typeof u === 'object' && u) ? (u.url || u.previewUrl || u.fileUrl || u.id) : u).filter(u => u && typeof u === 'string')
+      : [];
     const cleanFolders = Array.isArray(folderIds) ? folderIds.filter(f => f && typeof f === 'string') : (folderIds ? [folderIds] : []);
     const cleanFolderUrls = Array.isArray(folderUrls) ? folderUrls.filter(u => u && typeof u === 'string') : (folderUrls ? [folderUrls] : []);
     const rmaNumbers = Array.isArray(extra?.rmaNumbers) ? extra.rmaNumbers.filter(Boolean) : (extra?.rmaNumber ? [extra.rmaNumber] : []);
@@ -913,11 +916,15 @@ export const catalogService = {
     }
 
     // Clean up stored image from Google Drive / Supabase
-    const prodSku = barcode || (typeof idOrProduct === 'object' ? (idOrProduct?.code || idOrProduct?.sku) : null);
+    const prodCode = (typeof idOrProduct === 'object' ? (idOrProduct?.code || idOrProduct?.sku) : null);
+    const prodBarcode = barcode || (typeof idOrProduct === 'object' ? idOrProduct?.barcode : null);
+    const prodName = name || (typeof idOrProduct === 'object' ? idOrProduct?.name : '');
+    const skusToDelete = [prodCode, prodBarcode, prodName, `${prodCode || ''} ${prodName || ''}`.trim()].filter(Boolean);
+
     if (imageToDelete) {
-      await this.deleteStoredImages([imageToDelete], [], [], { sku: prodSku });
-    } else if (prodSku) {
-      await this.deleteStoredImages([], [], [], { sku: prodSku });
+      await this.deleteStoredImages([imageToDelete], [], [], { skus: skusToDelete });
+    } else if (skusToDelete.length > 0) {
+      await this.deleteStoredImages([], [], [], { skus: skusToDelete });
     }
 
     this.notifyChange('product-deleted', { id, barcode, name });
@@ -953,11 +960,11 @@ export const catalogService = {
       .map(p => p.image_url || p.imageUrl)
       .filter(Boolean);
     const allSkus = productsList
-      .map(p => p.code || p.sku || p.barcode)
+      .flatMap(p => [p.code, p.sku, p.barcode, p.name, `${p.code || p.sku || ''} ${p.name || ''}`.trim()])
       .filter(Boolean);
 
     if (allImages.length > 0 || allSkus.length > 0) {
-      await this.deleteStoredImages(allImages, [], [], { skus: allSkus });
+      await this.deleteStoredImages(allImages, [], [], { skus: [...new Set(allSkus)] });
     }
 
     this.notifyChange('products-bulk-deleted', { count: productsList.length });
@@ -1592,6 +1599,7 @@ export const catalogService = {
         const { data: found } = await findQ;
         if (found && found.length > 0) {
           const foundItem = found[0];
+          if (!rmaNumber && foundItem.rma_number) rmaNumber = foundItem.rma_number;
           if (!barcodeToCheck && foundItem.barcode) barcodeToCheck = foundItem.barcode;
           if (foundItem.google_drive_folder_id) foldersToDelete.push(foundItem.google_drive_folder_id);
           if (foundItem.google_drive_folder_url) folderUrlsToDelete.push(foundItem.google_drive_folder_url);
