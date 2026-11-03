@@ -354,8 +354,22 @@ In the **Supplier Claims (RTV)** tab:
    * Total Selected Items Count
    * Total Physical Units
    * Total Claim Debit Value (₱)
-4. Tapping **"Generate RTV Debit Claim"** bundles selected returns into a formal supplier chargeback claim.
+4. Tapping **"+ Batch Debit Claim"** bundles selected returns into a formal supplier chargeback claim.
 5. Export formal CSV reports for supplier credit accounting or print supplier debit vouchers.
+
+### 5.3 Row-Level Operations & Triage Feature Parity
+Every line item in the Supplier Claims Hub offers complete operational parity with the Customer Hub:
+1. **Row Click-to-Inspect**: Clicking anywhere across a record row instantly opens `QuickRMAActionModal`, allowing warehouse leads to re-grade merchandise (A/B/C/D), modify storage bin locations (`RACK-A1` through `DOCK-INTAKE`), and add inspection notes.
+2. **Thermal 4x6" Box Label Printer**: The dedicated printer icon on each row opens `ThermalBoxLabelModal` pre-populated with item barcodes, bin locations, and clean 4-border thermal formatting.
+3. **In-Table "Assign SKU" Action**: Items intake-scanned with unknown barcodes or "Unidentified Item" status render an `[ Assign SKU ]` button. Clicking it launches the product auto-suggest modal, allowing warehouse operators to search ERPLY live catalog records, link the master supplier, and assign the official unit price. Once saved, the Supplier Hub updates dynamically with real-time pricing and computed claim totals.
+
+### 5.4 Financial Validation & Safety Guard
+To eliminate erroneous ₱0.00 accounting claims or unassigned supplier deductions:
+1. **Zero-Value Voucher Prohibition**: The system actively guards both single-item and batch RTV claim generation. If any item has a unit price of `₱0.00` or supplier status `Pending Assignment`, the debit voucher cannot be issued.
+2. **Flagged Action Buttons**: The `+ Debit Claim` button is visually flagged as `+ Debit Claim (₱0.00)` with an alert badge whenever unpriced items are present.
+3. **Interactive Safety Guard Modal**: Attempting to generate a debit voucher triggers a friendly modal:
+   *"Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Please click 'Assign SKU' first to set the official item price and master supplier."*
+   The modal provides a direct **"Assign SKU Now"** shortcut that routes immediately to product registration.
 
 ---
 

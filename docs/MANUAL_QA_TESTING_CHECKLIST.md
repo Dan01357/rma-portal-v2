@@ -496,6 +496,26 @@ Each test scenario defines:
   * **Action**: Click button with items selected.
   * **Expected Behavior**: Bundles returns into a supplier debit note and displays a formal printable debit voucher.
 
+- [ ] **TC-RTV-04 (Unassigned Item SKU & Vendor Assignment from Supplier Hub Table)**
+  * **Location**: Supplier Hub Table -> `[ Assign SKU ]` button on unassigned / ₱0.00 items
+  * **Action**: Click `[ Assign SKU ]` on an unassigned or unpriced return item.
+  * **Expected Behavior**: Opens `ProductEditModal` pre-populated with the item's barcode. Searching and selecting an official ERPLY catalog SKU or saving master supplier and unit price immediately updates the Supplier Hub row with the official item name, vendor, unit price, and recomputed total claim amount without requiring a page reload.
+
+- [ ] **TC-RTV-05 (₱0.00 & Unassigned Vendor Financial Validation Safety Guard)**
+  * **Location**: Supplier Hub Table -> `+ Debit Claim` button on an unpriced item or batch with ₱0.00 total
+  * **Action**: Attempt to click `+ Debit Claim` or `+ Batch Debit Claim` on an item with ₱0.00 price or `Pending Assignment` vendor.
+  * **Expected Behavior**: System blocks voucher generation and displays the Financial Validation & Safety Guard modal: *"Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Please click 'Assign SKU' first to set the official item price and master supplier."* Clicking "Assign SKU Now" in the warning modal opens the product editor directly.
+
+- [ ] **TC-RTV-06 (Row Click-to-Open Quick Action / Triage Modal)**
+  * **Location**: Supplier Hub Table row body
+  * **Action**: Click anywhere on an item's table row (outside checkboxes and action buttons).
+  * **Expected Behavior**: Immediately opens `QuickRMAActionModal` preloaded with the selected RMA number, allowing physical inspection, grading (A/B/C/D), rack/bin updates, and note audits.
+
+- [ ] **TC-RTV-07 (4x6" Thermal Box Label Printing from Supplier Hub)**
+  * **Location**: Supplier Hub Table Actions -> Printer icon (`<Printer />`)
+  * **Action**: Click the thermal printer icon on any row.
+  * **Expected Behavior**: Opens `ThermalBoxLabelModal` pre-configured with that return item, rendering barcodes, rack/bin location, and all 4 printable borders cleanly for direct 4x6" label output.
+
 ---
 
 ## Section 7: Tab 5 — Settings, Diagnostics & API Key Vault

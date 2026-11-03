@@ -4444,6 +4444,14 @@ export default function App() {
                 onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
                 onRequestDeleteReport={requestDeleteReport}
                 onRequestBulkDeleteReports={requestBulkDeleteReports}
+                onAssignSku={(report) => handleEditProductFromReport(report)}
+                onEditProductFromReport={handleEditProductFromReport}
+                onOpenQuickAction={(rmaNumber) => {
+                  setQuickRmaNumber(rmaNumber);
+                  setIsQuickRmaModalOpen(true);
+                }}
+                onPrintLabel={(report) => setThermalPrintReport(report)}
+                savedProductsList={savedProductsList}
               />
             )}
 

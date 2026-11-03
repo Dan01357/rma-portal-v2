@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated: 2026-11-03T02:24:38.229Z
+Generated: 2026-11-03T02:49:32.666Z
 ================================================================================
 
 ================================================================================
@@ -48,11 +48,11 @@ rma-portal-v2/
 ├── scratch
 │   ├── check_key.js
 │   ├── deployed.js
-│   ├── generate_project_context.cjs
 │   ├── test_api_imports.js
 │   ├── test_api.js
 │   ├── test_handler_exec.js
 │   ├── test_openapi.js
+│   ├── update_context.cjs
 │   └── vercel_err.html
 ├── src
 │   ├── archive_v1
@@ -9128,6 +9128,14 @@ export default function App() {
                 onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
                 onRequestDeleteReport={requestDeleteReport}
                 onRequestBulkDeleteReports={requestBulkDeleteReports}
+                onAssignSku={(report) => handleEditProductFromReport(report)}
+                onEditProductFromReport={handleEditProductFromReport}
+                onOpenQuickAction={(rmaNumber) => {
+                  setQuickRmaNumber(rmaNumber);
+                  setIsQuickRmaModalOpen(true);
+                }}
+                onPrintLabel={(report) => setThermalPrintReport(report)}
+                savedProductsList={savedProductsList}
               />
             )}
 
@@ -27083,7 +27091,9 @@ import {
   MapPin,
   ArrowUp,
   ArrowDown,
-  ArrowUpDown
+  ArrowUpDown,
+  Package,
+  ClipboardCheck
 } from 'lucide-react';
 import { exportRMAReportsToCSV, exportSupplierOutboundClaimsToCSV } from '../utils/exportCsv';
 import TablePagination from './TablePagination';
@@ -27096,7 +27106,12 @@ export default function SupplierClaimsTab({
   onRefresh,
   onViewPhoto,
   onRequestDeleteReport,
-  onRequestBulkDeleteReports
+  onRequestBulkDeleteReports,
+  onAssignSku,
+  onEditProductFromReport,
+  onOpenQuickAction,
+  onPrintLabel,
+  savedProductsList = []
 }) {
   const [selectedSupplier, setSelectedSupplier] = useState('All');
   const [dispositionFilter, setDispositionFilter] = useState('All');
@@ -27110,9 +27125,59 @@ export default function SupplierClaimsTab({
   const [localLightboxPhoto, setLocalLightboxPhoto] = useState(null);
   const [savedClaims, setSavedClaims] = useState([]);
   const [isSavingClaim, setIsSavingClaim] = useState(false);
+  const [financialWarningTarget, setFinancialWarningTarget] = useState(null);
 
   // Role permissions
   const canDeleteReports = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
+
+  // Helper to resolve product information (SKU, Name, Supplier, Price) with fallback to savedProductsList
+  const resolveReportProduct = (r) => {
+    if (!r) {
+      return {
+        name: '',
+        code: '',
+        supplier: 'Savemore',
+        price: 0,
+        qty: 1,
+        total: 0,
+        isUnassigned: true,
+        matchedProduct: null
+      };
+    }
+    const barcodeStr = r.barcode ? String(r.barcode).trim() : '';
+    const matched = barcodeStr ? savedProductsList.find(p => p.barcode && String(p.barcode).trim() === barcodeStr) : null;
+
+    const rawName = r.name || '';
+    const isUnidentified = !rawName || rawName.toLowerCase().includes('unidentified');
+    const name = isUnidentified
+      ? (matched?.name || rawName || `Unidentified Item (${barcodeStr})`)
+      : rawName;
+
+    const code = r.code || r.sku || matched?.code || matched?.sku || '';
+
+    const rawSupplier = r.supplier_name || '';
+    const isPendingVendor = !rawSupplier || rawSupplier.toLowerCase().includes('pending') || rawSupplier.toLowerCase().includes('unassigned');
+    const supplier = isPendingVendor
+      ? (matched?.supplier_name || rawSupplier || 'Pending Assignment')
+      : rawSupplier;
+
+    const qty = Number(r.quantity || 1);
+    const price = Number(r.price_with_vat || r.price || matched?.price_with_vat || matched?.price || 0);
+    const total = qty * price;
+
+    const isUnassigned = !code || isUnidentified || price <= 0 || (supplier.toLowerCase().includes('pending') || supplier.toLowerCase().includes('unassigned'));
+
+    return {
+      name,
+      code,
+      supplier,
+      price,
+      qty,
+      total,
+      isUnassigned,
+      matchedProduct: matched
+    };
+  };
 
   // Load saved supplier debit claims from database
   useEffect(() => {
@@ -27129,11 +27194,12 @@ export default function SupplierClaimsTab({
   const suppliers = useMemo(() => {
     const set = new Set();
     reportsList.forEach(r => {
-      const sup = (r.supplier_name || 'Savemore').trim();
+      const res = resolveReportProduct(r);
+      const sup = res.supplier.trim();
       if (sup) set.add(sup);
     });
     return ['All', ...Array.from(set).sort()];
-  }, [reportsList]);
+  }, [reportsList, savedProductsList]);
 
   // Reset pagination on filter or sort change
   useEffect(() => {
@@ -27159,19 +27225,21 @@ export default function SupplierClaimsTab({
 
       if (!isSupplierCandidate) return false;
 
+      const res = resolveReportProduct(r);
+
       const matchesSupplier = selectedSupplier === 'All' || 
-        (r.supplier_name || 'Savemore').toLowerCase() === selectedSupplier.toLowerCase();
+        res.supplier.toLowerCase() === selectedSupplier.toLowerCase();
 
       const matchesDisposition = dispositionFilter === 'All' || 
         (r.disposition || 'Pending Triage').replace(/^\d+-\s*/, '').toLowerCase() === dispositionFilter.replace(/^\d+-\s*/, '').toLowerCase();
 
       const q = searchTerm.toLowerCase().trim();
       const matchesSearch = !q || 
-        r.name?.toLowerCase().includes(q) ||
+        res.name?.toLowerCase().includes(q) ||
         r.barcode?.includes(q) ||
         r.rma_number?.toLowerCase().includes(q) ||
-        r.code?.toLowerCase().includes(q) ||
-        r.supplier_name?.toLowerCase().includes(q) ||
+        res.code?.toLowerCase().includes(q) ||
+        res.supplier?.toLowerCase().includes(q) ||
         r.warehouse_location?.toLowerCase().includes(q) ||
         r.batch_lot_number?.toLowerCase().includes(q);
 
@@ -27180,34 +27248,37 @@ export default function SupplierClaimsTab({
 
     list.sort((a, b) => {
       let valA, valB;
+      const resA = resolveReportProduct(a);
+      const resB = resolveReportProduct(b);
+
       switch (sortField) {
         case 'rma_number':
           valA = String(a.rma_number || '').toLowerCase();
           valB = String(b.rma_number || '').toLowerCase();
           break;
         case 'supplier_name':
-          valA = String(a.supplier_name || 'Savemore').toLowerCase();
-          valB = String(b.supplier_name || 'Savemore').toLowerCase();
+          valA = resA.supplier.toLowerCase();
+          valB = resB.supplier.toLowerCase();
           break;
         case 'name':
-          valA = String(a.name || '').toLowerCase();
-          valB = String(b.name || '').toLowerCase();
+          valA = resA.name.toLowerCase();
+          valB = resB.name.toLowerCase();
           break;
         case 'disposition':
           valA = String(a.disposition || 'Pending Triage').toLowerCase();
           valB = String(b.disposition || 'Pending Triage').toLowerCase();
           break;
         case 'quantity':
-          valA = Number(a.quantity || 1);
-          valB = Number(b.quantity || 1);
+          valA = resA.qty;
+          valB = resB.qty;
           break;
         case 'price':
-          valA = Number(a.price_with_vat || a.price || 0);
-          valB = Number(b.price_with_vat || b.price || 0);
+          valA = resA.price;
+          valB = resB.price;
           break;
         case 'total':
-          valA = (Number(a.quantity || 1)) * (Number(a.price_with_vat || a.price || 0));
-          valB = (Number(b.quantity || 1)) * (Number(b.price_with_vat || b.price || 0));
+          valA = resA.total;
+          valB = resB.total;
           break;
         case 'created_at':
         default:
@@ -27222,7 +27293,7 @@ export default function SupplierClaimsTab({
     });
 
     return list;
-  }, [reportsList, selectedSupplier, dispositionFilter, searchTerm, sortField, sortDirection]);
+  }, [reportsList, selectedSupplier, dispositionFilter, searchTerm, sortField, sortDirection, savedProductsList]);
 
   // Paginated Slice
   const paginatedCandidates = useMemo(() => {
@@ -27237,15 +27308,17 @@ export default function SupplierClaimsTab({
 
   const totalClaimAmount = useMemo(() => {
     return selectedItems.reduce((sum, r) => {
-      const qty = Number(r.quantity || 1);
-      const price = Number(r.price_with_vat || r.price || 0);
-      return sum + (qty * price);
+      const res = resolveReportProduct(r);
+      return sum + res.total;
     }, 0);
-  }, [selectedItems]);
+  }, [selectedItems, savedProductsList]);
 
   const totalQuantity = useMemo(() => {
-    return selectedItems.reduce((sum, r) => sum + Number(r.quantity || 1), 0);
-  }, [selectedItems]);
+    return selectedItems.reduce((sum, r) => {
+      const res = resolveReportProduct(r);
+      return sum + res.qty;
+    }, 0);
+  }, [selectedItems, savedProductsList]);
 
   const handleToggleSelect = (id) => {
     setSelectedRmaIds(prev => {
@@ -27366,11 +27439,32 @@ export default function SupplierClaimsTab({
    */
   const handleGenerateSingleClaim = async (item) => {
     if (!item) return;
-    const supplierName = (item.supplier_name || 'Savemore').trim();
+    const res = resolveReportProduct(item);
+
+    // Financial Validation & Safety Guard: Cannot issue claim for ₱0.00 or unassigned vendor
+    if (res.price <= 0 || res.supplier === 'Pending Assignment' || res.supplier === 'Unassigned') {
+      setFinancialWarningTarget({
+        item,
+        message: "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Please click 'Assign SKU' first to set the official item price and master supplier."
+      });
+      return;
+    }
+
+    const supplierName = res.supplier.trim();
     const cleanGeneratedBy = getCleanUserName(currentUser);
     const claimNumber = supplierClaimService.generateRtvId(savedClaims);
-    const qty = Number(item.quantity) || 1;
-    const price = Number(item.price_with_vat || item.price || 0);
+    const qty = res.qty;
+    const price = res.price;
+
+    const enrichedItem = {
+      ...item,
+      name: res.name,
+      code: res.code || item.code,
+      sku: res.code || item.sku,
+      supplier_name: res.supplier,
+      price: res.price,
+      price_with_vat: res.price
+    };
 
     const newClaim = {
       claimNumber,
@@ -27381,7 +27475,7 @@ export default function SupplierClaimsTab({
       created_at: new Date().toISOString(),
       generatedBy: cleanGeneratedBy,
       generated_by: cleanGeneratedBy,
-      items: [item],
+      items: [enrichedItem],
       totalQuantity: qty,
       totalClaimAmount: qty * price
     };
@@ -27409,8 +27503,22 @@ export default function SupplierClaimsTab({
       return;
     }
 
+    // Financial Validation & Safety Guard: Cannot issue claim for ₱0.00 or unassigned vendor
+    const invalidItem = selectedItems.find(i => {
+      const res = resolveReportProduct(i);
+      return res.price <= 0 || res.supplier === 'Pending Assignment' || res.supplier === 'Unassigned';
+    });
+
+    if (invalidItem || totalClaimAmount <= 0) {
+      setFinancialWarningTarget({
+        item: invalidItem || selectedItems[0],
+        message: "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Please click 'Assign SKU' first to set the official item price and master supplier."
+      });
+      return;
+    }
+
     // Enforce that all bundled items belong strictly to the SAME supplier
-    const suppliersInBatch = [...new Set(selectedItems.map(i => (i.supplier_name || 'Savemore').trim()))];
+    const suppliersInBatch = [...new Set(selectedItems.map(i => resolveReportProduct(i).supplier.trim()))];
     if (suppliersInBatch.length > 1) {
       alert(`You have selected items across ${suppliersInBatch.length} different suppliers (${suppliersInBatch.join(', ')}).\n\nAn official Supplier Debit Claim (RTV) voucher must be issued to a SINGLE vendor.\n\nPlease select items from the same supplier, or filter by "${suppliersInBatch[0]}" to generate a consolidated claim.`);
       return;
@@ -27419,6 +27527,19 @@ export default function SupplierClaimsTab({
     const supplierName = suppliersInBatch[0] || (selectedSupplier !== 'All' ? selectedSupplier : 'Savemore');
     const cleanGeneratedBy = getCleanUserName(currentUser);
     const claimNumber = supplierClaimService.generateRtvId(savedClaims);
+
+    const enrichedItems = selectedItems.map(i => {
+      const res = resolveReportProduct(i);
+      return {
+        ...i,
+        name: res.name,
+        code: res.code || i.code,
+        sku: res.code || i.sku,
+        supplier_name: res.supplier,
+        price: res.price,
+        price_with_vat: res.price
+      };
+    });
 
     const newClaim = {
       claimNumber,
@@ -27429,7 +27550,7 @@ export default function SupplierClaimsTab({
       created_at: new Date().toISOString(),
       generatedBy: cleanGeneratedBy,
       generated_by: cleanGeneratedBy,
-      items: selectedItems,
+      items: enrichedItems,
       totalQuantity,
       totalClaimAmount
     };
@@ -27454,7 +27575,21 @@ export default function SupplierClaimsTab({
   const handlePrintSelectedVouchers = () => {
     if (selectedItems.length === 0) return;
 
-    const suppliersInBatch = [...new Set(selectedItems.map(i => (i.supplier_name || 'Savemore').trim()))];
+    // Financial Validation & Safety Guard
+    const invalidItem = selectedItems.find(i => {
+      const res = resolveReportProduct(i);
+      return res.price <= 0 || res.supplier === 'Pending Assignment' || res.supplier === 'Unassigned';
+    });
+
+    if (invalidItem || totalClaimAmount <= 0) {
+      setFinancialWarningTarget({
+        item: invalidItem || selectedItems[0],
+        message: "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Please click 'Assign SKU' first to set the official item price and master supplier."
+      });
+      return;
+    }
+
+    const suppliersInBatch = [...new Set(selectedItems.map(i => resolveReportProduct(i).supplier.trim()))];
     if (suppliersInBatch.length > 1) {
       alert(`You have selected items across ${suppliersInBatch.length} different suppliers (${suppliersInBatch.join(', ')}).\n\nTo print a consolidated RTV voucher, please select items from a single supplier.`);
       return;
@@ -27470,13 +27605,26 @@ export default function SupplierClaimsTab({
 
     if (!existingClaim) {
       const claimNumber = supplierClaimService.generateRtvId(savedClaims);
+      const enrichedItems = selectedItems.map(i => {
+        const res = resolveReportProduct(i);
+        return {
+          ...i,
+          name: res.name,
+          code: res.code || i.code,
+          sku: res.code || i.sku,
+          supplier_name: res.supplier,
+          price: res.price,
+          price_with_vat: res.price
+        };
+      });
+
       existingClaim = {
         claimNumber,
         claim_number: claimNumber,
         supplierName,
         createdAt: new Date().toISOString(),
         generatedBy: cleanGeneratedBy,
-        items: selectedItems,
+        items: enrichedItems,
         totalQuantity,
         totalClaimAmount
       };
@@ -27635,7 +27783,23 @@ export default function SupplierClaimsTab({
                   {selectedRmaIds.size} selected • ₱{totalClaimAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </span>
 
-                {/* 1. Print Vouchers for Selected Items */}
+                {/* 1. Batch Debit Claim Voucher */}
+                <button
+                  type="button"
+                  onClick={handleGenerateBatchClaim}
+                  disabled={isSavingClaim}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs ${
+                    totalClaimAmount <= 0
+                      ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-dashed border-amber-400 opacity-90'
+                      : 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-500/20'
+                  }`}
+                  title={totalClaimAmount <= 0 ? "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor" : "Generate consolidated supplier debit claim voucher"}
+                >
+                  <Receipt className="w-3.5 h-3.5" />
+                  <span>+ Debit Claim</span>
+                </button>
+
+                {/* 2. Print Vouchers for Selected Items */}
                 <button
                   type="button"
                   onClick={handlePrintSelectedVouchers}
@@ -27830,18 +27994,22 @@ export default function SupplierClaimsTab({
                 {paginatedCandidates.map((r, idx) => {
                   const id = r.id || r.rma_number;
                   const isSelected = selectedRmaIds.has(id);
-                  const qty = Number(r.quantity || 1);
-                  const price = Number(r.price_with_vat || r.price || 0);
-                  const total = qty * price;
+                  const res = resolveReportProduct(r);
                   const photos = getPhotos(r);
                   const existingClaim = getClaimForReport(r);
+                  const isClaimable = res.price > 0 && res.supplier && res.supplier !== 'Pending Assignment' && res.supplier !== 'Unassigned';
 
                   return (
                     <tr 
                       key={id}
-                      onClick={() => handleToggleSelect(id)}
-                      className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors cursor-pointer ${
-                        isSelected ? 'bg-amber-50/60 dark:bg-amber-950/20' : ''
+                      onClick={(e) => {
+                        if (e.target.closest('input, button, a')) return;
+                        if (onOpenQuickAction) {
+                          onOpenQuickAction(r.rma_number);
+                        }
+                      }}
+                      className={`hover:bg-amber-50/50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer ${
+                        isSelected ? 'bg-amber-50/80 dark:bg-amber-950/40' : ''
                       }`}
                     >
                       {/* Checkbox */}
@@ -27890,7 +28058,7 @@ export default function SupplierClaimsTab({
 
                       {/* RMA Identifier */}
                       <td className="p-3">
-                        <div className="font-mono font-black text-slate-900 dark:text-white">
+                        <div className="font-mono font-black text-slate-900 dark:text-white hover:text-amber-600 hover:underline">
                           {r.rma_number}
                         </div>
                         <div className="text-[10px] text-slate-400 flex items-center gap-1.5 flex-wrap">
@@ -27913,8 +28081,8 @@ export default function SupplierClaimsTab({
 
                       {/* Vendor / Supplier & Warehouse Bin */}
                       <td className="p-3">
-                        <div className="font-bold text-slate-800 dark:text-slate-200">
-                          {r.supplier_name || 'Savemore'}
+                        <div className={`font-bold ${res.supplier === 'Pending Assignment' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                          {res.supplier}
                         </div>
                         <div className="text-[10px] text-slate-400 font-mono mt-0.5">
                           Bin: <strong className="text-slate-600 dark:text-slate-300">{r.warehouse_location || 'DOCK'}</strong>
@@ -27926,11 +28094,11 @@ export default function SupplierClaimsTab({
 
                       {/* Product Description & SKU */}
                       <td className="p-3">
-                        <div className="font-bold text-slate-900 dark:text-white truncate max-w-xs" title={r.name}>
-                          {r.name}
+                        <div className="font-bold text-slate-900 dark:text-white truncate max-w-xs" title={res.name}>
+                          {res.name}
                         </div>
                         <div className="text-[10px] font-mono text-slate-400">
-                          SKU: <strong className="text-slate-600 dark:text-slate-300">{r.code || r.sku || 'Unassigned'}</strong> • BC: {r.barcode}
+                          SKU: <strong className={res.code ? 'text-slate-600 dark:text-slate-300' : 'text-amber-600 dark:text-amber-400'}>{res.code || 'Unassigned'}</strong> • BC: {r.barcode}
                         </div>
                       </td>
 
@@ -27953,23 +28121,71 @@ export default function SupplierClaimsTab({
 
                       {/* Qty */}
                       <td className="p-3 text-right font-mono font-bold text-slate-900 dark:text-white">
-                        {qty} {r.unit_name || 'pc'}
+                        {res.qty} {r.unit_name || 'pc'}
                       </td>
 
                       {/* Unit Price */}
                       <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">
-                        ₱{price.toFixed(2)}
+                        <span className={res.price <= 0 ? 'text-amber-600 dark:text-amber-400 font-semibold' : ''}>
+                          ₱{res.price.toFixed(2)}
+                        </span>
                       </td>
 
                       {/* Total Claim */}
                       <td className="p-3 text-right font-mono font-black text-amber-700 dark:text-amber-400">
-                        ₱{total.toFixed(2)}
+                        <span className={res.total <= 0 ? 'text-amber-600 dark:text-amber-400' : ''}>
+                          ₱{res.total.toFixed(2)}
+                        </span>
                       </td>
 
-                      {/* Actions Column: Individual Debit Claim & Delete Only */}
+                      {/* Actions Column: Thermal Label, Inspect/Triage, Assign SKU, Debit Claim & Delete */}
                       <td className="p-2.5 text-center" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                          {/* Individual Action for Debit Claim Generation or Viewing */}
+                          
+                          {/* 1. Print 4x6 Thermal Box Label */}
+                          {onPrintLabel && (
+                            <button
+                              type="button"
+                              onClick={() => onPrintLabel(r)}
+                              className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                              title="Print 4x6 inch Thermal Box Label"
+                            >
+                              <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
+                            </button>
+                          )}
+
+                          {/* 2. Inspect / Triage Physical Return */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (onOpenQuickAction) {
+                                onOpenQuickAction(r.rma_number);
+                              }
+                            }}
+                            className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                            title={`Inspect, triage condition grade, and assign rack/bin location for ${r.rma_number}`}
+                          >
+                            <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                            <span>Inspect / Triage</span>
+                          </button>
+
+                          {/* 3. Assign SKU (if item has unassigned SKU or ₱0.00 or unassigned vendor) */}
+                          {res.isUnassigned && (onAssignSku || onEditProductFromReport) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (onAssignSku) onAssignSku(r);
+                                else if (onEditProductFromReport) onEditProductFromReport(r);
+                              }}
+                              className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                              title={`Assign official SKU, pricing, and master vendor for "${res.name || r.barcode}"`}
+                            >
+                              <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                              <span>Assign SKU</span>
+                            </button>
+                          )}
+
+                          {/* 4. Official Debit Claim Generation or Viewing */}
                           {existingClaim ? (
                             <button
                               type="button"
@@ -27979,6 +28195,21 @@ export default function SupplierClaimsTab({
                             >
                               <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                               <span>RTV Voucher</span>
+                            </button>
+                          ) : !isClaimable ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFinancialWarningTarget({
+                                  item: r,
+                                  message: "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Please click 'Assign SKU' first to set the official item price and master supplier."
+                                });
+                              }}
+                              className="px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-2xs hover:border-amber-400 hover:text-amber-600"
+                              title="Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Click 'Assign SKU' first."
+                            >
+                              <AlertTriangle className="w-3 h-3 text-amber-500" />
+                              <span>+ Debit Claim (₱0.00)</span>
                             </button>
                           ) : (
                             <button
@@ -27993,7 +28224,7 @@ export default function SupplierClaimsTab({
                             </button>
                           )}
 
-                          {/* Delete Report */}
+                          {/* 5. Delete Report */}
                           {canDeleteReports && onRequestDeleteReport && (
                             <button
                               type="button"
@@ -28188,6 +28419,52 @@ export default function SupplierClaimsTab({
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* FINANCIAL VALIDATION & SAFETY GUARD MODAL */}
+      {financialWarningTarget && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-amber-500/30 max-w-md w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 shadow-inner">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="space-y-1.5 min-w-0">
+                <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                  Financial Validation & Safety Guard
+                </h4>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  {financialWarningTarget.message || "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Please click 'Assign SKU' first to set the official item price and master supplier."}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setFinancialWarningTarget(null)}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+              >
+                Dismiss
+              </button>
+              {financialWarningTarget.item && (onAssignSku || onEditProductFromReport) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = financialWarningTarget.item;
+                    setFinancialWarningTarget(null);
+                    if (onAssignSku) onAssignSku(target);
+                    else if (onEditProductFromReport) onEditProductFromReport(target);
+                  }}
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm shadow-blue-500/20 cursor-pointer"
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  <span>Assign SKU Now</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
