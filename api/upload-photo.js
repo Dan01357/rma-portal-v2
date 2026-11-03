@@ -157,7 +157,7 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
   }
 
   const searchRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
       signal,
@@ -167,61 +167,11 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
   if (searchRes.ok) {
     const data = await searchRes.json();
     if (data.files && data.files.length > 0) {
-      const primaryFolder = data.files[0];
-
-      // Auto-consolidate: If multiple duplicate folders exist under this parent, merge them into the primary folder
-      if (data.files.length > 1) {
-        for (let i = 1; i < data.files.length; i++) {
-          const dupFolder = data.files[i];
-          try {
-            const childrenRes = await fetch(
-              `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${dupFolder.id}' in parents and trashed = false`)}&fields=files(id)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
-              { headers: { Authorization: `Bearer ${accessToken}` }, signal }
-            );
-            if (childrenRes.ok) {
-              const children = await childrenRes.json();
-              for (const child of (children.files || [])) {
-                await fetch(
-                  `https://www.googleapis.com/drive/v3/files/${child.id}?addParents=${primaryFolder.id}&removeParents=${dupFolder.id}&supportsAllDrives=true`,
-                  {
-                    method: 'PATCH',
-                    headers: { Authorization: `Bearer ${accessToken}` }
-                  }
-                );
-              }
-            }
-            // Rename duplicate to avoid future search matches
-            await fetch(
-              `https://www.googleapis.com/drive/v3/files/${dupFolder.id}?supportsAllDrives=true`,
-              {
-                method: 'PATCH',
-                headers: {
-                  Authorization: `Bearer ${accessToken}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ name: `[Merged Duplicate] ${safeName}` })
-              }
-            ).catch(() => {});
-
-            // Remove the duplicate empty folder
-            await fetch(
-              `https://www.googleapis.com/drive/v3/files/${dupFolder.id}?supportsAllDrives=true`,
-              {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${accessToken}` }
-              }
-            ).catch(() => {});
-          } catch (mergeErr) {
-            console.warn('[Google Drive Duplicate Merge Notice]:', mergeErr.message);
-          }
-        }
-      }
-
-      return primaryFolder.id;
+      return data.files[0].id;
     }
   }
 
-  // Create subfolder inside parent
+  // Create subfolder inside parent with supportsAllDrives=true
   const meta = {
     name: safeName,
     mimeType: 'application/vnd.google-apps.folder',
@@ -300,18 +250,42 @@ async function resolveTargetFolder({
   category,
   sku = null,
   productName = null,
-  targetFolderId = null,
+  targetFolderId: preResolvedFolderId = null,
   accessToken,
   signal
 }) {
-  if (targetFolderId) {
+  if (preResolvedFolderId) {
     return {
-      targetFolderId,
-      rmaFolderId: targetFolderId,
-      rmaFolderUrl: `https://drive.google.com/drive/folders/${targetFolderId}`
+      targetFolderId: preResolvedFolderId,
+      rmaFolderId: preResolvedFolderId,
+      rmaFolderUrl: `https://drive.google.com/drive/folders/${preResolvedFolderId}`
     };
   }
+
   let rootId = rootFolderId;
+  if (!rootId) {
+    try {
+      // 1. Discover Shared Drives (Team Drives) accessible to service account
+      const drivesRes = await fetch(
+        'https://www.googleapis.com/drive/v3/drives?pageSize=10',
+        { headers: { Authorization: `Bearer ${accessToken}` }, signal }
+      );
+      if (drivesRes.ok) {
+        const dData = await drivesRes.json();
+        const matched = (dData.drives || []).find(d =>
+          /wholesale\s*rma/i.test(d.name || '') || d.name === 'Wholesale RMA Photos' || d.name === 'Wholesale RMA Reports'
+        );
+        if (matched) {
+          rootId = matched.id;
+        } else if (dData.drives && dData.drives.length > 0) {
+          rootId = dData.drives[0].id;
+        }
+      }
+    } catch (e) {
+      console.warn('[Google Drive] Shared Drives search notice:', e.message);
+    }
+  }
+
   if (!rootId) {
     try {
       const searchRes = await fetch(
@@ -338,11 +312,11 @@ async function resolveTargetFolder({
     const cleanSku = (sku || 'SKU').trim();
     const cleanName = (productName || '').trim();
     const folderName = cleanName ? `${cleanSku} ${cleanName}`.replace(/[\\/:*?"<>|]/g, '-').trim() : cleanSku;
-    const targetFolderId = await findOrCreateFolderCached(folderName, productsRootId, accessToken, signal);
+    const prodFolderId = await findOrCreateFolderCached(folderName, productsRootId, accessToken, signal);
     return {
-      targetFolderId: targetFolderId || productsRootId,
-      rmaFolderId: targetFolderId || productsRootId,
-      rmaFolderUrl: targetFolderId ? `https://drive.google.com/drive/folders/${targetFolderId}` : null
+      targetFolderId: prodFolderId || productsRootId,
+      rmaFolderId: prodFolderId || productsRootId,
+      rmaFolderUrl: prodFolderId ? `https://drive.google.com/drive/folders/${prodFolderId}` : null
     };
   }
 
@@ -672,7 +646,7 @@ export default async function handler(req, res) {
     customerName = null,
     storeBranch = null,
     supplierName = null,
-    targetFolderId = null
+    targetFolderId: clientTargetFolderId = null
   } = parsedBody || {};
 
   if (!fileData) {
@@ -687,29 +661,29 @@ export default async function handler(req, res) {
   const pureBase64 = fileData.includes(',') ? fileData.split(',')[1] : fileData;
   const buffer = Buffer.from(pureBase64, 'base64');
 
-  // Hard timeout guard: 7500ms to stay safely under Vercel Hobby 10-second limit
+  // Hard timeout guard: 25s for resilient Google Drive upload
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 7500);
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
 
   try {
     const accessToken = await getGoogleAccessToken(creds, controller.signal);
 
     // 4. Resolve target folder in Google Drive:
     // Root -> RMA-Reports-Item/[RMA] OR RMA-Reports-SI/DR/PO/[RMA] OR Products/[SKU Name]
-    const {
-      targetFolderId,
-      rmaFolderId,
-      rmaFolderUrl
-    } = await resolveTargetFolder({
+    const resolvedFolder = await resolveTargetFolder({
       rootFolderId: creds.folderId,
       rmaNumber,
       category,
       sku: sku || code,
       productName: productName || name,
-      targetFolderId,
+      targetFolderId: clientTargetFolderId,
       accessToken,
       signal: controller.signal
     });
+
+    const targetFolderId = resolvedFolder?.targetFolderId;
+    const rmaFolderId = resolvedFolder?.rmaFolderId;
+    const rmaFolderUrl = resolvedFolder?.rmaFolderUrl;
 
     if (!targetFolderId) {
       return res.status(400).json({
