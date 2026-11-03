@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated: 2026-11-03T04:01:47.863Z
+Generated: 2026-11-03T06:17:45.294Z
 ================================================================================
 
 ================================================================================
@@ -670,41 +670,55 @@ async function findOrCreateFolderCached(folderName, parentFolderId, accessToken,
 }
 
 /**
- * Resolves structured folder hierarchy:
- * Wholesale RMA Reports
- *   └── Customer Folder (e.g. Savemore Taguig) OR Supplier Folder (e.g. Liwayway Marketing)
- *       └── [YYYY-MM]
- *           └── [RMA_NUMBER]
- *               ├── Proof of Damage/
- *               └── Invoice/
+ * Robust JSON body parser for Vercel Serverless Functions
+ * Handles pre-parsed req.body objects, raw JSON strings, and unparsed stream bodies on DELETE / POST.
  */
-async function resolveRmaHierarchy({
+async function parseRequestBody(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  if (typeof req.body === 'string' && req.body.trim()) {
+    try { return JSON.parse(req.body); } catch (e) { return {}; }
+  }
+  return new Promise((resolve) => {
+    let raw = '';
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      if (!raw || !raw.trim()) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        resolve({});
+      }
+    });
+    req.on('error', () => resolve({}));
+  });
+}
+
+/**
+ * Resolves structured folder hierarchy under Root Shared Drive:
+ * 1. RMA Proof Items: Root -> RMA-Reports-Item -> [RMA_NUMBER] -> uploaded files
+ * 2. RMA Official Paperwork: Root -> RMA-Reports-SI/DR/PO -> [RMA_NUMBER] -> uploaded files
+ * 3. Product Catalog: Root -> Products -> [SKU] [Product Name] -> uploaded files
+ */
+async function resolveTargetFolder({
   rootFolderId,
   rmaNumber,
   category,
-  rmaType = 'customer_inbound',
-  customerName = null,
-  storeBranch = null,
-  supplierName = null,
+  sku = null,
+  productName = null,
   accessToken,
   signal
 }) {
-  const now = new Date();
-  const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-
-  let currentParentId = rootFolderId;
-
-  // 1. Root folder: "Wholesale RMA Reports" (or legacy "Wholesale RMA Records")
-  if (!currentParentId) {
+  let rootId = rootFolderId;
+  if (!rootId) {
     try {
       const searchRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Wholesale RMA Reports' or name = 'Wholesale RMA Records') and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Wholesale RMA Reports' or name = 'Wholesale RMA Photos') and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
         { headers: { Authorization: `Bearer ${accessToken}` }, signal }
       );
       if (searchRes.ok) {
         const sData = await searchRes.json();
         if (sData.files && sData.files.length > 0) {
-          currentParentId = sData.files[0].id;
+          rootId = sData.files[0].id;
         }
       }
     } catch (e) {
@@ -712,68 +726,43 @@ async function resolveRmaHierarchy({
     }
   }
 
-  if (currentParentId) {
-    try {
-      const infoRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${currentParentId}?fields=id,name&supportsAllDrives=true`,
-        { headers: { Authorization: `Bearer ${accessToken}` }, signal }
-      );
-      if (infoRes.ok) {
-        const info = await infoRes.json();
-        // If the configured parent folder is already a Wholesale RMA folder (e.g., "Wholesale RMA Photos" or "Wholesale RMA Reports"), use it directly
-        const isAlreadyRmaRoot = /wholesale\s*rma/i.test(info.name || '');
-        if (!isAlreadyRmaRoot) {
-          const subRoot = await findOrCreateFolderCached('Wholesale RMA Reports', currentParentId, accessToken, signal);
-          if (subRoot) currentParentId = subRoot;
-        }
-      }
-    } catch (e) {
-      console.warn('[Google Drive] Root verification notice:', e.message);
-    }
-  } else {
-    const newRoot = await findOrCreateFolder('Wholesale RMA Reports', null, accessToken, signal);
-    if (newRoot) currentParentId = newRoot;
+  const isProduct = category === 'product' || category === 'products' || category === 'catalog' || Boolean(sku && !rmaNumber);
+  const isPaperwork = category === 'official_paperwork' || category === 'paperwork' || category === 'invoice' || category === 'si_dr_po' || category === 'si' || category === 'dr' || category === 'po';
+
+  if (isProduct) {
+    // Hierarchy: Root -> Products -> [SKU] [Name]
+    const productsRootId = await findOrCreateFolderCached('Products', rootId, accessToken, signal);
+    const cleanSku = (sku || 'SKU').trim();
+    const cleanName = (productName || '').trim();
+    const folderName = cleanName ? `${cleanSku} ${cleanName}`.replace(/[\\/:*?"<>|]/g, '-').trim() : cleanSku;
+    const targetFolderId = await findOrCreateFolderCached(folderName, productsRootId, accessToken, signal);
+    return {
+      targetFolderId: targetFolderId || productsRootId,
+      rmaFolderId: targetFolderId || productsRootId,
+      rmaFolderUrl: targetFolderId ? `https://drive.google.com/drive/folders/${targetFolderId}` : null
+    };
   }
 
-  // 2. Level 2: Customer Folder or Supplier Folder
-  // If supplier_outbound -> Supplier Name (e.g., 'Liwayway Marketing')
-  // If customer_inbound -> Customer Store / Branch (e.g., 'Savemore Market - Taguig')
-  let rawEntity = (rmaType === 'supplier_outbound')
-    ? (supplierName && supplierName !== 'Warehouse' ? supplierName : (storeBranch || supplierName || 'General Suppliers'))
-    : (storeBranch || customerName || 'General Customers');
-
-  const cleanEntity = String(rawEntity).replace(/[\\/:*?"<>|]/g, '-').trim() || 'General';
-  const entityFolderId = await findOrCreateFolderCached(cleanEntity, currentParentId, accessToken, signal);
-  if (entityFolderId) {
-    currentParentId = entityFolderId;
-  }
-
-  // 3. Level 3: Year-Month [YYYY-MM] (e.g. 2026-11)
-  const monthFolderId = await findOrCreateFolderCached(yearMonth, currentParentId, accessToken, signal);
-  if (monthFolderId) {
-    currentParentId = monthFolderId;
-  }
-
-  // 4. Level 4: RMA Reference [RMA_NUMBER]
   const cleanRma = (rmaNumber && rmaNumber !== 'GENERAL') ? String(rmaNumber).trim() : 'General_Intake';
-  const rmaFolderId = await findOrCreateFolderCached(cleanRma, currentParentId, accessToken, signal);
-  if (rmaFolderId) {
-    currentParentId = rmaFolderId;
+
+  if (isPaperwork) {
+    // Hierarchy: Root -> RMA-Reports-SI/DR/PO -> [RMA_NUMBER]
+    const siDrPoRootId = await findOrCreateFolderCached('RMA-Reports-SI/DR/PO', rootId, accessToken, signal);
+    const rmaFolderId = await findOrCreateFolderCached(cleanRma, siDrPoRootId, accessToken, signal);
+    return {
+      targetFolderId: rmaFolderId || siDrPoRootId,
+      rmaFolderId: rmaFolderId || siDrPoRootId,
+      rmaFolderUrl: rmaFolderId ? `https://drive.google.com/drive/folders/${rmaFolderId}` : null
+    };
   }
 
-  // 5. Level 5: Invoice Folder or Proof of Damage/Return Folder
-  const isPaperwork = category === 'official_paperwork' || category === 'paperwork' || category === 'invoice';
-  const subFolderName = isPaperwork ? 'Invoice' : 'Proof of Damage';
-  const targetSubfolderId = await findOrCreateFolderCached(subFolderName, currentParentId, accessToken, signal);
-
-  const rmaFolderUrl = rmaFolderId
-    ? `https://drive.google.com/drive/folders/${rmaFolderId}`
-    : (currentParentId ? `https://drive.google.com/drive/folders/${currentParentId}` : null);
-
+  // Default: RMA Damage Proof Items -> Root -> RMA-Reports-Item -> [RMA_NUMBER]
+  const itemRootId = await findOrCreateFolderCached('RMA-Reports-Item', rootId, accessToken, signal);
+  const rmaFolderId = await findOrCreateFolderCached(cleanRma, itemRootId, accessToken, signal);
   return {
-    targetFolderId: targetSubfolderId || currentParentId,
-    rmaFolderId: rmaFolderId || currentParentId,
-    rmaFolderUrl
+    targetFolderId: rmaFolderId || itemRootId,
+    rmaFolderId: rmaFolderId || itemRootId,
+    rmaFolderUrl: rmaFolderId ? `https://drive.google.com/drive/folders/${rmaFolderId}` : null
   };
 }
 
@@ -789,20 +778,22 @@ export default async function handler(req, res) {
     return res.status(204).end();
   }
 
-  // Handle DELETE request to remove stored proof photos from Google Drive
-  if (req.method === 'DELETE') {
+  // Robust body parsing across Vercel / Node runtime
+  const parsedBody = await parseRequestBody(req);
+
+  const isDeleteAction = req.method === 'DELETE' || 
+    req.query?.action === 'delete' || 
+    parsedBody?.action === 'delete' ||
+    req.url?.includes('action=delete');
+
+  // Handle DELETE / Deletion request to remove stored proof photos and folders from Google Drive
+  if (isDeleteAction) {
     const creds = getGoogleCredentials();
     if (!creds) {
       return res.status(200).json({ success: false, message: 'Google Drive credentials not configured' });
     }
 
     try {
-      // 1. Robust body & query parsing (handling strings, objects, query params)
-      let parsedBody = req.body;
-      if (typeof parsedBody === 'string') {
-        try { parsedBody = JSON.parse(parsedBody); } catch (e) {}
-      }
-
       const rawUrlsOrIds = [];
       if (req.query?.fileId) rawUrlsOrIds.push(req.query.fileId);
       if (req.query?.fileUrl) rawUrlsOrIds.push(req.query.fileUrl);
@@ -818,13 +809,68 @@ export default async function handler(req, res) {
       if (Array.isArray(parsedBody?.folderUrls)) rawUrlsOrIds.push(...parsedBody.folderUrls);
       if (Array.isArray(parsedBody?.urls)) rawUrlsOrIds.push(...parsedBody.urls);
 
-      if (rawUrlsOrIds.length === 0) {
-        return res.status(400).json({ success: false, error: 'Missing fileId, fileUrl, folderId, or fileUrls for deletion' });
-      }
+      // Collect RMA numbers or SKUs for folder-level cleanup
+      const rmaNumbers = [];
+      if (req.query?.rmaNumber) rmaNumbers.push(req.query.rmaNumber);
+      if (parsedBody?.rmaNumber) rmaNumbers.push(parsedBody.rmaNumber);
+      if (Array.isArray(parsedBody?.rmaNumbers)) rmaNumbers.push(...parsedBody.rmaNumbers);
+
+      const skus = [];
+      if (req.query?.sku) skus.push(req.query.sku);
+      if (parsedBody?.sku) skus.push(parsedBody.sku);
+      if (Array.isArray(parsedBody?.skus)) skus.push(...parsedBody.skus);
 
       const accessToken = await getGoogleAccessToken(creds);
       const deletedIds = [];
       const failed = [];
+
+      // 1. If RMA numbers provided, locate & delete/trash their specific folders in RMA-Reports-Item & RMA-Reports-SI/DR/PO
+      for (const rma of [...new Set(rmaNumbers.filter(Boolean))]) {
+        try {
+          const cleanRma = String(rma).replace(/'/g, "\\'").trim();
+          const q = `mimeType = 'application/vnd.google-apps.folder' and name = '${cleanRma}' and trashed = false`;
+          const sRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,parents)&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (sRes.ok) {
+            const sData = await sRes.json();
+            for (const f of (sData.files || [])) {
+              if (f.id && f.id !== creds.folderId) {
+                rawUrlsOrIds.push(f.id);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(`[Google Drive RMA Folder Search Notice for ${rma}]:`, e.message);
+        }
+      }
+
+      // 2. If SKUs provided, locate & delete/trash their specific product folders in Products
+      for (const skuItem of [...new Set(skus.filter(Boolean))]) {
+        try {
+          const cleanSku = String(skuItem).replace(/'/g, "\\'").trim();
+          const q = `mimeType = 'application/vnd.google-apps.folder' and name contains '${cleanSku}' and trashed = false`;
+          const sRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,parents)&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (sRes.ok) {
+            const sData = await sRes.json();
+            for (const f of (sData.files || [])) {
+              if (f.id && f.id !== creds.folderId) {
+                rawUrlsOrIds.push(f.id);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(`[Google Drive SKU Folder Search Notice for ${skuItem}]:`, e.message);
+        }
+      }
+
+      if (rawUrlsOrIds.length === 0 && rmaNumbers.length === 0 && skus.length === 0) {
+        return res.status(200).json({ success: true, count: 0, message: 'No assets found to delete.' });
+      }
 
       for (const item of rawUrlsOrIds) {
         if (!item) continue;
@@ -873,8 +919,8 @@ export default async function handler(req, res) {
           }
         }
 
-        if (!fileId) {
-          failed.push({ item, reason: 'Could not extract or locate Google Drive File ID' });
+        if (!fileId || fileId === creds.folderId) {
+          failed.push({ item, reason: 'Invalid ID or root folder protected' });
           continue;
         }
 
@@ -895,7 +941,7 @@ export default async function handler(req, res) {
           }
 
           const delErrText = await delRes.text();
-          console.warn(`[Google Drive Permanent Delete Notice for ${fileId}]: ${delErrText}. Attempting fallback to move file/folder to trash...`);
+          console.warn(`[Google Drive Permanent Delete Notice for ${fileId}]: ${delErrText}. Falling back to trash...`);
 
           // Attempt 2: Move file or folder to trash (supported for Content Managers and Managers in Shared Drives)
           const trashRes = await fetch(
@@ -918,12 +964,7 @@ export default async function handler(req, res) {
 
           const trashErrText = await trashRes.text();
           console.warn(`[Google Drive Trash Fallback Notice for ${fileId}]: ${trashErrText}`);
-          failed.push({
-            fileId,
-            error: delErrText,
-            trashError: trashErrText,
-            hint: 'Ensure Google Service Account has "Content Manager" or "Manager" role in the Google Shared Drive members settings.'
-          });
+          failed.push({ fileId, error: delErrText, trashError: trashErrText });
         } catch (itemErr) {
           console.warn(`[Google Drive Delete Error for ${fileId}]:`, itemErr.message);
           failed.push({ fileId, error: itemErr.message });
@@ -947,12 +988,12 @@ export default async function handler(req, res) {
   }
 
   // 1. Handle Gemini Flash Paperwork Inspection
-  if (req.query?.action === 'inspect-paperwork' || req.body?.action === 'inspect-paperwork' || req.url?.includes('inspect-paperwork')) {
+  if (req.query?.action === 'inspect-paperwork' || parsedBody?.action === 'inspect-paperwork' || req.url?.includes('inspect-paperwork')) {
     try {
-      const { fileData, imageUrl, mimeType } = req.body || {};
+      const { fileData, imageUrl, mimeType } = parsedBody || {};
       const result = await inspectPaperworkWithGemini({
-        fileData: fileData || req.body?.image || req.body?.photo,
-        imageUrl: imageUrl || req.body?.url,
+        fileData: fileData || parsedBody?.image || parsedBody?.photo,
+        imageUrl: imageUrl || parsedBody?.url,
         mimeType: mimeType || 'image/jpeg'
       });
       return res.status(200).json(result);
@@ -977,18 +1018,22 @@ export default async function handler(req, res) {
     });
   }
 
-  // 3. Parse body: expect base64 fileData, rmaNumber, and category ('damaged_items' | 'official_paperwork')
+  // 3. Parse body: expect base64 fileData, rmaNumber, category, sku, productName
   const {
     fileData,
     fileName,
     mimeType = 'image/webp',
     rmaNumber = 'GENERAL',
     category = 'damaged_items',
+    sku = null,
+    code = null,
+    productName = null,
+    name = null,
     rmaType = 'customer_inbound',
     customerName = null,
     storeBranch = null,
     supplierName = null
-  } = req.body || {};
+  } = parsedBody || {};
 
   if (!fileData) {
     return res.status(400).json({
@@ -1009,20 +1054,18 @@ export default async function handler(req, res) {
   try {
     const accessToken = await getGoogleAccessToken(creds, controller.signal);
 
-    // 4. Resolve target folder in Google Drive with clean hierarchical structure:
-    // Wholesale RMA Reports / [Customer or Supplier] / [YYYY-MM] / [RMA_NUMBER] / [Proof of Damage | Invoice]
+    // 4. Resolve target folder in Google Drive:
+    // Root -> RMA-Reports-Item/[RMA] OR RMA-Reports-SI/DR/PO/[RMA] OR Products/[SKU Name]
     const {
       targetFolderId,
       rmaFolderId,
       rmaFolderUrl
-    } = await resolveRmaHierarchy({
+    } = await resolveTargetFolder({
       rootFolderId: creds.folderId,
       rmaNumber,
       category,
-      rmaType,
-      customerName,
-      storeBranch,
-      supplierName,
+      sku: sku || code,
+      productName: productName || name,
       accessToken,
       signal: controller.signal
     });
@@ -1128,6 +1171,7 @@ export default async function handler(req, res) {
     });
   }
 }
+
 --- END FILE: api/upload-photo.js ---
 
 --- START FILE: api/v1/api-keys/index.js ---
@@ -11194,6 +11238,7 @@ export default function CreditMemoModal({
   const [pullOutRef, setPullOutRef] = useState('');
   const [pullOutDate, setPullOutDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [creditAmount, setCreditAmount] = useState('0.00');
+  const [financeHead, setFinanceHead] = useState(creditMemo?.credit_issued_by || 'Analiza B. Benoza');
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
@@ -11260,8 +11305,10 @@ export default function CreditMemoModal({
         setPullOutRef(creditMemo.pull_out_ref || creditMemoService.generatePullOutReference(creditMemosCount));
         setPullOutDate(creditMemo.pull_out_date || new Date().toISOString().split('T')[0]);
         setCreditAmount(Number(creditMemo.credit_amount || creditMemo.amount || 0).toFixed(2));
+        setFinanceHead(creditMemo.credit_issued_by || 'Analiza B. Benoza');
         setNotes(creditMemo.notes || '');
       } else {
+        setFinanceHead('Analiza B. Benoza');
         const initialReport = report || (reportsList.length > 0 ? reportsList[0] : null);
         if (initialReport) {
           setSelectedReportId(initialReport.id || initialReport.rma_number || '');
@@ -11389,7 +11436,7 @@ export default function CreditMemoModal({
         pull_out_ref: pullOutRef.trim() || 'Warehouse Pull-Out',
         pull_out_date: pullOutDate,
         credit_amount: Number(finalCredit.toFixed(2)),
-        credit_issued_by: 'Analiza B. Benoza',
+        credit_issued_by: (financeHead || '').trim() || 'Analiza B. Benoza',
         credit_issued_by_email: 'analiza@savemore.com',
         notes: notes.trim()
       };
@@ -11695,24 +11742,30 @@ export default function CreditMemoModal({
               </div>
             </div>
 
-            {/* ROW 4: Credit Issued By & Issuer Role */}
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2 min-w-0">
+            {/* ROW 4: Authorized Finance Head & Issuer Role */}
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-1.5 text-xs">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                Authorized Finance Head / Approved By *
+              </label>
+              <div className="flex items-center gap-2">
                 <div className="p-2 bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 rounded-xl shrink-0">
                   <User className="w-4 h-4" />
                 </div>
-                <div className="min-w-0">
-                  <div className="font-bold text-slate-900 dark:text-white truncate">
-                    Finance Head: <strong className="text-purple-700 dark:text-purple-300">Analiza B. Benoza</strong>
-                  </div>
-                  <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    Head of Finance & Accounting • Official Credit Approval
-                  </div>
-                </div>
+                <input
+                  type="text"
+                  required
+                  value={financeHead}
+                  onChange={(e) => setFinanceHead(e.target.value)}
+                  placeholder="e.g. Analiza B. Benoza"
+                  className="flex-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-purple-600 focus:ring-1 focus:ring-purple-500"
+                />
+                <span className="text-[10px] font-black px-2 py-1 bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 rounded-lg shrink-0 uppercase">
+                  Finance Head
+                </span>
               </div>
-              <span className="text-[10px] font-black px-2 py-1 bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 rounded-lg shrink-0 uppercase">
-                Finance Head
-              </span>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                Authorized financial signatory appearing on the credit memo voucher and official audit records.
+              </p>
             </div>
 
             {/* Accounting Notes / Remarks */}
@@ -11774,6 +11827,7 @@ export default function CreditMemoModal({
     </div>
   );
 }
+
 --- END FILE: src/components/CreditMemoModal.jsx ---
 
 --- START FILE: src/components/CreditMemosTab.jsx ---
@@ -12897,7 +12951,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
               <div className="pt-6 sm:pt-7 border-t border-slate-200 grid grid-cols-3 gap-3 text-center text-xs">
                 <div className="space-y-1">
                   <div className="border-b border-slate-400 pb-1 font-bold text-slate-900 text-xs">
-                    Analiza B. Benoza
+                    {memo.credit_issued_by || 'Analiza B. Benoza'}
                   </div>
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">
                     Finance Head
@@ -12945,6 +12999,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
     </div>
   );
 }
+
 
 --- END FILE: src/components/CreditMemoVoucherModal.jsx ---
 
@@ -13893,17 +13948,16 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
 
               <div>
                 <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Issued By (Finance Officer)
+                  Issued By (Finance Head / Officer)
                 </label>
-                <select
+                <input
+                  type="text"
+                  required
                   value={issuedBy}
                   onChange={(e) => setIssuedBy(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
-                >
-                  <option value="Analiza B. Benoza">Analiza B. Benoza (Finance Head)</option>
-                  <option value="Finance Accounting Lead (A2Z2Go)">Finance Accounting Lead (A2Z2Go)</option>
-                  <option value="Billing Specialist (Pingcon Marketing)">Billing Specialist (Pingcon Marketing)</option>
-                </select>
+                  placeholder="e.g. Analiza B. Benoza"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-none focus:border-brand-500"
+                />
               </div>
 
               <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1 text-[11px] text-slate-600 dark:text-slate-300 font-mono">
@@ -13951,6 +14005,7 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
     </div>
   );
 }
+
 --- END FILE: src/components/FinanceCreditMemoTab.jsx ---
 
 --- START FILE: src/components/GatekeeperPinModal.jsx ---
@@ -15848,7 +15903,10 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
 
     setIsUploadingImage(true);
     try {
-      const url = await catalogService.uploadPhoto(file);
+      const url = await catalogService.uploadPhoto(file, null, 'product', {
+        sku: formData.code?.trim() || formData.barcode?.trim(),
+        name: formData.name?.trim()
+      });
       if (url) {
         setFormData(prev => ({ ...prev, imageUrl: url }));
       }
@@ -16476,6 +16534,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     </div>
   );
 }
+
 --- END FILE: src/components/PendingBarcodesModal.jsx ---
 
 --- START FILE: src/components/PinRequestsQueueModal.jsx ---
@@ -19576,7 +19635,10 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
     try {
       let finalImageUrl = imageUrl;
       if (photoFile) {
-        finalImageUrl = await catalogService.uploadPhoto(photoFile);
+        finalImageUrl = await catalogService.uploadPhoto(photoFile, null, 'product', {
+          sku: code.trim() || barcode.trim(),
+          name: name.trim()
+        });
       }
 
       const payload = {
@@ -20005,6 +20067,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
     </div>
   );
 }
+
 --- END FILE: src/components/ProductEditModal.jsx ---
 
 --- START FILE: src/components/ProductSearchTab.jsx ---
@@ -27097,6 +27160,7 @@ import { exportRMAReportsToCSV, exportSupplierOutboundClaimsToCSV } from '../uti
 import TablePagination from './TablePagination';
 import ImageLightboxModal from './ImageLightboxModal';
 import { supplierClaimService } from '../services/supplierClaimService';
+import { printIsolatedElement } from '../utils/printIsolatedElement';
 
 export default function SupplierClaimsTab({
   reportsList = [],
@@ -27630,8 +27694,13 @@ export default function SupplierClaimsTab({
 
     setActiveClaimBatch(existingClaim);
     setTimeout(() => {
-      window.print();
-    }, 400);
+      printIsolatedElement({
+        elementId: 'rtv-voucher-mount',
+        documentTitle: `Supplier_Debit_Claim_${existingClaim.claimNumber || existingClaim.claim_number || 'Voucher'}`,
+        pageSize: 'portrait',
+        pageMargin: '0.35in'
+      });
+    }, 250);
   };
 
   /**
@@ -27645,7 +27714,13 @@ export default function SupplierClaimsTab({
   };
 
   const handlePrintClaimVoucher = () => {
-    window.print();
+    if (!activeClaimBatch) return;
+    printIsolatedElement({
+      elementId: 'rtv-voucher-mount',
+      documentTitle: `Supplier_Debit_Claim_${activeClaimBatch.claimNumber || activeClaimBatch.claim_number || 'Voucher'}`,
+      pageSize: 'portrait',
+      pageMargin: '0.35in'
+    });
   };
 
   const hasActiveFilters = selectedSupplier !== 'All' || dispositionFilter !== 'All' || Boolean(searchTerm);
@@ -28470,6 +28545,7 @@ export default function SupplierClaimsTab({
     </div>
   );
 }
+
 --- END FILE: src/components/SupplierClaimsTab.jsx ---
 
 --- START FILE: src/components/SupplierInput.jsx ---
@@ -28895,18 +28971,21 @@ export default function ThermalBoxLabelModal({
       },
       '4x6': {
         pageSize: '4in 6in',
-        pageMargin: '0.12in',
-        scale: 0.90,
+        pageMargin: '0.10in',
+        scale: 0.84,
         customStyles: `
           #thermal-label-mount {
-            width: 3.45in !important;
-            max-width: 3.45in !important;
-            min-height: auto !important;
-            border: 2.5px solid #000000 !important;
-            border-radius: 8px !important;
+            width: 3.4in !important;
+            max-width: 3.4in !important;
+            max-height: 5.6in !important;
+            border: 2px solid #000000 !important;
+            border-radius: 6px !important;
             box-shadow: none !important;
             margin: 0 auto !important;
             box-sizing: border-box !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            overflow: hidden !important;
           }
         `
       },
@@ -28986,33 +29065,26 @@ export default function ThermalBoxLabelModal({
         </div>
 
         {/* Modal Scrollable Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-4 bg-slate-100 dark:bg-slate-950 flex flex-col items-center">
+        <div className="p-4 sm:p-6 overflow-y-auto space-y-3 bg-slate-100 dark:bg-slate-950 flex flex-col items-center">
 
           {/* DYNAMIC THERMAL LABEL CONTAINER (Target of print stylesheet) */}
           <div
             id="thermal-label-mount"
             ref={printAreaRef}
-            className={`bg-white text-black border-2 border-black rounded-lg shadow-md font-sans transition-all ${labelSize === '2x2'
-                ? 'w-[200px] p-2.5 text-[10px] space-y-2'
-                : labelSize === '3x3'
-                  ? 'w-[280px] p-3 text-xs space-y-2.5'
-                  : labelSize === '4x6'
-                    ? 'w-full max-w-[380px] p-4 text-xs space-y-2.5 min-h-0'
-                    : 'w-full max-w-[460px] p-6 text-xs space-y-3 min-h-0'
-              }`}
+            className="shrink-0 w-full max-w-[360px] p-3.5 bg-white text-black border-2 border-black rounded-xl shadow-md font-sans space-y-2 select-none"
           >
             {/* Top Header */}
-            <div className="border-b-2 border-black pb-2 flex items-center justify-between">
+            <div className="border-b-2 border-black pb-1.5 flex items-center justify-between">
               <div>
-                <div className="text-[10px] font-black uppercase tracking-widest text-black">
+                <div className="text-[9px] font-black uppercase tracking-widest text-black">
                   WHOLESALE REVERSE LOGISTICS
                 </div>
-                <div className="text-[14px] font-black tracking-tight text-black">
+                <div className="text-[13px] font-black tracking-tight text-black">
                   RMA INTAKE & TRIAGE LABEL
                 </div>
               </div>
               <div className="text-right">
-                <span className="inline-block border-2 border-black px-1.5 py-0.5 text-[10px] font-black uppercase bg-black text-white">
+                <span className="inline-block border border-black px-1.5 py-0.5 text-[9px] font-black uppercase bg-black text-white">
                   4x6 INTAKE
                 </span>
                 <div className="text-[9px] font-bold text-black mt-0.5">{createdDate}</div>
@@ -29020,36 +29092,36 @@ export default function ThermalBoxLabelModal({
             </div>
 
             {/* 1D Barcode & RMA Number */}
-            <div className="text-center py-1 border-b border-black">
-              <div className="text-[9px] font-extrabold uppercase tracking-wider text-black mb-1">
+            <div className="text-center py-0.5 border-b border-black">
+              <div className="text-[8px] font-extrabold uppercase tracking-wider text-black mb-0.5">
                 RETURN IDENTIFIER
               </div>
-              <SimpleBarcodeSVG value={rmaNumber} height={38} />
-              <div className="text-xl font-black tracking-tight font-mono text-black mt-1">
+              <SimpleBarcodeSVG value={rmaNumber} height={32} />
+              <div className="text-lg font-black tracking-tight font-mono text-black mt-0.5">
                 {rmaNumber}
               </div>
             </div>
 
             {/* Product & SKU Grid */}
-            <div className="grid grid-cols-2 gap-2 border-b-2 border-black pb-2 text-[11px]">
+            <div className="grid grid-cols-2 gap-2 border-b-2 border-black pb-1.5 text-[10px]">
               <div className="border-r border-black pr-2">
-                <div className="text-[9px] font-extrabold text-black uppercase">PRODUCT NAME</div>
-                <div className="font-extrabold text-black leading-tight text-xs line-clamp-2">
+                <div className="text-[8px] font-extrabold text-black uppercase">PRODUCT NAME</div>
+                <div className="font-extrabold text-black leading-snug text-xs line-clamp-2">
                   {name}
                 </div>
-                <div className="text-[10px] font-mono text-black mt-1">
+                <div className="text-[9px] font-mono text-black mt-0.5">
                   BC: {barcode}
                 </div>
               </div>
 
               <div className="pl-1">
-                <div className="text-[9px] font-extrabold text-black uppercase">ASSIGNED SKU</div>
-                <div className="font-mono font-black text-sm text-black truncate">
+                <div className="text-[8px] font-extrabold text-black uppercase">ASSIGNED SKU</div>
+                <div className="font-mono font-black text-xs text-black truncate">
                   {sku}
                 </div>
-                <div className="mt-1 flex items-center justify-between">
-                  <span className="text-[9px] font-bold">QTY:</span>
-                  <span className="font-mono text-base font-black text-black">
+                <div className="mt-0.5 flex items-center justify-between">
+                  <span className="text-[8px] font-bold">QTY:</span>
+                  <span className="font-mono text-sm font-black text-black">
                     {quantity} {unit}
                   </span>
                 </div>
@@ -29057,46 +29129,46 @@ export default function ThermalBoxLabelModal({
             </div>
 
             {/* Triage Destination & Condition Grade (High Visibility for Handlers) */}
-            <div className="grid grid-cols-2 gap-2 border-b-2 border-black pb-2">
-              <div className="bg-black text-white p-2 rounded-xs">
-                <div className="text-[8px] font-extrabold uppercase tracking-wider text-slate-300">
+            <div className="grid grid-cols-2 gap-2 border-b-2 border-black pb-1.5">
+              <div className="bg-black text-white p-1.5 rounded-xs">
+                <div className="text-[7.5px] font-extrabold uppercase tracking-wider text-slate-300">
                   DISPOSITION ACTION
                 </div>
-                <div className="text-xs font-black uppercase tracking-tight mt-0.5">
+                <div className="text-[11px] font-black uppercase tracking-tight mt-0.5 leading-tight">
                   {disposition}
                 </div>
               </div>
 
-              <div className="border-2 border-black p-1.5 text-center flex flex-col justify-center">
-                <div className="text-[8px] font-black uppercase text-black">
+              <div className="border border-black p-1 text-center flex flex-col justify-center">
+                <div className="text-[7.5px] font-black uppercase text-black">
                   CONDITION GRADE
                 </div>
-                <div className="text-xs font-black uppercase text-black mt-0.5">
+                <div className="text-[11px] font-black uppercase text-black mt-0.5">
                   {grade.split(' - ')[0]}
                 </div>
               </div>
             </div>
 
             {/* Warehouse Rack / Slot & QR Code for Instant Scanner Intake */}
-            <div className="flex items-center justify-between pt-1">
+            <div className="flex items-center justify-between pt-0.5">
               <div className="space-y-1">
                 <div>
-                  <div className="text-[9px] font-extrabold uppercase text-black">STORAGE LOCATION</div>
-                  <div className="font-mono font-black text-base text-black bg-slate-100 px-2 py-0.5 border border-black inline-block">
+                  <div className="text-[8px] font-extrabold uppercase text-black">STORAGE LOCATION</div>
+                  <div className="font-mono font-black text-sm text-black bg-slate-100 px-2 py-0.5 border border-black inline-block">
                     {location}
                   </div>
                 </div>
 
-                <div className="text-[9px] text-black pt-1 space-y-0.5">
+                <div className="text-[8.5px] text-black space-y-0.5">
                   <div>Vendor: <strong>{supplier}</strong></div>
                   <div>Reported By: <strong>{reporterName}</strong></div>
                   <div>Contact: <strong>{reporterContact}</strong></div>
-                  <div>Date & Time: <strong>{createdDateTime}</strong></div>
+                  <div>Date: <strong>{createdDateTime}</strong></div>
                 </div>
               </div>
 
               {/* 2D QR Code */}
-              <div className="p-1 border-2 border-black bg-white shrink-0">
+              <div className="p-1 border border-black bg-white shrink-0">
                 <QRCodeSVG
                   value={JSON.stringify({
                     rma: rmaNumber,
@@ -29107,32 +29179,32 @@ export default function ThermalBoxLabelModal({
                     contact: reporterContact,
                     time: createdDateTime
                   })}
-                  size={76}
+                  size={64}
                   level="M"
                 />
               </div>
             </div>
 
             {/* Reporter Signature Area for Thermal Label */}
-            <div className="border-t-2 border-dashed border-black pt-2 text-[10px] space-y-1">
-              <div className="flex items-center justify-between text-[9px] font-black text-black uppercase">
+            <div className="border-t-2 border-dashed border-black pt-1.5 text-[9px] space-y-1">
+              <div className="flex items-center justify-between text-[8px] font-black text-black uppercase">
                 <span>REPORTER SIGNATURE / SIGN-OFF:</span>
                 <span>DATE: ____________</span>
               </div>
-              <div className="h-5"></div>
-              <div className="border-b-2 border-black w-full"></div>
+              <div className="h-3.5"></div>
+              <div className="border-b border-black w-full"></div>
               <div className="text-[8px] text-black font-bold text-center">
                 Signed by {reporterName} • Physical Return Handover Acknowledged
               </div>
             </div>
 
             {/* Footer Notice */}
-            <div className="border-t border-black pt-1 text-center text-[8px] font-extrabold tracking-wider uppercase text-black">
+            <div className="border-t border-black pt-1 text-center text-[7.5px] font-extrabold tracking-wider uppercase text-black">
               * AFFIX FIRMLY TO BULK CRATE / RETURN TOTE *
             </div>
           </div>
 
-          <div className="text-xs text-slate-500 dark:text-slate-400 text-center max-w-sm">
+          <div className="text-xs text-slate-500 dark:text-slate-400 text-center max-w-sm pt-1 shrink-0">
             Ready to print on standard <strong>4" x 6" thermal adhesive rolls</strong> or standard letter/A4 warehouse paper.
           </div>
         </div>
@@ -29161,6 +29233,7 @@ export default function ThermalBoxLabelModal({
     </div>
   );
 }
+
 --- END FILE: src/components/ThermalBoxLabelModal.jsx ---
 
 --- START FILE: src/components/TicketsVaultTab.jsx ---
@@ -31209,6 +31282,8 @@ export const catalogService = {
             mimeType: compressed.type || 'image/webp',
             rmaNumber,
             category,
+            sku: extraMeta.sku || extraMeta.code || null,
+            productName: extraMeta.name || extraMeta.productName || null,
             rmaType: extraMeta.rmaType || extraMeta.rma_type || 'customer_inbound',
             customerName: extraMeta.customerName || extraMeta.storeBranch || extraMeta.store_branch || null,
             storeBranch: extraMeta.storeBranch || extraMeta.store_branch || null,
@@ -31372,13 +31447,16 @@ export const catalogService = {
 
   /**
    * Delete multiple stored image URLs and Google Drive folders in batch
+   * Supports cleaning up specific file URLs, folder IDs, RMA folders, and Product SKU folders
    */
-  async deleteStoredImages(imageUrls, folderIds = [], folderUrls = []) {
+  async deleteStoredImages(imageUrls, folderIds = [], folderUrls = [], extra = {}) {
     const cleanList = Array.isArray(imageUrls) ? imageUrls.filter(u => u && typeof u === 'string') : [];
     const cleanFolders = Array.isArray(folderIds) ? folderIds.filter(f => f && typeof f === 'string') : (folderIds ? [folderIds] : []);
     const cleanFolderUrls = Array.isArray(folderUrls) ? folderUrls.filter(u => u && typeof u === 'string') : (folderUrls ? [folderUrls] : []);
+    const rmaNumbers = Array.isArray(extra?.rmaNumbers) ? extra.rmaNumbers.filter(Boolean) : (extra?.rmaNumber ? [extra.rmaNumber] : []);
+    const skus = Array.isArray(extra?.skus) ? extra.skus.filter(Boolean) : (extra?.sku ? [extra.sku] : []);
 
-    if (cleanList.length === 0 && cleanFolders.length === 0 && cleanFolderUrls.length === 0) return;
+    if (cleanList.length === 0 && cleanFolders.length === 0 && cleanFolderUrls.length === 0 && rmaNumbers.length === 0 && skus.length === 0) return;
 
     // Separate Google Drive vs Supabase Storage
     const gdriveUrls = [];
@@ -31406,16 +31484,19 @@ export const catalogService = {
       );
     }
 
-    // Batch delete Google Drive photos & folders in 1 call to /api/upload-photo
-    if (gdriveUrls.length > 0 || cleanFolders.length > 0 || cleanFolderUrls.length > 0) {
+    // Batch delete Google Drive photos & folders via /api/upload-photo (support POST & DELETE)
+    if (gdriveUrls.length > 0 || cleanFolders.length > 0 || cleanFolderUrls.length > 0 || rmaNumbers.length > 0 || skus.length > 0) {
       tasks.push(
-        fetch('/api/upload-photo', {
-          method: 'DELETE',
+        fetch('/api/upload-photo?action=delete', {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            action: 'delete',
             fileUrls: gdriveUrls,
             folderIds: cleanFolders,
-            folderUrls: cleanFolderUrls
+            folderUrls: cleanFolderUrls,
+            rmaNumbers,
+            skus
           })
         }).then(async res => {
           if (res.ok) {
@@ -31912,8 +31993,11 @@ export const catalogService = {
     }
 
     // Clean up stored image from Google Drive / Supabase
+    const prodSku = barcode || (typeof idOrProduct === 'object' ? (idOrProduct?.code || idOrProduct?.sku) : null);
     if (imageToDelete) {
-      await this.deleteStoredImage(imageToDelete);
+      await this.deleteStoredImages([imageToDelete], [], [], { sku: prodSku });
+    } else if (prodSku) {
+      await this.deleteStoredImages([], [], [], { sku: prodSku });
     }
 
     this.notifyChange('product-deleted', { id, barcode, name });
@@ -31948,8 +32032,12 @@ export const catalogService = {
     const allImages = productsList
       .map(p => p.image_url || p.imageUrl)
       .filter(Boolean);
-    if (allImages.length > 0) {
-      await this.deleteStoredImages(allImages);
+    const allSkus = productsList
+      .map(p => p.code || p.sku || p.barcode)
+      .filter(Boolean);
+
+    if (allImages.length > 0 || allSkus.length > 0) {
+      await this.deleteStoredImages(allImages, [], [], { skus: allSkus });
     }
 
     this.notifyChange('products-bulk-deleted', { count: productsList.length });
@@ -32654,9 +32742,7 @@ export const catalogService = {
       const cleanFolders = [...new Set(foldersToDelete.filter(Boolean))];
       const cleanFolderUrls = [...new Set(folderUrlsToDelete.filter(Boolean))];
 
-      if (cleanPhotos.length > 0 || cleanFolders.length > 0 || cleanFolderUrls.length > 0) {
-        await this.deleteStoredImages(cleanPhotos, cleanFolders, cleanFolderUrls);
-      }
+      await this.deleteStoredImages(cleanPhotos, cleanFolders, cleanFolderUrls, { rmaNumber });
 
       this.notifyChange('report-deleted', { id, rmaNumber });
       return true;
@@ -32748,9 +32834,7 @@ export const catalogService = {
       const cleanFolders = [...new Set(allFolders.filter(Boolean))];
       const cleanFolderUrls = [...new Set(allFolderUrls.filter(Boolean))];
 
-      if (cleanPhotos.length > 0 || cleanFolders.length > 0 || cleanFolderUrls.length > 0) {
-        await this.deleteStoredImages(cleanPhotos, cleanFolders, cleanFolderUrls);
-      }
+      await this.deleteStoredImages(cleanPhotos, cleanFolders, cleanFolderUrls, { rmaNumbers });
 
       this.notifyChange('reports-bulk-deleted', { count: reportsList.length });
       return { success: true, count: reportsList.length };
@@ -32815,6 +32899,7 @@ export const catalogService = {
     return Array.from(supplierSet).sort((a, b) => a.localeCompare(b));
   }
 };
+
 
 --- END FILE: src/services/catalogService.js ---
 
@@ -35680,7 +35765,10 @@ export function printIsolatedElement({
             margin: 0 !important;
             padding: 0 !important;
             width: 100% !important;
-            min-height: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: 100% !important;
+            overflow: hidden !important;
             background: #ffffff !important;
             color: #000000 !important;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
@@ -35697,7 +35785,9 @@ export function printIsolatedElement({
           }
           .isolated-print-sheet {
             width: 100% !important;
-            min-height: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: 100% !important;
             display: flex !important;
             flex-direction: column !important;
             align-items: center !important;
@@ -35708,6 +35798,7 @@ export function printIsolatedElement({
             text-align: center !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+            overflow: hidden !important;
           }
           .isolated-print-card {
             margin: 0 auto !important;
@@ -35757,6 +35848,7 @@ export function printIsolatedElement({
   // Wait 150ms for layout & SVG render
   setTimeout(executePrint, 150);
 }
+
 
 --- END FILE: src/utils/printIsolatedElement.js ---
 

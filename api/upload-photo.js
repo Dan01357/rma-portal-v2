@@ -215,41 +215,55 @@ async function findOrCreateFolderCached(folderName, parentFolderId, accessToken,
 }
 
 /**
- * Resolves structured folder hierarchy:
- * Wholesale RMA Reports
- *   └── Customer Folder (e.g. Savemore Taguig) OR Supplier Folder (e.g. Liwayway Marketing)
- *       └── [YYYY-MM]
- *           └── [RMA_NUMBER]
- *               ├── Proof of Damage/
- *               └── Invoice/
+ * Robust JSON body parser for Vercel Serverless Functions
+ * Handles pre-parsed req.body objects, raw JSON strings, and unparsed stream bodies on DELETE / POST.
  */
-async function resolveRmaHierarchy({
+async function parseRequestBody(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  if (typeof req.body === 'string' && req.body.trim()) {
+    try { return JSON.parse(req.body); } catch (e) { return {}; }
+  }
+  return new Promise((resolve) => {
+    let raw = '';
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      if (!raw || !raw.trim()) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        resolve({});
+      }
+    });
+    req.on('error', () => resolve({}));
+  });
+}
+
+/**
+ * Resolves structured folder hierarchy under Root Shared Drive:
+ * 1. RMA Proof Items: Root -> RMA-Reports-Item -> [RMA_NUMBER] -> uploaded files
+ * 2. RMA Official Paperwork: Root -> RMA-Reports-SI/DR/PO -> [RMA_NUMBER] -> uploaded files
+ * 3. Product Catalog: Root -> Products -> [SKU] [Product Name] -> uploaded files
+ */
+async function resolveTargetFolder({
   rootFolderId,
   rmaNumber,
   category,
-  rmaType = 'customer_inbound',
-  customerName = null,
-  storeBranch = null,
-  supplierName = null,
+  sku = null,
+  productName = null,
   accessToken,
   signal
 }) {
-  const now = new Date();
-  const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-
-  let currentParentId = rootFolderId;
-
-  // 1. Root folder: "Wholesale RMA Reports" (or legacy "Wholesale RMA Records")
-  if (!currentParentId) {
+  let rootId = rootFolderId;
+  if (!rootId) {
     try {
       const searchRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Wholesale RMA Reports' or name = 'Wholesale RMA Records') and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Wholesale RMA Reports' or name = 'Wholesale RMA Photos') and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
         { headers: { Authorization: `Bearer ${accessToken}` }, signal }
       );
       if (searchRes.ok) {
         const sData = await searchRes.json();
         if (sData.files && sData.files.length > 0) {
-          currentParentId = sData.files[0].id;
+          rootId = sData.files[0].id;
         }
       }
     } catch (e) {
@@ -257,68 +271,43 @@ async function resolveRmaHierarchy({
     }
   }
 
-  if (currentParentId) {
-    try {
-      const infoRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${currentParentId}?fields=id,name&supportsAllDrives=true`,
-        { headers: { Authorization: `Bearer ${accessToken}` }, signal }
-      );
-      if (infoRes.ok) {
-        const info = await infoRes.json();
-        // If the configured parent folder is already a Wholesale RMA folder (e.g., "Wholesale RMA Photos" or "Wholesale RMA Reports"), use it directly
-        const isAlreadyRmaRoot = /wholesale\s*rma/i.test(info.name || '');
-        if (!isAlreadyRmaRoot) {
-          const subRoot = await findOrCreateFolderCached('Wholesale RMA Reports', currentParentId, accessToken, signal);
-          if (subRoot) currentParentId = subRoot;
-        }
-      }
-    } catch (e) {
-      console.warn('[Google Drive] Root verification notice:', e.message);
-    }
-  } else {
-    const newRoot = await findOrCreateFolder('Wholesale RMA Reports', null, accessToken, signal);
-    if (newRoot) currentParentId = newRoot;
+  const isProduct = category === 'product' || category === 'products' || category === 'catalog' || Boolean(sku && !rmaNumber);
+  const isPaperwork = category === 'official_paperwork' || category === 'paperwork' || category === 'invoice' || category === 'si_dr_po' || category === 'si' || category === 'dr' || category === 'po';
+
+  if (isProduct) {
+    // Hierarchy: Root -> Products -> [SKU] [Name]
+    const productsRootId = await findOrCreateFolderCached('Products', rootId, accessToken, signal);
+    const cleanSku = (sku || 'SKU').trim();
+    const cleanName = (productName || '').trim();
+    const folderName = cleanName ? `${cleanSku} ${cleanName}`.replace(/[\\/:*?"<>|]/g, '-').trim() : cleanSku;
+    const targetFolderId = await findOrCreateFolderCached(folderName, productsRootId, accessToken, signal);
+    return {
+      targetFolderId: targetFolderId || productsRootId,
+      rmaFolderId: targetFolderId || productsRootId,
+      rmaFolderUrl: targetFolderId ? `https://drive.google.com/drive/folders/${targetFolderId}` : null
+    };
   }
 
-  // 2. Level 2: Customer Folder or Supplier Folder
-  // If supplier_outbound -> Supplier Name (e.g., 'Liwayway Marketing')
-  // If customer_inbound -> Customer Store / Branch (e.g., 'Savemore Market - Taguig')
-  let rawEntity = (rmaType === 'supplier_outbound')
-    ? (supplierName && supplierName !== 'Warehouse' ? supplierName : (storeBranch || supplierName || 'General Suppliers'))
-    : (storeBranch || customerName || 'General Customers');
-
-  const cleanEntity = String(rawEntity).replace(/[\\/:*?"<>|]/g, '-').trim() || 'General';
-  const entityFolderId = await findOrCreateFolderCached(cleanEntity, currentParentId, accessToken, signal);
-  if (entityFolderId) {
-    currentParentId = entityFolderId;
-  }
-
-  // 3. Level 3: Year-Month [YYYY-MM] (e.g. 2026-11)
-  const monthFolderId = await findOrCreateFolderCached(yearMonth, currentParentId, accessToken, signal);
-  if (monthFolderId) {
-    currentParentId = monthFolderId;
-  }
-
-  // 4. Level 4: RMA Reference [RMA_NUMBER]
   const cleanRma = (rmaNumber && rmaNumber !== 'GENERAL') ? String(rmaNumber).trim() : 'General_Intake';
-  const rmaFolderId = await findOrCreateFolderCached(cleanRma, currentParentId, accessToken, signal);
-  if (rmaFolderId) {
-    currentParentId = rmaFolderId;
+
+  if (isPaperwork) {
+    // Hierarchy: Root -> RMA-Reports-SI/DR/PO -> [RMA_NUMBER]
+    const siDrPoRootId = await findOrCreateFolderCached('RMA-Reports-SI/DR/PO', rootId, accessToken, signal);
+    const rmaFolderId = await findOrCreateFolderCached(cleanRma, siDrPoRootId, accessToken, signal);
+    return {
+      targetFolderId: rmaFolderId || siDrPoRootId,
+      rmaFolderId: rmaFolderId || siDrPoRootId,
+      rmaFolderUrl: rmaFolderId ? `https://drive.google.com/drive/folders/${rmaFolderId}` : null
+    };
   }
 
-  // 5. Level 5: Invoice Folder or Proof of Damage/Return Folder
-  const isPaperwork = category === 'official_paperwork' || category === 'paperwork' || category === 'invoice';
-  const subFolderName = isPaperwork ? 'Invoice' : 'Proof of Damage';
-  const targetSubfolderId = await findOrCreateFolderCached(subFolderName, currentParentId, accessToken, signal);
-
-  const rmaFolderUrl = rmaFolderId
-    ? `https://drive.google.com/drive/folders/${rmaFolderId}`
-    : (currentParentId ? `https://drive.google.com/drive/folders/${currentParentId}` : null);
-
+  // Default: RMA Damage Proof Items -> Root -> RMA-Reports-Item -> [RMA_NUMBER]
+  const itemRootId = await findOrCreateFolderCached('RMA-Reports-Item', rootId, accessToken, signal);
+  const rmaFolderId = await findOrCreateFolderCached(cleanRma, itemRootId, accessToken, signal);
   return {
-    targetFolderId: targetSubfolderId || currentParentId,
-    rmaFolderId: rmaFolderId || currentParentId,
-    rmaFolderUrl
+    targetFolderId: rmaFolderId || itemRootId,
+    rmaFolderId: rmaFolderId || itemRootId,
+    rmaFolderUrl: rmaFolderId ? `https://drive.google.com/drive/folders/${rmaFolderId}` : null
   };
 }
 
@@ -334,20 +323,22 @@ export default async function handler(req, res) {
     return res.status(204).end();
   }
 
-  // Handle DELETE request to remove stored proof photos from Google Drive
-  if (req.method === 'DELETE') {
+  // Robust body parsing across Vercel / Node runtime
+  const parsedBody = await parseRequestBody(req);
+
+  const isDeleteAction = req.method === 'DELETE' || 
+    req.query?.action === 'delete' || 
+    parsedBody?.action === 'delete' ||
+    req.url?.includes('action=delete');
+
+  // Handle DELETE / Deletion request to remove stored proof photos and folders from Google Drive
+  if (isDeleteAction) {
     const creds = getGoogleCredentials();
     if (!creds) {
       return res.status(200).json({ success: false, message: 'Google Drive credentials not configured' });
     }
 
     try {
-      // 1. Robust body & query parsing (handling strings, objects, query params)
-      let parsedBody = req.body;
-      if (typeof parsedBody === 'string') {
-        try { parsedBody = JSON.parse(parsedBody); } catch (e) {}
-      }
-
       const rawUrlsOrIds = [];
       if (req.query?.fileId) rawUrlsOrIds.push(req.query.fileId);
       if (req.query?.fileUrl) rawUrlsOrIds.push(req.query.fileUrl);
@@ -363,13 +354,68 @@ export default async function handler(req, res) {
       if (Array.isArray(parsedBody?.folderUrls)) rawUrlsOrIds.push(...parsedBody.folderUrls);
       if (Array.isArray(parsedBody?.urls)) rawUrlsOrIds.push(...parsedBody.urls);
 
-      if (rawUrlsOrIds.length === 0) {
-        return res.status(400).json({ success: false, error: 'Missing fileId, fileUrl, folderId, or fileUrls for deletion' });
-      }
+      // Collect RMA numbers or SKUs for folder-level cleanup
+      const rmaNumbers = [];
+      if (req.query?.rmaNumber) rmaNumbers.push(req.query.rmaNumber);
+      if (parsedBody?.rmaNumber) rmaNumbers.push(parsedBody.rmaNumber);
+      if (Array.isArray(parsedBody?.rmaNumbers)) rmaNumbers.push(...parsedBody.rmaNumbers);
+
+      const skus = [];
+      if (req.query?.sku) skus.push(req.query.sku);
+      if (parsedBody?.sku) skus.push(parsedBody.sku);
+      if (Array.isArray(parsedBody?.skus)) skus.push(...parsedBody.skus);
 
       const accessToken = await getGoogleAccessToken(creds);
       const deletedIds = [];
       const failed = [];
+
+      // 1. If RMA numbers provided, locate & delete/trash their specific folders in RMA-Reports-Item & RMA-Reports-SI/DR/PO
+      for (const rma of [...new Set(rmaNumbers.filter(Boolean))]) {
+        try {
+          const cleanRma = String(rma).replace(/'/g, "\\'").trim();
+          const q = `mimeType = 'application/vnd.google-apps.folder' and name = '${cleanRma}' and trashed = false`;
+          const sRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,parents)&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (sRes.ok) {
+            const sData = await sRes.json();
+            for (const f of (sData.files || [])) {
+              if (f.id && f.id !== creds.folderId) {
+                rawUrlsOrIds.push(f.id);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(`[Google Drive RMA Folder Search Notice for ${rma}]:`, e.message);
+        }
+      }
+
+      // 2. If SKUs provided, locate & delete/trash their specific product folders in Products
+      for (const skuItem of [...new Set(skus.filter(Boolean))]) {
+        try {
+          const cleanSku = String(skuItem).replace(/'/g, "\\'").trim();
+          const q = `mimeType = 'application/vnd.google-apps.folder' and name contains '${cleanSku}' and trashed = false`;
+          const sRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,parents)&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (sRes.ok) {
+            const sData = await sRes.json();
+            for (const f of (sData.files || [])) {
+              if (f.id && f.id !== creds.folderId) {
+                rawUrlsOrIds.push(f.id);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(`[Google Drive SKU Folder Search Notice for ${skuItem}]:`, e.message);
+        }
+      }
+
+      if (rawUrlsOrIds.length === 0 && rmaNumbers.length === 0 && skus.length === 0) {
+        return res.status(200).json({ success: true, count: 0, message: 'No assets found to delete.' });
+      }
 
       for (const item of rawUrlsOrIds) {
         if (!item) continue;
@@ -418,8 +464,8 @@ export default async function handler(req, res) {
           }
         }
 
-        if (!fileId) {
-          failed.push({ item, reason: 'Could not extract or locate Google Drive File ID' });
+        if (!fileId || fileId === creds.folderId) {
+          failed.push({ item, reason: 'Invalid ID or root folder protected' });
           continue;
         }
 
@@ -440,7 +486,7 @@ export default async function handler(req, res) {
           }
 
           const delErrText = await delRes.text();
-          console.warn(`[Google Drive Permanent Delete Notice for ${fileId}]: ${delErrText}. Attempting fallback to move file/folder to trash...`);
+          console.warn(`[Google Drive Permanent Delete Notice for ${fileId}]: ${delErrText}. Falling back to trash...`);
 
           // Attempt 2: Move file or folder to trash (supported for Content Managers and Managers in Shared Drives)
           const trashRes = await fetch(
@@ -463,12 +509,7 @@ export default async function handler(req, res) {
 
           const trashErrText = await trashRes.text();
           console.warn(`[Google Drive Trash Fallback Notice for ${fileId}]: ${trashErrText}`);
-          failed.push({
-            fileId,
-            error: delErrText,
-            trashError: trashErrText,
-            hint: 'Ensure Google Service Account has "Content Manager" or "Manager" role in the Google Shared Drive members settings.'
-          });
+          failed.push({ fileId, error: delErrText, trashError: trashErrText });
         } catch (itemErr) {
           console.warn(`[Google Drive Delete Error for ${fileId}]:`, itemErr.message);
           failed.push({ fileId, error: itemErr.message });
@@ -492,12 +533,12 @@ export default async function handler(req, res) {
   }
 
   // 1. Handle Gemini Flash Paperwork Inspection
-  if (req.query?.action === 'inspect-paperwork' || req.body?.action === 'inspect-paperwork' || req.url?.includes('inspect-paperwork')) {
+  if (req.query?.action === 'inspect-paperwork' || parsedBody?.action === 'inspect-paperwork' || req.url?.includes('inspect-paperwork')) {
     try {
-      const { fileData, imageUrl, mimeType } = req.body || {};
+      const { fileData, imageUrl, mimeType } = parsedBody || {};
       const result = await inspectPaperworkWithGemini({
-        fileData: fileData || req.body?.image || req.body?.photo,
-        imageUrl: imageUrl || req.body?.url,
+        fileData: fileData || parsedBody?.image || parsedBody?.photo,
+        imageUrl: imageUrl || parsedBody?.url,
         mimeType: mimeType || 'image/jpeg'
       });
       return res.status(200).json(result);
@@ -522,18 +563,22 @@ export default async function handler(req, res) {
     });
   }
 
-  // 3. Parse body: expect base64 fileData, rmaNumber, and category ('damaged_items' | 'official_paperwork')
+  // 3. Parse body: expect base64 fileData, rmaNumber, category, sku, productName
   const {
     fileData,
     fileName,
     mimeType = 'image/webp',
     rmaNumber = 'GENERAL',
     category = 'damaged_items',
+    sku = null,
+    code = null,
+    productName = null,
+    name = null,
     rmaType = 'customer_inbound',
     customerName = null,
     storeBranch = null,
     supplierName = null
-  } = req.body || {};
+  } = parsedBody || {};
 
   if (!fileData) {
     return res.status(400).json({
@@ -554,20 +599,18 @@ export default async function handler(req, res) {
   try {
     const accessToken = await getGoogleAccessToken(creds, controller.signal);
 
-    // 4. Resolve target folder in Google Drive with clean hierarchical structure:
-    // Wholesale RMA Reports / [Customer or Supplier] / [YYYY-MM] / [RMA_NUMBER] / [Proof of Damage | Invoice]
+    // 4. Resolve target folder in Google Drive:
+    // Root -> RMA-Reports-Item/[RMA] OR RMA-Reports-SI/DR/PO/[RMA] OR Products/[SKU Name]
     const {
       targetFolderId,
       rmaFolderId,
       rmaFolderUrl
-    } = await resolveRmaHierarchy({
+    } = await resolveTargetFolder({
       rootFolderId: creds.folderId,
       rmaNumber,
       category,
-      rmaType,
-      customerName,
-      storeBranch,
-      supplierName,
+      sku: sku || code,
+      productName: productName || name,
       accessToken,
       signal: controller.signal
     });

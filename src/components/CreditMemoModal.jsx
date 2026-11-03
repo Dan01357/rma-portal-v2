@@ -43,6 +43,7 @@ export default function CreditMemoModal({
   const [pullOutRef, setPullOutRef] = useState('');
   const [pullOutDate, setPullOutDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [creditAmount, setCreditAmount] = useState('0.00');
+  const [financeHead, setFinanceHead] = useState(creditMemo?.credit_issued_by || 'Analiza B. Benoza');
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
@@ -109,8 +110,10 @@ export default function CreditMemoModal({
         setPullOutRef(creditMemo.pull_out_ref || creditMemoService.generatePullOutReference(creditMemosCount));
         setPullOutDate(creditMemo.pull_out_date || new Date().toISOString().split('T')[0]);
         setCreditAmount(Number(creditMemo.credit_amount || creditMemo.amount || 0).toFixed(2));
+        setFinanceHead(creditMemo.credit_issued_by || 'Analiza B. Benoza');
         setNotes(creditMemo.notes || '');
       } else {
+        setFinanceHead('Analiza B. Benoza');
         const initialReport = report || (reportsList.length > 0 ? reportsList[0] : null);
         if (initialReport) {
           setSelectedReportId(initialReport.id || initialReport.rma_number || '');
@@ -238,7 +241,7 @@ export default function CreditMemoModal({
         pull_out_ref: pullOutRef.trim() || 'Warehouse Pull-Out',
         pull_out_date: pullOutDate,
         credit_amount: Number(finalCredit.toFixed(2)),
-        credit_issued_by: 'Analiza B. Benoza',
+        credit_issued_by: (financeHead || '').trim() || 'Analiza B. Benoza',
         credit_issued_by_email: 'analiza@savemore.com',
         notes: notes.trim()
       };
@@ -544,24 +547,30 @@ export default function CreditMemoModal({
               </div>
             </div>
 
-            {/* ROW 4: Credit Issued By & Issuer Role */}
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2 min-w-0">
+            {/* ROW 4: Authorized Finance Head & Issuer Role */}
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-1.5 text-xs">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                Authorized Finance Head / Approved By *
+              </label>
+              <div className="flex items-center gap-2">
                 <div className="p-2 bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 rounded-xl shrink-0">
                   <User className="w-4 h-4" />
                 </div>
-                <div className="min-w-0">
-                  <div className="font-bold text-slate-900 dark:text-white truncate">
-                    Finance Head: <strong className="text-purple-700 dark:text-purple-300">Analiza B. Benoza</strong>
-                  </div>
-                  <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    Head of Finance & Accounting • Official Credit Approval
-                  </div>
-                </div>
+                <input
+                  type="text"
+                  required
+                  value={financeHead}
+                  onChange={(e) => setFinanceHead(e.target.value)}
+                  placeholder="e.g. Analiza B. Benoza"
+                  className="flex-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-purple-600 focus:ring-1 focus:ring-purple-500"
+                />
+                <span className="text-[10px] font-black px-2 py-1 bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 rounded-lg shrink-0 uppercase">
+                  Finance Head
+                </span>
               </div>
-              <span className="text-[10px] font-black px-2 py-1 bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 rounded-lg shrink-0 uppercase">
-                Finance Head
-              </span>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                Authorized financial signatory appearing on the credit memo voucher and official audit records.
+              </p>
             </div>
 
             {/* Accounting Notes / Remarks */}

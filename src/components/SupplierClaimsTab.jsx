@@ -22,6 +22,7 @@ import { exportRMAReportsToCSV, exportSupplierOutboundClaimsToCSV } from '../uti
 import TablePagination from './TablePagination';
 import ImageLightboxModal from './ImageLightboxModal';
 import { supplierClaimService } from '../services/supplierClaimService';
+import { printIsolatedElement } from '../utils/printIsolatedElement';
 
 export default function SupplierClaimsTab({
   reportsList = [],
@@ -555,8 +556,13 @@ export default function SupplierClaimsTab({
 
     setActiveClaimBatch(existingClaim);
     setTimeout(() => {
-      window.print();
-    }, 400);
+      printIsolatedElement({
+        elementId: 'rtv-voucher-mount',
+        documentTitle: `Supplier_Debit_Claim_${existingClaim.claimNumber || existingClaim.claim_number || 'Voucher'}`,
+        pageSize: 'portrait',
+        pageMargin: '0.35in'
+      });
+    }, 250);
   };
 
   /**
@@ -570,7 +576,13 @@ export default function SupplierClaimsTab({
   };
 
   const handlePrintClaimVoucher = () => {
-    window.print();
+    if (!activeClaimBatch) return;
+    printIsolatedElement({
+      elementId: 'rtv-voucher-mount',
+      documentTitle: `Supplier_Debit_Claim_${activeClaimBatch.claimNumber || activeClaimBatch.claim_number || 'Voucher'}`,
+      pageSize: 'portrait',
+      pageMargin: '0.35in'
+    });
   };
 
   const hasActiveFilters = selectedSupplier !== 'All' || dispositionFilter !== 'All' || Boolean(searchTerm);

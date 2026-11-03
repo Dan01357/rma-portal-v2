@@ -309,17 +309,16 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
 
               <div>
                 <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Issued By (Finance Officer)
+                  Issued By (Finance Head / Officer)
                 </label>
-                <select
+                <input
+                  type="text"
+                  required
                   value={issuedBy}
                   onChange={(e) => setIssuedBy(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
-                >
-                  <option value="Analiza B. Benoza">Analiza B. Benoza (Finance Head)</option>
-                  <option value="Finance Accounting Lead (A2Z2Go)">Finance Accounting Lead (A2Z2Go)</option>
-                  <option value="Billing Specialist (Pingcon Marketing)">Billing Specialist (Pingcon Marketing)</option>
-                </select>
+                  placeholder="e.g. Analiza B. Benoza"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-slate-100 font-semibold focus:outline-none focus:border-brand-500"
+                />
               </div>
 
               <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1 text-[11px] text-slate-600 dark:text-slate-300 font-mono">

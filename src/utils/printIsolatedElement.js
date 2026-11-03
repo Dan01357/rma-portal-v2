@@ -75,7 +75,10 @@ export function printIsolatedElement({
             margin: 0 !important;
             padding: 0 !important;
             width: 100% !important;
-            min-height: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: 100% !important;
+            overflow: hidden !important;
             background: #ffffff !important;
             color: #000000 !important;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
@@ -92,7 +95,9 @@ export function printIsolatedElement({
           }
           .isolated-print-sheet {
             width: 100% !important;
-            min-height: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: 100% !important;
             display: flex !important;
             flex-direction: column !important;
             align-items: center !important;
@@ -103,6 +108,7 @@ export function printIsolatedElement({
             text-align: center !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+            overflow: hidden !important;
           }
           .isolated-print-card {
             margin: 0 auto !important;

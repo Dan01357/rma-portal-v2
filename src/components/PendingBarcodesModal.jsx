@@ -136,7 +136,10 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
 
     setIsUploadingImage(true);
     try {
-      const url = await catalogService.uploadPhoto(file);
+      const url = await catalogService.uploadPhoto(file, null, 'product', {
+        sku: formData.code?.trim() || formData.barcode?.trim(),
+        name: formData.name?.trim()
+      });
       if (url) {
         setFormData(prev => ({ ...prev, imageUrl: url }));
       }

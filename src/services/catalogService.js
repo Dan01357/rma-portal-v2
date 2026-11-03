@@ -202,6 +202,8 @@ export const catalogService = {
             mimeType: compressed.type || 'image/webp',
             rmaNumber,
             category,
+            sku: extraMeta.sku || extraMeta.code || null,
+            productName: extraMeta.name || extraMeta.productName || null,
             rmaType: extraMeta.rmaType || extraMeta.rma_type || 'customer_inbound',
             customerName: extraMeta.customerName || extraMeta.storeBranch || extraMeta.store_branch || null,
             storeBranch: extraMeta.storeBranch || extraMeta.store_branch || null,
@@ -365,13 +367,16 @@ export const catalogService = {
 
   /**
    * Delete multiple stored image URLs and Google Drive folders in batch
+   * Supports cleaning up specific file URLs, folder IDs, RMA folders, and Product SKU folders
    */
-  async deleteStoredImages(imageUrls, folderIds = [], folderUrls = []) {
+  async deleteStoredImages(imageUrls, folderIds = [], folderUrls = [], extra = {}) {
     const cleanList = Array.isArray(imageUrls) ? imageUrls.filter(u => u && typeof u === 'string') : [];
     const cleanFolders = Array.isArray(folderIds) ? folderIds.filter(f => f && typeof f === 'string') : (folderIds ? [folderIds] : []);
     const cleanFolderUrls = Array.isArray(folderUrls) ? folderUrls.filter(u => u && typeof u === 'string') : (folderUrls ? [folderUrls] : []);
+    const rmaNumbers = Array.isArray(extra?.rmaNumbers) ? extra.rmaNumbers.filter(Boolean) : (extra?.rmaNumber ? [extra.rmaNumber] : []);
+    const skus = Array.isArray(extra?.skus) ? extra.skus.filter(Boolean) : (extra?.sku ? [extra.sku] : []);
 
-    if (cleanList.length === 0 && cleanFolders.length === 0 && cleanFolderUrls.length === 0) return;
+    if (cleanList.length === 0 && cleanFolders.length === 0 && cleanFolderUrls.length === 0 && rmaNumbers.length === 0 && skus.length === 0) return;
 
     // Separate Google Drive vs Supabase Storage
     const gdriveUrls = [];
@@ -399,16 +404,19 @@ export const catalogService = {
       );
     }
 
-    // Batch delete Google Drive photos & folders in 1 call to /api/upload-photo
-    if (gdriveUrls.length > 0 || cleanFolders.length > 0 || cleanFolderUrls.length > 0) {
+    // Batch delete Google Drive photos & folders via /api/upload-photo (support POST & DELETE)
+    if (gdriveUrls.length > 0 || cleanFolders.length > 0 || cleanFolderUrls.length > 0 || rmaNumbers.length > 0 || skus.length > 0) {
       tasks.push(
-        fetch('/api/upload-photo', {
-          method: 'DELETE',
+        fetch('/api/upload-photo?action=delete', {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            action: 'delete',
             fileUrls: gdriveUrls,
             folderIds: cleanFolders,
-            folderUrls: cleanFolderUrls
+            folderUrls: cleanFolderUrls,
+            rmaNumbers,
+            skus
           })
         }).then(async res => {
           if (res.ok) {
@@ -905,8 +913,11 @@ export const catalogService = {
     }
 
     // Clean up stored image from Google Drive / Supabase
+    const prodSku = barcode || (typeof idOrProduct === 'object' ? (idOrProduct?.code || idOrProduct?.sku) : null);
     if (imageToDelete) {
-      await this.deleteStoredImage(imageToDelete);
+      await this.deleteStoredImages([imageToDelete], [], [], { sku: prodSku });
+    } else if (prodSku) {
+      await this.deleteStoredImages([], [], [], { sku: prodSku });
     }
 
     this.notifyChange('product-deleted', { id, barcode, name });
@@ -941,8 +952,12 @@ export const catalogService = {
     const allImages = productsList
       .map(p => p.image_url || p.imageUrl)
       .filter(Boolean);
-    if (allImages.length > 0) {
-      await this.deleteStoredImages(allImages);
+    const allSkus = productsList
+      .map(p => p.code || p.sku || p.barcode)
+      .filter(Boolean);
+
+    if (allImages.length > 0 || allSkus.length > 0) {
+      await this.deleteStoredImages(allImages, [], [], { skus: allSkus });
     }
 
     this.notifyChange('products-bulk-deleted', { count: productsList.length });
@@ -1647,9 +1662,7 @@ export const catalogService = {
       const cleanFolders = [...new Set(foldersToDelete.filter(Boolean))];
       const cleanFolderUrls = [...new Set(folderUrlsToDelete.filter(Boolean))];
 
-      if (cleanPhotos.length > 0 || cleanFolders.length > 0 || cleanFolderUrls.length > 0) {
-        await this.deleteStoredImages(cleanPhotos, cleanFolders, cleanFolderUrls);
-      }
+      await this.deleteStoredImages(cleanPhotos, cleanFolders, cleanFolderUrls, { rmaNumber });
 
       this.notifyChange('report-deleted', { id, rmaNumber });
       return true;
@@ -1741,9 +1754,7 @@ export const catalogService = {
       const cleanFolders = [...new Set(allFolders.filter(Boolean))];
       const cleanFolderUrls = [...new Set(allFolderUrls.filter(Boolean))];
 
-      if (cleanPhotos.length > 0 || cleanFolders.length > 0 || cleanFolderUrls.length > 0) {
-        await this.deleteStoredImages(cleanPhotos, cleanFolders, cleanFolderUrls);
-      }
+      await this.deleteStoredImages(cleanPhotos, cleanFolders, cleanFolderUrls, { rmaNumbers });
 
       this.notifyChange('reports-bulk-deleted', { count: reportsList.length });
       return { success: true, count: reportsList.length };

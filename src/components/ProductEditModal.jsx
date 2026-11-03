@@ -242,7 +242,10 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
     try {
       let finalImageUrl = imageUrl;
       if (photoFile) {
-        finalImageUrl = await catalogService.uploadPhoto(photoFile);
+        finalImageUrl = await catalogService.uploadPhoto(photoFile, null, 'product', {
+          sku: code.trim() || barcode.trim(),
+          name: name.trim()
+        });
       }
 
       const payload = {
