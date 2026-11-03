@@ -490,37 +490,42 @@ export const accessKeyService = {
 
   /**
    * CHECK DEVICE COOLDOWN STATUS
-   * Checks if current device is in active cooldown for a given slug
+   * Authoritatively checks if current device is in active cooldown for a given slug.
+   * Auto-unlocks if an admin has cleared cooldowns or deleted the session.
    */
-  async checkDeviceCooldown(slug) {
+  async checkDeviceCooldown(slug, passedProfile = null) {
     if (!slug) return null;
     const cleanSlug = String(slug).trim().toLowerCase();
 
-    // 1. Fast local cache check
+    // 0. Resolve profile to check cooldown_reset_at watermark
+    let profile = passedProfile;
+    if (!profile) {
+      try {
+        profile = await this.getProfileBySlug(cleanSlug);
+      } catch (e) {}
+    }
+
+    const resetTimestamp = profile?.cooldown_reset_at ? new Date(profile.cooldown_reset_at).getTime() : 0;
+
+    // 1. Invalidate local cache if created before an admin emergency reset
     try {
       const cached = localStorage.getItem(`rma_last_session_${cleanSlug}`);
       if (cached) {
         const s = JSON.parse(cached);
-        if (s.cooldownUntil && s.expiresAt) {
-          const now = Date.now();
-          const expTime = new Date(s.expiresAt).getTime();
+        const sessionCreated = new Date(s.unlockedAt || s.created_at || s.expiresAt || 0).getTime();
+
+        if (resetTimestamp > 0 && sessionCreated > 0 && sessionCreated <= resetTimestamp) {
+          localStorage.removeItem(`rma_last_session_${cleanSlug}`);
+        } else if (s.cooldownUntil) {
           const cdTime = new Date(s.cooldownUntil).getTime();
-          if (now >= expTime && now < cdTime) {
-            const diffMs = cdTime - now;
-            return {
-              isCooldownActive: true,
-              cooldownRemainingMinutes: Math.max(1, Math.ceil(diffMs / (60 * 1000))),
-              unlocksAt: s.cooldownUntil,
-              sessionExpiresAt: s.expiresAt,
-              profileName: s.profileName,
-              cooldownDurationHours: s.cooldownDurationHours || 6
-            };
+          if (Date.now() >= cdTime) {
+            localStorage.removeItem(`rma_last_session_${cleanSlug}`);
           }
         }
       }
     } catch (e) {}
 
-    // 2. Hardware fingerprint & Supabase remote check
+    // 2. Hardware fingerprint & Supabase remote check (AUTHORITATIVE SOURCE OF TRUTH)
     try {
       const deviceFingerprint = await getDeviceFingerprint();
 
@@ -532,8 +537,26 @@ export const accessKeyService = {
         .order('cooldown_until', { ascending: false })
         .limit(1);
 
+      // If NO session in database (admin cleared cooldowns or session expired), WIPE local cache and unlock!
+      if (!error && (!data || data.length === 0)) {
+        try {
+          localStorage.removeItem(`rma_last_session_${cleanSlug}`);
+        } catch (e) {}
+        return null; // FULLY UNLOCKED FOR ALL DEVICES!
+      }
+
       if (!error && Array.isArray(data) && data.length > 0) {
         const s = data[0];
+        const sessionCreated = new Date(s.session_started_at || s.created_at || 0).getTime();
+
+        // If session was created prior to admin emergency reset watermark, wipe local cache & unlock
+        if (resetTimestamp > 0 && sessionCreated > 0 && sessionCreated <= resetTimestamp) {
+          try {
+            localStorage.removeItem(`rma_last_session_${cleanSlug}`);
+          } catch (e) {}
+          return null;
+        }
+
         const now = new Date();
         const cooldownDate = new Date(s.cooldown_until);
         const expiresDate = new Date(s.session_expires_at);
@@ -544,44 +567,94 @@ export const accessKeyService = {
             isCooldownActive: true,
             cooldownRemainingMinutes: Math.max(1, Math.ceil(diffMs / (60 * 1000))),
             unlocksAt: s.cooldown_until,
-            sessionExpiresAt: s.session_expires_at
+            sessionExpiresAt: s.session_expires_at,
+            profileName: profile?.name || cleanSlug,
+            cooldownDurationHours: profile?.cooldown_duration_hours || 6
           };
+        } else {
+          // Cooldown naturally over
+          try {
+            localStorage.removeItem(`rma_last_session_${cleanSlug}`);
+          } catch (e) {}
+          return null;
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Remote cooldown check notice:', e.message);
+    }
+
     return null;
   },
 
   /**
    * ADMIN EMERGENCY RESET / CLEAR COOLDOWNS
-   * Instantly unlocks all devices for a given QR profile.
+   * Instantly unlocks all physical devices for a given QR profile.
    */
   async emergencyResetCooldowns(slug, profileId = null) {
     const cleanSlug = String(slug || '').trim().toLowerCase();
+    const resetTimestamp = new Date().toISOString();
 
-    // 1. Clear local session cache
+    // 1. Clear local session cache on admin machine
     try {
       localStorage.removeItem(`rma_last_session_${cleanSlug}`);
     } catch (e) {}
 
-    // 2. Call server route
+    // 2. Direct Supabase delete from device_intake_sessions (removes all device locks)
     try {
-      await fetch('/api/v1/auth/clear-cooldown', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug: cleanSlug, profileId })
+      if (cleanSlug) {
+        await supabase.from('device_intake_sessions').delete().eq('access_slug', cleanSlug);
+      }
+      if (profileId) {
+        await supabase.from('device_intake_sessions').delete().eq('profile_id', profileId);
+      }
+    } catch (e) {
+      console.warn('Device intake sessions delete notice:', e.message);
+    }
+
+    // 3. Update cooldown_reset_at watermark in portal_access_keys & rma_settings
+    try {
+      if (cleanSlug) {
+        await supabase
+          .from('portal_access_keys')
+          .update({ cooldown_reset_at: resetTimestamp, updated_at: resetTimestamp })
+          .eq('access_slug', cleanSlug);
+      }
+
+      // Update rma_settings store
+      const allProfiles = await this.getProfiles();
+      const updatedList = allProfiles.map(p => {
+        if (p.access_slug.toLowerCase() === cleanSlug || (profileId && p.id === profileId)) {
+          return { ...p, cooldown_reset_at: resetTimestamp, updated_at: resetTimestamp };
+        }
+        return p;
+      });
+
+      await supabase.from('rma_settings').upsert({
+        key: SETTINGS_KEY,
+        value: updatedList,
+        updated_at: resetTimestamp
+      });
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
+    } catch (e) {
+      console.warn('Profile cooldown_reset_at watermark notice:', e.message);
+    }
+
+    // 4. Real-time broadcast to instantly unlock all live phones and browser tabs
+    try {
+      const channel = supabase.channel('gatekeeper_cooldown_bus');
+      channel.send({
+        type: 'broadcast',
+        event: 'cooldown_cleared',
+        payload: { slug: cleanSlug, profileId, resetAt: resetTimestamp }
       });
     } catch (e) {}
 
-    // 3. Direct Supabase delete
     try {
-      let query = supabase.from('device_intake_sessions').delete();
-      if (cleanSlug) {
-        query = query.eq('access_slug', cleanSlug);
-      } else if (profileId) {
-        query = query.eq('profile_id', profileId);
+      if (typeof window !== 'undefined' && window.BroadcastChannel) {
+        const bc = new BroadcastChannel('rma_portal_sync_bus');
+        bc.postMessage({ type: 'cooldown_cleared', slug: cleanSlug, resetAt: resetTimestamp });
       }
-      await query;
     } catch (e) {}
 
     return true;

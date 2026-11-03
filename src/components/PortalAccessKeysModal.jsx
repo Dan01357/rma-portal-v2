@@ -86,7 +86,6 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
   const [printSize, setPrintSize] = useState('a4');
 
   // Print Poster Options
-  const [showPinOnPoster, setShowPinOnPoster] = useState(true);
   const [isDownloadingPoster, setIsDownloadingPoster] = useState(false);
 
   // Load profiles on open
@@ -238,7 +237,6 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
   // Open Print Poster Modal
   const handleOpenPrint = (prof) => {
     setSelectedProfile(prof);
-    setShowPinOnPoster(prof.type === 'internal_warehouse');
     setModalMode('print');
   };
 
@@ -1110,23 +1108,11 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                     </span>
                   </div>
 
-                  {/* Large 6-Digit PIN on Poster */}
-                  {showPinOnPoster && (
-                    <div className="p-2.5 sm:p-4 border-2 sm:border-3 border-black rounded-xl sm:rounded-2xl bg-slate-50 space-y-0.5 sm:space-y-1">
-                      <div className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-black">
-                        Station 6-Digit Gatekeeper PIN
-                      </div>
-                      <div className="font-mono font-black text-2xl sm:text-4xl tracking-[0.25em] sm:tracking-[0.3em] text-black">
-                        {selectedProfile.pin_code}
-                      </div>
-                    </div>
-                  )}
-
                   {/* Numbered Google Lens Instructions */}
                   <div className="text-left text-[11px] sm:text-xs md:text-sm space-y-1.5 sm:space-y-2 text-black pt-2.5 sm:pt-3.5 border-t-2 sm:border-t-4 border-black font-medium leading-relaxed">
                     <div><strong>1.</strong> Open <strong>Google Lens</strong> (or phone camera) on your mobile device.</div>
                     <div><strong>2.</strong> Point camera directly at QR code above and tap the link to launch portal.</div>
-                    <div><strong>3.</strong> Enter station 6-digit PIN (<strong>{selectedProfile.pin_code}</strong>) when prompted to unlock intake scanner.</div>
+                    <div><strong>3.</strong> Enter authorized 6-digit station PIN when prompted to unlock intake scanner.</div>
                   </div>
                 </div>
               )}
@@ -1168,23 +1154,11 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                     </span>
                   </div>
 
-                  {/* Optional 6-Digit PIN on Sticker */}
-                  {showPinOnPoster && (
-                    <div className="p-1.5 border-2 border-black rounded-xl bg-slate-50 space-y-0.5">
-                      <div className="text-[9px] font-black uppercase tracking-wider text-black">
-                        Station 6-Digit Gatekeeper PIN
-                      </div>
-                      <div className="font-black font-mono text-xl tracking-widest text-black">
-                        {selectedProfile.pin_code}
-                      </div>
-                    </div>
-                  )}
-
                   {/* Numbered Instructions */}
                   <div className="text-left text-[9.5px] space-y-1 text-black pt-1.5 border-t-2 border-black font-medium">
                     <div><strong>1.</strong> Open <strong>Google Lens</strong> (or QR scanner) on phone.</div>
                     <div><strong>2.</strong> Point at QR code above &amp; tap link to launch portal.</div>
-                    <div><strong>3.</strong> Enter 6-digit station PIN when prompted.</div>
+                    <div><strong>3.</strong> Enter authorized 6-digit station PIN when prompted.</div>
                   </div>
                 </div>
               )}
@@ -1223,14 +1197,6 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                     </span>
                   </div>
 
-                  {/* Compact Horizontal PIN Strip */}
-                  {showPinOnPoster && (
-                    <div className="py-0.5 px-2 border border-black rounded-md bg-slate-50 flex items-center justify-between text-black">
-                      <span className="text-[8px] font-black uppercase tracking-wider">STATION PIN</span>
-                      <span className="font-mono font-black text-xs tracking-wider">{selectedProfile.pin_code}</span>
-                    </div>
-                  )}
-
                   {/* Concise 1-line Instruction */}
                   <div className="text-[8px] font-bold text-black border-t border-black pt-0.5">
                     Scan with Google Lens to Return Item
@@ -1262,14 +1228,6 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                     />
                   </div>
 
-                  {/* Inline PIN Pill */}
-                  {showPinOnPoster && (
-                    <div className="py-0.5 px-1.5 bg-black text-white rounded text-[8px] font-mono font-black flex items-center justify-between">
-                      <span className="text-[7px] uppercase opacity-90">PIN:</span>
-                      <span className="tracking-wider">{selectedProfile.pin_code}</span>
-                    </div>
-                  )}
-
                   {/* Mini Scan Prompt */}
                   <div className="text-[7px] font-black uppercase text-black pt-0.5 border-t border-black">
                     Scan via Google Lens
@@ -1281,15 +1239,10 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
 
             {/* Poster Controls Bar */}
             <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
-              <label className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showPinOnPoster}
-                  onChange={(e) => setShowPinOnPoster(e.target.checked)}
-                  className="rounded text-blue-600 w-4 h-4 cursor-pointer"
-                />
-                <span>Include 6-Digit PIN on Printed Sheet</span>
-              </label>
+              <div className="text-xs text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                <span>PIN is protected &amp; hidden from printed QR sticker</span>
+              </div>
 
               <div className="flex items-center gap-2">
                 <button

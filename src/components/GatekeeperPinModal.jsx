@@ -27,6 +27,7 @@ import {
 import { accessKeyService } from '../services/accessKeyService';
 import { pinRequestService } from '../services/pinRequestService';
 import { formatCooldownLabel } from './PortalAccessKeysModal';
+import { supabase } from '../supabaseClient';
 
 export function formatSessionBadgeLabel(hours) {
   const h = Number(hours || 0);
@@ -119,12 +120,16 @@ export default function GatekeeperPinModal({
 
         // Check if device is in cooldown for this profile
         if (prof?.type === 'external_customer') {
-          accessKeyService.checkDeviceCooldown(currentSlug).then(cd => {
+          accessKeyService.checkDeviceCooldown(currentSlug, prof).then(cd => {
             if (!isMounted) return;
             if (cd && cd.isCooldownActive) {
               setCooldownInfo(cd);
+            } else {
+              setCooldownInfo(null);
             }
           });
+        } else {
+          setCooldownInfo(null);
         }
       })
       .catch(() => {
@@ -134,6 +139,44 @@ export default function GatekeeperPinModal({
       });
 
     return () => { isMounted = false; };
+  }, [isOpen, currentSlug]);
+
+  // Real-time listener for emergency cooldown clear from admin across all devices
+  useEffect(() => {
+    if (!isOpen || !currentSlug) return;
+
+    const handleClearEvent = (slug) => {
+      const targetSlug = String(slug || '').trim().toLowerCase();
+      if (!targetSlug || targetSlug === currentSlug.toLowerCase()) {
+        try {
+          localStorage.removeItem(`rma_last_session_${currentSlug.toLowerCase()}`);
+        } catch (e) {}
+        setCooldownInfo(null);
+      }
+    };
+
+    // 1. Supabase Realtime broadcast channel across physical devices
+    const channel = supabase.channel('gatekeeper_cooldown_bus')
+      .on('broadcast', { event: 'cooldown_cleared' }, ({ payload }) => {
+        handleClearEvent(payload?.slug);
+      })
+      .subscribe();
+
+    // 2. BroadcastChannel for same-device cross-tab sync
+    let bc = null;
+    if (typeof window !== 'undefined' && window.BroadcastChannel) {
+      bc = new BroadcastChannel('rma_portal_sync_bus');
+      bc.onmessage = (msg) => {
+        if (msg.data?.type === 'cooldown_cleared') {
+          handleClearEvent(msg.data?.slug);
+        }
+      };
+    }
+
+    return () => {
+      supabase.removeChannel(channel);
+      if (bc) bc.close();
+    };
   }, [isOpen, currentSlug]);
 
   // Live ticking countdown for Cooldown Lockout Screen

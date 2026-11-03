@@ -265,7 +265,9 @@ async function resolveRmaHierarchy({
       );
       if (infoRes.ok) {
         const info = await infoRes.json();
-        if (info.name !== 'Wholesale RMA Reports' && info.name !== 'Wholesale RMA Records') {
+        // If the configured parent folder is already a Wholesale RMA folder (e.g., "Wholesale RMA Photos" or "Wholesale RMA Reports"), use it directly
+        const isAlreadyRmaRoot = /wholesale\s*rma/i.test(info.name || '');
+        if (!isAlreadyRmaRoot) {
           const subRoot = await findOrCreateFolderCached('Wholesale RMA Reports', currentParentId, accessToken, signal);
           if (subRoot) currentParentId = subRoot;
         }
