@@ -951,17 +951,75 @@ export const catalogService = {
 
   /**
    * GENERATE UNIQUE RMA NUMBER INSTANTLY
-   * Format: "RMA-YYYY-XXXX-RAND" (e.g. RMA-2026-0001-A14R)
+   * Standard Enterprise Format: "RMA-[YEAR]-[4-DIGIT-ASCENDING]-[4-CHAR-ALPHANUMERIC]"
+   * Example: RMA-2026-0001-6TYH
    */
-  generateRMANumber(seqHint) {
+  generateRMANumber(existingOrHint = null) {
     const currentYear = new Date().getFullYear();
-    const seqStr = String(seqHint || Math.floor(1000 + Math.random() * 9000)).padStart(4, '0');
-    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-    let randomSuffix = '';
-    for (let i = 0; i < 4; i++) {
-      randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
+    let maxSeq = 0;
+
+    // 1. If an array of reports was passed, find the highest existing sequence number
+    if (Array.isArray(existingOrHint)) {
+      existingOrHint.forEach(r => {
+        const num = r.rma_number || r.rmaNumber || r.id || '';
+        const match = String(num).match(/RMA-\d{4}-(\d+)-/i);
+        if (match && match[1]) {
+          const parsed = parseInt(match[1], 10);
+          if (!isNaN(parsed) && parsed > maxSeq) {
+            maxSeq = parsed;
+          }
+        }
+      });
+      if (maxSeq === 0 && existingOrHint.length > 0) {
+        maxSeq = existingOrHint.length;
+      }
+    } else if (typeof existingOrHint === 'number' && existingOrHint > 0) {
+      maxSeq = existingOrHint - 1;
     }
-    return `RMA-${currentYear}-${seqStr}-${randomSuffix}`;
+
+    // 2. Fallback to localStorage cache if existing array was not supplied
+    if (maxSeq === 0) {
+      try {
+        const rawReports = localStorage.getItem('cached_recent_reports') || localStorage.getItem('rma_reports_cache');
+        if (rawReports) {
+          const parsed = JSON.parse(rawReports);
+          if (Array.isArray(parsed)) {
+            parsed.forEach(r => {
+              const num = r.rma_number || r.rmaNumber || '';
+              const match = String(num).match(/RMA-\d{4}-(\d+)-/i);
+              if (match && match[1]) {
+                const p = parseInt(match[1], 10);
+                if (!isNaN(p) && p > maxSeq) maxSeq = p;
+              }
+            });
+            if (maxSeq === 0) maxSeq = parsed.length;
+          }
+        }
+      } catch {}
+    }
+
+    // 3. Increment persistent local counter
+    try {
+      const storageKey = `rma_last_seq_${currentYear}`;
+      const stored = parseInt(localStorage.getItem(storageKey) || '0', 10);
+      if (!isNaN(stored) && stored > maxSeq) {
+        maxSeq = stored;
+      }
+    } catch {}
+
+    const nextSeq = maxSeq + 1;
+    try {
+      localStorage.setItem(`rma_last_seq_${currentYear}`, String(nextSeq));
+    } catch {}
+
+    const seqStr = String(nextSeq).padStart(4, '0');
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let rand = '';
+    for (let i = 0; i < 4; i++) {
+      rand += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+
+    return `RMA-${currentYear}-${seqStr}-${rand}`;
   },
 
   /**

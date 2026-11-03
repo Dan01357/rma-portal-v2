@@ -36,7 +36,7 @@ export const RMATypeEnum = z.enum([
 
 export const RMAReportSchema = z.object({
   id: z.number().int().openapi({ example: 1042 }),
-  rma_number: z.string().openapi({ example: 'RMA-20261026-8941' }),
+  rma_number: z.string().openapi({ example: 'RMA-2026-0001-6TYH' }),
   rma_type: RMATypeEnum.default('customer_inbound').openapi({ example: 'customer_inbound', description: 'Logistics type: customer_inbound (store return) or supplier_outbound (vendor RTV)' }),
   barcode: z.string().openapi({ example: '4800016644833' }),
   code: z.string().nullable().optional().openapi({ example: 'OISHI-PRAWN-50G' }),
@@ -180,7 +180,7 @@ export function registerRMARoutes(registry) {
           'application/json': {
             schema: z.object({
               success: z.boolean().openapi({ example: true }),
-              message: z.string().openapi({ example: 'RMA report RMA-20261026-8941 created successfully.' }),
+              message: z.string().openapi({ example: 'RMA report RMA-2026-0001-6TYH created successfully.' }),
               client: z.string().openapi({ example: 'Jarmen' }),
               data: RMAReportSchema
             })
@@ -197,11 +197,11 @@ export function registerRMARoutes(registry) {
     method: 'get',
     path: '/api/v1/rma/{id}',
     summary: 'Get Single RMA Report',
-    description: 'Retrieve a return report by its numeric database ID or its public RMA Number (e.g. RMA-20261026-8941).',
+    description: 'Retrieve a return report by its numeric database ID or its public RMA Number (e.g. RMA-2026-0001-6TYH).',
     tags: ['RMA Reports'],
     request: {
       params: z.object({
-        id: z.string().openapi({ description: 'Numeric ID or RMA Number', example: 'RMA-20261026-8941' })
+        id: z.string().openapi({ description: 'Numeric ID or RMA Number', example: 'RMA-2026-0001-6TYH' })
       })
     },
     responses: {
@@ -229,7 +229,7 @@ export function registerRMARoutes(registry) {
     tags: ['RMA Reports'],
     request: {
       params: z.object({
-        id: z.string().openapi({ description: 'Numeric ID or RMA Number', example: 'RMA-20261026-8941' })
+        id: z.string().openapi({ description: 'Numeric ID or RMA Number', example: 'RMA-2026-0001-6TYH' })
       }),
       body: {
         required: true,
@@ -266,7 +266,7 @@ export function registerRMARoutes(registry) {
     tags: ['RMA Reports'],
     request: {
       params: z.object({
-        id: z.string().openapi({ example: 'RMA-20261026-8941' })
+        id: z.string().openapi({ example: 'RMA-2026-0001-6TYH' })
       })
     },
     responses: {

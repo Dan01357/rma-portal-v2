@@ -875,37 +875,30 @@ export default function QuickRMAActionModal({
 
                     <div className="flex-1 min-w-0 text-xs space-y-0.5">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-slate-400 text-[10px] uppercase font-bold">DR / Invoice:</span>
-                        <strong className="font-mono text-slate-900 dark:text-white font-black">{adminDrNumber || report.invoice_dr_number || 'None assigned'}</strong>
-                        {(report.si_number || aiMetadata?.si_number) && (
-                          <span className="text-[10px] font-mono bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 px-1.5 py-0.5 rounded font-bold">
-                            SI: {report.si_number || aiMetadata?.si_number}
-                          </span>
-                        )}
-                        {(report.dr_number || aiMetadata?.dr_number) && (
-                          <span className="text-[10px] font-mono bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 px-1.5 py-0.5 rounded font-bold">
-                            DR: {report.dr_number || aiMetadata?.dr_number}
-                          </span>
-                        )}
-                        {(report.po_number || aiMetadata?.po_number) && (
-                          <span className="text-[10px] font-mono bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.5 rounded font-bold">
-                            PO: {report.po_number || aiMetadata?.po_number}
-                          </span>
-                        )}
-                        {(adminDrNumber || report.invoice_dr_number) && (
+                        <span className="text-slate-400 text-[10px] uppercase font-bold">Documents:</span>
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${report.si_number ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'}`}>
+                          SI: {report.si_number || 'N/A'}
+                        </span>
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${(report.dr_number || (!report.si_number && adminDrNumber)) ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 border border-violet-200 dark:border-violet-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'}`}>
+                          DR: {report.dr_number || (!report.si_number && !report.po_number && adminDrNumber ? adminDrNumber : 'N/A')}
+                        </span>
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${report.po_number ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'}`}>
+                          PO: {report.po_number || 'N/A'}
+                        </span>
+                        {(report.dr_number || report.si_number || report.po_number || adminDrNumber) && (
                           <button
                             type="button"
                             onClick={() => {
-                              const dr = adminDrNumber || report.invoice_dr_number;
-                              navigator.clipboard.writeText(dr);
+                              const docNum = report.dr_number || report.si_number || report.po_number || adminDrNumber;
+                              navigator.clipboard.writeText(docNum);
                               setCopyDrSuccess(true);
                               setTimeout(() => setCopyDrSuccess(false), 2000);
                             }}
                             className="px-2 py-0.5 text-[10px] font-bold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-slate-700 dark:text-slate-200 hover:border-blue-500 hover:text-blue-600 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs ml-auto sm:ml-0"
-                            title="Copy DR# for Credit Memo voucher"
+                            title="Copy Document # for Credit Memo voucher"
                           >
                             <Copy className="w-3 h-3" />
-                            <span>{copyDrSuccess ? 'Copied!' : 'Copy DR#'}</span>
+                            <span>{copyDrSuccess ? 'Copied!' : 'Copy Doc#'}</span>
                           </button>
                         )}
                       </div>

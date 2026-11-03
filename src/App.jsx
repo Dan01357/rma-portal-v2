@@ -127,6 +127,35 @@ function formatLifecycleStage(status) {
   }
 }
 
+/**
+ * Resolves SI, DR, and PO numbers cleanly.
+ * Strictly avoids mistaking an SI number for a DR number.
+ */
+export function getDocumentNumbers(item) {
+  if (!item) return { si: 'N/A', dr: 'N/A', po: 'N/A' };
+
+  let si = item.si_number ? String(item.si_number).trim() : null;
+  let dr = item.dr_number ? String(item.dr_number).trim() : null;
+  let po = item.po_number ? String(item.po_number).trim() : null;
+
+  const legacy = item.invoice_dr_number ? String(item.invoice_dr_number).trim() : null;
+  if (legacy) {
+    if (!si && /^SI/i.test(legacy)) {
+      si = legacy;
+    } else if (!po && /^PO/i.test(legacy)) {
+      po = legacy;
+    } else if (!dr && !si && !po) {
+      dr = legacy;
+    }
+  }
+
+  return {
+    si: si || 'N/A',
+    dr: dr || 'N/A',
+    po: po || 'N/A'
+  };
+}
+
 
 /**
  * Resolves the QR Intake slug from pathname, hash, or query parameters.
@@ -1741,10 +1770,10 @@ export default function App() {
     const determinedRmaType = (gateSession?.type === 'internal_warehouse') ? 'supplier_outbound' : 'customer_inbound';
 
     // 2. Generate unique RMA Number synchronously for instant sticker/QR display
-    const rmaNumber = catalogService.generateRMANumber();
+    const rmaNumber = catalogService.generateRMANumber(recentReportsList);
     const submitQty = Math.max(1, parseInt(quantity, 10) || 1);
     const finalUnit = unitName || detectedProduct?.unit_name || 'pc';
-    const primaryDocNumber = cleanSi || cleanDr || cleanPo || invoiceDrNumber.trim() || null;
+    const primaryDocNumber = cleanDr || cleanSi || cleanPo || invoiceDrNumber.trim() || null;
 
     // 3. Show success screen with full report details for QR sticker generation INSTANTLY!
     setSubmitSuccessReport({
@@ -3855,29 +3884,36 @@ export default function App() {
                                   </div>
                                 </td>
 
-                                {/* 8. Commercial Document / DR # */}
+                                {/* 8. Commercial Document (SI / DR / PO) */}
                                 <td className="py-3 px-3.5 font-mono">
-                                  {item.invoice_dr_number || item.dr_number || item.si_number || item.po_number ? (
-                                    <div className="space-y-0.5">
-                                      {(item.invoice_dr_number || item.dr_number) && (
-                                        <span className="px-1.5 py-0.5 rounded bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 text-[9px] font-bold block truncate max-w-[120px]">
-                                          DR: {item.invoice_dr_number || item.dr_number}
+                                  {(() => {
+                                    const docs = getDocumentNumbers(item);
+                                    return (
+                                      <div className="space-y-0.5 text-[9px] font-mono leading-tight">
+                                        <span className={`px-1.5 py-0.5 rounded block truncate max-w-[125px] ${
+                                          docs.si !== 'N/A'
+                                            ? 'bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold'
+                                            : 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 border border-slate-200/50 dark:border-slate-700/50 font-medium'
+                                        }`}>
+                                          SI: {docs.si}
                                         </span>
-                                      )}
-                                      {item.si_number && (
-                                        <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[9px] font-bold block truncate max-w-[120px]">
-                                          SI: {item.si_number}
+                                        <span className={`px-1.5 py-0.5 rounded block truncate max-w-[125px] ${
+                                          docs.dr !== 'N/A'
+                                            ? 'bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-bold'
+                                            : 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 border border-slate-200/50 dark:border-slate-700/50 font-medium'
+                                        }`}>
+                                          DR: {docs.dr}
                                         </span>
-                                      )}
-                                      {item.po_number && (
-                                        <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9px] font-semibold block truncate max-w-[120px]">
-                                          PO: {item.po_number}
+                                        <span className={`px-1.5 py-0.5 rounded block truncate max-w-[125px] ${
+                                          docs.po !== 'N/A'
+                                            ? 'bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold'
+                                            : 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 border border-slate-200/50 dark:border-slate-700/50 font-medium'
+                                        }`}>
+                                          PO: {docs.po}
                                         </span>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <span className="text-slate-300 dark:text-slate-600 text-[10px]">—</span>
-                                  )}
+                                      </div>
+                                    );
+                                  })()}
                                 </td>
 
                                 {/* 8. Catalog Status */}
@@ -4255,11 +4291,28 @@ export default function App() {
                                     📍 {item.store_branch}
                                   </span>
                                 )}
-                                {item.invoice_dr_number && (
-                                  <span className="px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-mono font-bold">
-                                    DR: {item.invoice_dr_number}
-                                  </span>
-                                )}
+                                {(() => {
+                                  const docs = getDocumentNumbers(item);
+                                  return (
+                                    <>
+                                      {docs.si !== 'N/A' && (
+                                        <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-mono font-bold">
+                                          SI: {docs.si}
+                                        </span>
+                                      )}
+                                      {docs.dr !== 'N/A' && (
+                                        <span className="px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-mono font-bold">
+                                          DR: {docs.dr}
+                                        </span>
+                                      )}
+                                      {docs.po !== 'N/A' && (
+                                        <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-mono font-bold">
+                                          PO: {docs.po}
+                                        </span>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                                 {item.batch_lot_number && (
                                   <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-mono font-semibold">
                                     Lot: {item.batch_lot_number}

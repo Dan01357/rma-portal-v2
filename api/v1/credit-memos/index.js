@@ -90,10 +90,26 @@ export default async function handler(req, res) {
         });
       }
 
-      // Auto-generate CM Number: CM-YYYYMMDD-XXXX
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const rand = Math.floor(1000 + Math.random() * 9000);
-      const cmNumber = `CM-${dateStr}-${rand}`;
+      // Standardized CM Number: CM-[YEAR]-[4-DIGIT-ASCENDING]-[4-CHAR-ALPHANUMERIC]
+      // Example: CM-2026-0001-6TYH
+      const currentYear = new Date().getFullYear();
+      let nextSeq = 1;
+      try {
+        const { count } = await supabase.from('credit_memos').select('*', { count: 'exact', head: true });
+        if (typeof count === 'number' && count >= 0) {
+          nextSeq = count + 1;
+        }
+      } catch (countErr) {
+        console.warn('Count query notice for CM sequence:', countErr.message);
+      }
+
+      const seqStr = String(nextSeq).padStart(4, '0');
+      const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+      let rand = '';
+      for (let i = 0; i < 4; i++) {
+        rand += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      const cmNumber = `CM-${currentYear}-${seqStr}-${rand}`;
 
       const numQty = parseFloat(quantity) || 1;
       const numUnitPrice = parseFloat(unit_price) || 0;

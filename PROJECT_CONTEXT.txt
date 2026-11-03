@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated: 2026-10-30T06:34:29.138Z
+Generated: 2026-11-03T02:24:38.229Z
 ================================================================================
 
 ================================================================================
@@ -8,120 +8,121 @@ Generated: 2026-10-30T06:34:29.138Z
 ================================================================================
 
 rma-portal-v2/
-├── api/
-│   │   ├── _lib/
-│   │   │   │   ├── schemas/
-│   │   │   │   │   │   ├── apiKeys.schema.js
-│   │   │   │   │   │   ├── common.js
-│   │   │   │   │   │   ├── creditMemos.schema.js
-│   │   │   │   │   │   ├── health.schema.js
-│   │   │   │   │   │   ├── products.schema.js
-│   │   │   │   │   │   └── rma.schema.js
-│   │   │   │   ├── auth.js
-│   │   │   │   ├── geminiInspector.js
-│   │   │   │   ├── keyUtils.js
-│   │   │   │   ├── lookupHandler.js
-│   │   │   │   ├── mockProducts.js
-│   │   │   │   ├── openapiRegistry.js
-│   │   │   │   ├── supabase.js
-│   │   │   │   └── verifyPinHandler.js
-│   │   ├── v1/
-│   │   │   │   ├── api-keys/
-│   │   │   │   │   │   ├── [id].js
-│   │   │   │   │   │   └── index.js
-│   │   │   │   ├── credit-memos/
-│   │   │   │   │   │   ├── [id].js
-│   │   │   │   │   │   └── index.js
-│   │   │   │   ├── products/
-│   │   │   │   │   │   ├── [id].js
-│   │   │   │   │   │   └── index.js
-│   │   │   │   ├── rma/
-│   │   │   │   │   │   ├── [id].js
-│   │   │   │   │   │   └── index.js
-│   │   │   │   └── health.js
-│   │   ├── docs.js
-│   │   ├── send-email.js
-│   │   └── upload-photo.js
-├── docs/
-│   │   ├── MANUAL_QA_TESTING_CHECKLIST.md
-│   │   └── WHOLESALE_RMA_OPERATIONS_GUIDE.md
-├── scratch/
-│   │   ├── check_key.js
-│   │   ├── deployed.js
-│   │   ├── test_api_imports.js
-│   │   ├── test_api.js
-│   │   ├── test_handler_exec.js
-│   │   ├── test_openapi.js
-│   │   └── vercel_err.html
-├── src/
-│   │   ├── archive_v1/
-│   │   │   │   ├── AdminPinModal.jsx
-│   │   │   │   ├── FinanceCreditMemoTab.jsx
-│   │   │   │   ├── HowItWorksModal.jsx
-│   │   │   │   ├── PrintBarcodesTab.jsx
-│   │   │   │   ├── PurchasingBufferTab.jsx
-│   │   │   │   ├── ReturnQRModal.jsx
-│   │   │   │   ├── ScannerModal.jsx
-│   │   │   │   ├── SettingsTab.jsx
-│   │   │   │   ├── SubmitRMATab.jsx
-│   │   │   │   └── TicketsVaultTab.jsx
-│   │   ├── components/
-│   │   │   │   ├── AdminLoginModal.jsx
-│   │   │   │   ├── AdminPinModal.jsx
-│   │   │   │   ├── ApiKeysManagementSection.jsx
-│   │   │   │   ├── CreditMemoModal.jsx
-│   │   │   │   ├── CreditMemosTab.jsx
-│   │   │   │   ├── CreditMemoVoucherModal.jsx
-│   │   │   │   ├── DeleteConfirmationModal.jsx
-│   │   │   │   ├── EmployeeManagementModal.jsx
-│   │   │   │   ├── FinanceCreditMemoTab.jsx
-│   │   │   │   ├── GatekeeperPinModal.jsx
-│   │   │   │   ├── HowItWorksModal.jsx
-│   │   │   │   ├── ImageLightboxModal.jsx
-│   │   │   │   ├── NotificationBell.jsx
-│   │   │   │   ├── PendingBarcodesModal.jsx
-│   │   │   │   ├── PinRequestsQueueModal.jsx
-│   │   │   │   ├── PortalAccessKeysModal.jsx
-│   │   │   │   ├── PortalAccessQRModal.jsx
-│   │   │   │   ├── PrintBarcodesTab.jsx
-│   │   │   │   ├── ProductAutoSuggest.jsx
-│   │   │   │   ├── ProductEditModal.jsx
-│   │   │   │   ├── ProductSearchTab.jsx
-│   │   │   │   ├── PurchasingBufferTab.jsx
-│   │   │   │   ├── QuickRMAActionModal.jsx
-│   │   │   │   ├── ReturnQRModal.jsx
-│   │   │   │   ├── RMAReportsModal.jsx
-│   │   │   │   ├── RMATimelineAudit.jsx
-│   │   │   │   ├── SavedProductsTab.jsx
-│   │   │   │   ├── ScannerModal.jsx
-│   │   │   │   ├── SettingsTab.jsx
-│   │   │   │   ├── SubmitRMATab.jsx
-│   │   │   │   ├── SupplierClaimsTab.jsx
-│   │   │   │   ├── SupplierInput.jsx
-│   │   │   │   ├── TablePagination.jsx
-│   │   │   │   ├── ThermalBoxLabelModal.jsx
-│   │   │   │   └── TicketsVaultTab.jsx
-│   │   ├── data/
-│   │   │   │   └── mockData.js
-│   │   ├── services/
-│   │   │   │   ├── accessKeyService.js
-│   │   │   │   ├── authService.js
-│   │   │   │   ├── catalogService.js
-│   │   │   │   ├── creditMemoService.js
-│   │   │   │   ├── notificationService.js
-│   │   │   │   ├── pinRequestService.js
-│   │   │   │   ├── purchaseOrdersApi.js
-│   │   │   │   └── supplierClaimService.js
-│   │   ├── utils/
-│   │   │   │   ├── deviceFingerprint.js
-│   │   │   │   ├── exportCsv.js
-│   │   │   │   ├── printIsolatedElement.js
-│   │   │   │   ├── qrDownload.js
-│   │   │   │   └── rmaHelpers.js
-│   │   ├── App.jsx
-│   │   ├── index.css
-│   │   ├── main.jsx
-│   │   └── supabaseClient.js
+├── api
+│   ├── _lib
+│   │   ├── schemas
+│   │   │   ├── apiKeys.schema.js
+│   │   │   ├── common.js
+│   │   │   ├── creditMemos.schema.js
+│   │   │   ├── health.schema.js
+│   │   │   ├── products.schema.js
+│   │   │   └── rma.schema.js
+│   │   ├── auth.js
+│   │   ├── geminiInspector.js
+│   │   ├── keyUtils.js
+│   │   ├── lookupHandler.js
+│   │   ├── mockProducts.js
+│   │   ├── openapiRegistry.js
+│   │   ├── supabase.js
+│   │   └── verifyPinHandler.js
+│   ├── v1
+│   │   ├── api-keys
+│   │   │   ├── [id].js
+│   │   │   └── index.js
+│   │   ├── credit-memos
+│   │   │   ├── [id].js
+│   │   │   └── index.js
+│   │   ├── products
+│   │   │   ├── [id].js
+│   │   │   └── index.js
+│   │   ├── rma
+│   │   │   ├── [id].js
+│   │   │   └── index.js
+│   │   └── health.js
+│   ├── docs.js
+│   ├── send-email.js
+│   └── upload-photo.js
+├── docs
+│   ├── MANUAL_QA_TESTING_CHECKLIST.md
+│   └── WHOLESALE_RMA_OPERATIONS_GUIDE.md
+├── scratch
+│   ├── check_key.js
+│   ├── deployed.js
+│   ├── generate_project_context.cjs
+│   ├── test_api_imports.js
+│   ├── test_api.js
+│   ├── test_handler_exec.js
+│   ├── test_openapi.js
+│   └── vercel_err.html
+├── src
+│   ├── archive_v1
+│   │   ├── AdminPinModal.jsx
+│   │   ├── FinanceCreditMemoTab.jsx
+│   │   ├── HowItWorksModal.jsx
+│   │   ├── PrintBarcodesTab.jsx
+│   │   ├── PurchasingBufferTab.jsx
+│   │   ├── ReturnQRModal.jsx
+│   │   ├── ScannerModal.jsx
+│   │   ├── SettingsTab.jsx
+│   │   ├── SubmitRMATab.jsx
+│   │   └── TicketsVaultTab.jsx
+│   ├── components
+│   │   ├── AdminLoginModal.jsx
+│   │   ├── AdminPinModal.jsx
+│   │   ├── ApiKeysManagementSection.jsx
+│   │   ├── CreditMemoModal.jsx
+│   │   ├── CreditMemosTab.jsx
+│   │   ├── CreditMemoVoucherModal.jsx
+│   │   ├── DeleteConfirmationModal.jsx
+│   │   ├── EmployeeManagementModal.jsx
+│   │   ├── FinanceCreditMemoTab.jsx
+│   │   ├── GatekeeperPinModal.jsx
+│   │   ├── HowItWorksModal.jsx
+│   │   ├── ImageLightboxModal.jsx
+│   │   ├── NotificationBell.jsx
+│   │   ├── PendingBarcodesModal.jsx
+│   │   ├── PinRequestsQueueModal.jsx
+│   │   ├── PortalAccessKeysModal.jsx
+│   │   ├── PortalAccessQRModal.jsx
+│   │   ├── PrintBarcodesTab.jsx
+│   │   ├── ProductAutoSuggest.jsx
+│   │   ├── ProductEditModal.jsx
+│   │   ├── ProductSearchTab.jsx
+│   │   ├── PurchasingBufferTab.jsx
+│   │   ├── QuickRMAActionModal.jsx
+│   │   ├── ReturnQRModal.jsx
+│   │   ├── RMAReportsModal.jsx
+│   │   ├── RMATimelineAudit.jsx
+│   │   ├── SavedProductsTab.jsx
+│   │   ├── ScannerModal.jsx
+│   │   ├── SettingsTab.jsx
+│   │   ├── SubmitRMATab.jsx
+│   │   ├── SupplierClaimsTab.jsx
+│   │   ├── SupplierInput.jsx
+│   │   ├── TablePagination.jsx
+│   │   ├── ThermalBoxLabelModal.jsx
+│   │   └── TicketsVaultTab.jsx
+│   ├── data
+│   │   └── mockData.js
+│   ├── services
+│   │   ├── accessKeyService.js
+│   │   ├── authService.js
+│   │   ├── catalogService.js
+│   │   ├── creditMemoService.js
+│   │   ├── notificationService.js
+│   │   ├── pinRequestService.js
+│   │   ├── purchaseOrdersApi.js
+│   │   └── supplierClaimService.js
+│   ├── utils
+│   │   ├── deviceFingerprint.js
+│   │   ├── exportCsv.js
+│   │   ├── printIsolatedElement.js
+│   │   ├── qrDownload.js
+│   │   └── rmaHelpers.js
+│   ├── App.jsx
+│   ├── index.css
+│   ├── main.jsx
+│   └── supabaseClient.js
 ├── .env
 ├── .env.example
 ├── .gitignore
@@ -143,8 +144,10 @@ rma-portal-v2/
 ├── package-lock.json
 ├── package.json
 ├── postcss.config.js
+├── PROJECT_CONTEXT.txt
 ├── README.md
 ├── seed_api_keys.sql
+├── separate_customer_and_supplier_rma_types.sql
 ├── supabase_schema.sql
 ├── tailwind.config.js
 ├── update_schema_v3.sql
@@ -243,7 +246,6 @@ export default function handler(req, res) {
 
   return res.status(200).send(html);
 }
-
 --- END FILE: api/docs.js ---
 
 --- START FILE: api/send-email.js ---
@@ -448,7 +450,6 @@ export default async function handler(req, res) {
     });
   }
 }
-
 --- END FILE: api/send-email.js ---
 
 --- START FILE: api/upload-photo.js ---
@@ -602,9 +603,13 @@ async function getGoogleAccessToken(creds, signal) {
  * Passing supportsAllDrives=true and includeItemsFromAllDrives=true for Shared Drives.
  */
 async function findOrCreateFolder(folderName, parentFolderId, accessToken, signal) {
-  if (!parentFolderId) return null;
+  const safeName = (folderName || 'General').trim();
+  const escapedName = safeName.replace(/'/g, "\\'");
 
-  let query = `mimeType = 'application/vnd.google-apps.folder' and name = '${folderName}' and '${parentFolderId}' in parents and trashed = false`;
+  let query = `mimeType = 'application/vnd.google-apps.folder' and name = '${escapedName}' and trashed = false`;
+  if (parentFolderId) {
+    query += ` and '${parentFolderId}' in parents`;
+  }
 
   const searchRes = await fetch(
     `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
@@ -623,9 +628,9 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
 
   // Create subfolder inside parent
   const meta = {
-    name: folderName,
+    name: safeName,
     mimeType: 'application/vnd.google-apps.folder',
-    parents: [parentFolderId],
+    ...(parentFolderId ? { parents: [parentFolderId] } : {}),
   };
 
   const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true', {
@@ -640,7 +645,7 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
 
   if (!createRes.ok) {
     const errText = await createRes.text();
-    console.warn(`[Google Drive] Subfolder creation notice: ${errText}`);
+    console.warn(`[Google Drive] Folder creation notice for "${safeName}": ${errText}`);
     return parentFolderId;
   }
 
@@ -666,23 +671,34 @@ async function findOrCreateFolderCached(folderName, parentFolderId, accessToken,
 
 /**
  * Resolves structured folder hierarchy:
- * Wholesale RMA Records
- *   └── [YYYY-MM]
- *       └── [RMA_NUMBER]
- *           ├── 01_Damaged_Items/
- *           └── 02_Official_Paperwork/
+ * Wholesale RMA Reports
+ *   └── Customer Folder (e.g. Savemore Taguig) OR Supplier Folder (e.g. Liwayway Marketing)
+ *       └── [YYYY-MM]
+ *           └── [RMA_NUMBER]
+ *               ├── Proof of Damage/
+ *               └── Invoice/
  */
-async function resolveRmaHierarchy({ rootFolderId, rmaNumber, category, accessToken, signal }) {
+async function resolveRmaHierarchy({
+  rootFolderId,
+  rmaNumber,
+  category,
+  rmaType = 'customer_inbound',
+  customerName = null,
+  storeBranch = null,
+  supplierName = null,
+  accessToken,
+  signal
+}) {
   const now = new Date();
   const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
   let currentParentId = rootFolderId;
 
-  // 1. Root folder: "Wholesale RMA Records"
+  // 1. Root folder: "Wholesale RMA Reports" (or legacy "Wholesale RMA Records")
   if (!currentParentId) {
     try {
       const searchRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and name = 'Wholesale RMA Records' and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Wholesale RMA Reports' or name = 'Wholesale RMA Records') and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
         { headers: { Authorization: `Bearer ${accessToken}` }, signal }
       );
       if (searchRes.ok) {
@@ -704,32 +720,48 @@ async function resolveRmaHierarchy({ rootFolderId, rmaNumber, category, accessTo
       );
       if (infoRes.ok) {
         const info = await infoRes.json();
-        if (info.name !== 'Wholesale RMA Records') {
-          const subRoot = await findOrCreateFolderCached('Wholesale RMA Records', currentParentId, accessToken, signal);
+        if (info.name !== 'Wholesale RMA Reports' && info.name !== 'Wholesale RMA Records') {
+          const subRoot = await findOrCreateFolderCached('Wholesale RMA Reports', currentParentId, accessToken, signal);
           if (subRoot) currentParentId = subRoot;
         }
       }
     } catch (e) {
       console.warn('[Google Drive] Root verification notice:', e.message);
     }
+  } else {
+    const newRoot = await findOrCreateFolder('Wholesale RMA Reports', null, accessToken, signal);
+    if (newRoot) currentParentId = newRoot;
   }
 
-  // 2. Monthly: [YYYY-MM]
+  // 2. Level 2: Customer Folder or Supplier Folder
+  // If supplier_outbound -> Supplier Name (e.g., 'Liwayway Marketing')
+  // If customer_inbound -> Customer Store / Branch (e.g., 'Savemore Market - Taguig')
+  let rawEntity = (rmaType === 'supplier_outbound')
+    ? (supplierName && supplierName !== 'Warehouse' ? supplierName : (storeBranch || supplierName || 'General Suppliers'))
+    : (storeBranch || customerName || 'General Customers');
+
+  const cleanEntity = String(rawEntity).replace(/[\\/:*?"<>|]/g, '-').trim() || 'General';
+  const entityFolderId = await findOrCreateFolderCached(cleanEntity, currentParentId, accessToken, signal);
+  if (entityFolderId) {
+    currentParentId = entityFolderId;
+  }
+
+  // 3. Level 3: Year-Month [YYYY-MM] (e.g. 2026-11)
   const monthFolderId = await findOrCreateFolderCached(yearMonth, currentParentId, accessToken, signal);
   if (monthFolderId) {
     currentParentId = monthFolderId;
   }
 
-  // 3. RMA Number: [RMA_NUMBER]
+  // 4. Level 4: RMA Reference [RMA_NUMBER]
   const cleanRma = (rmaNumber && rmaNumber !== 'GENERAL') ? String(rmaNumber).trim() : 'General_Intake';
   const rmaFolderId = await findOrCreateFolderCached(cleanRma, currentParentId, accessToken, signal);
   if (rmaFolderId) {
     currentParentId = rmaFolderId;
   }
 
-  // 4. Subfolder: 01_Damaged_Items or 02_Official_Paperwork
-  const isPaperwork = category === 'official_paperwork' || category === 'paperwork';
-  const subFolderName = isPaperwork ? '02_Official_Paperwork' : '01_Damaged_Items';
+  // 5. Level 5: Invoice Folder or Proof of Damage/Return Folder
+  const isPaperwork = category === 'official_paperwork' || category === 'paperwork' || category === 'invoice';
+  const subFolderName = isPaperwork ? 'Invoice' : 'Proof of Damage';
   const targetSubfolderId = await findOrCreateFolderCached(subFolderName, currentParentId, accessToken, signal);
 
   const rmaFolderUrl = rmaFolderId
@@ -949,7 +981,11 @@ export default async function handler(req, res) {
     fileName,
     mimeType = 'image/webp',
     rmaNumber = 'GENERAL',
-    category = 'damaged_items'
+    category = 'damaged_items',
+    rmaType = 'customer_inbound',
+    customerName = null,
+    storeBranch = null,
+    supplierName = null
   } = req.body || {};
 
   if (!fileData) {
@@ -972,7 +1008,7 @@ export default async function handler(req, res) {
     const accessToken = await getGoogleAccessToken(creds, controller.signal);
 
     // 4. Resolve target folder in Google Drive with clean hierarchical structure:
-    // Wholesale RMA Records / [YYYY-MM] / [RMA_NUMBER] / [01_Damaged_Items | 02_Official_Paperwork]
+    // Wholesale RMA Reports / [Customer or Supplier] / [YYYY-MM] / [RMA_NUMBER] / [Proof of Damage | Invoice]
     const {
       targetFolderId,
       rmaFolderId,
@@ -981,6 +1017,10 @@ export default async function handler(req, res) {
       rootFolderId: creds.folderId,
       rmaNumber,
       category,
+      rmaType,
+      customerName,
+      storeBranch,
+      supplierName,
       accessToken,
       signal: controller.signal
     });
@@ -1086,7 +1126,6 @@ export default async function handler(req, res) {
     });
   }
 }
-
 --- END FILE: api/upload-photo.js ---
 
 --- START FILE: api/v1/api-keys/index.js ---
@@ -1314,7 +1353,6 @@ export default async function handler(req, res) {
     message: `Method ${req.method} not allowed.`
   });
 }
-
 --- END FILE: api/v1/api-keys/index.js ---
 
 --- START FILE: api/v1/api-keys/[id].js ---
@@ -1447,7 +1485,6 @@ export default async function handler(req, res) {
     message: `Method ${req.method} not allowed.`
   });
 }
-
 --- END FILE: api/v1/api-keys/[id].js ---
 
 --- START FILE: api/v1/credit-memos/index.js ---
@@ -1543,10 +1580,26 @@ export default async function handler(req, res) {
         });
       }
 
-      // Auto-generate CM Number: CM-YYYYMMDD-XXXX
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const rand = Math.floor(1000 + Math.random() * 9000);
-      const cmNumber = `CM-${dateStr}-${rand}`;
+      // Standardized CM Number: CM-[YEAR]-[4-DIGIT-ASCENDING]-[4-CHAR-ALPHANUMERIC]
+      // Example: CM-2026-0001-6TYH
+      const currentYear = new Date().getFullYear();
+      let nextSeq = 1;
+      try {
+        const { count } = await supabase.from('credit_memos').select('*', { count: 'exact', head: true });
+        if (typeof count === 'number' && count >= 0) {
+          nextSeq = count + 1;
+        }
+      } catch (countErr) {
+        console.warn('Count query notice for CM sequence:', countErr.message);
+      }
+
+      const seqStr = String(nextSeq).padStart(4, '0');
+      const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+      let rand = '';
+      for (let i = 0; i < 4; i++) {
+        rand += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      const cmNumber = `CM-${currentYear}-${seqStr}-${rand}`;
 
       const numQty = parseFloat(quantity) || 1;
       const numUnitPrice = parseFloat(unit_price) || 0;
@@ -1598,7 +1651,6 @@ export default async function handler(req, res) {
 
   return sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: `Method ${req.method} not allowed.` });
 }
-
 --- END FILE: api/v1/credit-memos/index.js ---
 
 --- START FILE: api/v1/credit-memos/[id].js ---
@@ -1673,7 +1725,6 @@ export default async function handler(req, res) {
 
   return sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: `Method ${req.method} not allowed.` });
 }
-
 --- END FILE: api/v1/credit-memos/[id].js ---
 
 --- START FILE: api/v1/health.js ---
@@ -1740,7 +1791,6 @@ export default async function handler(req, res) {
     documentation: '/docs'
   });
 }
-
 --- END FILE: api/v1/health.js ---
 
 --- START FILE: api/v1/products/index.js ---
@@ -1866,7 +1916,6 @@ export default async function handler(req, res) {
 
   return sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: `Method ${req.method} not allowed.` });
 }
-
 --- END FILE: api/v1/products/index.js ---
 
 --- START FILE: api/v1/products/[id].js ---
@@ -1986,7 +2035,6 @@ export default async function handler(req, res) {
 
   return sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: `Method ${req.method} not allowed.` });
 }
-
 --- END FILE: api/v1/products/[id].js ---
 
 --- START FILE: api/v1/rma/index.js ---
@@ -2007,7 +2055,7 @@ export default async function handler(req, res) {
   // 2. GET: List RMA Reports with query filters
   if (req.method === 'GET') {
     try {
-      const { status, barcode, search, limit = '50', offset = '0' } = req.query;
+      const { rma_type, status, barcode, search, limit = '50', offset = '0' } = req.query;
 
       const numLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
       const numOffset = Math.max(parseInt(offset, 10) || 0, 0);
@@ -2016,6 +2064,9 @@ export default async function handler(req, res) {
         .from('rma_reports')
         .select('*', { count: 'exact' });
 
+      if (rma_type) {
+        query = query.eq('rma_type', rma_type);
+      }
       if (status) {
         query = query.eq('status', status);
       }
@@ -2072,6 +2123,7 @@ export default async function handler(req, res) {
       const {
         barcode,
         name,
+        rma_type = 'customer_inbound',
         code,
         quantity = 1,
         supplier_name,
@@ -2108,13 +2160,30 @@ export default async function handler(req, res) {
         });
       }
 
-      // Generate unique RMA Number: RMA-YYYYMMDD-XXXX
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-      const rmaNumber = `RMA-${dateStr}-${randomSuffix}`;
+      // Standardized Unique RMA Number: RMA-[YEAR]-[4-DIGIT-ASCENDING]-[4-CHAR-ALPHANUMERIC]
+      // Example: RMA-2026-0001-6TYH
+      const currentYear = new Date().getFullYear();
+      let nextSeq = 1;
+      try {
+        const { count } = await supabase.from('rma_reports').select('*', { count: 'exact', head: true });
+        if (typeof count === 'number' && count >= 0) {
+          nextSeq = count + 1;
+        }
+      } catch (countErr) {
+        console.warn('Count query notice for RMA sequence:', countErr.message);
+      }
+
+      const seqStr = String(nextSeq).padStart(4, '0');
+      const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+      let randomSuffix = '';
+      for (let i = 0; i < 4; i++) {
+        randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      const rmaNumber = `RMA-${currentYear}-${seqStr}-${randomSuffix}`;
 
       const reportPayload = {
         rma_number: rmaNumber,
+        rma_type: rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound',
         barcode: String(barcode).trim(),
         code: code ? String(code).trim() : null,
         name: String(name).trim(),
@@ -2185,7 +2254,6 @@ export default async function handler(req, res) {
     message: `Method ${req.method} not allowed.`
   });
 }
-
 --- END FILE: api/v1/rma/index.js ---
 
 --- START FILE: api/v1/rma/[id].js ---
@@ -2247,7 +2315,7 @@ export default async function handler(req, res) {
       }
 
       const allowedFields = [
-        'status', 'notes', 'explanation', 'price', 'price_with_vat',
+        'rma_type', 'status', 'notes', 'explanation', 'price', 'price_with_vat',
         'code', 'name', 'supplier_name', 'unit_name', 'quantity', 'ae_name', 'ae_email',
         'condition_grade', 'disposition', 'warehouse_location', 'inspected_by', 'inspected_at',
         'store_branch', 'invoice_dr_number', 'si_number', 'dr_number', 'po_number', 'expiry_date', 'batch_lot_number'
@@ -2317,7 +2385,6 @@ export default async function handler(req, res) {
 
   return sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: `Method ${req.method} not allowed.` });
 }
-
 --- END FILE: api/v1/rma/[id].js ---
 
 --- START FILE: api/_lib/auth.js ---
@@ -2477,7 +2544,6 @@ export async function requireApiKey(req, res) {
     return null;
   }
 }
-
 --- END FILE: api/_lib/auth.js ---
 
 --- START FILE: api/_lib/geminiInspector.js ---
@@ -2678,7 +2744,6 @@ Return ONLY valid JSON matching this schema:
   throw new Error(`Gemini inspection failed: ${lastError?.message || 'Unknown error'}`);
 }
 
-
 --- END FILE: api/_lib/geminiInspector.js ---
 
 --- START FILE: api/_lib/keyUtils.js ---
@@ -2729,7 +2794,6 @@ export function generateApiKeyPair() {
     maskedKey
   };
 }
-
 --- END FILE: api/_lib/keyUtils.js ---
 
 --- START FILE: api/_lib/lookupHandler.js ---
@@ -3146,7 +3210,6 @@ export default async function handler(req, res) {
     message: 'Provide either ?barcode=[code] or ?search=[term].'
   });
 }
-
 --- END FILE: api/_lib/lookupHandler.js ---
 
 --- START FILE: api/_lib/mockProducts.js ---
@@ -3273,7 +3336,6 @@ export const INITIAL_PRODUCTS = [
     requires_serial: false
   }
 ];
-
 --- END FILE: api/_lib/mockProducts.js ---
 
 --- START FILE: api/_lib/openapiRegistry.js ---
@@ -3356,7 +3418,6 @@ Click **Authorize** on the top right to test live endpoints directly from this i
     ]
   });
 }
-
 --- END FILE: api/_lib/openapiRegistry.js ---
 
 --- START FILE: api/_lib/schemas/apiKeys.schema.js ---
@@ -3500,7 +3561,6 @@ export function registerApiKeyRoutes(registry) {
     }
   });
 }
-
 --- END FILE: api/_lib/schemas/apiKeys.schema.js ---
 
 --- START FILE: api/_lib/schemas/common.js ---
@@ -3535,7 +3595,6 @@ export const PaginationQuerySchema = z.object({
     example: 0
   })
 });
-
 --- END FILE: api/_lib/schemas/common.js ---
 
 --- START FILE: api/_lib/schemas/creditMemos.schema.js ---
@@ -3543,8 +3602,8 @@ import { z, StandardErrorSchema, PaginationQuerySchema } from './common.js';
 
 export const CreditMemoSchema = z.object({
   id: z.number().int().openapi({ example: 78 }),
-  credit_memo_number: z.string().openapi({ example: 'CM-20261026-4412' }),
-  rma_number: z.string().openapi({ example: 'RMA-20261026-8941' }),
+  credit_memo_number: z.string().openapi({ example: 'CM-2026-0001-6TYH' }),
+  rma_number: z.string().openapi({ example: 'RMA-2026-0001-6TYH' }),
   barcode: z.string().openapi({ example: '4800016644833' }),
   product_name: z.string().openapi({ example: 'Oishi Prawn Crackers 50g' }),
   sku: z.string().nullable().optional().openapi({ example: 'P2678P' }),
@@ -3566,10 +3625,10 @@ export const CreditMemoSchema = z.object({
 }).openapi('CreditMemo');
 
 export const CreateCreditMemoSchema = z.object({
-  rma_number: z.string().min(1).openapi({ example: 'RMA-20261026-8941' }),
+  rma_number: z.string().min(1).openapi({ example: 'RMA-2026-0001-6TYH' }),
   barcode: z.string().min(1).openapi({ example: '4800016644833' }),
   product_name: z.string().min(1).openapi({ example: 'Oishi Prawn Crackers 50g' }),
-  pull_out_ref: z.string().min(1).openapi({ example: 'PO-2026-10-88' }),
+  pull_out_ref: z.string().min(1).openapi({ example: 'POR-2026-0001-6TYH' }),
   credit_amount: z.number().min(0.01).openapi({ example: 137.20 }),
   quantity: z.number().min(1).default(1).openapi({ example: 5 }),
   unit_price: z.number().optional().default(0).openapi({ example: 27.44 }),
@@ -3674,7 +3733,6 @@ export function registerCreditMemoRoutes(registry) {
     }
   });
 }
-
 --- END FILE: api/_lib/schemas/creditMemos.schema.js ---
 
 --- START FILE: api/_lib/schemas/health.schema.js ---
@@ -3714,7 +3772,6 @@ export function registerHealthRoutes(registry) {
     }
   });
 }
-
 --- END FILE: api/_lib/schemas/health.schema.js ---
 
 --- START FILE: api/_lib/schemas/products.schema.js ---
@@ -3883,7 +3940,6 @@ export function registerProductRoutes(registry) {
     }
   });
 }
-
 --- END FILE: api/_lib/schemas/products.schema.js ---
 
 --- START FILE: api/_lib/schemas/rma.schema.js ---
@@ -3918,9 +3974,15 @@ export const RMADispositionEnum = z.enum([
   'Scrap / Dispose'
 ]);
 
+export const RMATypeEnum = z.enum([
+  'customer_inbound',
+  'supplier_outbound'
+]);
+
 export const RMAReportSchema = z.object({
   id: z.number().int().openapi({ example: 1042 }),
-  rma_number: z.string().openapi({ example: 'RMA-20261026-8941' }),
+  rma_number: z.string().openapi({ example: 'RMA-2026-0001-6TYH' }),
+  rma_type: RMATypeEnum.default('customer_inbound').openapi({ example: 'customer_inbound', description: 'Logistics type: customer_inbound (store return) or supplier_outbound (vendor RTV)' }),
   barcode: z.string().openapi({ example: '4800016644833' }),
   code: z.string().nullable().optional().openapi({ example: 'OISHI-PRAWN-50G' }),
   name: z.string().openapi({ example: 'Oishi Prawn Crackers 50g' }),
@@ -3955,6 +4017,7 @@ export const RMAReportSchema = z.object({
 export const CreateRMAReportSchema = z.object({
   barcode: z.string().min(1, 'Barcode is required').openapi({ example: '4800016644833' }),
   name: z.string().min(1, 'Product name is required').openapi({ example: 'Oishi Prawn Crackers 50g' }),
+  rma_type: RMATypeEnum.optional().default('customer_inbound').openapi({ example: 'customer_inbound', description: 'Logistics type: customer_inbound (default) or supplier_outbound' }),
   code: z.string().optional().openapi({ example: 'P2678P' }),
   quantity: z.number().int().min(1).default(1).openapi({ example: 2 }),
   supplier_name: z.string().optional().default('Savemore').openapi({ example: 'Liwayway Marketing' }),
@@ -3982,6 +4045,7 @@ export const CreateRMAReportSchema = z.object({
 }).openapi('CreateRMAReportRequest');
 
 export const UpdateRMAReportSchema = z.object({
+  rma_type: RMATypeEnum.optional().openapi({ example: 'supplier_outbound', description: 'Reclassify logistics type between customer_inbound and supplier_outbound' }),
   status: RMAStatusEnum.optional().openapi({ example: 'under_inspection' }),
   condition_grade: RMAConditionGradeEnum.optional().openapi({ example: 'A - Like New / Resellable' }),
   disposition: RMADispositionEnum.optional().openapi({ example: 'Restock to Inventory' }),
@@ -4011,6 +4075,7 @@ export function registerRMARoutes(registry) {
     tags: ['RMA Reports'],
     request: {
       query: PaginationQuerySchema.extend({
+        rma_type: z.enum(['customer_inbound', 'supplier_outbound']).optional().openapi({ description: 'Filter by logistics type: customer_inbound or supplier_outbound', example: 'customer_inbound' }),
         status: z.string().optional().openapi({ description: 'Filter by status (pending, resolved, etc.)', example: 'pending' }),
         barcode: z.string().optional().openapi({ description: 'Filter by exact product barcode', example: '4800016644833' }),
         search: z.string().optional().openapi({ description: 'Search term across RMA #, name, SKU, or reporter', example: 'Oishi' })
@@ -4060,7 +4125,7 @@ export function registerRMARoutes(registry) {
           'application/json': {
             schema: z.object({
               success: z.boolean().openapi({ example: true }),
-              message: z.string().openapi({ example: 'RMA report RMA-20261026-8941 created successfully.' }),
+              message: z.string().openapi({ example: 'RMA report RMA-2026-0001-6TYH created successfully.' }),
               client: z.string().openapi({ example: 'Jarmen' }),
               data: RMAReportSchema
             })
@@ -4077,11 +4142,11 @@ export function registerRMARoutes(registry) {
     method: 'get',
     path: '/api/v1/rma/{id}',
     summary: 'Get Single RMA Report',
-    description: 'Retrieve a return report by its numeric database ID or its public RMA Number (e.g. RMA-20261026-8941).',
+    description: 'Retrieve a return report by its numeric database ID or its public RMA Number (e.g. RMA-2026-0001-6TYH).',
     tags: ['RMA Reports'],
     request: {
       params: z.object({
-        id: z.string().openapi({ description: 'Numeric ID or RMA Number', example: 'RMA-20261026-8941' })
+        id: z.string().openapi({ description: 'Numeric ID or RMA Number', example: 'RMA-2026-0001-6TYH' })
       })
     },
     responses: {
@@ -4109,7 +4174,7 @@ export function registerRMARoutes(registry) {
     tags: ['RMA Reports'],
     request: {
       params: z.object({
-        id: z.string().openapi({ description: 'Numeric ID or RMA Number', example: 'RMA-20261026-8941' })
+        id: z.string().openapi({ description: 'Numeric ID or RMA Number', example: 'RMA-2026-0001-6TYH' })
       }),
       body: {
         required: true,
@@ -4146,7 +4211,7 @@ export function registerRMARoutes(registry) {
     tags: ['RMA Reports'],
     request: {
       params: z.object({
-        id: z.string().openapi({ example: 'RMA-20261026-8941' })
+        id: z.string().openapi({ example: 'RMA-2026-0001-6TYH' })
       })
     },
     responses: {
@@ -4209,7 +4274,6 @@ export function registerRMARoutes(registry) {
     }
   });
 }
-
 --- END FILE: api/_lib/schemas/rma.schema.js ---
 
 --- START FILE: api/_lib/supabase.js ---
@@ -4248,7 +4312,6 @@ function getSupabaseClient() {
 }
 
 export const supabase = getSupabaseClient();
-
 
 --- END FILE: api/_lib/supabase.js ---
 
@@ -4616,7 +4679,6 @@ export async function handleClearCooldown(req, res) {
   }
 }
 
-
 --- END FILE: api/_lib/verifyPinHandler.js ---
 
 --- START FILE: src/App.jsx ---
@@ -4693,7 +4755,7 @@ import SettingsTab from './components/SettingsTab';
 import CreditMemosTab from './components/CreditMemosTab';
 import SupplierClaimsTab from './components/SupplierClaimsTab';
 import ThermalBoxLabelModal from './components/ThermalBoxLabelModal';
-import { exportRMAReportsToCSV } from './utils/exportCsv';
+import { exportRMAReportsToCSV, exportCustomerInboundRMAsToCSV, exportSupplierOutboundClaimsToCSV } from './utils/exportCsv';
 import CreditMemoModal from './components/CreditMemoModal';
 import CreditMemoVoucherModal from './components/CreditMemoVoucherModal';
 import ProductEditModal from './components/ProductEditModal';
@@ -4747,6 +4809,35 @@ function formatLifecycleStage(status) {
     default:
       return { label: s.replace(/_/g, ' '), color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300' };
   }
+}
+
+/**
+ * Resolves SI, DR, and PO numbers cleanly.
+ * Strictly avoids mistaking an SI number for a DR number.
+ */
+export function getDocumentNumbers(item) {
+  if (!item) return { si: 'N/A', dr: 'N/A', po: 'N/A' };
+
+  let si = item.si_number ? String(item.si_number).trim() : null;
+  let dr = item.dr_number ? String(item.dr_number).trim() : null;
+  let po = item.po_number ? String(item.po_number).trim() : null;
+
+  const legacy = item.invoice_dr_number ? String(item.invoice_dr_number).trim() : null;
+  if (legacy) {
+    if (!si && /^SI/i.test(legacy)) {
+      si = legacy;
+    } else if (!po && /^PO/i.test(legacy)) {
+      po = legacy;
+    } else if (!dr && !si && !po) {
+      dr = legacy;
+    }
+  }
+
+  return {
+    si: si || 'N/A',
+    dr: dr || 'N/A',
+    po: po || 'N/A'
+  };
 }
 
 
@@ -5217,7 +5308,7 @@ export default function App() {
     }
     if (notif.type === 'rma') {
       if (isAdminView) {
-        setAdminActiveTab('reports');
+        setAdminActiveTab('customer_reports');
       } else {
         setIsReportsModalOpen(true);
       }
@@ -5693,10 +5784,24 @@ export default function App() {
     setSelectedReportIds(new Set());
   };
 
-  // Filter and sort return reports
+  // Operational Segregation: Inbound Customer Returns vs Outbound Supplier Claims
+  const customerInboundReports = React.useMemo(() => {
+    return recentReportsList.filter(r => r.rma_type === 'customer_inbound' || !r.rma_type);
+  }, [recentReportsList]);
+
+  const supplierOutboundReports = React.useMemo(() => {
+    return recentReportsList.filter(r => r.rma_type === 'supplier_outbound' || (r.disposition && (r.disposition.toLowerCase().includes('rtv') || r.disposition.toLowerCase().includes('vendor'))));
+  }, [recentReportsList]);
+
+  // Filter and sort return reports - strictly isolated to Customer Inbound Returns
   const processedReports = React.useMemo(() => {
     const q = reportsSearchQuery.toLowerCase().trim();
     let list = recentReportsList.filter(item => {
+      // Isolate to Customer Inbound Returns (treat missing rma_type as customer_inbound for backward compatibility)
+      if (item.rma_type && item.rma_type !== 'customer_inbound') {
+        return false;
+      }
+
       if (q) {
         const matches = (
           String(item.id || '').includes(q) ||
@@ -5706,7 +5811,13 @@ export default function App() {
           (item.reporter_name || item.reported_by || '').toLowerCase().includes(q) ||
           (item.reporter_contact || '').toLowerCase().includes(q) ||
           (item.reason || '').toLowerCase().includes(q) ||
-          (item.warehouse_location || '').toLowerCase().includes(q)
+          (item.warehouse_location || '').toLowerCase().includes(q) ||
+          (item.store_branch || '').toLowerCase().includes(q) ||
+          (item.invoice_dr_number || '').toLowerCase().includes(q) ||
+          (item.si_number || '').toLowerCase().includes(q) ||
+          (item.dr_number || '').toLowerCase().includes(q) ||
+          (item.po_number || '').toLowerCase().includes(q) ||
+          (item.batch_lot_number || '').toLowerCase().includes(q)
         );
         if (!matches) return false;
       }
@@ -5785,6 +5896,14 @@ export default function App() {
         case 'reporter':
           valA = String(a.reporter_name || a.reported_by || '').toLowerCase();
           valB = String(b.reporter_name || b.reported_by || '').toLowerCase();
+          break;
+        case 'store_branch':
+          valA = String(a.store_branch || '').toLowerCase();
+          valB = String(b.store_branch || '').toLowerCase();
+          break;
+        case 'invoice_dr_number':
+          valA = String(a.invoice_dr_number || a.dr_number || a.si_number || a.po_number || '').toLowerCase();
+          valB = String(b.invoice_dr_number || b.dr_number || b.si_number || b.po_number || '').toLowerCase();
           break;
         case 'catalog_status':
           valA = a.status === 'pending_admin_details' ? 0 : 1;
@@ -5974,8 +6093,16 @@ export default function App() {
             localStorage.setItem('rma_portal_admin_session', JSON.stringify(user));
             sessionStorage.removeItem('rma_login_pending_email');
             setCurrentUser(user);
-            setIsAdminView(true);
             setIsLoginModalOpen(false);
+
+            // ONLY switch to admin view if the user is explicitly on an admin route!
+            // If the user opened or navigated to the public reporter or intake page, NEVER switch them to admin automatically.
+            const currentPath = (typeof window !== 'undefined' ? window.location.pathname.toLowerCase() : '');
+            const currentHash = (typeof window !== 'undefined' ? window.location.hash.toLowerCase() : '');
+            const isOnAdminRoute = currentPath === '/admin' || currentPath.startsWith('/admin/') || currentHash === '#/admin' || (typeof window !== 'undefined' && window.location.search.includes('admin=true'));
+            if (isOnAdminRoute) {
+              setIsAdminView(true);
+            }
           }
         } catch (e) { }
       }
@@ -6127,19 +6254,11 @@ export default function App() {
       showToast(`Added ${availableSlots} photo(s). Maximum 3 photos allowed.`, 'info');
     }
 
-    const currentBarcode = barcodeInput.trim() || 'DOCK';
-    const newPhotos = filesToProcess.map(file => {
-      // Start background upload immediately so it's completed by the time user clicks submit!
-      const uploadPromise = catalogService.uploadPhoto(file, currentBarcode).catch(err => {
-        console.warn('Background photo upload warning:', err);
-        return null;
-      });
-      return {
-        file,
-        previewUrl: URL.createObjectURL(file),
-        uploadPromise
-      };
-    });
+    // Keep photos local in browser until final report submission (prevents orphan Google Drive uploads)
+    const newPhotos = filesToProcess.map(file => ({
+      file,
+      previewUrl: URL.createObjectURL(file)
+    }));
 
     setPhotoFiles(prev => [...prev, ...newPhotos]);
     if (e.target) e.target.value = ''; // Reset input value so subsequent snaps fire onChange reliably
@@ -6331,16 +6450,20 @@ export default function App() {
       localStorage.setItem('rma_reporter_contact', reporterContact.trim());
     } catch {}
 
-    // 1. Generate unique RMA Number synchronously for instant sticker/QR display
-    const rmaNumber = catalogService.generateRMANumber();
+    // 1. Determine RMA Type based on station Gatekeeper profile (internal warehouse vs external customer)
+    const determinedRmaType = (gateSession?.type === 'internal_warehouse') ? 'supplier_outbound' : 'customer_inbound';
+
+    // 2. Generate unique RMA Number synchronously for instant sticker/QR display
+    const rmaNumber = catalogService.generateRMANumber(recentReportsList);
     const submitQty = Math.max(1, parseInt(quantity, 10) || 1);
     const finalUnit = unitName || detectedProduct?.unit_name || 'pc';
-    const primaryDocNumber = cleanSi || cleanDr || cleanPo || invoiceDrNumber.trim() || null;
+    const primaryDocNumber = cleanDr || cleanSi || cleanPo || invoiceDrNumber.trim() || null;
 
-    // 2. Show success screen with full report details for QR sticker generation INSTANTLY!
+    // 3. Show success screen with full report details for QR sticker generation INSTANTLY!
     setSubmitSuccessReport({
       rma_number: rmaNumber,
       rmaNumber: rmaNumber,
+      rma_type: determinedRmaType,
       barcode: cleanBarcode,
       name: detectedProduct?.name || `Barcode ${cleanBarcode}`,
       productName: detectedProduct?.name || `Barcode ${cleanBarcode}`,
@@ -6409,15 +6532,22 @@ export default function App() {
     // 4. Background execution: hierarchical Google Drive upload, Supabase insertion, email
     (async () => {
       try {
-        // Upload damaged item photos to 01_Damaged_Items
+        const photoMeta = {
+          rmaType: determinedRmaType,
+          customerName: capturedStoreBranch,
+          storeBranch: capturedStoreBranch,
+          supplierName: capturedProduct?.supplier_name
+        };
+
+        // Upload damaged item photos to Proof of Damage
         const damagedUploadPromises = capturedPhotos.map(item => {
-          if (item.file) return catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'damaged_items');
+          if (item.file) return catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'damaged_items', photoMeta);
           return null;
         }).filter(Boolean);
 
-        // Upload official paperwork photos to 02_Official_Paperwork
+        // Upload official paperwork photos to Invoice
         const paperworkUploadPromises = capturedPaperworkPhotos.map(item => {
-          if (item.file) return catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'official_paperwork');
+          if (item.file) return catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'official_paperwork', photoMeta);
           return null;
         }).filter(Boolean);
 
@@ -6434,6 +6564,7 @@ export default function App() {
         const res = await catalogService.submitReport({
           rmaNumber,
           barcode: cleanBarcode,
+          rma_type: determinedRmaType,
           product: capturedProduct,
           quantity: submitQty,
           reporterName: capturedReporterName,
@@ -7629,8 +7760,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* SaaS KPI Overview Strip: Fluid grid tracks for all viewports */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3.5">
+            {/* SaaS KPI Overview Strip: Enterprise Logistics 6-column Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3.5">
               {/* Metric 1: Saved Products */}
               <div
                 onClick={() => setAdminActiveTab('products')}
@@ -7639,7 +7770,7 @@ export default function App() {
               >
                 <div className="flex items-center justify-between text-indigo-600 dark:text-indigo-400 mb-1.5 sm:mb-2">
                   <Package className="w-5 h-5 shrink-0" />
-                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">Database</span>
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">Catalog</span>
                 </div>
                 <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
                   {savedProductsList.length}
@@ -7648,24 +7779,43 @@ export default function App() {
                 <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Catalog items</div>
               </div>
 
-              {/* Metric 2: Return Reports */}
+              {/* Metric 2: Customer Returns (Inbound Logistics) */}
               <div
-                onClick={() => setAdminActiveTab('reports')}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${adminActiveTab === 'reports' ? 'border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900/40' : 'border-slate-200 dark:border-slate-800'
+                onClick={() => setAdminActiveTab('customer_reports')}
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports') ? 'border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900/40' : 'border-slate-200 dark:border-slate-800'
                   }`}
               >
                 <div className="flex items-center justify-between text-blue-600 dark:text-blue-400 mb-1.5 sm:mb-2">
                   <FileText className="w-5 h-5 shrink-0" />
-                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">Reports</span>
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">Inbound</span>
                 </div>
                 <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
-                  {recentReportsList.length}
+                  {customerInboundReports.length}
                 </div>
-                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">RMA Returns</div>
-                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Total filed returns</div>
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Customer Inbound</div>
+                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">
+                  {customerInboundReports.filter(r => !creditMemosList.some(m => m.rma_number === r.rma_number || m.report_id === r.id)).length} pending credit
+                </div>
               </div>
 
-              {/* Metric 3: Credit Memos (Finance Section) */}
+              {/* Metric 3: Supplier RTVs (Outbound Logistics) */}
+              <div
+                onClick={() => setAdminActiveTab('supplier_claims')}
+                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${adminActiveTab === 'supplier_claims' ? 'border-purple-500 ring-2 ring-purple-100 dark:ring-purple-900/40' : 'border-slate-200 dark:border-slate-800'
+                  }`}
+              >
+                <div className="flex items-center justify-between text-purple-600 dark:text-purple-400 mb-1.5 sm:mb-2">
+                  <Building2 className="w-5 h-5 shrink-0" />
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300">Outbound</span>
+                </div>
+                <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
+                  {supplierOutboundReports.length}
+                </div>
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Supplier RTVs</div>
+                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Vendor claims queued</div>
+              </div>
+
+              {/* Metric 4: Credit Memos (Finance Section) */}
               <div
                 onClick={() => setAdminActiveTab('credit_memos')}
                 className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${adminActiveTab === 'credit_memos' ? 'border-emerald-500 ring-2 ring-emerald-100 dark:ring-emerald-900/40' : 'border-slate-200 dark:border-slate-800'
@@ -7686,7 +7836,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Metric 4: Pending Barcodes */}
+              {/* Metric 5: Pending Barcodes */}
               <div
                 onClick={() => setIsPendingModalOpen(true)}
                 className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${pendingBarcodesList.length > 0 ? 'border-amber-400 bg-amber-50/20 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-800'
@@ -7703,7 +7853,7 @@ export default function App() {
                 <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Needs verification</div>
               </div>
 
-              {/* Metric 5: Staff Directory */}
+              {/* Metric 6: Staff Directory */}
               <div
                 onClick={() => {
                   if (currentUser?.role === 'super_admin') setIsEmployeeModalOpen(true);
@@ -7725,11 +7875,12 @@ export default function App() {
 
             {/* Production-Level Tab Segmented Switcher: Horizontally scrollable on mobile, wrapping on desktop */}
             <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-200/70 dark:bg-slate-800/80 p-1.5 rounded-2xl overflow-x-auto no-scrollbar sm:flex-wrap">
+              {/* Tab 1: Saved Products */}
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('products')}
                 className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'products'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
               >
@@ -7737,23 +7888,38 @@ export default function App() {
                 <span>Saved Products ({savedProductsList.length})</span>
               </button>
 
+              {/* Tab 2: Customer RMA Hub (Inbound) */}
               <button
                 type="button"
-                onClick={() => setAdminActiveTab('reports')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'reports'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                onClick={() => setAdminActiveTab('customer_reports')}
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
+                    ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
               >
                 <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                <span>Return Reports ({recentReportsList.length})</span>
+                <span>Customer RMA Hub ({customerInboundReports.length})</span>
               </button>
 
+              {/* Tab 3: Supplier Hub (RTV Claims) */}
+              <button
+                type="button"
+                onClick={() => setAdminActiveTab('supplier_claims')}
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'supplier_claims'
+                    ? 'bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+              >
+                <Building2 className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                <span>Supplier Hub (RTV Claims) ({supplierOutboundReports.length})</span>
+              </button>
+
+              {/* Tab 4: Credit Memos */}
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('credit_memos')}
                 className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'credit_memos'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                    ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
               >
@@ -7761,24 +7927,13 @@ export default function App() {
                 <span>Credit Memos ({creditMemosList.length})</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => setAdminActiveTab('supplier_claims')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'supplier_claims'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-              >
-                <Building2 className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
-                <span>Supplier Claims (RTV)</span>
-              </button>
-
+              {/* Tab 5: Settings & SMTP (Super Admin Only) */}
               {currentUser?.role === 'super_admin' && (
                 <button
                   type="button"
                   onClick={() => setAdminActiveTab('settings')}
                   className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'settings'
-                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                      ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                     }`}
                 >
@@ -7827,22 +7982,22 @@ export default function App() {
               />
             )}
 
-            {/* TAB 2: INCOMING RETURN REPORTS */}
-            {adminActiveTab === 'reports' && (
+            {/* TAB 2: CUSTOMER RMA HUB (INBOUND LOGISTICS) */}
+            {(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports') && (
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 w-full min-w-0 box-border">
                 {/* Header & Responsive Action Toolbar */}
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 w-full min-w-0">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
-                        Incoming Return Reports
+                        Customer RMA Hub (Inbound Logistics)
                       </h3>
                       <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0">
-                        {recentReportsList.length} Total
+                        {processedReports.length} Returns Active
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                      Recent RMA submissions from warehouse & customer returns.
+                      Store & branch merchandise returns, billing document matching, and customer credit memo vouchers.
                     </p>
                   </div>
 
@@ -7891,12 +8046,12 @@ export default function App() {
 
                       <button
                         type="button"
-                        onClick={() => exportRMAReportsToCSV(processedReports)}
+                        onClick={() => exportCustomerInboundRMAsToCSV(processedReports)}
                         className="w-full sm:w-auto justify-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
-                        title="Export filtered reports to CSV with financial & triage data"
+                        title="Export Customer Inbound RMAs to CSV with Store Branch, Customer Name, DR#, AE Name, and Credit Memo #"
                       >
                         <Download className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate">Export CSV</span>
+                        <span className="truncate">Export Inbound CSV</span>
                       </button>
                     </div>
                   </div>
@@ -8170,14 +8325,29 @@ export default function App() {
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
                             </th>
+                            {/* 7. Customer Branch Header */}
                             <th
-                              onClick={() => handleReportsSort('reporter')}
+                              onClick={() => handleReportsSort('store_branch')}
                               className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Reporter"
+                              title="Click to sort by Customer Branch"
                             >
                               <div className="flex items-center">
-                                <span>Reported By</span>
-                                {reportsSortField === 'reporter' ? (
+                                <span>Customer Branch</span>
+                                {reportsSortField === 'store_branch' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
+
+                            {/* 8. Invoice / DR # Header */}
+                            <th
+                              onClick={() => handleReportsSort('invoice_dr_number')}
+                              className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by Invoice / DR #"
+                            >
+                              <div className="flex items-center">
+                                <span>Invoice / DR #</span>
+                                {reportsSortField === 'invoice_dr_number' ? (
                                   reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
@@ -8384,26 +8554,50 @@ export default function App() {
                                   </span>
                                 </td>
 
-                                {/* 7. Reported By */}
+                                {/* 7. Customer Branch & Reporter */}
                                 <td className="py-3 px-3.5">
-                                  <div className="font-bold text-slate-900 dark:text-slate-200 text-[11px]">
-                                    {item.reporter_name || item.reported_by || 'Reporter'}
+                                  <div className="font-bold text-slate-900 dark:text-slate-200 text-[11px] flex items-center gap-1" title={item.store_branch || 'Direct Return'}>
+                                    <span className="text-blue-600 dark:text-blue-400">📍</span>
+                                    <span className="truncate max-w-[130px] font-extrabold text-blue-900 dark:text-blue-300">
+                                      {item.store_branch || 'Direct Return'}
+                                    </span>
                                   </div>
-                                  {item.reporter_contact && (
-                                    <div className="font-mono text-slate-500 dark:text-slate-400 text-[10px]">
-                                      {item.reporter_contact}
-                                    </div>
-                                  )}
-                                  {item.store_branch && (
-                                    <div className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-0.5 mt-0.5 max-w-[150px] truncate" title={item.store_branch}>
-                                      📍 {item.store_branch}
-                                    </div>
-                                  )}
-                                  {item.invoice_dr_number && (
-                                    <div className="text-[10px] font-mono text-violet-600 dark:text-violet-400 font-bold">
-                                      DR: {item.invoice_dr_number}
-                                    </div>
-                                  )}
+                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5 truncate max-w-[130px]">
+                                    {item.reporter_name || item.reported_by || 'Staff'}
+                                    {item.reporter_contact ? ` • ${item.reporter_contact}` : ''}
+                                  </div>
+                                </td>
+
+                                {/* 8. Commercial Document (SI / DR / PO) */}
+                                <td className="py-3 px-3.5 font-mono">
+                                  {(() => {
+                                    const docs = getDocumentNumbers(item);
+                                    return (
+                                      <div className="space-y-0.5 text-[9px] font-mono leading-tight">
+                                        <span className={`px-1.5 py-0.5 rounded block truncate max-w-[125px] ${
+                                          docs.si !== 'N/A'
+                                            ? 'bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold'
+                                            : 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 border border-slate-200/50 dark:border-slate-700/50 font-medium'
+                                        }`}>
+                                          SI: {docs.si}
+                                        </span>
+                                        <span className={`px-1.5 py-0.5 rounded block truncate max-w-[125px] ${
+                                          docs.dr !== 'N/A'
+                                            ? 'bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-bold'
+                                            : 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 border border-slate-200/50 dark:border-slate-700/50 font-medium'
+                                        }`}>
+                                          DR: {docs.dr}
+                                        </span>
+                                        <span className={`px-1.5 py-0.5 rounded block truncate max-w-[125px] ${
+                                          docs.po !== 'N/A'
+                                            ? 'bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold'
+                                            : 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 border border-slate-200/50 dark:border-slate-700/50 font-medium'
+                                        }`}>
+                                          PO: {docs.po}
+                                        </span>
+                                      </div>
+                                    );
+                                  })()}
                                 </td>
 
                                 {/* 8. Catalog Status */}
@@ -8654,6 +8848,9 @@ export default function App() {
                                   <span className="font-mono font-black text-xs text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg">
                                     SN #{(reportsCurrentPage - 1) * reportsPageSize + index + 1}
                                   </span>
+                                  <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                    📥 Inbound
+                                  </span>
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -8778,11 +8975,28 @@ export default function App() {
                                     📍 {item.store_branch}
                                   </span>
                                 )}
-                                {item.invoice_dr_number && (
-                                  <span className="px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-mono font-bold">
-                                    DR: {item.invoice_dr_number}
-                                  </span>
-                                )}
+                                {(() => {
+                                  const docs = getDocumentNumbers(item);
+                                  return (
+                                    <>
+                                      {docs.si !== 'N/A' && (
+                                        <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-mono font-bold">
+                                          SI: {docs.si}
+                                        </span>
+                                      )}
+                                      {docs.dr !== 'N/A' && (
+                                        <span className="px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-mono font-bold">
+                                          DR: {docs.dr}
+                                        </span>
+                                      )}
+                                      {docs.po !== 'N/A' && (
+                                        <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-mono font-bold">
+                                          PO: {docs.po}
+                                        </span>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                                 {item.batch_lot_number && (
                                   <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-mono font-semibold">
                                     Lot: {item.batch_lot_number}
@@ -9310,7 +9524,6 @@ export default function App() {
     </div>
   );
 }
-
 --- END FILE: src/App.jsx ---
 
 --- START FILE: src/supabaseClient.js ---
@@ -9659,7 +9872,6 @@ export const rmaApi = {
     }
   }
 };
-
 --- END FILE: src/supabaseClient.js ---
 
 --- START FILE: src/main.jsx ---
@@ -9673,7 +9885,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <App />
   </React.StrictMode>,
 )
-
 --- END FILE: src/main.jsx ---
 
 --- START FILE: src/index.css ---
@@ -10002,7 +10213,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 }
 
 
-
 --- END FILE: src/index.css ---
 
 --- START FILE: src/components/AdminLoginModal.jsx ---
@@ -10256,7 +10466,6 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
     </div>
   );
 }
-
 --- END FILE: src/components/AdminLoginModal.jsx ---
 
 --- START FILE: src/components/AdminPinModal.jsx ---
@@ -10359,7 +10568,6 @@ export default function AdminPinModal({ isOpen, onClose, onUnlock }) {
     </div>
   );
 }
-
 --- END FILE: src/components/AdminPinModal.jsx ---
 
 --- START FILE: src/components/ApiKeysManagementSection.jsx ---
@@ -10928,7 +11136,6 @@ export default function ApiKeysManagementSection() {
     </div>
   );
 }
-
 --- END FILE: src/components/ApiKeysManagementSection.jsx ---
 
 --- START FILE: src/components/CreditMemoModal.jsx ---
@@ -11557,7 +11764,6 @@ export default function CreditMemoModal({
     </div>
   );
 }
-
 --- END FILE: src/components/CreditMemoModal.jsx ---
 
 --- START FILE: src/components/CreditMemosTab.jsx ---
@@ -12433,7 +12639,6 @@ export default function CreditMemosTab({
   );
 }
 
-
 --- END FILE: src/components/CreditMemosTab.jsx ---
 
 --- START FILE: src/components/CreditMemoVoucherModal.jsx ---
@@ -12731,7 +12936,6 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
   );
 }
 
-
 --- END FILE: src/components/CreditMemoVoucherModal.jsx ---
 
 --- START FILE: src/components/DeleteConfirmationModal.jsx ---
@@ -12835,7 +13039,6 @@ export default function DeleteConfirmationModal({
     </div>
   );
 }
-
 --- END FILE: src/components/DeleteConfirmationModal.jsx ---
 
 --- START FILE: src/components/EmployeeManagementModal.jsx ---
@@ -13366,7 +13569,6 @@ export default function EmployeeManagementModal({ isOpen, onClose, currentUser }
     </div>
   );
 }
-
 --- END FILE: src/components/EmployeeManagementModal.jsx ---
 
 --- START FILE: src/components/FinanceCreditMemoTab.jsx ---
@@ -13739,7 +13941,6 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
     </div>
   );
 }
-
 --- END FILE: src/components/FinanceCreditMemoTab.jsx ---
 
 --- START FILE: src/components/GatekeeperPinModal.jsx ---
@@ -14661,7 +14862,6 @@ export default function GatekeeperPinModal({
   );
 }
 
-
 --- END FILE: src/components/GatekeeperPinModal.jsx ---
 
 --- START FILE: src/components/HowItWorksModal.jsx ---
@@ -14946,7 +15146,6 @@ export default function HowItWorksModal({ isOpen, onClose }) {
     </div>
   );
 }
-
 --- END FILE: src/components/HowItWorksModal.jsx ---
 
 --- START FILE: src/components/ImageLightboxModal.jsx ---
@@ -15141,7 +15340,6 @@ export default function ImageLightboxModal({
     </div>
   );
 }
-
 --- END FILE: src/components/ImageLightboxModal.jsx ---
 
 --- START FILE: src/components/NotificationBell.jsx ---
@@ -15456,7 +15654,6 @@ export default function NotificationBell({
     </div>
   );
 }
-
 --- END FILE: src/components/NotificationBell.jsx ---
 
 --- START FILE: src/components/PendingBarcodesModal.jsx ---
@@ -16226,7 +16423,6 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     </div>
   );
 }
-
 --- END FILE: src/components/PendingBarcodesModal.jsx ---
 
 --- START FILE: src/components/PinRequestsQueueModal.jsx ---
@@ -16962,7 +17158,6 @@ export default function PinRequestsQueueModal({
     </div>
   );
 }
-
 
 --- END FILE: src/components/PinRequestsQueueModal.jsx ---
 
@@ -18279,7 +18474,6 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
     </div>
   );
 }
-
 --- END FILE: src/components/PortalAccessKeysModal.jsx ---
 
 --- START FILE: src/components/PortalAccessQRModal.jsx ---
@@ -18564,7 +18758,6 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
     </div>
   );
 }
-
 --- END FILE: src/components/PortalAccessQRModal.jsx ---
 
 --- START FILE: src/components/PrintBarcodesTab.jsx ---
@@ -18710,7 +18903,6 @@ export default function PrintBarcodesTab({ catalog = [] }) {
     </div>
   );
 }
-
 --- END FILE: src/components/PrintBarcodesTab.jsx ---
 
 --- START FILE: src/components/ProductAutoSuggest.jsx ---
@@ -19131,7 +19323,6 @@ export default function ProductAutoSuggest({
     </div>
   );
 }
-
 --- END FILE: src/components/ProductAutoSuggest.jsx ---
 
 --- START FILE: src/components/ProductEditModal.jsx ---
@@ -19808,7 +19999,6 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
     </div>
   );
 }
-
 --- END FILE: src/components/ProductEditModal.jsx ---
 
 --- START FILE: src/components/ProductSearchTab.jsx ---
@@ -20479,7 +20669,6 @@ export default function ProductSearchTab({ onInspectProduct, onImportToCatalog }
     </div>
   );
 }
-
 --- END FILE: src/components/ProductSearchTab.jsx ---
 
 --- START FILE: src/components/PurchasingBufferTab.jsx ---
@@ -20877,7 +21066,6 @@ export default function PurchasingBufferTab({ tickets = [], onUpdateTicket }) {
     </div>
   );
 }
-
 --- END FILE: src/components/PurchasingBufferTab.jsx ---
 
 --- START FILE: src/components/QuickRMAActionModal.jsx ---
@@ -20916,6 +21104,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
+import { catalogService } from '../services/catalogService';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import RMATimelineAudit from './RMATimelineAudit';
 
@@ -20966,6 +21155,43 @@ export default function QuickRMAActionModal({
   const [isSavingTriage, setIsSavingTriage] = useState(false);
   const [triageSavedSuccess, setTriageSavedSuccess] = useState(false);
   const [isThermalLabelOpen, setIsThermalLabelOpen] = useState(false);
+  const [isUpdatingType, setIsUpdatingType] = useState(false);
+  const [typeFeedback, setTypeFeedback] = useState(null);
+
+  // Official Logistics Paperwork (DR / Invoice / PO) & AI Overrides
+  const [adminDrNumber, setAdminDrNumber] = useState('');
+  const [adminStoreBranch, setAdminStoreBranch] = useState('');
+  const [adminExpiryDate, setAdminExpiryDate] = useState('');
+  const [adminBatchLot, setAdminBatchLot] = useState('');
+  const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
+  const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
+  const [copyDrSuccess, setCopyDrSuccess] = useState(false);
+
+  // Reclassify RMA Type between customer_inbound and supplier_outbound
+  const handleToggleRmaType = async (newType) => {
+    if (!report || isUpdatingType) return;
+    const currentType = report.rma_type || 'customer_inbound';
+    if (currentType === newType) return;
+
+    setIsUpdatingType(true);
+    setTypeFeedback(null);
+    try {
+      // Optimistic update
+      setReport(prev => ({ ...prev, rma_type: newType }));
+      const cleanId = report.id || report.rma_number;
+      await catalogService.updateRMAType(cleanId, newType);
+      setTypeFeedback(newType === 'customer_inbound' ? 'Moved to Customer RMA Hub (Inbound)' : 'Moved to Supplier RMA Hub (Outbound / RTV)');
+      setTimeout(() => setTypeFeedback(null), 3000);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error('Failed to update RMA type:', err);
+      // Revert optimistic update
+      setReport(prev => ({ ...prev, rma_type: currentType }));
+      alert(`Could not switch return type: ${err.message}`);
+    } finally {
+      setIsUpdatingType(false);
+    }
+  };
 
   // Synchronize triage inputs when report loads or updates
   useEffect(() => {
@@ -21184,6 +21410,15 @@ export default function QuickRMAActionModal({
     }
   }, [isOpen, rmaNumber, recentReportsList]);
 
+  // Synchronize AI-extracted or existing paperwork document details whenever report changes
+  useEffect(() => {
+    setAdminDrNumber(report?.invoice_dr_number || report?.ai_document_metadata?.invoice_dr_number || '');
+    setAdminStoreBranch(report?.store_branch || report?.ai_document_metadata?.store_branch || '');
+    setAdminExpiryDate(report?.expiry_date || '');
+    setAdminBatchLot(report?.batch_lot_number || '');
+    setIsEditingAiDetails(false);
+  }, [report?.id, report?.invoice_dr_number, report?.store_branch, report?.expiry_date, report?.batch_lot_number]);
+
   // Step 1: Request OTP for authorized company admin
   const handleRequestOtp = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -21286,6 +21521,41 @@ export default function QuickRMAActionModal({
     setAuthSuccessMsg(null);
   };
 
+  const handleSaveAiDetails = async () => {
+    if (!report?.id) return;
+    setIsSavingAiDetails(true);
+    try {
+      const { error } = await supabase
+        .from('rma_reports')
+        .update({
+          invoice_dr_number: adminDrNumber.trim() || null,
+          store_branch: adminStoreBranch.trim() || null,
+          expiry_date: adminExpiryDate || null,
+          batch_lot_number: adminBatchLot.trim() || null
+        })
+        .eq('id', report.id);
+
+      if (error) throw error;
+      report.invoice_dr_number = adminDrNumber.trim();
+      report.store_branch = adminStoreBranch.trim();
+      report.expiry_date = adminExpiryDate || null;
+      report.batch_lot_number = adminBatchLot.trim() || null;
+      setIsEditingAiDetails(false);
+      onReportUpdated && onReportUpdated({
+        ...report,
+        invoice_dr_number: adminDrNumber.trim(),
+        store_branch: adminStoreBranch.trim(),
+        expiry_date: adminExpiryDate || null,
+        batch_lot_number: adminBatchLot.trim() || null
+      });
+    } catch (e) {
+      console.error('Failed to update AI details:', e);
+      alert('Failed to save updated DR/Branch details.');
+    } finally {
+      setIsSavingAiDetails(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   // Derive catalog & memo status for this report
@@ -21321,56 +21591,6 @@ export default function QuickRMAActionModal({
     ? (Array.isArray(report.paperwork_photos) ? report.paperwork_photos : [report.paperwork_photos])
     : [];
   const aiMetadata = report?.ai_document_metadata || null;
-  const [adminDrNumber, setAdminDrNumber] = useState(report?.invoice_dr_number || aiMetadata?.invoice_dr_number || '');
-  const [adminStoreBranch, setAdminStoreBranch] = useState(report?.store_branch || aiMetadata?.store_branch || '');
-  const [adminExpiryDate, setAdminExpiryDate] = useState(report?.expiry_date || '');
-  const [adminBatchLot, setAdminBatchLot] = useState(report?.batch_lot_number || '');
-  const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
-  const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
-  const [copyDrSuccess, setCopyDrSuccess] = useState(false);
-
-  useEffect(() => {
-    setAdminDrNumber(report?.invoice_dr_number || report?.ai_document_metadata?.invoice_dr_number || '');
-    setAdminStoreBranch(report?.store_branch || report?.ai_document_metadata?.store_branch || '');
-    setAdminExpiryDate(report?.expiry_date || '');
-    setAdminBatchLot(report?.batch_lot_number || '');
-    setIsEditingAiDetails(false);
-  }, [report?.id, report?.invoice_dr_number, report?.store_branch, report?.expiry_date, report?.batch_lot_number]);
-
-  const handleSaveAiDetails = async () => {
-    if (!report?.id) return;
-    setIsSavingAiDetails(true);
-    try {
-      const { error } = await supabase
-        .from('rma_reports')
-        .update({
-          invoice_dr_number: adminDrNumber.trim() || null,
-          store_branch: adminStoreBranch.trim() || null,
-          expiry_date: adminExpiryDate || null,
-          batch_lot_number: adminBatchLot.trim() || null
-        })
-        .eq('id', report.id);
-
-      if (error) throw error;
-      report.invoice_dr_number = adminDrNumber.trim();
-      report.store_branch = adminStoreBranch.trim();
-      report.expiry_date = adminExpiryDate || null;
-      report.batch_lot_number = adminBatchLot.trim() || null;
-      setIsEditingAiDetails(false);
-      onReportUpdated && onReportUpdated({
-        ...report,
-        invoice_dr_number: adminDrNumber.trim(),
-        store_branch: adminStoreBranch.trim(),
-        expiry_date: adminExpiryDate || null,
-        batch_lot_number: adminBatchLot.trim() || null
-      });
-    } catch (e) {
-      console.error('Failed to update AI details:', e);
-      alert('Failed to save updated DR/Branch details.');
-    } finally {
-      setIsSavingAiDetails(false);
-    }
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-in fade-in duration-200">
@@ -21449,6 +21669,57 @@ export default function QuickRMAActionModal({
           {/* 3. Report Loaded: Display Summary Card */}
           {report && (
             <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-4 space-y-3">
+              {/* TOP SEGMENTED SWITCHER: Customer Inbound vs Supplier Outbound */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Logistics Stream Classification:
+                  </span>
+                  <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                    report.rma_type === 'supplier_outbound'
+                      ? 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
+                      : 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                  }`}>
+                    {report.rma_type === 'supplier_outbound' ? 'Outbound Vendor RTV' : 'Inbound Customer RMA'}
+                  </span>
+                </div>
+                <div className="bg-slate-200/80 dark:bg-slate-900 p-1 rounded-xl border border-slate-300/80 dark:border-slate-700 flex items-center justify-between gap-1 shadow-2xs">
+                  <button
+                    type="button"
+                    disabled={isUpdatingType}
+                    onClick={() => handleToggleRmaType('customer_inbound')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      (report.rma_type === 'customer_inbound' || !report.rma_type)
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <Package className="w-3.5 h-3.5 shrink-0" />
+                    <span>📥 Customer Return (Inbound)</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isUpdatingType}
+                    onClick={() => handleToggleRmaType('supplier_outbound')}
+                    className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      report.rma_type === 'supplier_outbound'
+                        ? 'bg-purple-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <Building2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>📤 Supplier Claim (Outbound / RTV)</span>
+                  </button>
+                </div>
+              </div>
+
+              {typeFeedback && (
+                <div className="p-2 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 rounded-xl text-[11px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{typeFeedback}</span>
+                </div>
+              )}
+
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-700 pb-3">
                 <div className="space-y-0.5">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
@@ -21519,6 +21790,71 @@ export default function QuickRMAActionModal({
                   )}
                 </div>
               </div>
+
+              {/* CONTEXTUAL STREAM HIGHLIGHT: Customer Inbound vs Supplier Outbound */}
+              {report.rma_type === 'supplier_outbound' ? (
+                <div className="p-3 bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-xl space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between text-purple-900 dark:text-purple-200 font-black">
+                    <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide">
+                      <Building2 className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                      <span>Supplier Outbound Return (RTV Recovery)</span>
+                    </span>
+                    <span className="text-[10px] bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-300 px-2 py-0.5 rounded-full font-bold">
+                      Vendor Chargeback
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Master Supplier</span>
+                      <strong className="text-slate-900 dark:text-white truncate block">{report.supplier_name || 'Savemore'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Warehouse Bin</span>
+                      <strong className="text-slate-900 dark:text-white font-mono">{report.warehouse_location || 'DOCK'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Batch / Lot #</span>
+                      <strong className="text-slate-900 dark:text-white font-mono">{report.batch_lot_number || 'N/A'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Total Debit Value</span>
+                      <strong className="text-emerald-600 dark:text-emerald-400 font-mono font-black">₱{totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between text-blue-900 dark:text-blue-200 font-black">
+                    <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide">
+                      <Package className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>Customer Inbound Return (Credit Processing)</span>
+                    </span>
+                    <span className="text-[10px] bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 px-2 py-0.5 rounded-full font-bold">
+                      Customer Credit
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Store / Branch</span>
+                      <strong className="text-slate-900 dark:text-white truncate block">{report.store_branch || 'Store/Branch Unassigned'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Invoice / DR #</span>
+                      <strong className="text-slate-900 dark:text-white font-mono">{report.invoice_dr_number || report.dr_number || report.si_number || 'None'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Customer AE</span>
+                      <strong className="text-slate-900 dark:text-white truncate block">{report.ae_name || 'Unassigned'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Credit Memo</span>
+                      <strong className={existingMemo ? 'text-emerald-600 dark:text-emerald-400 font-mono' : 'text-amber-600 dark:text-amber-400 font-bold'}>
+                        {existingMemo ? `✓ ${existingMemo.credit_memo_number || 'Issued'}` : 'Pending Issuance'}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Proof Photos Thumbnail */}
               {photoList.length > 0 && (
@@ -21610,37 +21946,30 @@ export default function QuickRMAActionModal({
 
                     <div className="flex-1 min-w-0 text-xs space-y-0.5">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-slate-400 text-[10px] uppercase font-bold">DR / Invoice:</span>
-                        <strong className="font-mono text-slate-900 dark:text-white font-black">{adminDrNumber || report.invoice_dr_number || 'None assigned'}</strong>
-                        {(report.si_number || aiMetadata?.si_number) && (
-                          <span className="text-[10px] font-mono bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 px-1.5 py-0.5 rounded font-bold">
-                            SI: {report.si_number || aiMetadata?.si_number}
-                          </span>
-                        )}
-                        {(report.dr_number || aiMetadata?.dr_number) && (
-                          <span className="text-[10px] font-mono bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 px-1.5 py-0.5 rounded font-bold">
-                            DR: {report.dr_number || aiMetadata?.dr_number}
-                          </span>
-                        )}
-                        {(report.po_number || aiMetadata?.po_number) && (
-                          <span className="text-[10px] font-mono bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.5 rounded font-bold">
-                            PO: {report.po_number || aiMetadata?.po_number}
-                          </span>
-                        )}
-                        {(adminDrNumber || report.invoice_dr_number) && (
+                        <span className="text-slate-400 text-[10px] uppercase font-bold">Documents:</span>
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${report.si_number ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'}`}>
+                          SI: {report.si_number || 'N/A'}
+                        </span>
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${(report.dr_number || (!report.si_number && adminDrNumber)) ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 border border-violet-200 dark:border-violet-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'}`}>
+                          DR: {report.dr_number || (!report.si_number && !report.po_number && adminDrNumber ? adminDrNumber : 'N/A')}
+                        </span>
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${report.po_number ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'}`}>
+                          PO: {report.po_number || 'N/A'}
+                        </span>
+                        {(report.dr_number || report.si_number || report.po_number || adminDrNumber) && (
                           <button
                             type="button"
                             onClick={() => {
-                              const dr = adminDrNumber || report.invoice_dr_number;
-                              navigator.clipboard.writeText(dr);
+                              const docNum = report.dr_number || report.si_number || report.po_number || adminDrNumber;
+                              navigator.clipboard.writeText(docNum);
                               setCopyDrSuccess(true);
                               setTimeout(() => setCopyDrSuccess(false), 2000);
                             }}
                             className="px-2 py-0.5 text-[10px] font-bold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-slate-700 dark:text-slate-200 hover:border-blue-500 hover:text-blue-600 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs ml-auto sm:ml-0"
-                            title="Copy DR# for Credit Memo voucher"
+                            title="Copy Document # for Credit Memo voucher"
                           >
                             <Copy className="w-3 h-3" />
-                            <span>{copyDrSuccess ? 'Copied!' : 'Copy DR#'}</span>
+                            <span>{copyDrSuccess ? 'Copied!' : 'Copy Doc#'}</span>
                           </button>
                         )}
                       </div>
@@ -22217,7 +22546,6 @@ export default function QuickRMAActionModal({
     </div>
   );
 }
-
 --- END FILE: src/components/QuickRMAActionModal.jsx ---
 
 --- START FILE: src/components/ReturnQRModal.jsx ---
@@ -22237,11 +22565,11 @@ import {
 import { downloadQrCodePng, downloadBoxStickerPng, printBoxSticker } from '../utils/qrDownload';
 
 export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickAction }) {
-  if (!isOpen || !report) return null;
-
   const [downloadingType, setDownloadingType] = useState(null); // 'qr' | 'label' | null
   const [downloadNotice, setDownloadNotice] = useState(null);
   const [isPrinting, setIsPrinting] = useState(false);
+
+  if (!isOpen || !report) return null;
 
   const rmaNumber = report.rma_number || report.rmaNumber || report.id || 'N/A';
   const barcode = report.barcode || 'N/A';
@@ -22586,7 +22914,6 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
     </div>
   );
 }
-
 --- END FILE: src/components/ReturnQRModal.jsx ---
 
 --- START FILE: src/components/RMAReportsModal.jsx ---
@@ -23761,7 +24088,6 @@ export default function RMAReportsModal({
     </div>
   );
 }
-
 --- END FILE: src/components/RMAReportsModal.jsx ---
 
 --- START FILE: src/components/RMATimelineAudit.jsx ---
@@ -23911,7 +24237,6 @@ export default function RMATimelineAudit({
     </div>
   );
 }
-
 --- END FILE: src/components/RMATimelineAudit.jsx ---
 
 --- START FILE: src/components/SavedProductsTab.jsx ---
@@ -24859,7 +25184,6 @@ export default function SavedProductsTab({
     </div>
   );
 }
-
 --- END FILE: src/components/SavedProductsTab.jsx ---
 
 --- START FILE: src/components/ScannerModal.jsx ---
@@ -25055,7 +25379,6 @@ export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog =
     </div>
   );
 }
-
 --- END FILE: src/components/ScannerModal.jsx ---
 
 --- START FILE: src/components/SettingsTab.jsx ---
@@ -25795,7 +26118,6 @@ export default function SettingsTab({
     </div>
   );
 }
-
 --- END FILE: src/components/SettingsTab.jsx ---
 
 --- START FILE: src/components/SubmitRMATab.jsx ---
@@ -26742,7 +27064,6 @@ export default function SubmitRMATab({
     </div>
   );
 }
-
 --- END FILE: src/components/SubmitRMATab.jsx ---
 
 --- START FILE: src/components/SupplierClaimsTab.jsx ---
@@ -26764,7 +27085,7 @@ import {
   ArrowDown,
   ArrowUpDown
 } from 'lucide-react';
-import { exportRMAReportsToCSV } from '../utils/exportCsv';
+import { exportRMAReportsToCSV, exportSupplierOutboundClaimsToCSV } from '../utils/exportCsv';
 import TablePagination from './TablePagination';
 import ImageLightboxModal from './ImageLightboxModal';
 import { supplierClaimService } from '../services/supplierClaimService';
@@ -26829,9 +27150,15 @@ export default function SupplierClaimsTab({
     }
   };
 
-  // Filter & sort reports suitable for RTV
+  // Filter & sort reports suitable for Supplier Outbound / RTV
   const rtvCandidates = useMemo(() => {
     let list = reportsList.filter(r => {
+      // Must be supplier outbound OR have an RTV disposition
+      const isSupplierCandidate = (r.rma_type === 'supplier_outbound') ||
+        (r.disposition && (r.disposition.toLowerCase().includes('return to vendor') || r.disposition.toLowerCase().includes('rtv')));
+
+      if (!isSupplierCandidate) return false;
+
       const matchesSupplier = selectedSupplier === 'All' || 
         (r.supplier_name || 'Savemore').toLowerCase() === selectedSupplier.toLowerCase();
 
@@ -26844,7 +27171,9 @@ export default function SupplierClaimsTab({
         r.barcode?.includes(q) ||
         r.rma_number?.toLowerCase().includes(q) ||
         r.code?.toLowerCase().includes(q) ||
-        r.supplier_name?.toLowerCase().includes(q);
+        r.supplier_name?.toLowerCase().includes(q) ||
+        r.warehouse_location?.toLowerCase().includes(q) ||
+        r.batch_lot_number?.toLowerCase().includes(q);
 
       return matchesSupplier && matchesDisposition && matchesSearch;
     });
@@ -27343,11 +27672,12 @@ export default function SupplierClaimsTab({
 
           <button
             type="button"
-            onClick={() => exportRMAReportsToCSV(selectedItems.length > 0 ? selectedItems : rtvCandidates)}
-            className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-white flex items-center gap-1 font-bold cursor-pointer ml-auto"
+            onClick={() => exportSupplierOutboundClaimsToCSV(selectedItems.length > 0 ? selectedItems : rtvCandidates)}
+            className="text-xs text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 flex items-center gap-1.5 font-bold cursor-pointer ml-auto bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-3 py-1.5 rounded-xl shadow-2xs hover:shadow-xs transition-all"
+            title="Download vendor chargeback CSV with bin location and batch numbers"
           >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export RTV CSV</span>
+            <Download className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span>Export Supplier Claims CSV</span>
           </button>
         </div>
       </div>
@@ -27581,9 +27911,17 @@ export default function SupplierClaimsTab({
                         </div>
                       </td>
 
-                      {/* Vendor / Supplier */}
-                      <td className="p-3 font-semibold text-slate-700 dark:text-slate-300">
-                        {r.supplier_name || 'Savemore'}
+                      {/* Vendor / Supplier & Warehouse Bin */}
+                      <td className="p-3">
+                        <div className="font-bold text-slate-800 dark:text-slate-200">
+                          {r.supplier_name || 'Savemore'}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          Bin: <strong className="text-slate-600 dark:text-slate-300">{r.warehouse_location || 'DOCK'}</strong>
+                          {r.batch_lot_number && (
+                            <span className="text-purple-600 dark:text-purple-400 font-bold ml-1.5">• Lot: {r.batch_lot_number}</span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Product Description & SKU */}
@@ -27857,7 +28195,6 @@ export default function SupplierClaimsTab({
     </div>
   );
 }
-
 --- END FILE: src/components/SupplierClaimsTab.jsx ---
 
 --- START FILE: src/components/SupplierInput.jsx ---
@@ -28049,7 +28386,6 @@ export default function SupplierInput({
     </div>
   );
 }
-
 --- END FILE: src/components/SupplierInput.jsx ---
 
 --- START FILE: src/components/TablePagination.jsx ---
@@ -28129,7 +28465,6 @@ export default function TablePagination({
     </div>
   );
 }
-
 --- END FILE: src/components/TablePagination.jsx ---
 
 --- START FILE: src/components/ThermalBoxLabelModal.jsx ---
@@ -28268,12 +28603,15 @@ export default function ThermalBoxLabelModal({
     const sizeConfig = {
       'a4': {
         pageSize: 'A4 portrait',
-        pageMargin: '0.3in',
+        pageMargin: '0.25in',
         scale: 1.0,
         customStyles: `
           #thermal-label-mount {
             width: 100% !important;
-            max-width: 180mm !important;
+            max-width: 175mm !important;
+            min-height: auto !important;
+            border: 2.5px solid #000000 !important;
+            border-radius: 8px !important;
             box-shadow: none !important;
             margin: 0 auto !important;
             box-sizing: border-box !important;
@@ -28282,12 +28620,15 @@ export default function ThermalBoxLabelModal({
       },
       '4x6': {
         pageSize: '4in 6in',
-        pageMargin: '0.2in',
-        scale: 1.0,
+        pageMargin: '0.12in',
+        scale: 0.90,
         customStyles: `
           #thermal-label-mount {
-            width: 3.0in !important;
-            max-width: 3.0in !important;
+            width: 3.45in !important;
+            max-width: 3.45in !important;
+            min-height: auto !important;
+            border: 2.5px solid #000000 !important;
+            border-radius: 8px !important;
             box-shadow: none !important;
             margin: 0 auto !important;
             box-sizing: border-box !important;
@@ -28296,12 +28637,15 @@ export default function ThermalBoxLabelModal({
       },
       '3x3': {
         pageSize: '3in 3in',
-        pageMargin: '0.1in',
-        scale: 0.9,
+        pageMargin: '0.08in',
+        scale: 0.88,
         customStyles: `
           #thermal-label-mount {
-            width: 2.15in !important;
-            max-width: 2.15in !important;
+            width: 2.3in !important;
+            max-width: 2.3in !important;
+            min-height: auto !important;
+            border: 2px solid #000000 !important;
+            border-radius: 6px !important;
             box-shadow: none !important;
             margin: 0 auto !important;
             box-sizing: border-box !important;
@@ -28310,12 +28654,15 @@ export default function ThermalBoxLabelModal({
       },
       '2x2': {
         pageSize: '2in 2in',
-        pageMargin: '0.05in',
-        scale: 0.75,
+        pageMargin: '0.04in',
+        scale: 0.72,
         customStyles: `
           #thermal-label-mount {
-            width: 1.45in !important;
-            max-width: 1.45in !important;
+            width: 1.55in !important;
+            max-width: 1.55in !important;
+            min-height: auto !important;
+            border: 1.5px solid #000000 !important;
+            border-radius: 4px !important;
             box-shadow: none !important;
             margin: 0 auto !important;
             box-sizing: border-box !important;
@@ -28375,8 +28722,8 @@ export default function ThermalBoxLabelModal({
                 : labelSize === '3x3'
                   ? 'w-[280px] p-3 text-xs space-y-2.5'
                   : labelSize === '4x6'
-                    ? 'w-full max-w-[380px] p-4 text-xs space-y-3 min-h-[500px]'
-                    : 'w-full max-w-[460px] p-6 text-xs space-y-4'
+                    ? 'w-full max-w-[380px] p-4 text-xs space-y-2.5 min-h-0'
+                    : 'w-full max-w-[460px] p-6 text-xs space-y-3 min-h-0'
               }`}
           >
             {/* Top Header */}
@@ -28539,7 +28886,6 @@ export default function ThermalBoxLabelModal({
     </div>
   );
 }
-
 --- END FILE: src/components/ThermalBoxLabelModal.jsx ---
 
 --- START FILE: src/components/TicketsVaultTab.jsx ---
@@ -28898,7 +29244,6 @@ export default function TicketsVaultTab({
     </div>
   );
 }
-
 --- END FILE: src/components/TicketsVaultTab.jsx ---
 
 --- START FILE: src/services/accessKeyService.js ---
@@ -29596,7 +29941,6 @@ export const accessKeyService = {
     }
   }
 };
-
 
 --- END FILE: src/services/accessKeyService.js ---
 
@@ -30310,7 +30654,6 @@ export const authService = {
     return { success: true, user: sessionUser };
   }
 };
-
 --- END FILE: src/services/authService.js ---
 
 --- START FILE: src/services/catalogService.js ---
@@ -30492,15 +30835,15 @@ export const catalogService = {
    * 3. Fallback: If Google Drive credentials are not yet set or offline, uploads to Supabase Storage ('rma-photos').
    * 4. Tertiary Fallback: Offline Base64 Data URL so user never loses their submission.
    */
-  async uploadPhoto(file, rmaNumber = 'GENERAL', category = 'damaged_items') {
-    const details = await this.uploadPhotoWithDetails(file, rmaNumber, category);
+  async uploadPhoto(file, rmaNumber = 'GENERAL', category = 'damaged_items', extraMeta = {}) {
+    const details = await this.uploadPhotoWithDetails(file, rmaNumber, category, extraMeta);
     return details?.url || details;
   },
 
   /**
    * Upload photo and return full details including Google Drive folder URLs
    */
-  async uploadPhotoWithDetails(file, rmaNumber = 'GENERAL', category = 'damaged_items') {
+  async uploadPhotoWithDetails(file, rmaNumber = 'GENERAL', category = 'damaged_items', extraMeta = {}) {
     if (!file) return null;
     try {
       // 1. Client-Side Aggressive WebP Compression
@@ -30517,7 +30860,11 @@ export const catalogService = {
             fileName: compressed.name || `RMA_${rmaNumber}_${category}_${Date.now()}.webp`,
             mimeType: compressed.type || 'image/webp',
             rmaNumber,
-            category
+            category,
+            rmaType: extraMeta.rmaType || extraMeta.rma_type || 'customer_inbound',
+            customerName: extraMeta.customerName || extraMeta.storeBranch || extraMeta.store_branch || null,
+            storeBranch: extraMeta.storeBranch || extraMeta.store_branch || null,
+            supplierName: extraMeta.supplierName || extraMeta.supplier_name || null
           })
         });
 
@@ -31263,17 +31610,75 @@ export const catalogService = {
 
   /**
    * GENERATE UNIQUE RMA NUMBER INSTANTLY
-   * Format: "RMA-YYYY-XXXX-RAND" (e.g. RMA-2026-0001-A14R)
+   * Standard Enterprise Format: "RMA-[YEAR]-[4-DIGIT-ASCENDING]-[4-CHAR-ALPHANUMERIC]"
+   * Example: RMA-2026-0001-6TYH
    */
-  generateRMANumber(seqHint) {
+  generateRMANumber(existingOrHint = null) {
     const currentYear = new Date().getFullYear();
-    const seqStr = String(seqHint || Math.floor(1000 + Math.random() * 9000)).padStart(4, '0');
-    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-    let randomSuffix = '';
-    for (let i = 0; i < 4; i++) {
-      randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
+    let maxSeq = 0;
+
+    // 1. If an array of reports was passed, find the highest existing sequence number
+    if (Array.isArray(existingOrHint)) {
+      existingOrHint.forEach(r => {
+        const num = r.rma_number || r.rmaNumber || r.id || '';
+        const match = String(num).match(/RMA-\d{4}-(\d+)-/i);
+        if (match && match[1]) {
+          const parsed = parseInt(match[1], 10);
+          if (!isNaN(parsed) && parsed > maxSeq) {
+            maxSeq = parsed;
+          }
+        }
+      });
+      if (maxSeq === 0 && existingOrHint.length > 0) {
+        maxSeq = existingOrHint.length;
+      }
+    } else if (typeof existingOrHint === 'number' && existingOrHint > 0) {
+      maxSeq = existingOrHint - 1;
     }
-    return `RMA-${currentYear}-${seqStr}-${randomSuffix}`;
+
+    // 2. Fallback to localStorage cache if existing array was not supplied
+    if (maxSeq === 0) {
+      try {
+        const rawReports = localStorage.getItem('cached_recent_reports') || localStorage.getItem('rma_reports_cache');
+        if (rawReports) {
+          const parsed = JSON.parse(rawReports);
+          if (Array.isArray(parsed)) {
+            parsed.forEach(r => {
+              const num = r.rma_number || r.rmaNumber || '';
+              const match = String(num).match(/RMA-\d{4}-(\d+)-/i);
+              if (match && match[1]) {
+                const p = parseInt(match[1], 10);
+                if (!isNaN(p) && p > maxSeq) maxSeq = p;
+              }
+            });
+            if (maxSeq === 0) maxSeq = parsed.length;
+          }
+        }
+      } catch {}
+    }
+
+    // 3. Increment persistent local counter
+    try {
+      const storageKey = `rma_last_seq_${currentYear}`;
+      const stored = parseInt(localStorage.getItem(storageKey) || '0', 10);
+      if (!isNaN(stored) && stored > maxSeq) {
+        maxSeq = stored;
+      }
+    } catch {}
+
+    const nextSeq = maxSeq + 1;
+    try {
+      localStorage.setItem(`rma_last_seq_${currentYear}`, String(nextSeq));
+    } catch {}
+
+    const seqStr = String(nextSeq).padStart(4, '0');
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let rand = '';
+    for (let i = 0; i < 4; i++) {
+      rand += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+
+    return `RMA-${currentYear}-${seqStr}-${rand}`;
   },
 
   /**
@@ -31284,6 +31689,7 @@ export const catalogService = {
    */
   async submitReport({ 
     rmaNumber: explicitRmaNumber = null,
+    rma_type = 'customer_inbound',
     barcode, 
     product, 
     quantity = 1, 
@@ -31388,6 +31794,7 @@ export const catalogService = {
 
     const reportRow = {
       rma_number: rmaNumber,
+      rma_type: rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound',
       barcode: cleanBarcode,
       code: isKnown ? (resolvedProduct.code || resolvedProduct.barcode) : null,
       name: isKnown ? resolvedProduct.name : `Unidentified Item (${cleanBarcode})`,
@@ -31451,6 +31858,9 @@ export const catalogService = {
       delete fallbackRow.ai_document_metadata;
       delete fallbackRow.google_drive_folder_url;
       delete fallbackRow.google_drive_folder_id;
+      if (reportError.message?.includes('rma_type')) {
+        delete fallbackRow.rma_type;
+      }
       const retry = await supabase.from('rma_reports').insert([fallbackRow]).select().single();
       if (!retry.error) {
         insertedReport = retry.data;
@@ -31516,6 +31926,30 @@ export const catalogService = {
       status: reportRow.status,
       report: finalReport
     };
+  },
+
+  /**
+   * Reclassify RMA Type between 'customer_inbound' and 'supplier_outbound'
+   */
+  async updateRMAType(id, rma_type) {
+    const cleanType = rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
+    const cleanId = String(id).trim();
+    const isNum = /^\d+$/.test(cleanId);
+
+    let query = supabase.from('rma_reports').update({ rma_type: cleanType });
+    if (isNum) {
+      query = query.eq('id', parseInt(cleanId, 10));
+    } else {
+      query = query.eq('rma_number', cleanId);
+    }
+
+    const { data, error } = await query.select().single();
+    if (error) {
+      console.error('Failed to update rma_type:', error);
+      throw error;
+    }
+    this.notifyChange('report-updated', { report: data });
+    return data;
   },
 
   /**
@@ -32034,7 +32468,6 @@ export const catalogService = {
   }
 };
 
-
 --- END FILE: src/services/catalogService.js ---
 
 --- START FILE: src/services/creditMemoService.js ---
@@ -32475,7 +32908,6 @@ export const creditMemoService = {
     return { success: true, deletedCount: targets.length };
   }
 };
-
 
 
 --- END FILE: src/services/creditMemoService.js ---
@@ -33044,7 +33476,6 @@ export const notificationService = {
     }
   }
 };
-
 
 --- END FILE: src/services/notificationService.js ---
 
@@ -33640,7 +34071,6 @@ export const pinRequestService = {
   }
 };
 
-
 --- END FILE: src/services/pinRequestService.js ---
 
 --- START FILE: src/services/purchaseOrdersApi.js ---
@@ -34053,7 +34483,6 @@ export const purchaseOrdersApi = {
     return [];
   }
 };
-
 --- END FILE: src/services/purchaseOrdersApi.js ---
 
 --- START FILE: src/services/supplierClaimService.js ---
@@ -34339,7 +34768,6 @@ export const supplierClaimService = {
     } catch (e) {}
   }
 };
-
 --- END FILE: src/services/supplierClaimService.js ---
 
 --- START FILE: src/utils/deviceFingerprint.js ---
@@ -34507,7 +34935,6 @@ export async function getDeviceFingerprint() {
   }
 }
 
-
 --- END FILE: src/utils/deviceFingerprint.js ---
 
 --- START FILE: src/utils/exportCsv.js ---
@@ -34617,6 +35044,154 @@ export function exportRMAReportsToCSV(reports, filename = null) {
 }
 
 /**
+ * Export Customer Inbound RMAs to CSV
+ */
+export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
+  if (!reports || reports.length === 0) {
+    alert('No customer return reports available to export.');
+    return;
+  }
+
+  const headers = [
+    'SN',
+    'RMA Number',
+    'Date Logged',
+    'Customer Store / Branch',
+    'Reporter Name',
+    'Reporter Contact',
+    'Sales Invoice (SI) #',
+    'Delivery Receipt (DR) #',
+    'Purchase Order (PO) #',
+    'Account Executive (AE)',
+    'AE Email',
+    'Barcode',
+    'Assigned SKU',
+    'Product Description',
+    'Quantity',
+    'Packaging Unit',
+    'Unit Price (PHP)',
+    'Total Credit Claim (PHP)',
+    'Lifecycle Stage / Status',
+    'Disposition',
+    'Condition Grade',
+    'Defect Reason',
+    'Credit Memo #',
+    'Google Drive Folder',
+    'Customer Notes'
+  ];
+
+  const rows = reports.map((r, index) => {
+    const qty = Number(r.quantity || 1);
+    const unitPrice = Number(r.price_with_vat || r.price || 0);
+    const totalVal = (qty * unitPrice).toFixed(2);
+    const dateStr = r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '';
+
+    return [
+      escapeCsvCell(index + 1),
+      escapeCsvCell(r.rma_number),
+      escapeCsvCell(dateStr),
+      escapeCsvCell(r.store_branch || ''),
+      escapeCsvCell(r.reporter_name || ''),
+      escapeCsvCell(r.reporter_contact || ''),
+      escapeCsvCell(r.si_number || ''),
+      escapeCsvCell(r.dr_number || r.invoice_dr_number || ''),
+      escapeCsvCell(r.po_number || ''),
+      escapeCsvCell(r.ae_name || ''),
+      escapeCsvCell(r.ae_email || ''),
+      escapeCsvCell(r.barcode),
+      escapeCsvCell(r.code || r.sku || ''),
+      escapeCsvCell(r.name),
+      escapeCsvCell(qty),
+      escapeCsvCell(r.unit_name || 'pc'),
+      escapeCsvCell(unitPrice.toFixed(2)),
+      escapeCsvCell(totalVal),
+      escapeCsvCell(r.status || 'received_at_dock'),
+      escapeCsvCell(r.disposition || 'Pending Triage'),
+      escapeCsvCell(r.condition_grade || 'Unassessed'),
+      escapeCsvCell(r.reason || ''),
+      escapeCsvCell(r.credit_memo_no || r.credit_memo_number || ''),
+      escapeCsvCell(r.google_drive_folder_url || ''),
+      escapeCsvCell(r.notes || '')
+    ].join(',');
+  });
+
+  const csv = [headers.join(','), ...rows].join('\r\n');
+  const actualFilename = filename || `Customer_Inbound_RMAs_${new Date().toISOString().slice(0, 10)}.csv`;
+  downloadCsvBlob(csv, actualFilename);
+}
+
+/**
+ * Export Supplier Outbound / RTV Debit Claims to CSV
+ */
+export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
+  if (!reports || reports.length === 0) {
+    alert('No supplier outbound claims available to export.');
+    return;
+  }
+
+  const headers = [
+    'SN',
+    'RMA Number',
+    'Date Logged',
+    'Master Supplier / Vendor',
+    'Warehouse Bin / Location',
+    'Batch / Lot #',
+    'Expiry Date',
+    'Barcode',
+    'Assigned SKU',
+    'Product Description',
+    'Quantity',
+    'Packaging Unit',
+    'Net Purchase Price (PHP)',
+    'Total Debit Value (PHP)',
+    'Condition Grade',
+    'Disposition',
+    'Debit Claim Status',
+    'Inspected By',
+    'Defect Reason / Diagnosis',
+    'Supplier PO #',
+    'Google Drive Folder',
+    'Warehouse Notes'
+  ];
+
+  const rows = reports.map((r, index) => {
+    const qty = Number(r.quantity || 1);
+    const unitPrice = Number(r.price || r.price_with_vat || 0);
+    const totalVal = (qty * unitPrice).toFixed(2);
+    const dateStr = r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '';
+
+    return [
+      escapeCsvCell(index + 1),
+      escapeCsvCell(r.rma_number),
+      escapeCsvCell(dateStr),
+      escapeCsvCell(r.supplier_name || 'Savemore'),
+      escapeCsvCell(r.warehouse_location || 'DOCK'),
+      escapeCsvCell(r.batch_lot_number || ''),
+      escapeCsvCell(r.expiry_date || ''),
+      escapeCsvCell(r.barcode),
+      escapeCsvCell(r.code || r.sku || ''),
+      escapeCsvCell(r.name),
+      escapeCsvCell(qty),
+      escapeCsvCell(r.unit_name || 'pc'),
+      escapeCsvCell(unitPrice.toFixed(2)),
+      escapeCsvCell(totalVal),
+      escapeCsvCell(r.condition_grade || 'Unassessed'),
+      escapeCsvCell(r.disposition || 'Return to Vendor (RTV)'),
+      escapeCsvCell(r.status || 'Pending Debit'),
+      escapeCsvCell(r.inspected_by || ''),
+      escapeCsvCell(r.reason || r.explanation || ''),
+      escapeCsvCell(r.po_number || r.supplier_po_no || ''),
+      escapeCsvCell(r.google_drive_folder_url || ''),
+      escapeCsvCell(r.notes || '')
+    ].join(',');
+  });
+
+  const csv = [headers.join(','), ...rows].join('\r\n');
+  const actualFilename = filename || `Supplier_Outbound_Claims_${new Date().toISOString().slice(0, 10)}.csv`;
+  downloadCsvBlob(csv, actualFilename);
+}
+
+/**
  * Export Credit Memos to CSV
  */
 export function exportCreditMemosToCSV(memos, filename = null) {
@@ -34677,7 +35252,6 @@ export function exportCreditMemosToCSV(memos, filename = null) {
   const actualFilename = filename || `Credit_Memos_Export_${new Date().toISOString().slice(0, 10)}.csv`;
   downloadCsvBlob(csv, actualFilename);
 }
-
 --- END FILE: src/utils/exportCsv.js ---
 
 --- START FILE: src/utils/printIsolatedElement.js ---
@@ -34758,17 +35332,16 @@ export function printIsolatedElement({
             margin: 0 !important;
             padding: 0 !important;
             width: 100% !important;
-            height: 100% !important;
+            min-height: 100% !important;
             background: #ffffff !important;
             color: #000000 !important;
-            overflow: hidden !important;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
           }
           body {
             display: flex !important;
             flex-direction: column !important;
             align-items: center !important;
-            justify-content: center !important;
+            justify-content: flex-start !important;
             page-break-before: avoid !important;
             page-break-after: avoid !important;
             page-break-inside: avoid !important;
@@ -34776,31 +35349,30 @@ export function printIsolatedElement({
           }
           .isolated-print-sheet {
             width: 100% !important;
-            height: 100% !important;
+            min-height: 100% !important;
             display: flex !important;
             flex-direction: column !important;
             align-items: center !important;
-            justify-content: center !important;
+            justify-content: flex-start !important;
             margin: 0 auto !important;
             padding: ${pageMargin} !important;
             box-sizing: border-box !important;
             text-align: center !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
-            overflow: hidden !important;
           }
           .isolated-print-card {
             margin: 0 auto !important;
             display: flex !important;
             flex-direction: column !important;
             align-items: center !important;
-            justify-content: center !important;
+            justify-content: flex-start !important;
             box-shadow: none !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
             max-width: 100% !important;
             box-sizing: border-box !important;
-            transform-origin: center center !important;
+            transform-origin: top center !important;
             ${scale !== 1.0 ? `transform: scale(${scale}) !important;` : ''}
           }
           ${customStyles}
@@ -34837,7 +35409,6 @@ export function printIsolatedElement({
   // Wait 150ms for layout & SVG render
   setTimeout(executePrint, 150);
 }
-
 
 --- END FILE: src/utils/printIsolatedElement.js ---
 
@@ -35703,7 +36274,6 @@ export function downloadQrSvg(svgElementOrId, filename = 'rma-qr-code.svg') {
   return true;
 }
 
-
 --- END FILE: src/utils/qrDownload.js ---
 
 --- START FILE: src/utils/rmaHelpers.js ---
@@ -35858,7 +36428,6 @@ export function generateAiDiagnosis(productName, defectCategory, photosCount = 0
 
   return diagnoses[Math.floor(Math.random() * diagnoses.length)];
 }
-
 --- END FILE: src/utils/rmaHelpers.js ---
 
 --- START FILE: src/data/mockData.js ---
@@ -36344,5 +36913,5 @@ export const INITIAL_TICKETS = [
     notes: '5 replacement scanners dispatched from Warehouse Inventory buffer stock to customer.'
   }
 ];
-
 --- END FILE: src/data/mockData.js ---
+

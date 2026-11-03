@@ -2,8 +2,8 @@ import { z, StandardErrorSchema, PaginationQuerySchema } from './common.js';
 
 export const CreditMemoSchema = z.object({
   id: z.number().int().openapi({ example: 78 }),
-  credit_memo_number: z.string().openapi({ example: 'CM-20261026-4412' }),
-  rma_number: z.string().openapi({ example: 'RMA-20261026-8941' }),
+  credit_memo_number: z.string().openapi({ example: 'CM-2026-0001-6TYH' }),
+  rma_number: z.string().openapi({ example: 'RMA-2026-0001-6TYH' }),
   barcode: z.string().openapi({ example: '4800016644833' }),
   product_name: z.string().openapi({ example: 'Oishi Prawn Crackers 50g' }),
   sku: z.string().nullable().optional().openapi({ example: 'P2678P' }),
@@ -25,10 +25,10 @@ export const CreditMemoSchema = z.object({
 }).openapi('CreditMemo');
 
 export const CreateCreditMemoSchema = z.object({
-  rma_number: z.string().min(1).openapi({ example: 'RMA-20261026-8941' }),
+  rma_number: z.string().min(1).openapi({ example: 'RMA-2026-0001-6TYH' }),
   barcode: z.string().min(1).openapi({ example: '4800016644833' }),
   product_name: z.string().min(1).openapi({ example: 'Oishi Prawn Crackers 50g' }),
-  pull_out_ref: z.string().min(1).openapi({ example: 'PO-2026-10-88' }),
+  pull_out_ref: z.string().min(1).openapi({ example: 'POR-2026-0001-6TYH' }),
   credit_amount: z.number().min(0.01).openapi({ example: 137.20 }),
   quantity: z.number().min(1).default(1).openapi({ example: 5 }),
   unit_price: z.number().optional().default(0).openapi({ example: 27.44 }),

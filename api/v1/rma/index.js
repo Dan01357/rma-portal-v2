@@ -120,10 +120,26 @@ export default async function handler(req, res) {
         });
       }
 
-      // Generate unique RMA Number: RMA-YYYYMMDD-XXXX
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-      const rmaNumber = `RMA-${dateStr}-${randomSuffix}`;
+      // Standardized Unique RMA Number: RMA-[YEAR]-[4-DIGIT-ASCENDING]-[4-CHAR-ALPHANUMERIC]
+      // Example: RMA-2026-0001-6TYH
+      const currentYear = new Date().getFullYear();
+      let nextSeq = 1;
+      try {
+        const { count } = await supabase.from('rma_reports').select('*', { count: 'exact', head: true });
+        if (typeof count === 'number' && count >= 0) {
+          nextSeq = count + 1;
+        }
+      } catch (countErr) {
+        console.warn('Count query notice for RMA sequence:', countErr.message);
+      }
+
+      const seqStr = String(nextSeq).padStart(4, '0');
+      const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+      let randomSuffix = '';
+      for (let i = 0; i < 4; i++) {
+        randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      const rmaNumber = `RMA-${currentYear}-${seqStr}-${randomSuffix}`;
 
       const reportPayload = {
         rma_number: rmaNumber,
