@@ -176,15 +176,15 @@ export const catalogService = {
    * 3. Fallback: If Google Drive credentials are not yet set or offline, uploads to Supabase Storage ('rma-photos').
    * 4. Tertiary Fallback: Offline Base64 Data URL so user never loses their submission.
    */
-  async uploadPhoto(file, rmaNumber = 'GENERAL', category = 'damaged_items') {
-    const details = await this.uploadPhotoWithDetails(file, rmaNumber, category);
+  async uploadPhoto(file, rmaNumber = 'GENERAL', category = 'damaged_items', extraMeta = {}) {
+    const details = await this.uploadPhotoWithDetails(file, rmaNumber, category, extraMeta);
     return details?.url || details;
   },
 
   /**
    * Upload photo and return full details including Google Drive folder URLs
    */
-  async uploadPhotoWithDetails(file, rmaNumber = 'GENERAL', category = 'damaged_items') {
+  async uploadPhotoWithDetails(file, rmaNumber = 'GENERAL', category = 'damaged_items', extraMeta = {}) {
     if (!file) return null;
     try {
       // 1. Client-Side Aggressive WebP Compression
@@ -201,7 +201,11 @@ export const catalogService = {
             fileName: compressed.name || `RMA_${rmaNumber}_${category}_${Date.now()}.webp`,
             mimeType: compressed.type || 'image/webp',
             rmaNumber,
-            category
+            category,
+            rmaType: extraMeta.rmaType || extraMeta.rma_type || 'customer_inbound',
+            customerName: extraMeta.customerName || extraMeta.storeBranch || extraMeta.store_branch || null,
+            storeBranch: extraMeta.storeBranch || extraMeta.store_branch || null,
+            supplierName: extraMeta.supplierName || extraMeta.supplier_name || null
           })
         });
 

@@ -161,14 +161,16 @@ When a delivery truck, return pallet, or customer shipment arrives at the wareho
 
 3. **Tap-First Dual-Zone Photo Capture & Google Drive Subfolder Architecture**:
    * **Zone 1: Damaged Product Photo (Required)**: Max 3 photos of damaged carton, crushed packaging, or broken product seals. Files are compressed via client-side WebP canvas to $< 180\text{KB}$.
-   * **Zone 2: Official Paperwork Photo (Required - Zero Typing UX)**: Warehouse clerks snap the paper Delivery Receipt (DR), Sales Invoice (SI), or Purchase Order (PO). The caption instructs: *"Don't type numbers! Snap your paper delivery receipt, DR, invoice, or PO."* Both product and paperwork photos are mandatory for submission.
-   * **Automated Hierarchical Google Drive Storage**: Rather than dumping files into a single flat directory, images are sorted into structured nested folders:
+   * **Zone 2: Official Paperwork Photo (Optional / Recommended - Zero Typing UX)**: Warehouse clerks snap the paper Delivery Receipt (DR), Sales Invoice (SI), or Purchase Order (PO). The caption instructs: *"Don't type numbers! Snap your paper delivery receipt, DR, invoice, or PO."*
+   * **Deferred Upload Guarantee (Zero Orphan Uploads)**: When users snap or upload photos in the intake form, images are held strictly in local browser memory via object URLs (`URL.createObjectURL`). **No network calls are made to Google Drive until the user officially clicks "Submit Return Report".** Abandoned, retaken, or unsubmitted photo sessions generate zero orphaned files on Google Drive.
+   * **Automated Hierarchical Google Drive Storage**: Rather than dumping files into a single flat directory, images are sorted into structured 6-tier nested folders:
      ```
-     Root: "Wholesale RMA Records"
-       └── [YYYY-MM] (e.g. 2026-10)
-           └── [RMA_NUMBER] (e.g. RMA-20261030-9841)
-               ├── 01_Damaged_Items/ (stores photos of defective products)
-               └── 02_Official_Paperwork/ (stores verified DR, SI, and PO photos)
+     Root: "Wholesale RMA Reports"
+       └── [Customer Folder (e.g. Savemore Taguig) OR Supplier Folder (e.g. Liwayway Marketing)]
+           └── [YYYY-MM] (e.g. 2026-11)
+               └── [RMA_NUMBER] (e.g. RMA-20261103-9841)
+                   ├── Proof of Damage/ (stores photos of defective merchandise)
+                   └── Invoice/ (stores verified DR, SI, and PO photos)
      ```
    * Public preview URLs (`https://lh3.googleusercontent.com/d/{fileId}`) are saved directly to `rma_reports.photos` and `rma_reports.paperwork_photos`.
    * **Full Lifecycle Google Drive Asset Deletion**: When an administrator permanently deletes an RMA report (single or bulk), the system calls the Google Drive API (`DELETE` / `trashed: true`) to purge the entire dedicated RMA folder (`google_drive_folder_id`) and all nested photos, leaving zero orphaned files.
@@ -484,16 +486,18 @@ To eliminate manual data entry for warehouse handlers and prevent fraudulent or 
      The DR number and store branch are auto-filled into the return ticket behind the scenes.
 
 ### 9.2 Structured Google Drive Storage Hierarchy
-Rather than saving proof photos in a flat unorganized folder, the upload service (`/api/upload-photo`) organizes all incoming media in a structured directory tree:
+Rather than saving proof photos in a flat unorganized folder, the upload service (`/api/upload-photo`) organizes all incoming media in a structured 6-tier directory tree:
 
 ```
-Root Folder: "Wholesale RMA Records"
-  └── [YYYY-MM] (e.g. 2026-10)
-      └── [RMA_NUMBER] (e.g. RMA-20261030-9841)
-          ├── 01_Damaged_Items/ (stores photos of defective goods)
-          └── 02_Official_Paperwork/ (stores verified DR, SI, and PO photos)
+Root Folder: "Wholesale RMA Reports"
+  └── [Customer Folder (e.g. Savemore Taguig) OR Supplier Folder (e.g. Liwayway Marketing)]
+      └── [YYYY-MM] (e.g. 2026-11)
+          └── [RMA_NUMBER] (e.g. RMA-20261103-9841)
+              ├── Proof of Damage/ (stores photos of defective goods)
+              └── Invoice/ (stores verified DR, SI, and PO photos)
 ```
 
+- **Deferred Upload Rule**: Photos captured or selected in the intake form are retained purely in client-side memory (`URL.createObjectURL`) and are NEVER transmitted to Google Drive until the user officially clicks "Submit Return Report".
 - **Database Preservation**:
   - `rma_reports.photos`: Array of URLs for damaged item photos.
   - `rma_reports.paperwork_photos`: Array of URLs for verified paperwork documents.

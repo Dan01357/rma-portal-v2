@@ -1533,19 +1533,11 @@ export default function App() {
       showToast(`Added ${availableSlots} photo(s). Maximum 3 photos allowed.`, 'info');
     }
 
-    const currentBarcode = barcodeInput.trim() || 'DOCK';
-    const newPhotos = filesToProcess.map(file => {
-      // Start background upload immediately so it's completed by the time user clicks submit!
-      const uploadPromise = catalogService.uploadPhoto(file, currentBarcode).catch(err => {
-        console.warn('Background photo upload warning:', err);
-        return null;
-      });
-      return {
-        file,
-        previewUrl: URL.createObjectURL(file),
-        uploadPromise
-      };
-    });
+    // Keep photos local in browser until final report submission (prevents orphan Google Drive uploads)
+    const newPhotos = filesToProcess.map(file => ({
+      file,
+      previewUrl: URL.createObjectURL(file)
+    }));
 
     setPhotoFiles(prev => [...prev, ...newPhotos]);
     if (e.target) e.target.value = ''; // Reset input value so subsequent snaps fire onChange reliably
@@ -1819,15 +1811,22 @@ export default function App() {
     // 4. Background execution: hierarchical Google Drive upload, Supabase insertion, email
     (async () => {
       try {
-        // Upload damaged item photos to 01_Damaged_Items
+        const photoMeta = {
+          rmaType: determinedRmaType,
+          customerName: capturedStoreBranch,
+          storeBranch: capturedStoreBranch,
+          supplierName: capturedProduct?.supplier_name
+        };
+
+        // Upload damaged item photos to Proof of Damage
         const damagedUploadPromises = capturedPhotos.map(item => {
-          if (item.file) return catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'damaged_items');
+          if (item.file) return catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'damaged_items', photoMeta);
           return null;
         }).filter(Boolean);
 
-        // Upload official paperwork photos to 02_Official_Paperwork
+        // Upload official paperwork photos to Invoice
         const paperworkUploadPromises = capturedPaperworkPhotos.map(item => {
-          if (item.file) return catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'official_paperwork');
+          if (item.file) return catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'official_paperwork', photoMeta);
           return null;
         }).filter(Boolean);
 

@@ -148,9 +148,13 @@ async function getGoogleAccessToken(creds, signal) {
  * Passing supportsAllDrives=true and includeItemsFromAllDrives=true for Shared Drives.
  */
 async function findOrCreateFolder(folderName, parentFolderId, accessToken, signal) {
-  if (!parentFolderId) return null;
+  const safeName = (folderName || 'General').trim();
+  const escapedName = safeName.replace(/'/g, "\\'");
 
-  let query = `mimeType = 'application/vnd.google-apps.folder' and name = '${folderName}' and '${parentFolderId}' in parents and trashed = false`;
+  let query = `mimeType = 'application/vnd.google-apps.folder' and name = '${escapedName}' and trashed = false`;
+  if (parentFolderId) {
+    query += ` and '${parentFolderId}' in parents`;
+  }
 
   const searchRes = await fetch(
     `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
@@ -169,9 +173,9 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
 
   // Create subfolder inside parent
   const meta = {
-    name: folderName,
+    name: safeName,
     mimeType: 'application/vnd.google-apps.folder',
-    parents: [parentFolderId],
+    ...(parentFolderId ? { parents: [parentFolderId] } : {}),
   };
 
   const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true', {
@@ -186,7 +190,7 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
 
   if (!createRes.ok) {
     const errText = await createRes.text();
-    console.warn(`[Google Drive] Subfolder creation notice: ${errText}`);
+    console.warn(`[Google Drive] Folder creation notice for "${safeName}": ${errText}`);
     return parentFolderId;
   }
 
@@ -212,23 +216,34 @@ async function findOrCreateFolderCached(folderName, parentFolderId, accessToken,
 
 /**
  * Resolves structured folder hierarchy:
- * Wholesale RMA Records
- *   └── [YYYY-MM]
- *       └── [RMA_NUMBER]
- *           ├── 01_Damaged_Items/
- *           └── 02_Official_Paperwork/
+ * Wholesale RMA Reports
+ *   └── Customer Folder (e.g. Savemore Taguig) OR Supplier Folder (e.g. Liwayway Marketing)
+ *       └── [YYYY-MM]
+ *           └── [RMA_NUMBER]
+ *               ├── Proof of Damage/
+ *               └── Invoice/
  */
-async function resolveRmaHierarchy({ rootFolderId, rmaNumber, category, accessToken, signal }) {
+async function resolveRmaHierarchy({
+  rootFolderId,
+  rmaNumber,
+  category,
+  rmaType = 'customer_inbound',
+  customerName = null,
+  storeBranch = null,
+  supplierName = null,
+  accessToken,
+  signal
+}) {
   const now = new Date();
   const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
   let currentParentId = rootFolderId;
 
-  // 1. Root folder: "Wholesale RMA Records"
+  // 1. Root folder: "Wholesale RMA Reports" (or legacy "Wholesale RMA Records")
   if (!currentParentId) {
     try {
       const searchRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and name = 'Wholesale RMA Records' and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Wholesale RMA Reports' or name = 'Wholesale RMA Records') and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
         { headers: { Authorization: `Bearer ${accessToken}` }, signal }
       );
       if (searchRes.ok) {
@@ -250,32 +265,48 @@ async function resolveRmaHierarchy({ rootFolderId, rmaNumber, category, accessTo
       );
       if (infoRes.ok) {
         const info = await infoRes.json();
-        if (info.name !== 'Wholesale RMA Records') {
-          const subRoot = await findOrCreateFolderCached('Wholesale RMA Records', currentParentId, accessToken, signal);
+        if (info.name !== 'Wholesale RMA Reports' && info.name !== 'Wholesale RMA Records') {
+          const subRoot = await findOrCreateFolderCached('Wholesale RMA Reports', currentParentId, accessToken, signal);
           if (subRoot) currentParentId = subRoot;
         }
       }
     } catch (e) {
       console.warn('[Google Drive] Root verification notice:', e.message);
     }
+  } else {
+    const newRoot = await findOrCreateFolder('Wholesale RMA Reports', null, accessToken, signal);
+    if (newRoot) currentParentId = newRoot;
   }
 
-  // 2. Monthly: [YYYY-MM]
+  // 2. Level 2: Customer Folder or Supplier Folder
+  // If supplier_outbound -> Supplier Name (e.g., 'Liwayway Marketing')
+  // If customer_inbound -> Customer Store / Branch (e.g., 'Savemore Market - Taguig')
+  let rawEntity = (rmaType === 'supplier_outbound')
+    ? (supplierName && supplierName !== 'Warehouse' ? supplierName : (storeBranch || supplierName || 'General Suppliers'))
+    : (storeBranch || customerName || 'General Customers');
+
+  const cleanEntity = String(rawEntity).replace(/[\\/:*?"<>|]/g, '-').trim() || 'General';
+  const entityFolderId = await findOrCreateFolderCached(cleanEntity, currentParentId, accessToken, signal);
+  if (entityFolderId) {
+    currentParentId = entityFolderId;
+  }
+
+  // 3. Level 3: Year-Month [YYYY-MM] (e.g. 2026-11)
   const monthFolderId = await findOrCreateFolderCached(yearMonth, currentParentId, accessToken, signal);
   if (monthFolderId) {
     currentParentId = monthFolderId;
   }
 
-  // 3. RMA Number: [RMA_NUMBER]
+  // 4. Level 4: RMA Reference [RMA_NUMBER]
   const cleanRma = (rmaNumber && rmaNumber !== 'GENERAL') ? String(rmaNumber).trim() : 'General_Intake';
   const rmaFolderId = await findOrCreateFolderCached(cleanRma, currentParentId, accessToken, signal);
   if (rmaFolderId) {
     currentParentId = rmaFolderId;
   }
 
-  // 4. Subfolder: 01_Damaged_Items or 02_Official_Paperwork
-  const isPaperwork = category === 'official_paperwork' || category === 'paperwork';
-  const subFolderName = isPaperwork ? '02_Official_Paperwork' : '01_Damaged_Items';
+  // 5. Level 5: Invoice Folder or Proof of Damage/Return Folder
+  const isPaperwork = category === 'official_paperwork' || category === 'paperwork' || category === 'invoice';
+  const subFolderName = isPaperwork ? 'Invoice' : 'Proof of Damage';
   const targetSubfolderId = await findOrCreateFolderCached(subFolderName, currentParentId, accessToken, signal);
 
   const rmaFolderUrl = rmaFolderId
@@ -495,7 +526,11 @@ export default async function handler(req, res) {
     fileName,
     mimeType = 'image/webp',
     rmaNumber = 'GENERAL',
-    category = 'damaged_items'
+    category = 'damaged_items',
+    rmaType = 'customer_inbound',
+    customerName = null,
+    storeBranch = null,
+    supplierName = null
   } = req.body || {};
 
   if (!fileData) {
@@ -518,7 +553,7 @@ export default async function handler(req, res) {
     const accessToken = await getGoogleAccessToken(creds, controller.signal);
 
     // 4. Resolve target folder in Google Drive with clean hierarchical structure:
-    // Wholesale RMA Records / [YYYY-MM] / [RMA_NUMBER] / [01_Damaged_Items | 02_Official_Paperwork]
+    // Wholesale RMA Reports / [Customer or Supplier] / [YYYY-MM] / [RMA_NUMBER] / [Proof of Damage | Invoice]
     const {
       targetFolderId,
       rmaFolderId,
@@ -527,6 +562,10 @@ export default async function handler(req, res) {
       rootFolderId: creds.folderId,
       rmaNumber,
       category,
+      rmaType,
+      customerName,
+      storeBranch,
+      supplierName,
       accessToken,
       signal: controller.signal
     });

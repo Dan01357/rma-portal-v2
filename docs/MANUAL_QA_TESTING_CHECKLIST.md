@@ -202,10 +202,20 @@ Each test scenario defines:
     * `Signed by [Reporter Name] • Physical Return Handover Sign-Off`
     Enables warehouse clerks and receiving drivers to physically sign the ticket immediately after printing.
 
-- [ ] **TC-AI-04 (Google Drive Subfolder Organization: /01_Damaged_Items vs /02_Official_Paperwork)**
-  * **Location**: Google Workspace Drive -> Root: `Wholesale RMA Records`
-  * **Action**: Submit an RMA containing both damaged product photos and an official delivery receipt.
-  * **Expected Behavior**: Automatic directory creation: `Wholesale RMA Records/YYYY-MM/RMA-[NUMBER]/`. Damaged product photos are stored under `01_Damaged_Items/`; verified receipts are stored under `02_Official_Paperwork/`.
+- [ ] **TC-AI-04 (Deferred Upload Guarantee & 6-Tier Google Drive Storage Hierarchy)**
+  * **Location**: Google Workspace Drive -> Root: `Wholesale RMA Reports`
+  * **Deferred Upload Verification**:
+    1. Open public intake, snap or upload 2 photos of damaged merchandise, and attach a paperwork photo.
+    2. Before clicking submit, check Google Drive: **Zero files or folders must be created.** All images remain purely in client-side memory (`URL.createObjectURL`).
+    3. Cancel or remove one photo and change input fields. Verify still zero orphaned files on Google Drive.
+  * **Hierarchy Creation upon Final Submission**:
+    1. Click **"Submit Return Report"**.
+    2. Google Drive background worker automatically resolves the exact 6-tier directory path:
+       `Wholesale RMA Reports` -> `[Customer Folder OR Supplier Folder]` -> `[YYYY-MM]` -> `[RMA_NUMBER]` -> `Proof of Damage` OR `Invoice`.
+    3. Damaged product photos are stored under `Proof of Damage/`.
+    4. Verified DR, SI, or PO paperwork photos are stored under `Invoice/`.
+    5. Customer returns (`rma_type: 'customer_inbound'`) route into customer store branch folder (e.g., `Savemore Market - Taguig`).
+    6. Warehouse floor defects (`rma_type: 'supplier_outbound'`) route into master vendor folder (e.g., `Liwayway Marketing`).
 
 - [ ] **TC-AI-05 (Admin Side-by-Side Paperwork Inspection & DR# Manual Override)**
   * **Location**: Admin Return Reports -> Quick RMA Action Modal
@@ -826,23 +836,29 @@ Each test scenario defines:
     3. Audit trail records update event.
 
 ### 10.2 Structured Google Drive Storage Hierarchy Verification
-- [ ] **TC-GDRIVE-HIERARCHY-01 (Automated Subfolder Creation & Separation)**
+- [ ] **TC-GDRIVE-HIERARCHY-01 (6-Tier Directory Structure & Deferred Upload Verification)**
   * **Location**: Google Workspace Drive Service (`/api/upload-photo`)
-  * **Action**: Submit an RMA report with 2 damaged merchandise photos and 1 verified paperwork photo.
-  * **Expected Behavior**:
-    1. Upload utility automatically discovers or creates the root folder: `Wholesale RMA Records`.
-    2. Creates current monthly subfolder: `[YYYY-MM]` (e.g. `2026-10`).
-    3. Creates dedicated RMA subfolder: `[RMA_NUMBER]` (e.g. `RMA-20261030-9841`).
-    4. Creates category subfolders inside RMA folder:
-       - `01_Damaged_Items/` (stores photos of defective goods)
-       - `02_Official_Paperwork/` (stores verified DR/SI/PO photos)
-    5. Database saves `rma_reports.photos` array pointing to `01_Damaged_Items` URLs and `rma_reports.paperwork_photos` array pointing to `02_Official_Paperwork` URLs.
-    6. `rma_reports.google_drive_folder_url` stores the direct URL to the `[RMA_NUMBER]` parent folder.
+  * **Deferred Upload Check**: Snapping or selecting photos in the public reporter must hold images strictly in memory (`URL.createObjectURL`); no network requests are sent to Google Drive and zero folders are created until the report is officially submitted.
+  * **6-Tier Path Resolution**:
+    1. Root Folder: `Wholesale RMA Reports` (with seamless fallback detection of legacy `Wholesale RMA Records`).
+    2. Level 2 Entity Folder:
+       - Customer return (`rma_type: 'customer_inbound'`): Named after customer/branch (e.g. `Savemore Market - Taguig`).
+       - Supplier RTV (`rma_type: 'supplier_outbound'`): Named after master supplier (e.g. `Liwayway Marketing`).
+    3. Level 3 Monthly Folder: `[YYYY-MM]` (e.g. `2026-11`).
+    4. Level 4 RMA Subfolder: Dedicated folder named `[RMA_NUMBER]` (e.g. `RMA-20261103-9841`).
+    5. Level 5 Category Subfolders:
+       - `Proof of Damage/` for damaged merchandise photos.
+       - `Invoice/` for official delivery receipts, commercial invoices, or purchase orders.
+    6. Level 6 Files: WebP compressed images stored securely inside their respective category subfolder.
+  * **Database Persistence**:
+    - `rma_reports.photos` array stores public preview URLs for files in `Proof of Damage/`.
+    - `rma_reports.paperwork_photos` array stores public preview URLs for files in `Invoice/`.
+    - `rma_reports.google_drive_folder_url` stores the direct URL to the `[RMA_NUMBER]` parent folder.
 
 - [ ] **TC-GDRIVE-HIERARCHY-02 (Direct Link to Organized RMA Folder in Admin Modal)**
   * **Location**: `QuickRMAActionModal` -> Ticket Details
   * **Action**: Click the **"Open RMA Drive Folder"** button with amber Folder icon.
-  * **Expected Behavior**: Directly opens the specific `[RMA_NUMBER]` folder in Google Drive in a new tab, displaying `01_Damaged_Items` and `02_Official_Paperwork` neatly organized.
+  * **Expected Behavior**: Directly opens the specific `[RMA_NUMBER]` folder in Google Drive in a new tab, displaying `Proof of Damage` and `Invoice` neatly organized under the proper Customer/Supplier and Month path.
 
 ---
 
