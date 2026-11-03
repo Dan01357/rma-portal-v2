@@ -1380,8 +1380,16 @@ export default function App() {
             localStorage.setItem('rma_portal_admin_session', JSON.stringify(user));
             sessionStorage.removeItem('rma_login_pending_email');
             setCurrentUser(user);
-            setIsAdminView(true);
             setIsLoginModalOpen(false);
+
+            // ONLY switch to admin view if the user is explicitly on an admin route!
+            // If the user opened or navigated to the public reporter or intake page, NEVER switch them to admin automatically.
+            const currentPath = (typeof window !== 'undefined' ? window.location.pathname.toLowerCase() : '');
+            const currentHash = (typeof window !== 'undefined' ? window.location.hash.toLowerCase() : '');
+            const isOnAdminRoute = currentPath === '/admin' || currentPath.startsWith('/admin/') || currentHash === '#/admin' || (typeof window !== 'undefined' && window.location.search.includes('admin=true'));
+            if (isOnAdminRoute) {
+              setIsAdminView(true);
+            }
           }
         } catch (e) { }
       }

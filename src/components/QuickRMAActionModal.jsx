@@ -87,6 +87,15 @@ export default function QuickRMAActionModal({
   const [isUpdatingType, setIsUpdatingType] = useState(false);
   const [typeFeedback, setTypeFeedback] = useState(null);
 
+  // Official Logistics Paperwork (DR / Invoice / PO) & AI Overrides
+  const [adminDrNumber, setAdminDrNumber] = useState('');
+  const [adminStoreBranch, setAdminStoreBranch] = useState('');
+  const [adminExpiryDate, setAdminExpiryDate] = useState('');
+  const [adminBatchLot, setAdminBatchLot] = useState('');
+  const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
+  const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
+  const [copyDrSuccess, setCopyDrSuccess] = useState(false);
+
   // Reclassify RMA Type between customer_inbound and supplier_outbound
   const handleToggleRmaType = async (newType) => {
     if (!report || isUpdatingType) return;
@@ -330,6 +339,15 @@ export default function QuickRMAActionModal({
     }
   }, [isOpen, rmaNumber, recentReportsList]);
 
+  // Synchronize AI-extracted or existing paperwork document details whenever report changes
+  useEffect(() => {
+    setAdminDrNumber(report?.invoice_dr_number || report?.ai_document_metadata?.invoice_dr_number || '');
+    setAdminStoreBranch(report?.store_branch || report?.ai_document_metadata?.store_branch || '');
+    setAdminExpiryDate(report?.expiry_date || '');
+    setAdminBatchLot(report?.batch_lot_number || '');
+    setIsEditingAiDetails(false);
+  }, [report?.id, report?.invoice_dr_number, report?.store_branch, report?.expiry_date, report?.batch_lot_number]);
+
   // Step 1: Request OTP for authorized company admin
   const handleRequestOtp = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -432,6 +450,41 @@ export default function QuickRMAActionModal({
     setAuthSuccessMsg(null);
   };
 
+  const handleSaveAiDetails = async () => {
+    if (!report?.id) return;
+    setIsSavingAiDetails(true);
+    try {
+      const { error } = await supabase
+        .from('rma_reports')
+        .update({
+          invoice_dr_number: adminDrNumber.trim() || null,
+          store_branch: adminStoreBranch.trim() || null,
+          expiry_date: adminExpiryDate || null,
+          batch_lot_number: adminBatchLot.trim() || null
+        })
+        .eq('id', report.id);
+
+      if (error) throw error;
+      report.invoice_dr_number = adminDrNumber.trim();
+      report.store_branch = adminStoreBranch.trim();
+      report.expiry_date = adminExpiryDate || null;
+      report.batch_lot_number = adminBatchLot.trim() || null;
+      setIsEditingAiDetails(false);
+      onReportUpdated && onReportUpdated({
+        ...report,
+        invoice_dr_number: adminDrNumber.trim(),
+        store_branch: adminStoreBranch.trim(),
+        expiry_date: adminExpiryDate || null,
+        batch_lot_number: adminBatchLot.trim() || null
+      });
+    } catch (e) {
+      console.error('Failed to update AI details:', e);
+      alert('Failed to save updated DR/Branch details.');
+    } finally {
+      setIsSavingAiDetails(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   // Derive catalog & memo status for this report
@@ -467,56 +520,6 @@ export default function QuickRMAActionModal({
     ? (Array.isArray(report.paperwork_photos) ? report.paperwork_photos : [report.paperwork_photos])
     : [];
   const aiMetadata = report?.ai_document_metadata || null;
-  const [adminDrNumber, setAdminDrNumber] = useState(report?.invoice_dr_number || aiMetadata?.invoice_dr_number || '');
-  const [adminStoreBranch, setAdminStoreBranch] = useState(report?.store_branch || aiMetadata?.store_branch || '');
-  const [adminExpiryDate, setAdminExpiryDate] = useState(report?.expiry_date || '');
-  const [adminBatchLot, setAdminBatchLot] = useState(report?.batch_lot_number || '');
-  const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
-  const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
-  const [copyDrSuccess, setCopyDrSuccess] = useState(false);
-
-  useEffect(() => {
-    setAdminDrNumber(report?.invoice_dr_number || report?.ai_document_metadata?.invoice_dr_number || '');
-    setAdminStoreBranch(report?.store_branch || report?.ai_document_metadata?.store_branch || '');
-    setAdminExpiryDate(report?.expiry_date || '');
-    setAdminBatchLot(report?.batch_lot_number || '');
-    setIsEditingAiDetails(false);
-  }, [report?.id, report?.invoice_dr_number, report?.store_branch, report?.expiry_date, report?.batch_lot_number]);
-
-  const handleSaveAiDetails = async () => {
-    if (!report?.id) return;
-    setIsSavingAiDetails(true);
-    try {
-      const { error } = await supabase
-        .from('rma_reports')
-        .update({
-          invoice_dr_number: adminDrNumber.trim() || null,
-          store_branch: adminStoreBranch.trim() || null,
-          expiry_date: adminExpiryDate || null,
-          batch_lot_number: adminBatchLot.trim() || null
-        })
-        .eq('id', report.id);
-
-      if (error) throw error;
-      report.invoice_dr_number = adminDrNumber.trim();
-      report.store_branch = adminStoreBranch.trim();
-      report.expiry_date = adminExpiryDate || null;
-      report.batch_lot_number = adminBatchLot.trim() || null;
-      setIsEditingAiDetails(false);
-      onReportUpdated && onReportUpdated({
-        ...report,
-        invoice_dr_number: adminDrNumber.trim(),
-        store_branch: adminStoreBranch.trim(),
-        expiry_date: adminExpiryDate || null,
-        batch_lot_number: adminBatchLot.trim() || null
-      });
-    } catch (e) {
-      console.error('Failed to update AI details:', e);
-      alert('Failed to save updated DR/Branch details.');
-    } finally {
-      setIsSavingAiDetails(false);
-    }
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-in fade-in duration-200">

@@ -14,11 +14,11 @@ import {
 import { downloadQrCodePng, downloadBoxStickerPng, printBoxSticker } from '../utils/qrDownload';
 
 export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickAction }) {
-  if (!isOpen || !report) return null;
-
   const [downloadingType, setDownloadingType] = useState(null); // 'qr' | 'label' | null
   const [downloadNotice, setDownloadNotice] = useState(null);
   const [isPrinting, setIsPrinting] = useState(false);
+
+  if (!isOpen || !report) return null;
 
   const rmaNumber = report.rma_number || report.rmaNumber || report.id || 'N/A';
   const barcode = report.barcode || 'N/A';
