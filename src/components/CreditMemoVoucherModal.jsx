@@ -118,7 +118,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
               className="voucher-sheet p-6 sm:p-8 space-y-4 sm:space-y-5 print:p-2 print:space-y-3.5"
             >
               
-              {/* Header with Unified Corporate Identity (Divisions Removed) */}
+              {/* Header with Unified Corporate Identity */}
               <div className="border-b-2 border-slate-900 pb-3 sm:pb-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="pl-1">
@@ -242,9 +242,12 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
               {/* Signatures & Certification Grid */}
               <div className="pt-6 sm:pt-7 border-t border-slate-200 grid grid-cols-3 gap-3 text-center text-xs">
                 <div className="space-y-1">
-                  <div className="border-b border-slate-400 pb-1 font-bold text-slate-900 text-xs">
-                    {memo.credit_issued_by || 'Analiza B. Benoza'}
-                  </div>
+                  <input
+                    type="text"
+                    defaultValue={memo.credit_issued_by || 'Analiza B. Benoza'}
+                    className="border-b border-slate-400 pb-1 font-bold text-slate-900 text-xs text-center w-full bg-transparent border-t-0 border-l-0 border-r-0 focus:outline-none focus:ring-1 focus:ring-purple-500 rounded print:border-b print:border-slate-400"
+                    title="Click to edit Finance Head name if needed"
+                  />
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">
                     Finance Head
                   </span>
@@ -291,4 +294,3 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
     </div>
   );
 }
-

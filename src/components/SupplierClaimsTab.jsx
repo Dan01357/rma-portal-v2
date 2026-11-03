@@ -560,7 +560,23 @@ export default function SupplierClaimsTab({
         elementId: 'rtv-voucher-mount',
         documentTitle: `Supplier_Debit_Claim_${existingClaim.claimNumber || existingClaim.claim_number || 'Voucher'}`,
         pageSize: 'portrait',
-        pageMargin: '0.35in'
+        pageMargin: '0.35in',
+        customStyles: `
+          #rtv-voucher-mount {
+            width: 100% !important;
+            max-width: 195mm !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            box-shadow: none !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+          }
+          #rtv-voucher-mount input {
+            border: none !important;
+            outline: none !important;
+            background: transparent !important;
+          }
+        `
       });
     }, 250);
   };
@@ -581,7 +597,23 @@ export default function SupplierClaimsTab({
       elementId: 'rtv-voucher-mount',
       documentTitle: `Supplier_Debit_Claim_${activeClaimBatch.claimNumber || activeClaimBatch.claim_number || 'Voucher'}`,
       pageSize: 'portrait',
-      pageMargin: '0.35in'
+      pageMargin: '0.35in',
+      customStyles: `
+        #rtv-voucher-mount {
+          width: 100% !important;
+          max-width: 195mm !important;
+          margin: 0 auto !important;
+          padding: 0 !important;
+          box-shadow: none !important;
+          background: #ffffff !important;
+          color: #000000 !important;
+        }
+        #rtv-voucher-mount input {
+          border: none !important;
+          outline: none !important;
+          background: transparent !important;
+        }
+      `
     });
   };
 

@@ -24,6 +24,27 @@ export function printIsolatedElement({
   // Clone target element
   const clone = sourceEl.cloneNode(true);
 
+  // Synchronize dynamic form controls (inputs, textareas, selects) from live DOM into cloned DOM
+  try {
+    const sourceInputs = sourceEl.querySelectorAll('input, textarea, select');
+    const cloneInputs = clone.querySelectorAll('input, textarea, select');
+    sourceInputs.forEach((srcInput, idx) => {
+      const clnInput = cloneInputs[idx];
+      if (clnInput) {
+        if (srcInput.type === 'checkbox' || srcInput.type === 'radio') {
+          clnInput.checked = srcInput.checked;
+          if (srcInput.checked) clnInput.setAttribute('checked', 'checked');
+          else clnInput.removeAttribute('checked');
+        } else {
+          clnInput.value = srcInput.value;
+          clnInput.setAttribute('value', srcInput.value);
+        }
+      }
+    });
+  } catch (syncErr) {
+    console.warn('Form controls clone sync notice:', syncErr);
+  }
+
   // Remove existing print iframe if any
   const existingIframe = document.getElementById('app-isolated-print-iframe');
   if (existingIframe) {
@@ -76,12 +97,10 @@ export function printIsolatedElement({
             padding: 0 !important;
             width: 100% !important;
             height: auto !important;
-            min-height: 0 !important;
-            max-height: 100% !important;
-            overflow: hidden !important;
             background: #ffffff !important;
             color: #000000 !important;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+            overflow: visible !important;
           }
           body {
             display: flex !important;
@@ -96,8 +115,6 @@ export function printIsolatedElement({
           .isolated-print-sheet {
             width: 100% !important;
             height: auto !important;
-            min-height: 0 !important;
-            max-height: 100% !important;
             display: flex !important;
             flex-direction: column !important;
             align-items: center !important;
@@ -108,7 +125,8 @@ export function printIsolatedElement({
             text-align: center !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
-            overflow: hidden !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
           }
           .isolated-print-card {
             margin: 0 auto !important;
@@ -119,10 +137,20 @@ export function printIsolatedElement({
             box-shadow: none !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
             max-width: 100% !important;
             box-sizing: border-box !important;
             transform-origin: top center !important;
-            ${scale !== 1.0 ? `transform: scale(${scale}) !important;` : ''}
+            ${scale !== 1.0 ? `zoom: ${scale};` : ''}
+          }
+          @media print {
+            body, .isolated-print-sheet, .isolated-print-card, #thermal-label-mount, #rtv-voucher-mount {
+              page-break-after: avoid !important;
+              break-after: avoid !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
           }
           ${customStyles}
         </style>
@@ -158,4 +186,3 @@ export function printIsolatedElement({
   // Wait 150ms for layout & SVG render
   setTimeout(executePrint, 150);
 }
-
