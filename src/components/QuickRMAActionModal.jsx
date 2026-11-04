@@ -186,22 +186,23 @@ export default function QuickRMAActionModal({
         audit_trail: [...existingAudit, newAuditEvent]
       };
 
-      const { data, error } = await supabase
-        .from('rma_reports')
-        .update(updates)
-        .eq('id', report.id)
-        .select('*')
-        .single();
+      // Synchronize across both parent and any child items under this ticket
+      const targetQuery = report.rma_number
+        ? supabase.from('rma_reports').update(updates).eq('rma_number', report.rma_number)
+        : supabase.from('rma_reports').update(updates).eq('id', report.id);
+
+      const { data, error } = await targetQuery.select('*');
 
       if (error) {
         alert(`Failed to save warehouse triage: ${error.message}`);
       } else {
-        const updatedReport = data || { ...report, ...updates };
-        setReport(updatedReport);
+        const rows = Array.isArray(data) ? data : (data ? [data] : []);
+        const primaryReport = rows.find(r => !r.parent_rma_id) || rows[0] || { ...report, ...updates };
+        setReport(primaryReport);
         setTriageSavedSuccess(true);
         setTimeout(() => setTriageSavedSuccess(false), 3000);
-        if (onRefresh) onRefresh(updatedReport);
-        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'triage-updated', reportId: report.id, report: updatedReport } }));
+        if (onRefresh) onRefresh(primaryReport);
+        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'triage-updated', reportId: primaryReport.id, rmaNumber: primaryReport.rma_number, report: primaryReport } }));
       }
     } catch (err) {
       alert(`Error updating triage: ${err.message}`);
@@ -443,10 +444,12 @@ export default function QuickRMAActionModal({
     let isMounted = true;
     const cleanRma = String(rmaNumber).trim();
 
-    // Try local list first for instant responsiveness
+    // Try local list first for instant responsiveness - ALWAYS prefer parent record (!r.parent_rma_id)
     const localMatch = recentReportsList.find(
-      r => String(r.rma_number || '').toUpperCase() === cleanRma.toUpperCase() ||
+      r => (String(r.rma_number || '').toUpperCase() === cleanRma.toUpperCase() && !r.parent_rma_id) ||
            String(r.id) === cleanRma
+    ) || recentReportsList.find(
+      r => String(r.rma_number || '').toUpperCase() === cleanRma.toUpperCase()
     );
 
     if (localMatch) {
@@ -467,7 +470,7 @@ export default function QuickRMAActionModal({
           query = query.ilike('rma_number', cleanRma);
         }
 
-        const { data, error } = await query.limit(1);
+        const { data, error } = await query;
 
         if (!isMounted) return;
 
@@ -477,7 +480,8 @@ export default function QuickRMAActionModal({
             setReportError(`Failed to load RMA record: ${error.message}`);
           }
         } else if (data && data.length > 0) {
-          setReport(data[0]);
+          const primary = data.find(d => !d.parent_rma_id) || data[0];
+          setReport(primary);
         } else if (!localMatch) {
           setReportError(`No return report found matching "${cleanRma}". Please check the QR code or serial number.`);
         }
@@ -500,13 +504,25 @@ export default function QuickRMAActionModal({
     if (!isOpen || !rmaNumber || !recentReportsList.length) return;
     const cleanRma = String(rmaNumber).trim().toUpperCase();
     const match = recentReportsList.find(
-      r => String(r.rma_number || '').toUpperCase() === cleanRma || String(r.id) === cleanRma
+      r => (String(r.rma_number || '').toUpperCase() === cleanRma && !r.parent_rma_id) ||
+           String(r.id) === cleanRma
+    ) || recentReportsList.find(
+      r => String(r.rma_number || '').toUpperCase() === cleanRma
     );
     if (match) {
       setReport(prev => {
         if (!prev) return match;
-        // Only trigger state update if meaningful fields actually changed
-        if (prev.status !== match.status || prev.code !== match.code || prev.name !== match.name || prev.notes !== match.notes) {
+        // Do not downgrade an existing parent record to a child record
+        if (!prev.parent_rma_id && match.parent_rma_id) return prev;
+        if (
+          prev.status !== match.status ||
+          prev.disposition !== match.disposition ||
+          prev.condition_grade !== match.condition_grade ||
+          prev.warehouse_location !== match.warehouse_location ||
+          prev.code !== match.code ||
+          prev.name !== match.name ||
+          prev.notes !== match.notes
+        ) {
           return match;
         }
         return prev;

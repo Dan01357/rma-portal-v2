@@ -5038,11 +5038,24 @@ export default function App() {
         onOpenLightbox={setLightboxPhoto}
         onRefresh={(updated) => {
           if (updated && (updated.id || updated.rma_number)) {
-            setRecentReportsList(prev => prev.map(r =>
-              (r.id === updated.id || (r.rma_number && r.rma_number === updated.rma_number))
-                ? { ...r, ...updated }
-                : r
-            ));
+            setRecentReportsList(prev => prev.map(r => {
+              if (r.id === updated.id) {
+                return { ...r, ...updated };
+              }
+              if (r.rma_number && r.rma_number === updated.rma_number) {
+                return {
+                  ...r,
+                  status: updated.status !== undefined ? updated.status : r.status,
+                  disposition: updated.disposition !== undefined ? updated.disposition : r.disposition,
+                  condition_grade: updated.condition_grade !== undefined ? updated.condition_grade : r.condition_grade,
+                  warehouse_location: updated.warehouse_location !== undefined ? updated.warehouse_location : r.warehouse_location,
+                  inspected_by: updated.inspected_by !== undefined ? updated.inspected_by : r.inspected_by,
+                  inspected_at: updated.inspected_at !== undefined ? updated.inspected_at : r.inspected_at,
+                  notes: updated.notes !== undefined ? updated.notes : r.notes
+                };
+              }
+              return r;
+            }));
           }
           refreshAllData();
         }}
