@@ -382,7 +382,7 @@ export default function BufferExchangeSlipModal({
                   <div>
                     <span className="text-[9.5px] uppercase font-bold text-slate-400 block">Receiving Customer / Store</span>
                     <div className="font-black text-slate-900 text-xs sm:text-sm mt-0.5">
-                      {rep.store_branch || rep.supplier_name || 'Savemore'}
+                      {rep.store_branch || rep.supplier_name || rep.company || 'Customer Store'}
                     </div>
                   </div>
                   <div>
@@ -400,7 +400,7 @@ export default function BufferExchangeSlipModal({
                   <div>
                     <span className="text-[9.5px] uppercase font-bold text-slate-400 block">Assigned AE / Coordinator</span>
                     <div className="font-bold text-slate-800 text-xs mt-0.5">
-                      {rep.ae_name || rep.reported_by || 'Wholesale Operations'}
+                      {rep.ae_name ? (rep.ae_email ? `${rep.ae_name} (${rep.ae_email})` : rep.ae_name) : 'Unassigned'}
                     </div>
                   </div>
                 </div>

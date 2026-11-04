@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-04T08:14:53.570Z
+Generated At: 2026-11-04T09:14:06.442Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -14995,7 +14995,7 @@ export default function BufferExchangeSlipModal({
                   <div>
                     <span className="text-[9.5px] uppercase font-bold text-slate-400 block">Receiving Customer / Store</span>
                     <div className="font-black text-slate-900 text-xs sm:text-sm mt-0.5">
-                      {rep.store_branch || rep.supplier_name || 'Savemore'}
+                      {rep.store_branch || rep.supplier_name || rep.company || 'Customer Store'}
                     </div>
                   </div>
                   <div>
@@ -15013,7 +15013,7 @@ export default function BufferExchangeSlipModal({
                   <div>
                     <span className="text-[9.5px] uppercase font-bold text-slate-400 block">Assigned AE / Coordinator</span>
                     <div className="font-bold text-slate-800 text-xs mt-0.5">
-                      {rep.ae_name || rep.reported_by || 'Wholesale Operations'}
+                      {rep.ae_name ? (rep.ae_email ? `${rep.ae_name} (${rep.ae_email})` : rep.ae_name) : 'Unassigned'}
                     </div>
                   </div>
                 </div>
@@ -25183,7 +25183,8 @@ import {
   Scissors,
   Truck,
   Plus,
-  Minus
+  Minus,
+  ArrowRightLeft
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
@@ -25309,6 +25310,7 @@ export default function QuickRMAActionModal({
       if (qty > 1) {
         setSplitPart1Qty(Math.max(1, qty - 1));
         setSplitPart1Location(report.warehouse_location || '');
+        setSplitPart2Reason(report.reason || 'Damaged packaging / Defective units');
       }
     }
   }, [report]);
@@ -25406,7 +25408,9 @@ export default function QuickRMAActionModal({
     }
   };
 
-  const maxSplitVal = Math.max(1, (Number(report?.quantity) || 2) - 1);
+  const totalSplitQty = Number(report?.quantity) || 0;
+  const maxSplitVal = Math.max(1, totalSplitQty - 1);
+  const derivedPart2Qty = Math.max(1, totalSplitQty - (parseInt(splitPart1Qty, 10) || 1));
 
   const handleSplitPart1Change = (val) => {
     if (val === '') {
@@ -25417,11 +25421,23 @@ export default function QuickRMAActionModal({
     if (!isNaN(parsed)) {
       if (parsed > maxSplitVal) {
         setSplitPart1Qty(maxSplitVal);
-      } else if (parsed < 0) {
+      } else if (parsed < 1) {
         setSplitPart1Qty(1);
       } else {
         setSplitPart1Qty(parsed);
       }
+    }
+  };
+
+  const handleSplitPart2Change = (val) => {
+    if (val === '') {
+      setSplitPart1Qty(maxSplitVal);
+      return;
+    }
+    const parsed = parseInt(val, 10);
+    if (!isNaN(parsed)) {
+      const clampedP2 = Math.max(1, Math.min(maxSplitVal, parsed));
+      setSplitPart1Qty(totalSplitQty - clampedP2);
     }
   };
 
@@ -25440,6 +25456,18 @@ export default function QuickRMAActionModal({
     const current = parseInt(splitPart1Qty, 10) || 1;
     const next = Math.max(1, Math.min(maxSplitVal, current + delta));
     setSplitPart1Qty(next);
+  };
+
+  const stepSplitPart2 = (delta) => {
+    stepSplitPart1(-delta);
+  };
+
+  const handleSwapSplit = () => {
+    const p1 = parseInt(splitPart1Qty, 10) || 1;
+    const p2 = totalSplitQty - p1;
+    if (p2 >= 1 && p2 <= maxSplitVal) {
+      setSplitPart1Qty(p2);
+    }
   };
 
   const handleExecuteSplit = async () => {
@@ -25490,13 +25518,17 @@ export default function QuickRMAActionModal({
         price_with_vat: report.price_with_vat || 0,
         unit_name: report.unit_name || 'pc',
         quantity: p2Qty,
+        total_quantity: p2Qty,
         condition_grade: splitPart2Grade,
         disposition: splitPart2Disposition,
         warehouse_location: splitPart2Location ? splitPart2Location.trim().toUpperCase() : 'SCRAP-BIN',
         status: 'received_at_dock',
-        reason: splitPart2Reason || report.reason || 'Damaged packaging (Split)',
+        reason: splitPart2Reason || report.reason || 'Damaged packaging / Defective units',
         explanation: `Split from ${report.rma_number} (${p2Qty} of ${totalQty} units). Disposition: ${splitPart2Disposition}`,
         parent_rma_id: report.id,
+        items: Array.isArray(report.items) && report.items.length > 0
+          ? [{ ...report.items[0], quantity: p2Qty, reason: splitPart2Reason || report.reason }]
+          : [],
         photos: report.photos || [],
         paperwork_photos: report.paperwork_photos || [],
         store_branch: report.store_branch,
@@ -25538,11 +25570,18 @@ export default function QuickRMAActionModal({
       const existingAudit = Array.isArray(report.audit_trail) ? [...report.audit_trail] : [];
       const parentUpdates = {
         quantity: p1Qty,
+        total_quantity: p1Qty,
+        status: (report.status === 'pending_admin_details' || !report.status || report.status === 'pending')
+          ? 'received_at_dock'
+          : report.status,
         condition_grade: splitPart1Grade,
         disposition: splitPart1Disposition,
-        warehouse_location: splitPart1Location ? splitPart1Location.trim().toUpperCase() : null,
+        warehouse_location: splitPart1Location ? splitPart1Location.trim().toUpperCase() : report.warehouse_location || null,
         inspected_by: inspectorName,
         inspected_at: timestamp,
+        items: Array.isArray(report.items) && report.items.length > 0
+          ? report.items.map((it, idx) => idx === 0 ? { ...it, quantity: p1Qty } : it)
+          : report.items,
         notes: `${report.notes ? report.notes + ' | ' : ''}Split: Kept ${p1Qty} units (${splitPart1Disposition}), split ${p2Qty} units to ${childRmaNumber} (${splitPart2Disposition})`,
         audit_trail: [
           ...existingAudit,
@@ -26776,27 +26815,38 @@ export default function QuickRMAActionModal({
                 {/* INLINE PARTIAL TRIAGE & LINE ITEM SPLIT MODULE */}
                 {isSplitting && (
                   <div className="p-3.5 bg-blue-50/80 dark:bg-blue-950/40 border-2 border-blue-300 dark:border-blue-800 rounded-2xl space-y-3.5 my-2 animate-in fade-in duration-200">
-                    <div className="flex items-center justify-between border-b border-blue-200 dark:border-blue-800/80 pb-2">
+                    <div className="flex items-center justify-between border-b border-blue-200 dark:border-blue-800/80 pb-2 flex-wrap gap-2">
                       <div className="flex items-center gap-2">
                         <div className="p-1.5 bg-blue-600 text-white rounded-lg">
                           <Scissors className="w-3.5 h-3.5" />
                         </div>
                         <div>
                           <h6 className="text-xs font-black text-blue-950 dark:text-blue-100 uppercase tracking-wider">
-                            Partial Triage & Split Quantity
+                            Partial Triage &amp; Split Quantity
                           </h6>
                           <p className="text-[10px] text-blue-700 dark:text-blue-300">
-                            Total to split: <strong>{Number(report.quantity)} {report.unit_name || 'pcs'}</strong> of {report.name}
+                            Total to split: <strong>{totalSplitQty} {report.unit_name || 'pcs'}</strong> of {report.name}
                           </p>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setIsSplitting(false)}
-                        className="text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 rounded-lg"
-                      >
-                        Cancel
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={handleSwapSplit}
+                          className="px-2.5 py-1 bg-blue-100 hover:bg-blue-200 active:bg-blue-300 dark:bg-blue-900/60 dark:hover:bg-blue-800 text-blue-800 dark:text-blue-200 text-xs font-extrabold rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                          title="Instantly swap Part 1 and Part 2 quantities"
+                        >
+                          <ArrowRightLeft className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                          <span>Swap Quantities</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsSplitting(false)}
+                          className="text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 rounded-lg cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -26896,14 +26946,43 @@ export default function QuickRMAActionModal({
                             Part 2 (New Ticket: {report.rma_number}-B)
                           </span>
                           <span className="text-xs font-black text-amber-600 dark:text-amber-400">
-                            {Math.max(0, (Number(report.quantity) || 0) - (Number(splitPart1Qty) || 0))} {report.unit_name || 'pcs'}
+                            {derivedPart2Qty} {report.unit_name || 'pcs'}
                           </span>
                         </div>
 
                         <div>
-                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Remaining Quantity</label>
-                          <div className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-black text-slate-700 dark:text-slate-300">
-                            {Math.max(0, (Number(report.quantity) || 0) - (Number(splitPart1Qty) || 0))} {report.unit_name || 'pcs'} (Calculated)
+                          <div className="flex items-center justify-between mb-0.5">
+                            <label className="text-[9.5px] font-extrabold uppercase text-amber-800 dark:text-amber-300 block">Quantity for New Ticket *</label>
+                            <span className="text-[9px] font-bold text-slate-400">Max: {maxSplitVal}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => stepSplitPart2(-1)}
+                              disabled={derivedPart2Qty <= 1}
+                              className="w-8 h-8 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-amber-800 dark:text-amber-300 font-bold flex items-center justify-center disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors shrink-0"
+                              title="Decrease Part 2 quantity"
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+                            <input
+                              type="number"
+                              min="1"
+                              max={maxSplitVal}
+                              value={derivedPart2Qty}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => handleSplitPart2Change(e.target.value)}
+                              className="flex-1 px-2.5 py-1.5 bg-amber-50/50 dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-black text-center text-amber-900 dark:text-amber-200 focus:outline-none focus:border-amber-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => stepSplitPart2(1)}
+                              disabled={derivedPart2Qty >= maxSplitVal}
+                              className="w-8 h-8 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-amber-800 dark:text-amber-300 font-bold flex items-center justify-center disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors shrink-0"
+                              title="Increase Part 2 quantity"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
 
@@ -26944,6 +27023,17 @@ export default function QuickRMAActionModal({
                             onChange={(e) => setSplitPart2Location(e.target.value)}
                             placeholder="e.g. SCRAP-BIN-01"
                             className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white uppercase font-mono"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Defect / Reason for Part 2</label>
+                          <input
+                            type="text"
+                            value={splitPart2Reason}
+                            onChange={(e) => setSplitPart2Reason(e.target.value)}
+                            placeholder="e.g. Damaged packaging"
+                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
                           />
                         </div>
                       </div>
