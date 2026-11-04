@@ -31,7 +31,9 @@ import {
   Folder,
   Copy,
   Scissors,
-  Truck
+  Truck,
+  Plus,
+  Minus
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
@@ -254,14 +256,50 @@ export default function QuickRMAActionModal({
     }
   };
 
+  const maxSplitVal = Math.max(1, (Number(report?.quantity) || 2) - 1);
+
+  const handleSplitPart1Change = (val) => {
+    if (val === '') {
+      setSplitPart1Qty('');
+      return;
+    }
+    const parsed = parseInt(val, 10);
+    if (!isNaN(parsed)) {
+      if (parsed > maxSplitVal) {
+        setSplitPart1Qty(maxSplitVal);
+      } else if (parsed < 0) {
+        setSplitPart1Qty(1);
+      } else {
+        setSplitPart1Qty(parsed);
+      }
+    }
+  };
+
+  const handleSplitPart1Blur = () => {
+    const parsed = parseInt(splitPart1Qty, 10);
+    if (isNaN(parsed) || parsed < 1) {
+      setSplitPart1Qty(1);
+    } else if (parsed > maxSplitVal) {
+      setSplitPart1Qty(maxSplitVal);
+    } else {
+      setSplitPart1Qty(parsed);
+    }
+  };
+
+  const stepSplitPart1 = (delta) => {
+    const current = parseInt(splitPart1Qty, 10) || 1;
+    const next = Math.max(1, Math.min(maxSplitVal, current + delta));
+    setSplitPart1Qty(next);
+  };
+
   const handleExecuteSplit = async () => {
     if (!report || isExecutingSplit) return;
     const totalQty = Number(report.quantity) || 0;
     const p1Qty = parseInt(splitPart1Qty, 10);
     const p2Qty = totalQty - p1Qty;
 
-    if (p1Qty < 1 || p2Qty < 1 || p1Qty + p2Qty !== totalQty) {
-      alert(`Invalid split quantities. Part 1 (${p1Qty}) + Part 2 (${p2Qty}) must equal total (${totalQty}).`);
+    if (isNaN(p1Qty) || p1Qty < 1 || p2Qty < 1 || p1Qty + p2Qty !== totalQty) {
+      alert(`Invalid split quantities. Part 1 must be between 1 and ${Math.max(1, totalQty - 1)}.`);
       return;
     }
 
@@ -1619,25 +1657,45 @@ export default function QuickRMAActionModal({
                             Part 1 (Current: {report.rma_number})
                           </span>
                           <span className="text-xs font-black text-slate-900 dark:text-white">
-                            {splitPart1Qty} {report.unit_name || 'pcs'}
+                            {splitPart1Qty !== '' ? splitPart1Qty : 0} {report.unit_name || 'pcs'}
                           </span>
                         </div>
 
                         <div>
-                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Quantity to Keep on This Ticket *</label>
-                          <input
-                            type="number"
-                            min="1"
-                            max={Math.max(1, (Number(report.quantity) || 2) - 1)}
-                            value={splitPart1Qty}
-                            onChange={(e) => {
-                              const maxVal = Math.max(1, (Number(report.quantity) || 2) - 1);
-                              const parsed = parseInt(e.target.value, 10);
-                              if (isNaN(parsed)) setSplitPart1Qty(1);
-                              else setSplitPart1Qty(Math.max(1, Math.min(parsed, maxVal)));
-                            }}
-                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
-                          />
+                          <div className="flex items-center justify-between mb-0.5">
+                            <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block">Quantity to Keep on This Ticket *</label>
+                            <span className="text-[9px] font-bold text-slate-400">Max: {maxSplitVal}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => stepSplitPart1(-1)}
+                              disabled={Number(splitPart1Qty) <= 1}
+                              className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold flex items-center justify-center disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors shrink-0"
+                              title="Decrease quantity"
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+                            <input
+                              type="number"
+                              min="1"
+                              max={maxSplitVal}
+                              value={splitPart1Qty}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => handleSplitPart1Change(e.target.value)}
+                              onBlur={handleSplitPart1Blur}
+                              className="flex-1 px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-black text-center text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => stepSplitPart1(1)}
+                              disabled={Number(splitPart1Qty) >= maxSplitVal}
+                              className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold flex items-center justify-center disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors shrink-0"
+                              title="Increase quantity"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
 
                         <div>
@@ -1688,14 +1746,14 @@ export default function QuickRMAActionModal({
                             Part 2 (New Ticket: {report.rma_number}-B)
                           </span>
                           <span className="text-xs font-black text-amber-600 dark:text-amber-400">
-                            {Math.max(1, (Number(report.quantity) || 0) - splitPart1Qty)} {report.unit_name || 'pcs'}
+                            {Math.max(0, (Number(report.quantity) || 0) - (Number(splitPart1Qty) || 0))} {report.unit_name || 'pcs'}
                           </span>
                         </div>
 
                         <div>
                           <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Remaining Quantity</label>
                           <div className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-black text-slate-700 dark:text-slate-300">
-                            {Math.max(1, (Number(report.quantity) || 0) - splitPart1Qty)} {report.unit_name || 'pcs'} (Calculated)
+                            {Math.max(0, (Number(report.quantity) || 0) - (Number(splitPart1Qty) || 0))} {report.unit_name || 'pcs'} (Calculated)
                           </div>
                         </div>
 
