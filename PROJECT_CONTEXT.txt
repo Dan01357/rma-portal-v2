@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-04T03:40:55.466Z
+Generated At: 2026-11-04T04:31:16.322Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -14869,7 +14869,9 @@ export default function CreditMemoModal({
                   onChange={(e) => setUnitName(e.target.value)}
                   className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer h-9"
                 >
-                  <option value="pc">pc</option>
+                  <option value="pc">pc (piece)</option>
+                  <option value="box">box</option>
+                  <option value="carton">carton</option>
                   <option value="case">case</option>
                 </select>
               </div>
@@ -19802,8 +19804,10 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                     onChange={(e) => setFormData({ ...formData, unitName: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer"
                   >
-                    <option value="pc">pc</option>
-                    <option value="case">case</option>
+                    <option value="pc">pc (piece)</option>
+                  <option value="box">box</option>
+                  <option value="carton">carton</option>
+                  <option value="case">case</option>
                   </select>
                 </div>
               </div>
@@ -23322,7 +23326,9 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                   onChange={(e) => setUnitName(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer"
                 >
-                  <option value="pc">pc</option>
+                  <option value="pc">pc (piece)</option>
+                  <option value="box">box</option>
+                  <option value="carton">carton</option>
                   <option value="case">case</option>
                 </select>
               </div>

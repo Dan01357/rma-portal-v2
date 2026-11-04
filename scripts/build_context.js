@@ -150,3 +150,4 @@ console.log(` - Root: ${rootOutputFile}`);
 console.log(` - Public: ${publicOutputFile}`);
 if (fs.existsSync(distDir)) console.log(` - Dist: ${distOutputFile}`);
 console.log(`[build_context] File size: ${(stats.size / 1024 / 1024).toFixed(2)} MB (${stats.size} bytes)`);
+

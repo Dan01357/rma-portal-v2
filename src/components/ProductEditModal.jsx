@@ -614,7 +614,9 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                   onChange={(e) => setUnitName(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer"
                 >
-                  <option value="pc">pc</option>
+                  <option value="pc">pc (piece)</option>
+                  <option value="box">box</option>
+                  <option value="carton">carton</option>
                   <option value="case">case</option>
                 </select>
               </div>
