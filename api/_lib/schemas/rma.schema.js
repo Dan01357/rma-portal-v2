@@ -133,6 +133,9 @@ export function registerRMARoutes(registry) {
         rma_type: z.enum(['customer_inbound', 'supplier_outbound']).optional().openapi({ description: 'Filter by logistics type: customer_inbound or supplier_outbound', example: 'customer_inbound' }),
         status: z.string().optional().openapi({ description: 'Filter by status (pending, resolved, etc.)', example: 'pending' }),
         barcode: z.string().optional().openapi({ description: 'Filter by exact product barcode', example: '4800016644833' }),
+        disposition: z.string().optional().openapi({ description: 'Filter by warehouse triage disposition (e.g. "Restock to Inventory", "Return to Vendor (RTV)", "Scrap / Dispose")', example: 'Restock to Inventory' }),
+        condition_grade: z.string().optional().openapi({ description: 'Filter by item grade condition', example: 'A - Like New / Resellable' }),
+        warehouse_location: z.string().optional().openapi({ description: 'Filter by bin or rack storage location', example: 'RACK-03-BIN-A' }),
         search: z.string().optional().openapi({ description: 'Search term across RMA #, name, SKU, or reporter', example: 'Oishi' })
       })
     },

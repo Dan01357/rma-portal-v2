@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   // 2. GET: List RMA Reports with query filters
   if (req.method === 'GET') {
     try {
-      const { rma_type, status, barcode, search, limit = '50', offset = '0' } = req.query;
+      const { rma_type, status, barcode, search, disposition, condition_grade, warehouse_location, limit = '50', offset = '0' } = req.query;
 
       const numLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
       const numOffset = Math.max(parseInt(offset, 10) || 0, 0);
@@ -32,6 +32,15 @@ export default async function handler(req, res) {
       }
       if (barcode) {
         query = query.eq('barcode', barcode.trim());
+      }
+      if (disposition) {
+        query = query.ilike('disposition', `%${disposition.trim()}%`);
+      }
+      if (condition_grade) {
+        query = query.ilike('condition_grade', `%${condition_grade.trim()}%`);
+      }
+      if (warehouse_location) {
+        query = query.ilike('warehouse_location', `%${warehouse_location.trim()}%`);
       }
       if (search) {
         query = query.or(`name.ilike.%${search}%,code.ilike.%${search}%,rma_number.ilike.%${search}%,reporter_name.ilike.%${search}%`);
