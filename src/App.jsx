@@ -1792,17 +1792,17 @@ export default function App() {
     e.preventDefault();
 
     // 0. Gatekeeper Check: Block return if station device is locked out or session expired
-    if (!isAdminView && !currentUser && (intakeSlug || gateSession)) {
+    if (!isAdminView && !currentUser) {
+      if (!gateSession) {
+        showToast('This station is locked. Please enter PIN to resume.', 'warning');
+        return;
+      }
       const active = accessKeyService.getActiveSession(intakeSlug || gateSession?.slug);
       if (!active) {
         showToast('Your return session has expired. You cannot submit this report.', 'error');
         setGateSession(null);
         return;
       }
-    }
-    if (isGatekeeperLocked) {
-      showToast('This station is locked. Please request an admin or enter PIN to resume.', 'warning');
-      return;
     }
 
     // 1. Gather all line items: previously added manifest items + active item if user has typed a barcode
