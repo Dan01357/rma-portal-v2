@@ -28,20 +28,21 @@ export default async function handler(req, res) {
     return isNumeric ? query.eq('id', parseInt(cleanId, 10)) : query.eq('rma_number', cleanId);
   };
 
-  // 1. GET: Fetch single RMA
+  // 1. GET: Fetch single or manifest RMA
   if (req.method === 'GET') {
     try {
-      const { data, error } = await matchRma(supabase.from('rma_reports').select('*')).maybeSingle();
+      const { data, error } = await matchRma(supabase.from('rma_reports').select('*'));
 
       if (error) {
         return sendJson(res, 500, { success: false, error: 'DATABASE_ERROR', message: error.message });
       }
 
-      if (!data) {
+      if (!data || data.length === 0) {
         return sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: `RMA report ${cleanId} not found.` });
       }
 
-      return sendJson(res, 200, { success: true, data });
+      const result = data.length === 1 ? data[0] : data;
+      return sendJson(res, 200, { success: true, data: result });
     } catch (err) {
       return sendJson(res, 500, { success: false, error: 'SERVER_ERROR', message: err.message });
     }
@@ -79,20 +80,23 @@ export default async function handler(req, res) {
 
       const { data, error } = await matchRma(
         supabase.from('rma_reports').update(updateData).select('*')
-      ).maybeSingle();
+      );
 
       if (error) {
         return sendJson(res, 500, { success: false, error: 'UPDATE_ERROR', message: error.message });
       }
 
-      if (!data) {
+      if (!data || data.length === 0) {
         return sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: `RMA report ${cleanId} not found.` });
       }
 
+      const result = data.length === 1 ? data[0] : data;
+      const rmaNum = Array.isArray(data) ? data[0]?.rma_number : data?.rma_number;
+
       return sendJson(res, 200, {
         success: true,
-        message: `RMA report ${data.rma_number} updated by ${client.name}.`,
-        data
+        message: `RMA report ${rmaNum || cleanId} updated by ${client.name} (${data.length} item${data.length > 1 ? 's' : ''} updated).`,
+        data: result
       });
     } catch (err) {
       return sendJson(res, 500, { success: false, error: 'SERVER_ERROR', message: err.message });
@@ -104,20 +108,23 @@ export default async function handler(req, res) {
     try {
       const { data, error } = await matchRma(
         supabase.from('rma_reports').delete().select('id, rma_number, name')
-      ).maybeSingle();
+      );
 
       if (error) {
         return sendJson(res, 500, { success: false, error: 'DELETE_ERROR', message: error.message });
       }
 
-      if (!data) {
+      if (!data || data.length === 0) {
         return sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: `RMA report ${cleanId} not found.` });
       }
 
+      const result = data.length === 1 ? data[0] : data;
+      const rmaNum = Array.isArray(data) ? data[0]?.rma_number : data?.rma_number;
+
       return sendJson(res, 200, {
         success: true,
-        message: `RMA report ${data.rma_number} deleted by ${client.name}.`,
-        deleted: data
+        message: `RMA report ${rmaNum || cleanId} deleted by ${client.name} (${data.length} item${data.length > 1 ? 's' : ''} removed).`,
+        deleted: result
       });
     } catch (err) {
       return sendJson(res, 500, { success: false, error: 'SERVER_ERROR', message: err.message });
