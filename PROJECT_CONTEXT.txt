@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-04T04:31:16.322Z
+Generated At: 2026-11-04T04:51:52.700Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -24492,7 +24492,8 @@ import {
   KeyRound,
   ArrowLeft,
   Folder,
-  Copy
+  Copy,
+  Scissors
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
@@ -24550,6 +24551,19 @@ export default function QuickRMAActionModal({
   const [isUpdatingType, setIsUpdatingType] = useState(false);
   const [typeFeedback, setTypeFeedback] = useState(null);
 
+  // Partial Triage & Line Item Split State
+  const [isSplitting, setIsSplitting] = useState(false);
+  const [splitPart1Qty, setSplitPart1Qty] = useState(1);
+  const [splitPart1Grade, setSplitPart1Grade] = useState('A - Like New / Resellable');
+  const [splitPart1Disposition, setSplitPart1Disposition] = useState('2- Restock to Inventory');
+  const [splitPart1Location, setSplitPart1Location] = useState('');
+  const [splitPart2Grade, setSplitPart2Grade] = useState('D - Total Loss / Scrap');
+  const [splitPart2Disposition, setSplitPart2Disposition] = useState('5- Scrap / Dispose');
+  const [splitPart2Location, setSplitPart2Location] = useState('SCRAP-BIN');
+  const [splitPart2Reason, setSplitPart2Reason] = useState('Damaged packaging / Defective units');
+  const [isExecutingSplit, setIsExecutingSplit] = useState(false);
+  const [splitSuccessMessage, setSplitSuccessMessage] = useState('');
+
   // Official Logistics Paperwork (DR / Invoice / PO) & AI Overrides
   const [adminDrNumber, setAdminDrNumber] = useState('');
   const [adminStoreBranch, setAdminStoreBranch] = useState('');
@@ -24592,6 +24606,12 @@ export default function QuickRMAActionModal({
       setDisposition(normalizeDispositionOption(report.disposition));
       setWarehouseLocation(report.warehouse_location || '');
       setRmaStatus(report.status || 'received_at_dock');
+
+      const qty = Number(report.quantity) || 1;
+      if (qty > 1) {
+        setSplitPart1Qty(Math.max(1, qty - 1));
+        setSplitPart1Location(report.warehouse_location || '');
+      }
     }
   }, [report]);
 
@@ -24642,6 +24662,153 @@ export default function QuickRMAActionModal({
       alert(`Error updating triage: ${err.message}`);
     } finally {
       setIsSavingTriage(false);
+    }
+  };
+
+  const handleExecuteSplit = async () => {
+    if (!report || isExecutingSplit) return;
+    const totalQty = Number(report.quantity) || 0;
+    const p1Qty = parseInt(splitPart1Qty, 10);
+    const p2Qty = totalQty - p1Qty;
+
+    if (p1Qty < 1 || p2Qty < 1 || p1Qty + p2Qty !== totalQty) {
+      alert(`Invalid split quantities. Part 1 (${p1Qty}) + Part 2 (${p2Qty}) must equal total (${totalQty}).`);
+      return;
+    }
+
+    setIsExecutingSplit(true);
+    try {
+      const inspectorName = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
+
+      // 1. Generate unique child RMA Number (e.g. RMA-2026-0005-96LJ-B)
+      let childRmaNumber = `${report.rma_number}-B`;
+      const { data: existingChild } = await supabase
+        .from('rma_reports')
+        .select('rma_number')
+        .eq('rma_number', childRmaNumber)
+        .maybeSingle();
+
+      if (existingChild) {
+        childRmaNumber = `${report.rma_number}-C`;
+        const { data: existingChildC } = await supabase
+          .from('rma_reports')
+          .select('rma_number')
+          .eq('rma_number', childRmaNumber)
+          .maybeSingle();
+        if (existingChildC) {
+          childRmaNumber = `${report.rma_number}-D`;
+        }
+      }
+
+      const timestamp = new Date().toISOString();
+
+      // 2. Insert new child ticket (Part 2)
+      const childPayload = {
+        rma_number: childRmaNumber,
+        barcode: report.barcode,
+        code: report.code,
+        name: report.name,
+        supplier_name: report.supplier_name || 'Savemore',
+        price: report.price || 0,
+        price_with_vat: report.price_with_vat || 0,
+        unit_name: report.unit_name || 'pc',
+        quantity: p2Qty,
+        condition_grade: splitPart2Grade,
+        disposition: splitPart2Disposition,
+        warehouse_location: splitPart2Location ? splitPart2Location.trim().toUpperCase() : 'SCRAP-BIN',
+        status: 'received_at_dock',
+        reason: splitPart2Reason || report.reason || 'Damaged packaging (Split)',
+        explanation: `Split from ${report.rma_number} (${p2Qty} of ${totalQty} units). Disposition: ${splitPart2Disposition}`,
+        parent_rma_id: report.id,
+        photos: report.photos || [],
+        paperwork_photos: report.paperwork_photos || [],
+        store_branch: report.store_branch,
+        si_number: report.si_number,
+        dr_number: report.dr_number,
+        po_number: report.po_number,
+        invoice_dr_number: report.invoice_dr_number,
+        reporter_name: report.reporter_name,
+        reporter_contact: report.reporter_contact,
+        reported_by: report.reported_by,
+        ae_name: report.ae_name,
+        ae_email: report.ae_email,
+        company: report.company,
+        rma_type: report.rma_type || 'customer_inbound',
+        inspected_by: inspectorName,
+        inspected_at: timestamp,
+        notes: `Split from parent ticket ${report.rma_number}. Triage: ${splitPart2Disposition}`,
+        audit_trail: [
+          {
+            timestamp,
+            stage: 'SPLIT_CREATED',
+            actor: inspectorName,
+            condition_grade: splitPart2Grade,
+            disposition: splitPart2Disposition,
+            note: `Created via partial split from ${report.rma_number} (${p2Qty} ${report.unit_name || 'pcs'})`
+          }
+        ]
+      };
+
+      const { data: newChild, error: childError } = await supabase
+        .from('rma_reports')
+        .insert([childPayload])
+        .select('*')
+        .single();
+
+      if (childError) throw childError;
+
+      // 3. Update Parent Ticket (Part 1)
+      const existingAudit = Array.isArray(report.audit_trail) ? [...report.audit_trail] : [];
+      const parentUpdates = {
+        quantity: p1Qty,
+        condition_grade: splitPart1Grade,
+        disposition: splitPart1Disposition,
+        warehouse_location: splitPart1Location ? splitPart1Location.trim().toUpperCase() : null,
+        inspected_by: inspectorName,
+        inspected_at: timestamp,
+        notes: `${report.notes ? report.notes + ' | ' : ''}Split: Kept ${p1Qty} units (${splitPart1Disposition}), split ${p2Qty} units to ${childRmaNumber} (${splitPart2Disposition})`,
+        audit_trail: [
+          ...existingAudit,
+          {
+            timestamp,
+            stage: 'SPLIT_EXECUTED',
+            actor: inspectorName,
+            condition_grade: splitPart1Grade,
+            disposition: splitPart1Disposition,
+            note: `Split ticket: Kept ${p1Qty} units on ${report.rma_number}, created ${childRmaNumber} with ${p2Qty} units`
+          }
+        ]
+      };
+
+      const { data: updatedParent, error: parentError } = await supabase
+        .from('rma_reports')
+        .update(parentUpdates)
+        .eq('id', report.id)
+        .select('*')
+        .single();
+
+      if (parentError) throw parentError;
+
+      // 4. Update local state
+      const finalParent = updatedParent || { ...report, ...parentUpdates };
+      setReport(finalParent);
+      setConditionGrade(splitPart1Grade);
+      setDisposition(normalizeDispositionOption(splitPart1Disposition));
+      setWarehouseLocation(splitPart1Location || '');
+      setIsSplitting(false);
+      setSplitSuccessMessage(`Successfully split: Kept ${p1Qty} ${report.unit_name || 'pcs'} on this ticket (${splitPart1Disposition}), and created new ticket ${childRmaNumber} with ${p2Qty} ${report.unit_name || 'pcs'} (${splitPart2Disposition})!`);
+      setTimeout(() => setSplitSuccessMessage(''), 10000);
+
+      // 5. Notify parent to refresh lists and dispatch event
+      if (onRefresh) {
+        onRefresh(finalParent);
+      }
+      window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'item-split', parentId: report.id, childId: newChild?.id } }));
+    } catch (err) {
+      console.error('Failed to execute split:', err);
+      alert(`Split failed: ${err.message}`);
+    } finally {
+      setIsExecutingSplit(false);
     }
   };
 
@@ -25655,16 +25822,227 @@ export default function QuickRMAActionModal({
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setIsThermalLabelOpen(true)}
-                    className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
-                    title="Print 4x6 inch thermal sticker label"
-                  >
-                    <Printer className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Print 4x6" Label</span>
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {Number(report?.quantity) > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setIsSplitting(prev => !prev)}
+                        className={`px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer ${
+                          isSplitting
+                            ? 'bg-blue-700 text-white dark:bg-blue-600'
+                            : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800'
+                        }`}
+                        title="Split quantity into partial restock / scrap"
+                      >
+                        <Scissors className="w-3.5 h-3.5" />
+                        <span>{isSplitting ? 'Close Split' : `Split Qty (${report?.quantity})`}</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setIsThermalLabelOpen(true)}
+                      className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
+                      title="Print 4x6 inch thermal sticker label"
+                    >
+                      <Printer className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Print 4x6" Label</span>
+                    </button>
+                  </div>
                 </div>
+
+                {splitSuccessMessage && (
+                  <div className="p-3 bg-blue-50 dark:bg-blue-950/70 border border-blue-300 dark:border-blue-800 rounded-xl text-xs font-bold text-blue-900 dark:text-blue-100 flex items-center gap-2 animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>{splitSuccessMessage}</span>
+                  </div>
+                )}
+
+                {/* INLINE PARTIAL TRIAGE & LINE ITEM SPLIT MODULE */}
+                {isSplitting && (
+                  <div className="p-3.5 bg-blue-50/80 dark:bg-blue-950/40 border-2 border-blue-300 dark:border-blue-800 rounded-2xl space-y-3.5 my-2 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between border-b border-blue-200 dark:border-blue-800/80 pb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1.5 bg-blue-600 text-white rounded-lg">
+                          <Scissors className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <h6 className="text-xs font-black text-blue-950 dark:text-blue-100 uppercase tracking-wider">
+                            Partial Triage & Split Quantity
+                          </h6>
+                          <p className="text-[10px] text-blue-700 dark:text-blue-300">
+                            Total to split: <strong>{Number(report.quantity)} {report.unit_name || 'pcs'}</strong> of {report.name}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsSplitting(false)}
+                        className="text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 rounded-lg"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {/* PART 1 (Kept on current ticket) */}
+                      <div className="p-3 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950 px-2 py-0.5 rounded-full">
+                            Part 1 (Current: {report.rma_number})
+                          </span>
+                          <span className="text-xs font-black text-slate-900 dark:text-white">
+                            {splitPart1Qty} {report.unit_name || 'pcs'}
+                          </span>
+                        </div>
+
+                        <div>
+                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Quantity to Keep on This Ticket *</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max={Math.max(1, (Number(report.quantity) || 2) - 1)}
+                            value={splitPart1Qty}
+                            onChange={(e) => {
+                              const maxVal = Math.max(1, (Number(report.quantity) || 2) - 1);
+                              const parsed = parseInt(e.target.value, 10);
+                              if (isNaN(parsed)) setSplitPart1Qty(1);
+                              else setSplitPart1Qty(Math.max(1, Math.min(parsed, maxVal)));
+                            }}
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Disposition</label>
+                          <select
+                            value={splitPart1Disposition}
+                            onChange={(e) => setSplitPart1Disposition(e.target.value)}
+                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
+                          >
+                            <option value="2- Restock to Inventory">2- Restock to Inventory</option>
+                            <option value="1- Pending Triage">1- Pending Triage</option>
+                            <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
+                            <option value="4- Quarantine">4- Quarantine</option>
+                            <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Condition Grade</label>
+                          <select
+                            value={splitPart1Grade}
+                            onChange={(e) => setSplitPart1Grade(e.target.value)}
+                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
+                          >
+                            <option value="A - Like New / Resellable">A - Like New / Resellable</option>
+                            <option value="B - Damaged Packaging Only">B - Damaged Packaging Only</option>
+                            <option value="C - Defective / Parts Only">C - Defective / Parts Only</option>
+                            <option value="D - Total Loss / Scrap">D - Total Loss / Scrap</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Rack / Bin Location</label>
+                          <input
+                            type="text"
+                            value={splitPart1Location}
+                            onChange={(e) => setSplitPart1Location(e.target.value)}
+                            placeholder="e.g. RACK-03-BIN-A"
+                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white uppercase font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      {/* PART 2 (New split ticket) */}
+                      <div className="p-3 bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950 px-2 py-0.5 rounded-full">
+                            Part 2 (New Ticket: {report.rma_number}-B)
+                          </span>
+                          <span className="text-xs font-black text-amber-600 dark:text-amber-400">
+                            {Math.max(1, (Number(report.quantity) || 0) - splitPart1Qty)} {report.unit_name || 'pcs'}
+                          </span>
+                        </div>
+
+                        <div>
+                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Remaining Quantity</label>
+                          <div className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-black text-slate-700 dark:text-slate-300">
+                            {Math.max(1, (Number(report.quantity) || 0) - splitPart1Qty)} {report.unit_name || 'pcs'} (Calculated)
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Disposition</label>
+                          <select
+                            value={splitPart2Disposition}
+                            onChange={(e) => setSplitPart2Disposition(e.target.value)}
+                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
+                          >
+                            <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
+                            <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
+                            <option value="4- Quarantine">4- Quarantine</option>
+                            <option value="2- Restock to Inventory">2- Restock to Inventory</option>
+                            <option value="1- Pending Triage">1- Pending Triage</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Condition Grade</label>
+                          <select
+                            value={splitPart2Grade}
+                            onChange={(e) => setSplitPart2Grade(e.target.value)}
+                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
+                          >
+                            <option value="D - Total Loss / Scrap">D - Total Loss / Scrap</option>
+                            <option value="C - Defective / Parts Only">C - Defective / Parts Only</option>
+                            <option value="B - Damaged Packaging Only">B - Damaged Packaging Only</option>
+                            <option value="A - Like New / Resellable">A - Like New / Resellable</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Location or Bin</label>
+                          <input
+                            type="text"
+                            value={splitPart2Location}
+                            onChange={(e) => setSplitPart2Location(e.target.value)}
+                            placeholder="e.g. SCRAP-BIN-01"
+                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white uppercase font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-1 border-t border-blue-200 dark:border-blue-800/80">
+                      <button
+                        type="button"
+                        onClick={() => setIsSplitting(false)}
+                        className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExecuteSplit}
+                        disabled={isExecutingSplit}
+                        className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                      >
+                        {isExecutingSplit ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Splitting Ticket...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Scissors className="w-3.5 h-3.5" />
+                            <span>Confirm & Execute Split</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {triageSavedSuccess && (
                   <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 rounded-xl text-xs font-bold text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
