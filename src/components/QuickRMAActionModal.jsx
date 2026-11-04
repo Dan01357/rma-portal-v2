@@ -103,6 +103,7 @@ export default function QuickRMAActionModal({
   const [splitPart2Reason, setSplitPart2Reason] = useState('Damaged packaging / Defective units');
   const [isExecutingSplit, setIsExecutingSplit] = useState(false);
   const [splitSuccessMessage, setSplitSuccessMessage] = useState('');
+  const [isClosingHandover, setIsClosingHandover] = useState(false);
 
   // Official Logistics Paperwork (DR / Invoice / PO) & AI Overrides
   const [adminDrNumber, setAdminDrNumber] = useState('');
@@ -208,6 +209,48 @@ export default function QuickRMAActionModal({
       alert(`Error updating triage: ${err.message}`);
     } finally {
       setIsSavingTriage(false);
+    }
+  };
+
+  const handleMarkStoreHandoverComplete = async () => {
+    if (!report || isClosingHandover) return;
+    setIsClosingHandover(true);
+    try {
+      const timestamp = new Date().toISOString();
+      const inspector = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
+      const updates = {
+        status: 'closed',
+        notes: `${report.notes ? report.notes + ' | ' : ''}Store handover completed. Signed Buffer Replacement Slip received. Ticket closed.`,
+        audit_trail: [
+          ...(Array.isArray(report.audit_trail) ? report.audit_trail : []),
+          {
+            timestamp,
+            stage: 'BUFFER_HANDOVER_COMPLETE',
+            actor: inspector,
+            note: 'Store handover confirmed: signed exchange slip received and ticket closed.'
+          }
+        ]
+      };
+      const { data: updated, error } = await supabase
+        .from('rma_reports')
+        .update(updates)
+        .eq('id', report.id)
+        .select('*')
+        .single();
+
+      if (error) throw error;
+      const finalRep = updated || { ...report, ...updates };
+      setReport(finalRep);
+      setRmaStatus('closed');
+      if (onRefresh) onRefresh(finalRep);
+      window.dispatchEvent(new CustomEvent('rma-data-changed', {
+        detail: { type: 'buffer-closed', rma: report.rma_number }
+      }));
+    } catch (e) {
+      console.error('Failed to close handover:', e);
+      alert(`Failed to close handover: ${e.message}`);
+    } finally {
+      setIsClosingHandover(false);
     }
   };
 
@@ -345,9 +388,9 @@ export default function QuickRMAActionModal({
       setSplitSuccessMessage(`Successfully split: Kept ${p1Qty} ${report.unit_name || 'pcs'} on this ticket (${splitPart1Disposition}), and created new ticket ${childRmaNumber} with ${p2Qty} ${report.unit_name || 'pcs'} (${splitPart2Disposition})!`);
       setTimeout(() => setSplitSuccessMessage(''), 10000);
 
-      // 5. Notify parent to refresh lists and dispatch event
+      // 5. Notify parent to refresh lists and dispatch event (pass newChild so it immediately appears in UI)
       if (onRefresh) {
-        onRefresh(finalParent);
+        onRefresh(finalParent, newChild);
       }
       window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'item-split', parentId: report.id, childId: newChild?.id } }));
     } catch (err) {
@@ -1422,6 +1465,119 @@ export default function QuickRMAActionModal({
                   </div>
                 </div>
 
+                {/* Split Relationship Banners */}
+                {(() => {
+                  const splitChildTicket = recentReportsList.find(
+                    r => (r.parent_rma_id === report?.id || String(r.parent_rma_id) === String(report?.id)) && r.rma_number !== report?.rma_number
+                  );
+                  if (splitChildTicket) {
+                    return (
+                      <div className="p-3 bg-blue-50 dark:bg-blue-950/70 border border-blue-300 dark:border-blue-800 rounded-xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 bg-blue-600 text-white rounded-lg shrink-0">
+                            <Scissors className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="font-extrabold text-blue-950 dark:text-blue-200">
+                              Partially Split Return (Part 1 of 2)
+                            </span>
+                            <p className="text-[11px] text-blue-700 dark:text-blue-300">
+                              This ticket holds <strong>{report.quantity} {report.unit_name || 'pc'}</strong> ({report.disposition || 'Restocked'}). Part 2 (<strong>{splitChildTicket.quantity} {splitChildTicket.unit_name || 'pc'}</strong>) is tracked under <strong>{splitChildTicket.rma_number}</strong> ({splitChildTicket.disposition}).
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReport(splitChildTicket);
+                          }}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-black shrink-0 flex items-center gap-1 shadow-2xs cursor-pointer"
+                        >
+                          <span>Open Part 2 ({splitChildTicket.rma_number})</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  const isChild = Boolean(
+                    report?.parent_rma_id || report?.rma_number?.includes('-B') || report?.rma_number?.includes('-C')
+                  );
+                  const parentTicket = isChild
+                    ? recentReportsList.find(r => r.id === report?.parent_rma_id || r.rma_number === report?.rma_number?.replace(/-[B-Z]$/, ''))
+                    : null;
+
+                  if (isChild && parentTicket) {
+                    return (
+                      <div className="p-3 bg-amber-50 dark:bg-amber-950/70 border border-amber-300 dark:border-amber-800 rounded-xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 bg-amber-600 text-white rounded-lg shrink-0">
+                            <Scissors className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="font-extrabold text-amber-950 dark:text-amber-200">
+                              Split Child Ticket (Part 2 of 2)
+                            </span>
+                            <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                              This ticket holds <strong>{report.quantity} {report.unit_name || 'pc'}</strong> ({report.disposition}) split from parent ticket <strong>{parentTicket.rma_number}</strong>.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReport(parentTicket);
+                          }}
+                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-xl text-xs font-black shrink-0 flex items-center gap-1 shadow-2xs cursor-pointer"
+                        >
+                          <span>Open Parent ({parentTicket.rma_number})</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                {/* Buffer Replacement Dispatched Banner */}
+                {report?.status === 'buffer_replacement_dispatched' && (
+                  <div className="p-3 bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-300 dark:border-indigo-800 rounded-xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-indigo-600 text-white rounded-lg shrink-0">
+                        <Truck className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="font-extrabold text-indigo-950 dark:text-indigo-200">
+                          1-to-1 Buffer Stock Replacement Dispatched!
+                        </span>
+                        <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
+                          Emergency buffer goods dispatched to store. Customer was physically compensated; no Credit Memo refund is due.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setIsBufferSlipOpen(true)}
+                        className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-2xs cursor-pointer"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Reprint Slip</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleMarkStoreHandoverComplete}
+                        disabled={isClosingHandover}
+                        className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-black flex items-center gap-1 shadow-2xs cursor-pointer disabled:opacity-50"
+                        title="Confirm store accepted replacement and close ticket"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Store Received / Close</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {splitSuccessMessage && (
                   <div className="p-3 bg-blue-50 dark:bg-blue-950/70 border border-blue-300 dark:border-blue-800 rounded-xl text-xs font-bold text-blue-900 dark:text-blue-100 flex items-center gap-2 animate-in fade-in">
                     <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
@@ -1655,6 +1811,7 @@ export default function QuickRMAActionModal({
                       <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
                       <option value="4- Quarantine">4- Quarantine</option>
                       <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
+                      <option value="6- Buffer Stock Exchange">6- Buffer Stock Exchange</option>
                     </select>
                   </div>
 
@@ -1691,6 +1848,7 @@ export default function QuickRMAActionModal({
                       <option value="pending_finance_approval">4- Pending Finance Approval</option>
                       <option value="credit_memo_issued">5- Credit Memo Issued</option>
                       <option value="closed">6- Closed / Restocked</option>
+                      <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
                       <option value="rejected">7- Rejected / Invalid Claim</option>
                     </select>
                   </div>
@@ -1928,6 +2086,14 @@ export default function QuickRMAActionModal({
           isOpen={isBufferSlipOpen}
           onClose={() => setIsBufferSlipOpen(false)}
           report={report}
+          onDispatched={(updatedReport) => {
+            setReport(updatedReport);
+            setRmaStatus('buffer_replacement_dispatched');
+            setDisposition('6- Buffer Stock Exchange');
+            if (onRefresh) {
+              onRefresh(updatedReport);
+            }
+          }}
         />
       )}
     </div>

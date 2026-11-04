@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { X, Printer, Truck, ArrowLeftRight, CheckCircle2, Building2, Package, ShieldCheck, UserCheck, Calendar, FileText } from 'lucide-react';
+import { X, Printer, Truck, ArrowLeftRight, CheckCircle2, Building2, Package, ShieldCheck, UserCheck, Calendar, FileText, RefreshCw, AlertCircle } from 'lucide-react';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
+import { supabase } from '../supabaseClient';
 
 export default function BufferExchangeSlipModal({
   isOpen,
   onClose,
   report,
-  reports = []
+  reports = [],
+  onDispatched
 }) {
   if (!isOpen) return null;
 
@@ -17,10 +19,84 @@ export default function BufferExchangeSlipModal({
 
   if (reportsToRender.length === 0) return null;
 
-  // Driver and vehicle dispatch state (editable before printing)
-  const [driverName, setDriverName] = useState('');
-  const [plateNumber, setPlateNumber] = useState('');
+  // Driver, vehicle, and dispatch state
+  const [driverName, setDriverName] = useState(report?.ai_document_metadata?.buffer_driver || '');
+  const [plateNumber, setPlateNumber] = useState(report?.ai_document_metadata?.buffer_plate || '');
   const [dispatcherName, setDispatcherName] = useState('Logistics Lead');
+  const [sourceBin, setSourceBin] = useState(report?.warehouse_location || 'BUFFER-STOCK-RACK-01');
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchSuccess, setDispatchSuccess] = useState(false);
+  const [autoPrintOnDispatch, setAutoPrintOnDispatch] = useState(true);
+
+  const isAlreadyDispatched = reportsToRender.some(
+    r => r.status === 'buffer_replacement_dispatched' || (r.disposition && r.disposition.includes('Buffer'))
+  );
+
+  const handleConfirmDispatch = async () => {
+    if (isDispatching) return;
+    setIsDispatching(true);
+    try {
+      const timestamp = new Date().toISOString();
+      const driver = driverName.trim() || 'Authorized Driver';
+      const plate = plateNumber.trim().toUpperCase() || 'TRUCK-ASSIGNED';
+      const dispatcher = dispatcherName.trim() || 'Logistics Lead';
+      const bin = sourceBin.trim().toUpperCase() || 'BUFFER-STOCK-RACK-01';
+
+      const updatedReports = [];
+      for (const rep of reportsToRender) {
+        const existingAudit = Array.isArray(rep.audit_trail) ? [...rep.audit_trail] : [];
+        const payload = {
+          status: 'buffer_replacement_dispatched',
+          disposition: '6- Buffer Stock Exchange',
+          warehouse_location: bin,
+          inspected_by: dispatcher,
+          inspected_at: timestamp,
+          notes: `${rep.notes ? rep.notes + ' | ' : ''}1-to-1 Buffer Stock Replacement Dispatched (${rep.quantity} ${rep.unit_name || 'pc'}). Driver: ${driver} (${plate}). Released by: ${dispatcher}.`,
+          audit_trail: [
+            ...existingAudit,
+            {
+              timestamp,
+              stage: 'BUFFER_DISPATCHED',
+              actor: dispatcher,
+              disposition: 'Buffer Stock Exchange',
+              note: `1-to-1 Buffer stock replacement dispatched: ${rep.quantity} ${rep.unit_name || 'pc'} released to driver ${driver} (${plate}). Gate pass authorized.`
+            }
+          ]
+        };
+
+        const { data: updated, error } = await supabase
+          .from('rma_reports')
+          .update(payload)
+          .eq('id', rep.id)
+          .select('*')
+          .single();
+
+        if (error) throw error;
+        updatedReports.push(updated || { ...rep, ...payload });
+      }
+
+      setDispatchSuccess(true);
+      if (autoPrintOnDispatch) {
+        handlePrint();
+      }
+      if (onDispatched) {
+        onDispatched(updatedReports[0], updatedReports);
+      }
+      window.dispatchEvent(new CustomEvent('rma-data-changed', {
+        detail: { type: 'buffer-dispatched', rma: updatedReports[0]?.rma_number }
+      }));
+
+      setTimeout(() => {
+        setDispatchSuccess(false);
+        onClose();
+      }, 2500);
+    } catch (err) {
+      console.error('Buffer dispatch error:', err);
+      alert(`Buffer Dispatch failed: ${err.message}`);
+    } finally {
+      setIsDispatching(false);
+    }
+  };
 
   const handlePrint = () => {
     const docTitle = reportsToRender.length === 1 && reportsToRender[0]?.rma_number
@@ -154,14 +230,39 @@ export default function BufferExchangeSlipModal({
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={handleConfirmDispatch}
+              disabled={isDispatching}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+              title="Update system to Buffer Dispatched, record driver & vehicle, and authorize gate pass"
+            >
+              {isDispatching ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Recording Dispatch...</span>
+                </>
+              ) : isAlreadyDispatched ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Update &amp; Re-dispatch</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>🚀 Confirm &amp; Dispatch Buffer</span>
+                </>
+              )}
+            </button>
             <button
               type="button"
               onClick={handlePrint}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              title="Print Physical Gate Pass Slip"
             >
               <Printer className="w-4 h-4" />
-              <span>{isBulk ? `Print All ${reportsToRender.length} Slips` : 'Print Slip / Save PDF'}</span>
+              <span>Print Slip / PDF</span>
             </button>
             <button
               type="button"
@@ -173,8 +274,26 @@ export default function BufferExchangeSlipModal({
           </div>
         </div>
 
-        {/* Driver & Truck Quick Inputs (For Printing Convenience) */}
-        <div className="px-6 py-2.5 bg-indigo-50/70 border-b border-indigo-100 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs print:hidden">
+        {/* Success Alert Banner */}
+        {dispatchSuccess && (
+          <div className="px-6 py-3 bg-emerald-500 text-white font-bold text-xs flex items-center justify-between gap-2 print:hidden animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>Buffer Stock Replacement Confirmed &amp; Dispatched! System lifecycle updated to "Buffer Dispatched".</span>
+            </div>
+          </div>
+        )}
+
+        {/* Notice if already dispatched */}
+        {isAlreadyDispatched && !dispatchSuccess && (
+          <div className="px-6 py-2 bg-indigo-50 border-b border-indigo-200 text-indigo-900 text-xs font-medium flex items-center gap-2 print:hidden">
+            <Truck className="w-4 h-4 text-indigo-600 shrink-0" />
+            <span>This RMA ticket was already recorded as <strong>Buffer Replacement Dispatched</strong>. You can reprint or re-authorize dispatch below.</span>
+          </div>
+        )}
+
+        {/* Driver, Truck, Bin & Dispatcher Quick Inputs */}
+        <div className="px-6 py-2.5 bg-indigo-50/70 border-b border-indigo-100 grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs print:hidden">
           <div>
             <label className="text-[9.5px] font-black uppercase tracking-wider text-indigo-900 block mb-0.5">Assigned Driver</label>
             <input
@@ -193,6 +312,16 @@ export default function BufferExchangeSlipModal({
               onChange={(e) => setPlateNumber(e.target.value)}
               placeholder="e.g. NBD-1042 / Truck 03"
               className="w-full px-2.5 py-1 bg-white border border-indigo-200 rounded-lg text-xs font-bold text-slate-800 uppercase focus:outline-none focus:border-indigo-600"
+            />
+          </div>
+          <div>
+            <label className="text-[9.5px] font-black uppercase tracking-wider text-indigo-900 block mb-0.5">Source Buffer Bin</label>
+            <input
+              type="text"
+              value={sourceBin}
+              onChange={(e) => setSourceBin(e.target.value)}
+              placeholder="e.g. BUFFER-STOCK-RACK-01"
+              className="w-full px-2.5 py-1 bg-white border border-indigo-200 rounded-lg text-xs font-bold text-slate-800 uppercase focus:outline-none focus:border-indigo-600 font-mono"
             />
           </div>
           <div>
@@ -326,7 +455,7 @@ export default function BufferExchangeSlipModal({
                     <Package className="w-4 h-4 text-slate-600 shrink-0" />
                     <div>
                       <span className="font-bold text-slate-700">Source Buffer Bin: </span>
-                      <strong className="font-mono text-indigo-900">{rep.warehouse_location || 'BUFFER-STOCK-RACK-01'}</strong>
+                      <strong className="font-mono text-indigo-900">{sourceBin || rep.warehouse_location || 'BUFFER-STOCK-RACK-01'}</strong>
                     </div>
                   </div>
                   <div className="text-[10px] font-black uppercase text-slate-500">

@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-04T06:30:00.697Z
+Generated At: 2026-11-04T07:12:11.840Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -8542,6 +8542,16 @@ const DEFECT_REASONS = [
 ];
 
 /**
+ * Helper to identify whether a row is a manifest line-item child row.
+ * Manifest line-item children share the identical rma_number with their parent and should be collapsed into the parent ticket.
+ * Split tickets (e.g. -B, -C) have their own distinct RMA number and are standalone tickets.
+ */
+function isManifestSubItem(item, allReports) {
+  if (!item || !item.parent_rma_id || !Array.isArray(allReports)) return false;
+  return allReports.some(p => p.id === item.parent_rma_id && p.rma_number === item.rma_number);
+}
+
+/**
  * Universal Lifecycle Stage Formatter & Color Resolver
  */
 function formatLifecycleStage(status) {
@@ -8563,6 +8573,9 @@ function formatLifecycleStage(status) {
     case 'restocked':
     case 'resolved':
       return { label: '6- Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    case 'buffer_replacement_dispatched':
+    case 'buffer_dispatched':
+      return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
     case 'rejected':
       return { label: '7- Rejected / Invalid Claim', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
     case 'pending_admin_details':
@@ -9549,11 +9562,11 @@ export default function App() {
 
   // Operational Segregation: Inbound Customer Returns vs Outbound Supplier Claims
   const customerInboundReports = React.useMemo(() => {
-    return recentReportsList.filter(r => (r.rma_type === 'customer_inbound' || !r.rma_type) && !r.parent_rma_id);
+    return recentReportsList.filter(r => (r.rma_type === 'customer_inbound' || !r.rma_type) && !isManifestSubItem(r, recentReportsList));
   }, [recentReportsList]);
 
   const supplierOutboundReports = React.useMemo(() => {
-    return recentReportsList.filter(r => (r.rma_type === 'supplier_outbound' || (r.disposition && (r.disposition.toLowerCase().includes('rtv') || r.disposition.toLowerCase().includes('vendor')))) && !r.parent_rma_id);
+    return recentReportsList.filter(r => (r.rma_type === 'supplier_outbound' || (r.disposition && (r.disposition.toLowerCase().includes('rtv') || r.disposition.toLowerCase().includes('vendor')))) && !isManifestSubItem(r, recentReportsList));
   }, [recentReportsList]);
 
   // Filter and sort return reports - strictly isolated to Customer Inbound Returns
@@ -9564,8 +9577,9 @@ export default function App() {
       if (item.rma_type && item.rma_type !== 'customer_inbound') {
         return false;
       }
-      // Omit child rows of manifest returns from main list so ticket appears once
-      if (item.parent_rma_id) {
+      // Omit child rows of manifest returns (which share identical rma_number with parent)
+      // BUT keep Split tickets (which have their own unique rma_number like -B, -C)
+      if (isManifestSubItem(item, recentReportsList)) {
         return false;
       }
 
@@ -12241,7 +12255,8 @@ export default function App() {
                         { id: 'Restock to Inventory', label: '2- Restock' },
                         { id: 'Return to Vendor (RTV)', label: '3- Return to Vendor (RTV)' },
                         { id: 'Quarantine', label: '4- Quarantine' },
-                        { id: 'Scrap / Dispose', label: '5- Scrap / Dispose' }
+                        { id: 'Scrap / Dispose', label: '5- Scrap / Dispose' },
+                        { id: 'Buffer Stock Exchange', label: '6- Buffer Exchange' }
                       ].map(chip => {
                         const isActive = reportsDispositionFilter.toLowerCase() === chip.id.toLowerCase();
                         return (
@@ -12548,6 +12563,24 @@ export default function App() {
                                       <QrCode className="w-3.5 h-3.5" />
                                     </button>
                                   </div>
+                                  {/* Split and Buffer Quick Badges */}
+                                  <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                                    {item.rma_number?.includes('-B') || item.rma_number?.includes('-C') ? (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
+                                        <span>✂️ Part 2</span>
+                                      </span>
+                                    ) : recentReportsList.some(other => other.parent_rma_id === item.id && other.rma_number !== item.rma_number) ? (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Parent Ticket (Part 1)">
+                                        <span>✂️ Split</span>
+                                      </span>
+                                    ) : null}
+
+                                    {(item.status === 'buffer_replacement_dispatched' || (item.disposition && item.disposition.includes('Buffer'))) && (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800 inline-flex items-center gap-0.5 shadow-2xs" title="1-to-1 Buffer Stock Replacement Dispatched">
+                                        <span>🚚 Buffer</span>
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
 
                                 {/* 3. Photo Thumbnail with Lightbox */}
@@ -12699,6 +12732,7 @@ export default function App() {
                                     else if (disp === 'Return to Vendor (RTV)') color = 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/70 dark:text-purple-300 dark:border-purple-800';
                                     else if (disp === 'Quarantine') color = 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800';
                                     else if (disp === 'Scrap / Dispose') color = 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800';
+                                    else if (disp.includes('Buffer')) color = 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/70 dark:text-indigo-300 dark:border-indigo-800';
                                     return (
                                       <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${color}`}>
                                         {disp}
@@ -12788,6 +12822,17 @@ export default function App() {
                                             <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                                             <span>CM Voucher</span>
                                           </button>
+                                        );
+                                      }
+                                      if (item.status === 'buffer_replacement_dispatched' || (item.disposition && item.disposition.includes('Buffer'))) {
+                                        return (
+                                          <span
+                                            className="px-2 py-1 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 shadow-2xs whitespace-nowrap"
+                                            title="This return was resolved via 1-to-1 Buffer Stock Replacement. No Credit Memo refund is due."
+                                          >
+                                            <Truck className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                                            <span>Buffer Swapped</span>
+                                          </span>
                                         );
                                       }
                                       if (canEditProducts) {
@@ -13509,8 +13554,19 @@ export default function App() {
           setQrModalReport(rep);
         }}
         onOpenLightbox={setLightboxPhoto}
-        onRefresh={(updated) => {
-          if (updated && (updated.id || updated.rma_number)) {
+        onRefresh={(updated, newChild) => {
+          if (newChild) {
+            setRecentReportsList(prev => {
+              const filtered = prev.filter(r => r.id !== newChild.id && r.rma_number !== newChild.rma_number);
+              const updatedList = filtered.map(r => {
+                if (updated && (r.id === updated.id || (r.rma_number && r.rma_number === updated.rma_number))) {
+                  return { ...r, ...updated };
+                }
+                return r;
+              });
+              return [newChild, ...updatedList];
+            });
+          } else if (updated && (updated.id || updated.rma_number)) {
             setRecentReportsList(prev => prev.map(r => {
               if (r.id === updated.id) {
                 return { ...r, ...updated };
@@ -13518,6 +13574,7 @@ export default function App() {
               if (r.rma_number && r.rma_number === updated.rma_number) {
                 return {
                   ...r,
+                  ...updated,
                   status: updated.status !== undefined ? updated.status : r.status,
                   disposition: updated.disposition !== undefined ? updated.disposition : r.disposition,
                   condition_grade: updated.condition_grade !== undefined ? updated.condition_grade : r.condition_grade,
@@ -14547,14 +14604,16 @@ export default function ApiKeysManagementSection() {
 
 --- START FILE: src/components/BufferExchangeSlipModal.jsx ---
 import React, { useState } from 'react';
-import { X, Printer, Truck, ArrowLeftRight, CheckCircle2, Building2, Package, ShieldCheck, UserCheck, Calendar, FileText } from 'lucide-react';
+import { X, Printer, Truck, ArrowLeftRight, CheckCircle2, Building2, Package, ShieldCheck, UserCheck, Calendar, FileText, RefreshCw, AlertCircle } from 'lucide-react';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
+import { supabase } from '../supabaseClient';
 
 export default function BufferExchangeSlipModal({
   isOpen,
   onClose,
   report,
-  reports = []
+  reports = [],
+  onDispatched
 }) {
   if (!isOpen) return null;
 
@@ -14565,10 +14624,84 @@ export default function BufferExchangeSlipModal({
 
   if (reportsToRender.length === 0) return null;
 
-  // Driver and vehicle dispatch state (editable before printing)
-  const [driverName, setDriverName] = useState('');
-  const [plateNumber, setPlateNumber] = useState('');
+  // Driver, vehicle, and dispatch state
+  const [driverName, setDriverName] = useState(report?.ai_document_metadata?.buffer_driver || '');
+  const [plateNumber, setPlateNumber] = useState(report?.ai_document_metadata?.buffer_plate || '');
   const [dispatcherName, setDispatcherName] = useState('Logistics Lead');
+  const [sourceBin, setSourceBin] = useState(report?.warehouse_location || 'BUFFER-STOCK-RACK-01');
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchSuccess, setDispatchSuccess] = useState(false);
+  const [autoPrintOnDispatch, setAutoPrintOnDispatch] = useState(true);
+
+  const isAlreadyDispatched = reportsToRender.some(
+    r => r.status === 'buffer_replacement_dispatched' || (r.disposition && r.disposition.includes('Buffer'))
+  );
+
+  const handleConfirmDispatch = async () => {
+    if (isDispatching) return;
+    setIsDispatching(true);
+    try {
+      const timestamp = new Date().toISOString();
+      const driver = driverName.trim() || 'Authorized Driver';
+      const plate = plateNumber.trim().toUpperCase() || 'TRUCK-ASSIGNED';
+      const dispatcher = dispatcherName.trim() || 'Logistics Lead';
+      const bin = sourceBin.trim().toUpperCase() || 'BUFFER-STOCK-RACK-01';
+
+      const updatedReports = [];
+      for (const rep of reportsToRender) {
+        const existingAudit = Array.isArray(rep.audit_trail) ? [...rep.audit_trail] : [];
+        const payload = {
+          status: 'buffer_replacement_dispatched',
+          disposition: '6- Buffer Stock Exchange',
+          warehouse_location: bin,
+          inspected_by: dispatcher,
+          inspected_at: timestamp,
+          notes: `${rep.notes ? rep.notes + ' | ' : ''}1-to-1 Buffer Stock Replacement Dispatched (${rep.quantity} ${rep.unit_name || 'pc'}). Driver: ${driver} (${plate}). Released by: ${dispatcher}.`,
+          audit_trail: [
+            ...existingAudit,
+            {
+              timestamp,
+              stage: 'BUFFER_DISPATCHED',
+              actor: dispatcher,
+              disposition: 'Buffer Stock Exchange',
+              note: `1-to-1 Buffer stock replacement dispatched: ${rep.quantity} ${rep.unit_name || 'pc'} released to driver ${driver} (${plate}). Gate pass authorized.`
+            }
+          ]
+        };
+
+        const { data: updated, error } = await supabase
+          .from('rma_reports')
+          .update(payload)
+          .eq('id', rep.id)
+          .select('*')
+          .single();
+
+        if (error) throw error;
+        updatedReports.push(updated || { ...rep, ...payload });
+      }
+
+      setDispatchSuccess(true);
+      if (autoPrintOnDispatch) {
+        handlePrint();
+      }
+      if (onDispatched) {
+        onDispatched(updatedReports[0], updatedReports);
+      }
+      window.dispatchEvent(new CustomEvent('rma-data-changed', {
+        detail: { type: 'buffer-dispatched', rma: updatedReports[0]?.rma_number }
+      }));
+
+      setTimeout(() => {
+        setDispatchSuccess(false);
+        onClose();
+      }, 2500);
+    } catch (err) {
+      console.error('Buffer dispatch error:', err);
+      alert(`Buffer Dispatch failed: ${err.message}`);
+    } finally {
+      setIsDispatching(false);
+    }
+  };
 
   const handlePrint = () => {
     const docTitle = reportsToRender.length === 1 && reportsToRender[0]?.rma_number
@@ -14702,14 +14835,39 @@ export default function BufferExchangeSlipModal({
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={handleConfirmDispatch}
+              disabled={isDispatching}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+              title="Update system to Buffer Dispatched, record driver & vehicle, and authorize gate pass"
+            >
+              {isDispatching ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Recording Dispatch...</span>
+                </>
+              ) : isAlreadyDispatched ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Update &amp; Re-dispatch</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>🚀 Confirm &amp; Dispatch Buffer</span>
+                </>
+              )}
+            </button>
             <button
               type="button"
               onClick={handlePrint}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              title="Print Physical Gate Pass Slip"
             >
               <Printer className="w-4 h-4" />
-              <span>{isBulk ? `Print All ${reportsToRender.length} Slips` : 'Print Slip / Save PDF'}</span>
+              <span>Print Slip / PDF</span>
             </button>
             <button
               type="button"
@@ -14721,8 +14879,26 @@ export default function BufferExchangeSlipModal({
           </div>
         </div>
 
-        {/* Driver & Truck Quick Inputs (For Printing Convenience) */}
-        <div className="px-6 py-2.5 bg-indigo-50/70 border-b border-indigo-100 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs print:hidden">
+        {/* Success Alert Banner */}
+        {dispatchSuccess && (
+          <div className="px-6 py-3 bg-emerald-500 text-white font-bold text-xs flex items-center justify-between gap-2 print:hidden animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>Buffer Stock Replacement Confirmed &amp; Dispatched! System lifecycle updated to "Buffer Dispatched".</span>
+            </div>
+          </div>
+        )}
+
+        {/* Notice if already dispatched */}
+        {isAlreadyDispatched && !dispatchSuccess && (
+          <div className="px-6 py-2 bg-indigo-50 border-b border-indigo-200 text-indigo-900 text-xs font-medium flex items-center gap-2 print:hidden">
+            <Truck className="w-4 h-4 text-indigo-600 shrink-0" />
+            <span>This RMA ticket was already recorded as <strong>Buffer Replacement Dispatched</strong>. You can reprint or re-authorize dispatch below.</span>
+          </div>
+        )}
+
+        {/* Driver, Truck, Bin & Dispatcher Quick Inputs */}
+        <div className="px-6 py-2.5 bg-indigo-50/70 border-b border-indigo-100 grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs print:hidden">
           <div>
             <label className="text-[9.5px] font-black uppercase tracking-wider text-indigo-900 block mb-0.5">Assigned Driver</label>
             <input
@@ -14741,6 +14917,16 @@ export default function BufferExchangeSlipModal({
               onChange={(e) => setPlateNumber(e.target.value)}
               placeholder="e.g. NBD-1042 / Truck 03"
               className="w-full px-2.5 py-1 bg-white border border-indigo-200 rounded-lg text-xs font-bold text-slate-800 uppercase focus:outline-none focus:border-indigo-600"
+            />
+          </div>
+          <div>
+            <label className="text-[9.5px] font-black uppercase tracking-wider text-indigo-900 block mb-0.5">Source Buffer Bin</label>
+            <input
+              type="text"
+              value={sourceBin}
+              onChange={(e) => setSourceBin(e.target.value)}
+              placeholder="e.g. BUFFER-STOCK-RACK-01"
+              className="w-full px-2.5 py-1 bg-white border border-indigo-200 rounded-lg text-xs font-bold text-slate-800 uppercase focus:outline-none focus:border-indigo-600 font-mono"
             />
           </div>
           <div>
@@ -14874,7 +15060,7 @@ export default function BufferExchangeSlipModal({
                     <Package className="w-4 h-4 text-slate-600 shrink-0" />
                     <div>
                       <span className="font-bold text-slate-700">Source Buffer Bin: </span>
-                      <strong className="font-mono text-indigo-900">{rep.warehouse_location || 'BUFFER-STOCK-RACK-01'}</strong>
+                      <strong className="font-mono text-indigo-900">{sourceBin || rep.warehouse_location || 'BUFFER-STOCK-RACK-01'}</strong>
                     </div>
                   </div>
                   <div className="text-[10px] font-black uppercase text-slate-500">
@@ -25059,6 +25245,7 @@ export default function QuickRMAActionModal({
   const [splitPart2Reason, setSplitPart2Reason] = useState('Damaged packaging / Defective units');
   const [isExecutingSplit, setIsExecutingSplit] = useState(false);
   const [splitSuccessMessage, setSplitSuccessMessage] = useState('');
+  const [isClosingHandover, setIsClosingHandover] = useState(false);
 
   // Official Logistics Paperwork (DR / Invoice / PO) & AI Overrides
   const [adminDrNumber, setAdminDrNumber] = useState('');
@@ -25164,6 +25351,48 @@ export default function QuickRMAActionModal({
       alert(`Error updating triage: ${err.message}`);
     } finally {
       setIsSavingTriage(false);
+    }
+  };
+
+  const handleMarkStoreHandoverComplete = async () => {
+    if (!report || isClosingHandover) return;
+    setIsClosingHandover(true);
+    try {
+      const timestamp = new Date().toISOString();
+      const inspector = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
+      const updates = {
+        status: 'closed',
+        notes: `${report.notes ? report.notes + ' | ' : ''}Store handover completed. Signed Buffer Replacement Slip received. Ticket closed.`,
+        audit_trail: [
+          ...(Array.isArray(report.audit_trail) ? report.audit_trail : []),
+          {
+            timestamp,
+            stage: 'BUFFER_HANDOVER_COMPLETE',
+            actor: inspector,
+            note: 'Store handover confirmed: signed exchange slip received and ticket closed.'
+          }
+        ]
+      };
+      const { data: updated, error } = await supabase
+        .from('rma_reports')
+        .update(updates)
+        .eq('id', report.id)
+        .select('*')
+        .single();
+
+      if (error) throw error;
+      const finalRep = updated || { ...report, ...updates };
+      setReport(finalRep);
+      setRmaStatus('closed');
+      if (onRefresh) onRefresh(finalRep);
+      window.dispatchEvent(new CustomEvent('rma-data-changed', {
+        detail: { type: 'buffer-closed', rma: report.rma_number }
+      }));
+    } catch (e) {
+      console.error('Failed to close handover:', e);
+      alert(`Failed to close handover: ${e.message}`);
+    } finally {
+      setIsClosingHandover(false);
     }
   };
 
@@ -25301,9 +25530,9 @@ export default function QuickRMAActionModal({
       setSplitSuccessMessage(`Successfully split: Kept ${p1Qty} ${report.unit_name || 'pcs'} on this ticket (${splitPart1Disposition}), and created new ticket ${childRmaNumber} with ${p2Qty} ${report.unit_name || 'pcs'} (${splitPart2Disposition})!`);
       setTimeout(() => setSplitSuccessMessage(''), 10000);
 
-      // 5. Notify parent to refresh lists and dispatch event
+      // 5. Notify parent to refresh lists and dispatch event (pass newChild so it immediately appears in UI)
       if (onRefresh) {
-        onRefresh(finalParent);
+        onRefresh(finalParent, newChild);
       }
       window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'item-split', parentId: report.id, childId: newChild?.id } }));
     } catch (err) {
@@ -26378,6 +26607,119 @@ export default function QuickRMAActionModal({
                   </div>
                 </div>
 
+                {/* Split Relationship Banners */}
+                {(() => {
+                  const splitChildTicket = recentReportsList.find(
+                    r => (r.parent_rma_id === report?.id || String(r.parent_rma_id) === String(report?.id)) && r.rma_number !== report?.rma_number
+                  );
+                  if (splitChildTicket) {
+                    return (
+                      <div className="p-3 bg-blue-50 dark:bg-blue-950/70 border border-blue-300 dark:border-blue-800 rounded-xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 bg-blue-600 text-white rounded-lg shrink-0">
+                            <Scissors className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="font-extrabold text-blue-950 dark:text-blue-200">
+                              Partially Split Return (Part 1 of 2)
+                            </span>
+                            <p className="text-[11px] text-blue-700 dark:text-blue-300">
+                              This ticket holds <strong>{report.quantity} {report.unit_name || 'pc'}</strong> ({report.disposition || 'Restocked'}). Part 2 (<strong>{splitChildTicket.quantity} {splitChildTicket.unit_name || 'pc'}</strong>) is tracked under <strong>{splitChildTicket.rma_number}</strong> ({splitChildTicket.disposition}).
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReport(splitChildTicket);
+                          }}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-black shrink-0 flex items-center gap-1 shadow-2xs cursor-pointer"
+                        >
+                          <span>Open Part 2 ({splitChildTicket.rma_number})</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  const isChild = Boolean(
+                    report?.parent_rma_id || report?.rma_number?.includes('-B') || report?.rma_number?.includes('-C')
+                  );
+                  const parentTicket = isChild
+                    ? recentReportsList.find(r => r.id === report?.parent_rma_id || r.rma_number === report?.rma_number?.replace(/-[B-Z]$/, ''))
+                    : null;
+
+                  if (isChild && parentTicket) {
+                    return (
+                      <div className="p-3 bg-amber-50 dark:bg-amber-950/70 border border-amber-300 dark:border-amber-800 rounded-xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 bg-amber-600 text-white rounded-lg shrink-0">
+                            <Scissors className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="font-extrabold text-amber-950 dark:text-amber-200">
+                              Split Child Ticket (Part 2 of 2)
+                            </span>
+                            <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                              This ticket holds <strong>{report.quantity} {report.unit_name || 'pc'}</strong> ({report.disposition}) split from parent ticket <strong>{parentTicket.rma_number}</strong>.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReport(parentTicket);
+                          }}
+                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-xl text-xs font-black shrink-0 flex items-center gap-1 shadow-2xs cursor-pointer"
+                        >
+                          <span>Open Parent ({parentTicket.rma_number})</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                {/* Buffer Replacement Dispatched Banner */}
+                {report?.status === 'buffer_replacement_dispatched' && (
+                  <div className="p-3 bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-300 dark:border-indigo-800 rounded-xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-indigo-600 text-white rounded-lg shrink-0">
+                        <Truck className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="font-extrabold text-indigo-950 dark:text-indigo-200">
+                          1-to-1 Buffer Stock Replacement Dispatched!
+                        </span>
+                        <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
+                          Emergency buffer goods dispatched to store. Customer was physically compensated; no Credit Memo refund is due.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setIsBufferSlipOpen(true)}
+                        className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-2xs cursor-pointer"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Reprint Slip</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleMarkStoreHandoverComplete}
+                        disabled={isClosingHandover}
+                        className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-black flex items-center gap-1 shadow-2xs cursor-pointer disabled:opacity-50"
+                        title="Confirm store accepted replacement and close ticket"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Store Received / Close</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {splitSuccessMessage && (
                   <div className="p-3 bg-blue-50 dark:bg-blue-950/70 border border-blue-300 dark:border-blue-800 rounded-xl text-xs font-bold text-blue-900 dark:text-blue-100 flex items-center gap-2 animate-in fade-in">
                     <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
@@ -26611,6 +26953,7 @@ export default function QuickRMAActionModal({
                       <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
                       <option value="4- Quarantine">4- Quarantine</option>
                       <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
+                      <option value="6- Buffer Stock Exchange">6- Buffer Stock Exchange</option>
                     </select>
                   </div>
 
@@ -26647,6 +26990,7 @@ export default function QuickRMAActionModal({
                       <option value="pending_finance_approval">4- Pending Finance Approval</option>
                       <option value="credit_memo_issued">5- Credit Memo Issued</option>
                       <option value="closed">6- Closed / Restocked</option>
+                      <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
                       <option value="rejected">7- Rejected / Invalid Claim</option>
                     </select>
                   </div>
@@ -26884,6 +27228,14 @@ export default function QuickRMAActionModal({
           isOpen={isBufferSlipOpen}
           onClose={() => setIsBufferSlipOpen(false)}
           report={report}
+          onDispatched={(updatedReport) => {
+            setReport(updatedReport);
+            setRmaStatus('buffer_replacement_dispatched');
+            setDisposition('6- Buffer Stock Exchange');
+            if (onRefresh) {
+              onRefresh(updatedReport);
+            }
+          }}
         />
       )}
     </div>

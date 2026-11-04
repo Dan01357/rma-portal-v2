@@ -99,6 +99,16 @@ const DEFECT_REASONS = [
 ];
 
 /**
+ * Helper to identify whether a row is a manifest line-item child row.
+ * Manifest line-item children share the identical rma_number with their parent and should be collapsed into the parent ticket.
+ * Split tickets (e.g. -B, -C) have their own distinct RMA number and are standalone tickets.
+ */
+function isManifestSubItem(item, allReports) {
+  if (!item || !item.parent_rma_id || !Array.isArray(allReports)) return false;
+  return allReports.some(p => p.id === item.parent_rma_id && p.rma_number === item.rma_number);
+}
+
+/**
  * Universal Lifecycle Stage Formatter & Color Resolver
  */
 function formatLifecycleStage(status) {
@@ -120,6 +130,9 @@ function formatLifecycleStage(status) {
     case 'restocked':
     case 'resolved':
       return { label: '6- Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    case 'buffer_replacement_dispatched':
+    case 'buffer_dispatched':
+      return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
     case 'rejected':
       return { label: '7- Rejected / Invalid Claim', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
     case 'pending_admin_details':
@@ -1106,11 +1119,11 @@ export default function App() {
 
   // Operational Segregation: Inbound Customer Returns vs Outbound Supplier Claims
   const customerInboundReports = React.useMemo(() => {
-    return recentReportsList.filter(r => (r.rma_type === 'customer_inbound' || !r.rma_type) && !r.parent_rma_id);
+    return recentReportsList.filter(r => (r.rma_type === 'customer_inbound' || !r.rma_type) && !isManifestSubItem(r, recentReportsList));
   }, [recentReportsList]);
 
   const supplierOutboundReports = React.useMemo(() => {
-    return recentReportsList.filter(r => (r.rma_type === 'supplier_outbound' || (r.disposition && (r.disposition.toLowerCase().includes('rtv') || r.disposition.toLowerCase().includes('vendor')))) && !r.parent_rma_id);
+    return recentReportsList.filter(r => (r.rma_type === 'supplier_outbound' || (r.disposition && (r.disposition.toLowerCase().includes('rtv') || r.disposition.toLowerCase().includes('vendor')))) && !isManifestSubItem(r, recentReportsList));
   }, [recentReportsList]);
 
   // Filter and sort return reports - strictly isolated to Customer Inbound Returns
@@ -1121,8 +1134,9 @@ export default function App() {
       if (item.rma_type && item.rma_type !== 'customer_inbound') {
         return false;
       }
-      // Omit child rows of manifest returns from main list so ticket appears once
-      if (item.parent_rma_id) {
+      // Omit child rows of manifest returns (which share identical rma_number with parent)
+      // BUT keep Split tickets (which have their own unique rma_number like -B, -C)
+      if (isManifestSubItem(item, recentReportsList)) {
         return false;
       }
 
@@ -3798,7 +3812,8 @@ export default function App() {
                         { id: 'Restock to Inventory', label: '2- Restock' },
                         { id: 'Return to Vendor (RTV)', label: '3- Return to Vendor (RTV)' },
                         { id: 'Quarantine', label: '4- Quarantine' },
-                        { id: 'Scrap / Dispose', label: '5- Scrap / Dispose' }
+                        { id: 'Scrap / Dispose', label: '5- Scrap / Dispose' },
+                        { id: 'Buffer Stock Exchange', label: '6- Buffer Exchange' }
                       ].map(chip => {
                         const isActive = reportsDispositionFilter.toLowerCase() === chip.id.toLowerCase();
                         return (
@@ -4105,6 +4120,24 @@ export default function App() {
                                       <QrCode className="w-3.5 h-3.5" />
                                     </button>
                                   </div>
+                                  {/* Split and Buffer Quick Badges */}
+                                  <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                                    {item.rma_number?.includes('-B') || item.rma_number?.includes('-C') ? (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
+                                        <span>✂️ Part 2</span>
+                                      </span>
+                                    ) : recentReportsList.some(other => other.parent_rma_id === item.id && other.rma_number !== item.rma_number) ? (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Parent Ticket (Part 1)">
+                                        <span>✂️ Split</span>
+                                      </span>
+                                    ) : null}
+
+                                    {(item.status === 'buffer_replacement_dispatched' || (item.disposition && item.disposition.includes('Buffer'))) && (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800 inline-flex items-center gap-0.5 shadow-2xs" title="1-to-1 Buffer Stock Replacement Dispatched">
+                                        <span>🚚 Buffer</span>
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
 
                                 {/* 3. Photo Thumbnail with Lightbox */}
@@ -4256,6 +4289,7 @@ export default function App() {
                                     else if (disp === 'Return to Vendor (RTV)') color = 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/70 dark:text-purple-300 dark:border-purple-800';
                                     else if (disp === 'Quarantine') color = 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800';
                                     else if (disp === 'Scrap / Dispose') color = 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800';
+                                    else if (disp.includes('Buffer')) color = 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/70 dark:text-indigo-300 dark:border-indigo-800';
                                     return (
                                       <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${color}`}>
                                         {disp}
@@ -4345,6 +4379,17 @@ export default function App() {
                                             <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                                             <span>CM Voucher</span>
                                           </button>
+                                        );
+                                      }
+                                      if (item.status === 'buffer_replacement_dispatched' || (item.disposition && item.disposition.includes('Buffer'))) {
+                                        return (
+                                          <span
+                                            className="px-2 py-1 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 shadow-2xs whitespace-nowrap"
+                                            title="This return was resolved via 1-to-1 Buffer Stock Replacement. No Credit Memo refund is due."
+                                          >
+                                            <Truck className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                                            <span>Buffer Swapped</span>
+                                          </span>
                                         );
                                       }
                                       if (canEditProducts) {
@@ -5066,8 +5111,19 @@ export default function App() {
           setQrModalReport(rep);
         }}
         onOpenLightbox={setLightboxPhoto}
-        onRefresh={(updated) => {
-          if (updated && (updated.id || updated.rma_number)) {
+        onRefresh={(updated, newChild) => {
+          if (newChild) {
+            setRecentReportsList(prev => {
+              const filtered = prev.filter(r => r.id !== newChild.id && r.rma_number !== newChild.rma_number);
+              const updatedList = filtered.map(r => {
+                if (updated && (r.id === updated.id || (r.rma_number && r.rma_number === updated.rma_number))) {
+                  return { ...r, ...updated };
+                }
+                return r;
+              });
+              return [newChild, ...updatedList];
+            });
+          } else if (updated && (updated.id || updated.rma_number)) {
             setRecentReportsList(prev => prev.map(r => {
               if (r.id === updated.id) {
                 return { ...r, ...updated };
@@ -5075,6 +5131,7 @@ export default function App() {
               if (r.rma_number && r.rma_number === updated.rma_number) {
                 return {
                   ...r,
+                  ...updated,
                   status: updated.status !== undefined ? updated.status : r.status,
                   disposition: updated.disposition !== undefined ? updated.disposition : r.disposition,
                   condition_grade: updated.condition_grade !== undefined ? updated.condition_grade : r.condition_grade,
