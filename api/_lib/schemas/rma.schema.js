@@ -125,8 +125,16 @@ export function registerRMARoutes(registry) {
   registry.registerPath({
     method: 'get',
     path: '/api/v1/rma',
-    summary: 'List RMA Return Reports',
-    description: 'Fetch paginated return reports with optional filtering by status, product barcode, or text search.',
+    summary: 'List RMA Return Reports (Inventory Restock Queue)',
+    description: `Fetch paginated return reports with optional filtering by warehouse disposition, lifecycle status, product barcode, or search query.
+
+### 📦 Coworker Restock Guide:
+To fetch all goods approved by warehouse triage for inventory restocking:
+\`\`\`bash
+curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?disposition=Restock%20to%20Inventory&status=pending" \\
+  -H "x-api-key: sk_live_rma_..."
+\`\`\`
+Reads: \`barcode\`, \`code\` (SKU), \`name\`, \`quantity\`, \`unit_name\`, and \`warehouse_location\`.`,
     tags: ['RMA Reports'],
     request: {
       query: PaginationQuerySchema.extend({
@@ -227,8 +235,22 @@ export function registerRMARoutes(registry) {
   registry.registerPath({
     method: 'patch',
     path: '/api/v1/rma/{id}',
-    summary: 'Update RMA Report',
-    description: 'Update status, inspection notes, or details of an existing RMA report.',
+    summary: 'Update RMA Report (Acknowledge / Mark Restocked)',
+    description: `Update status, warehouse location, inspection notes, or details of an existing RMA report.
+
+### 📦 Coworker Inventory Restock Acknowledgment:
+When your ERP system has added the returned quantity to your warehouse stock count, call this endpoint to mark the RMA ticket as resolved so it won't be restocked again:
+\`\`\`bash
+curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-2026-0001-6TYH" \\
+  -H "Content-Type: application/json" \\
+  -H "x-api-key: sk_live_rma_..." \\
+  -d '{
+    "status": "resolved",
+    "disposition": "Restock to Inventory",
+    "warehouse_location": "RACK-03-BIN-A",
+    "notes": "Added to stock in ERP (Ref #INV-8821)"
+  }'
+\`\`\``,
     tags: ['RMA Reports'],
     request: {
       params: z.object({

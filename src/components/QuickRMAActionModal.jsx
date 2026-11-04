@@ -30,12 +30,14 @@ import {
   ArrowLeft,
   Folder,
   Copy,
-  Scissors
+  Scissors,
+  Truck
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
+import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
 
 const QUICK_AUTH_STORAGE_KEY = 'rma_quick_auth_admin';
@@ -85,6 +87,7 @@ export default function QuickRMAActionModal({
   const [isSavingTriage, setIsSavingTriage] = useState(false);
   const [triageSavedSuccess, setTriageSavedSuccess] = useState(false);
   const [isThermalLabelOpen, setIsThermalLabelOpen] = useState(false);
+  const [isBufferSlipOpen, setIsBufferSlipOpen] = useState(false);
   const [isUpdatingType, setIsUpdatingType] = useState(false);
   const [typeFeedback, setTypeFeedback] = useState(null);
 
@@ -1378,6 +1381,16 @@ export default function QuickRMAActionModal({
 
                     <button
                       type="button"
+                      onClick={() => setIsBufferSlipOpen(true)}
+                      className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
+                      title="Print Buffer Stock Replacement Dispatch Slip / Gate Pass"
+                    >
+                      <Truck className="w-3.5 h-3.5 text-indigo-200" />
+                      <span>Buffer Slip</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => setIsThermalLabelOpen(true)}
                       className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
                       title="Print 4x6 inch thermal sticker label"
@@ -1885,6 +1898,15 @@ export default function QuickRMAActionModal({
           onClose={() => setIsThermalLabelOpen(false)}
           report={report}
           currentUser={verifiedAdmin || currentUser}
+        />
+      )}
+
+      {/* Buffer Stock Replacement Dispatch Slip Modal */}
+      {isBufferSlipOpen && report && (
+        <BufferExchangeSlipModal
+          isOpen={isBufferSlipOpen}
+          onClose={() => setIsBufferSlipOpen(false)}
+          report={report}
         />
       )}
     </div>

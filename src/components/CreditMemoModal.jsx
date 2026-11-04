@@ -419,8 +419,6 @@ export default function CreditMemoModal({
                   className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800 cursor-pointer h-9"
                 >
                   <option value="pc">pc (piece)</option>
-                  <option value="box">box</option>
-                  <option value="carton">carton</option>
                   <option value="case">case</option>
                 </select>
               </div>

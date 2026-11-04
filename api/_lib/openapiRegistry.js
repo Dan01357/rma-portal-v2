@@ -58,6 +58,16 @@ Pass your secret API key in all requests:
 - \`x-api-key: sk_live_rma_...\`
 - Or \`Authorization: Bearer sk_live_rma_...\`
 
+### 📦 Coworker Inventory Integration Guide (Restocking Queue):
+If you are syncing returned goods into your inventory management system:
+1. **Query Pending Restock Items**:
+   Send \`GET /api/v1/rma?disposition=Restock to Inventory&status=pending\`
+   Retrieves all items that warehouse inspection approved for restocking with quantities and bin locations.
+2. **Update Inventory & Acknowledge**:
+   Once added to your ERP stock, send \`PATCH /api/v1/rma/{id}\` with body:
+   \`{"status": "resolved", "notes": "Added to inventory counts"}\`
+   This marks the ticket as resolved so it won't be double-counted.
+
 Click **Authorize** on the top right to test live endpoints directly from this interactive documentation.
       `,
       contact: {

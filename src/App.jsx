@@ -2511,11 +2511,9 @@ export default function App() {
                           value={unitName}
                           onChange={(e) => setUnitName(e.target.value)}
                           className="px-3 py-2 bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs h-[44px]"
-                          title="Select return unit (pc, box, carton, case)"
+                          title="Select unit: pc (piece) or case"
                         >
                           <option value="pc">pc (piece)</option>
-                          <option value="box">box</option>
-                          <option value="carton">carton</option>
                           <option value="case">case</option>
                         </select>
                       </div>
