@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-04T07:12:11.840Z
+Generated At: 2026-11-04T07:18:50.934Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -5745,7 +5745,14 @@ export default async function handler(req, res) {
         query = query.eq('rma_type', rma_type);
       }
       if (status) {
-        query = query.eq('status', status);
+        const cleanStatus = status.trim().toLowerCase();
+        if (cleanStatus === 'pending' || cleanStatus === 'received_at_dock') {
+          query = query.in('status', ['pending', 'received_at_dock']);
+        } else if (cleanStatus === 'open') {
+          query = query.not('status', 'in', '("closed","resolved","rejected","deleted")');
+        } else {
+          query = query.eq('status', status.trim());
+        }
       }
       if (barcode) {
         query = query.eq('barcode', barcode.trim());
