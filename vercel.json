@@ -7,6 +7,8 @@
   "rewrites": [
     { "source": "/docs", "destination": "/api/docs" },
     { "source": "/api/openapi.json", "destination": "/api/docs?format=json" },
+    { "source": "/api/context", "destination": "/api/docs?format=context" },
+    { "source": "/api/project-context", "destination": "/api/docs?format=context" },
     { "source": "/api/v1/ai/inspect-paperwork", "destination": "/api/upload-photo?action=inspect-paperwork" },
     { "source": "/api/v1/auth/verify-pin", "destination": "/api/v1/api-keys?action=verify-pin" },
     { "source": "/api/v1/auth/clear-cooldown", "destination": "/api/v1/api-keys?action=clear-cooldown" },
@@ -14,6 +16,6 @@
     { "source": "/api/v1/rma/:id", "destination": "/api/v1/rma/[id]?id=:id" },
     { "source": "/api/v1/products/:id", "destination": "/api/v1/products/[id]?id=:id" },
     { "source": "/api/v1/credit-memos/:id", "destination": "/api/v1/credit-memos/[id]?id=:id" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|PROJECT_CONTEXT\\.txt).*)", "destination": "/index.html" }
   ]
 }

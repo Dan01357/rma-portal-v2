@@ -572,6 +572,23 @@ Each test scenario defines:
 
 ---
 
+- [ ] **TC-SET-11 (Dynamic OpenAPI Specification Generation)**
+  * **Location**: `/api/openapi.json`
+  * **Action**: Send `GET /api/openapi.json`.
+  * **Expected Behavior**: Server dynamically compiles OpenAPI 3.1 JSON from Zod schemas on the fly (`generateCodeFirstOpenApiSpec()`). Includes all newly added query parameters (`disposition`, `condition_grade`, `warehouse_location`), schemas, and responses with HTTP 200 and standard CORS headers.
+
+- [ ] **TC-SET-12 (Automated Living Project Context Pipeline)**
+  * **Location**: Edge CDN `/PROJECT_CONTEXT.txt` & Serverless `/api/context`
+  * **Action**: Trigger `GET /PROJECT_CONTEXT.txt` and `GET /api/context`.
+  * **Expected Behavior**: Automatically compiled during `npm run build` by `scripts/build_context.js`. Returns consolidated text context (>1.8MB) containing active directory tree, `package.json` dependencies, and all 109+ project source files. Features `Content-Type: text/plain; charset=utf-8` and cache-busting headers (`X-Context-Size-Bytes`, `X-Context-Updated-At`).
+
+- [ ] **TC-SET-13 (Restocking Triage Query Filter Parameters)**
+  * **Location**: REST API `GET /api/v1/rma`
+  * **Action**: Send `GET /api/v1/rma?disposition=Restock+to+Inventory&condition_grade=A&warehouse_location=RACK-03` with valid `x-api-key`.
+  * **Expected Behavior**: Supabase query filters records by matching disposition, condition grade, and bin location. Returns matching array of RMA records with HTTP 200.
+
+---
+
 ## Section 8: Auxiliary Modals & Workflows
 
 ### 8.1 Pending Unknown Barcodes Modal

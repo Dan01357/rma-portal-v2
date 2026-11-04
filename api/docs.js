@@ -1,13 +1,61 @@
+import fs from 'fs';
+import path from 'path';
 import { setCorsHeaders } from './_lib/auth.js';
 import { generateCodeFirstOpenApiSpec } from './_lib/openapiRegistry.js';
 
 export default function handler(req, res) {
+  setCorsHeaders(res, req);
+
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  // Support returning PROJECT_CONTEXT.txt (served via /api/context or /api/project-context rewrite)
+  if (req.query?.format === 'context' || req.query?.format === 'txt' || req.url?.includes('context') || req.url?.includes('PROJECT_CONTEXT')) {
+    try {
+      const candidates = [
+        path.join(process.cwd(), 'dist', 'PROJECT_CONTEXT.txt'),
+        path.join(process.cwd(), 'public', 'PROJECT_CONTEXT.txt'),
+        path.join(process.cwd(), 'PROJECT_CONTEXT.txt')
+      ];
+
+      let foundPath = null;
+      for (const c of candidates) {
+        if (fs.existsSync(c)) {
+          foundPath = c;
+          break;
+        }
+      }
+
+      if (!foundPath) {
+        return res.status(404).json({
+          success: false,
+          error: 'CONTEXT_NOT_FOUND',
+          message: 'PROJECT_CONTEXT.txt has not been generated yet. Please run npm run build:context.'
+        });
+      }
+
+      const content = fs.readFileSync(foundPath, 'utf-8');
+      const stats = fs.statSync(foundPath);
+
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300');
+      res.setHeader('X-Context-Size-Bytes', String(stats.size));
+      res.setHeader('X-Context-Updated-At', stats.mtime.toISOString());
+
+      return res.status(200).send(content);
+    } catch (err) {
+      console.error('[Context Reader Error]:', err);
+      return res.status(500).json({
+        success: false,
+        error: 'CONTEXT_READ_ERROR',
+        message: err.message
+      });
+    }
+  }
+
   // Support returning raw OpenAPI 3.1 JSON
   if (req.query?.format === 'json' || req.url?.includes('openapi.json')) {
-    setCorsHeaders(res, req);
-    if (req.method === 'OPTIONS') {
-      return res.status(204).end();
-    }
     try {
       const spec = generateCodeFirstOpenApiSpec();
       res.setHeader('Content-Type', 'application/json; charset=utf-8');

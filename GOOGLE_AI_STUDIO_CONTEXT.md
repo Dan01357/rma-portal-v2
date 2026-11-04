@@ -70,15 +70,19 @@ The system operates across several affiliated wholesale distribution and manufac
 
 ## 4. Key Modules & Functional Workflows
 
-### A. Public Reporter & Intake (`/` or Default View)
-- **Instant Barcode/QR Scanner**: Uses device camera via `html5-qrcode` to scan EAN/UPC barcodes.
+### A. Public Reporter & Multi-Item Intake Manifest (`/` or Default View)
+- **Multi-Item Batch Manifest Mode**:
+  - Allows adding multiple returned line items to a single return manifest under ONE overarching RMA Ticket (`RMA-YYYY-XXXX-XXXX`).
+  - For each line item: collects Barcode / SKU, Quantity, Packaging Unit (`pc`, `carton`, `box`, `case`), Defect Reason dropdown, and item-specific proof photos.
+  - Interactive queued items table / card preview with immediate "Remove Line Item" capability and live total item/quantity counters.
+  - Global Manifest Header & Paperwork: Captures Store / Branch Location, Sales Invoice (SI#), Delivery Receipt (DR#), Purchase Order (PO#), AI-powered paperwork OCR photo capture, and reporter contact details.
+- **Instant Barcode/QR Scanner**: Uses device camera via `html5-qrcode` to scan EAN/UPC barcodes and auto-queries product catalog.
 - **Auto-Fill & Quantity Counter**:
-  - Scanning increments quantity automatically.
-  - Volume controls: `[-]` and `[+]` buttons plus direct numerical input (e.g., `25`).
-- **Proof Photo Upload**: Allows multiple mobile camera captures or gallery uploads stored directly in Supabase Storage.
-- **Failure Reasons**: Damaged box, expired / near expiry date, factory defect, leaking packaging, wrong item delivered, etc.
-- **Dock GPS Capture**: Optionally captures geolocation coordinates (`latitude`, `longitude`, `accuracy`) if within acceptable dock threshold (<= 150m).
-- **RMA Number Generation**: Generates unique identifiers formatted as `RMA-YYYYMMDD-XXXX`.
+  - Scanning increments item quantity automatically.
+  - Volume controls: `[-]` and `[+]` buttons plus direct numerical input.
+- **Proof Photo Upload**: Compressed directly in-browser to WebP; synced to Google Workspace Shared Drive or Supabase Storage.
+- **Dock GPS Capture**: Optionally captures geolocation coordinates (`latitude`, `longitude`, `accuracy`) if within dock threshold (<= 150m).
+- **Thermal 4x6" RMA Box Label**: Renders multi-item summary label featuring high-density 1D Code128 barcode, 2D QR Code, total item count, total quantity, and branch details. Optimized for thermal label printers (Zebra, Dymo) and mobile screen printing.
 
 ### B. Admin & Warehouse Intake Review (`/admin`)
 - **Gate Authentication**: OTP verification and email-based Super Admin authentication.
@@ -103,10 +107,12 @@ The system operates across several affiliated wholesale distribution and manufac
 - **Client Identity Injection**: Each request automatically identifies the client system (`Primary System (Mine)`, `Jarmen`, `Jelo`, `Arlito`) for auditing.
 - **Key Management UI**: Super Admin can view masked keys (`sk_live_...4a2b`), monitor last used timestamps, rotate keys, and revoke keys.
 
-### E. Code-First Interactive Docs (`/docs`)
-- **Schema Source of Truth**: All route schemas defined in `api/_lib/schemas/*.schema.js` using Zod.
-- **Runtime Generator**: `api/_lib/openapiRegistry.js` compiles schemas into OpenAPI 3.1 JSON at `/api/openapi.json`.
+### E. Code-First Interactive Docs & Automated Project Context (`/docs` & `/api/context`)
+- **Dynamic OpenAPI 3.1 Specification**: All route schemas defined in `api/_lib/schemas/*.schema.js` using Zod. `api/_lib/openapiRegistry.js` compiles schemas dynamically into OpenAPI 3.1 JSON at `/api/openapi.json` at runtime on every request with zero drift.
 - **Interactive Playground**: Served at `/docs` using Scalar with multi-language code snippets (cURL, JavaScript, Python) and an **Authorize** modal for live testing.
+- **Automated Living Project Context (`PROJECT_CONTEXT.txt`)**:
+  - Automatically compiled during `npm run build` by `scripts/build_context.js`, embedding directory tree, package dependencies, and 109+ project source files.
+  - Deployed directly to `/PROJECT_CONTEXT.txt` (static edge CDN asset) and `/api/context` (via `api/docs.js?format=context`) with standard CORS, cache headers, and timestamp metadata. Never goes out of date.
 
 ---
 
@@ -137,9 +143,35 @@ The system operates across several affiliated wholesale distribution and manufac
 | `reported_by` | `text` | Attribution tag (e.g. `Jarmen (API)` or `Reporter`) |
 | `ae_name` | `text` | Assigned Account Executive |
 | `ae_email` | `text` | AE notification email |
+| `parent_rma_id` | `bigint REFERENCES rma_reports(id)` | Manifest parent ticket ID |
+| `is_parent` | `boolean DEFAULT false` | Flag if record is multi-item parent manifest |
+| `items` | `jsonb DEFAULT '[]'::jsonb` | Embedded array of child line items |
+| `total_items` | `integer DEFAULT 1` | Total distinct line items in manifest |
+| `total_quantity` | `integer DEFAULT 1` | Total units returned across manifest |
+| `disposition` | `text` | Triage action (`Restock to Inventory`, `RTV`, `Scrap`) |
+| `condition_grade` | `text` | Grade classification (e.g. `A - Resellable`, `B`, `C`) |
+| `warehouse_location` | `text` | Assigned warehouse rack/bin slot |
 | `created_at` | `timestamptz DEFAULT now()` | Timestamp of intake |
 
-### 2. `public.products` (Wholesale Catalog)
+### 2. `public.rma_items` (Normalized Multi-Item Return Lines)
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | `bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY` | Child item ID |
+| `rma_report_id` | `bigint REFERENCES rma_reports(id) ON DELETE CASCADE` | Parent ticket relation |
+| `rma_number` | `text NOT NULL` | Formatted parent RMA number |
+| `barcode` | `text NOT NULL` | Scanned item barcode |
+| `sku` | `text` | Item SKU code |
+| `name` | `text NOT NULL` | Product description |
+| `quantity` | `integer NOT NULL DEFAULT 1` | Quantity returned |
+| `unit_name` | `text NOT NULL DEFAULT 'pc'` | Packaging unit (`pc`, `box`, `carton`, `case`) |
+| `price` / `price_with_vat` | `numeric(12,2)` | Pricing snapshots |
+| `supplier_name` | `text NOT NULL` | Vendor/Supplier name |
+| `reason` | `text NOT NULL` | Defect reason dropdown choice |
+| `explanation` | `text` | Detailed notes |
+| `photos` | `jsonb DEFAULT '[]'::jsonb` | Line-item proof damage photos |
+| `created_at` / `updated_at` | `timestamptz` | Audit timestamps |
+
+### 3. `public.products` (Wholesale Catalog)
 | Column | Type | Description |
 | :--- | :--- | :--- |
 | `id` | `bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY` | Internal ID |
@@ -155,7 +187,7 @@ The system operates across several affiliated wholesale distribution and manufac
 | `is_verified` | `boolean DEFAULT true` | Admin-verified catalog status |
 | `created_at` / `updated_at` | `timestamptz` | Audit timestamps |
 
-### 3. `public.credit_memos` (Finance Credit Vouchers)
+### 4. `public.credit_memos` (Finance Credit Vouchers)
 | Column | Type | Description |
 | :--- | :--- | :--- |
 | `id` | `bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY` | Record ID |
@@ -175,7 +207,7 @@ The system operates across several affiliated wholesale distribution and manufac
 | `status` | `text DEFAULT 'issued'` | Status (`issued`, `applied`, `void`) |
 | `created_at` | `timestamptz DEFAULT now()` | Issuance timestamp |
 
-### 4. `public.api_keys` (SHA-256 API Key Vault)
+### 5. `public.api_keys` (SHA-256 API Key Vault)
 | Column | Type | Description |
 | :--- | :--- | :--- |
 | `id` | `uuid PRIMARY KEY DEFAULT gen_random_uuid()` | Key UUID |
@@ -197,18 +229,20 @@ All endpoints below reside under `https://rma-portal-v2.vercel.app`:
 | Method | Endpoint | Auth Required | Description |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/docs` | Public | Interactive Scalar API documentation |
-| `GET` | `/api/openapi.json` | Public | Dynamic OpenAPI 3.1 schema |
+| `GET` | `/api/openapi.json` | Public | Dynamic OpenAPI 3.1 schema compiled runtime from Zod |
+| `GET` | `/api/context` | Public | Auto-compiled consolidated `PROJECT_CONTEXT.txt` |
+| `GET` | `/PROJECT_CONTEXT.txt`| Public | Edge CDN static copy of consolidated project context |
 | `GET` | `/api/v1/health` | Semi-Public | Server health, latency, caller identity |
-| `GET` | `/api/v1/rma` | **Yes** | List & filter RMA reports (pagination, status, search) |
-| `POST` | `/api/v1/rma` | **Yes** | Submit a new RMA return report |
+| `GET` | `/api/v1/rma` | **Yes** | List & filter RMA reports (supports `disposition`, `condition_grade`, `warehouse_location`, `status`, `barcode`, `search`) |
+| `POST` | `/api/v1/rma` | **Yes** | Submit a new RMA return report / multi-item batch manifest |
 | `GET` | `/api/v1/rma/:id` | **Yes** | Get single RMA report by ID or RMA number |
-| `PATCH`| `/api/v1/rma/:id` | **Yes** | Update RMA report status/notes |
-| `DELETE`| `/api/v1/rma/:id` | **Yes** | Delete RMA report |
+| `PATCH`| `/api/v1/rma/:id` | **Yes** | Update RMA report (permits `disposition`, `status`, `warehouse_location`, `notes`) |
+| `DELETE`| `/api/v1/rma/:id` | **Yes** | Delete RMA report (triggers cascading Google Drive photo cleanup) |
 | `GET` | `/api/v1/products` | **Yes** | Search product catalog by barcode or name |
 | `POST` | `/api/v1/products` | **Yes** | Create or upsert a product record |
 | `GET` | `/api/v1/products/:id`| **Yes** | Get product details by barcode or ID |
 | `GET` | `/api/v1/credit-memos`| **Yes** | List credit memos |
-| `POST` | `/api/v1/credit-memos`| **Yes** | Issue a credit memo voucher |
+| `POST` | `/api/v1/credit-memos`| **Yes** | Issue a credit memo voucher (editable Finance Head) |
 | `GET` | `/api/v1/credit-memos/:id`| **Yes** | Get single credit memo voucher |
 | `GET` | `/api/v1/api-keys` | Admin | List all registered API keys (masked) |
 | `POST` | `/api/v1/api-keys` | Admin | Generate a new API key (shows secret once) |
@@ -252,9 +286,13 @@ When answering prompts about this project in Google AI Studio:
    - All captures are aggressively compressed directly in the browser via Canvas API to WebP (1280px max dimension, quality 0.7), reducing 4MB–10MB phone uploads to ~80KB–180KB (>95% reduction).
    - `/api/upload-photo` features an active 7.5s abort timeout guard.
 3. **Supabase 1 GB Storage Cap & Google Workspace Drive Hybrid Storage**:
-   - Primary: RMA proof photos upload directly to company Google Workspace Drive (`keysysincorporated.com` / `pingconmarketing.com`) in folder `Wholesale RMA Photos/YYYY-MM/` using zero-dependency OAuth2 JWT service account integration.
-   - Fallback: If Google Drive credentials are not configured, seamlessly falls back to Supabase Storage `rma-photos` bucket.
-   - Tertiary: Offline Base64 Data URL fallback.
+   - Primary: Proof photos upload directly to company Google Workspace Shared Drive (`keysysincorporated.com` / `pingconmarketing.com`) using zero-dependency OAuth2 JWT service account integration.
+   - Clean Organized Hierarchy:
+     * `RMA-Reports-Item/{RMA_NUMBER}/{PHOTO_FILES}`: Proof of damaged/expired merchandise photos.
+     * `RMA-Reports-SI/DR/PO/{RMA_NUMBER}/{PAPERWORK_FILES}`: Scanned receipts, delivery slips, and purchase orders.
+     * `Products/{SKU} {DESCRIPTION}/{CATALOG_IMAGES}`: Official verified catalog reference images.
+   - Cascading Deletion: When an RMA record, customer return, or product is deleted in Admin Hub, all corresponding files in Google Drive and Supabase Storage are systematically purged to reclaim cloud storage space.
+   - Fallback: If Google Drive credentials are not configured, seamlessly falls back to Supabase Storage `rma-photos` bucket; tertiary fallback to offline Base64 Data URLs.
 4. **Supabase 500 MB Database Quota & Connection Pooler**:
    - All high-frequency query columns (`rma_number`, `barcode`, `supplier_name`, `status`, `created_at`) are indexed via `optimize_free_tier_indexes.sql` to eliminate sequential scans.
    - Serverless functions use `api/_lib/supabase.js` with client caching on `globalThis._supabaseServerlessClient` for warm container connection reuse over HTTPS/REST. Direct DB connections must use Supavisor Transaction Pooler port `6543`.
