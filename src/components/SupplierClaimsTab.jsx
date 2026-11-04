@@ -912,13 +912,14 @@ export default function SupplierClaimsTab({
                     </div>
                   </th>
 
-                  {/* Qty */}
+                  {/* Qty & Unit */}
                   <th 
                     onClick={() => handleSort('quantity')}
                     className="p-3 text-right cursor-pointer hover:text-amber-600 transition-colors group"
+                    title="Click to sort by Quantity and Unit"
                   >
                     <div className="flex items-center justify-end gap-1">
-                      <span>Qty</span>
+                      <span>Qty &amp; Unit</span>
                       {sortField === 'quantity' ? (
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
@@ -1065,7 +1066,7 @@ export default function SupplierClaimsTab({
                           {res.name}
                         </div>
                         <div className="text-[10px] font-mono text-slate-400">
-                          SKU: <strong className={res.code ? 'text-slate-600 dark:text-slate-300' : 'text-amber-600 dark:text-amber-400'}>{res.code || 'Unassigned'}</strong> • BC: {r.barcode}
+                          Qty: <strong className="text-slate-800 dark:text-slate-200 font-bold">{res.qty} {r.unit_name || 'pc'}</strong> • SKU: <strong className={res.code ? 'text-slate-600 dark:text-slate-300' : 'text-amber-600 dark:text-amber-400'}>{res.code || 'Unassigned'}</strong> • BC: {r.barcode}
                         </div>
                       </td>
 
@@ -1086,9 +1087,12 @@ export default function SupplierClaimsTab({
                         </span>
                       </td>
 
-                      {/* Qty */}
-                      <td className="p-3 text-right font-mono font-bold text-slate-900 dark:text-white">
-                        {res.qty} {r.unit_name || 'pc'}
+                      {/* Qty & Unit */}
+                      <td className="p-3 text-right whitespace-nowrap font-mono">
+                        <span className="px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-800 font-black text-amber-900 dark:text-amber-200 text-xs inline-flex items-center gap-1 shadow-2xs">
+                          <span>{res.qty}</span>
+                          <span className="text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400">{r.unit_name || 'pc'}</span>
+                        </span>
                       </td>
 
                       {/* Unit Price */}

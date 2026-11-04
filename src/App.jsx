@@ -1220,6 +1220,10 @@ export default function App() {
           valA = String(a.name || '').toLowerCase();
           valB = String(b.name || '').toLowerCase();
           break;
+        case 'quantity':
+          valA = Number(a.quantity) || 1;
+          valB = Number(b.quantity) || 1;
+          break;
         case 'reason':
           valA = String(a.reason || '').toLowerCase();
           valB = String(b.reason || '').toLowerCase();
@@ -3911,6 +3915,19 @@ export default function App() {
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
                             </th>
+                            {/* Quantity & Unit Header */}
+                            <th
+                              onClick={() => handleReportsSort('quantity')}
+                              className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
+                              title="Click to sort by Quantity & Unit"
+                            >
+                              <div className="flex items-center justify-center">
+                                <span>Qty & Unit</span>
+                                {reportsSortField === 'quantity' ? (
+                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
+                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
+                              </div>
+                            </th>
                             <th
                               onClick={() => handleReportsSort('reason')}
                               className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
@@ -4143,6 +4160,16 @@ export default function App() {
                                       )}
                                     </div>
                                   )}
+                                </td>
+
+                                {/* Quantity & Unit Column */}
+                                <td className="py-3 px-3 text-center whitespace-nowrap">
+                                  <span className="font-mono font-black text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs inline-flex items-center gap-1">
+                                    <span>{item.quantity || 1}</span>
+                                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-extrabold uppercase">
+                                      {item.unit_name || 'pc'}
+                                    </span>
+                                  </span>
                                 </td>
 
                                 {/* 6. Reason */}
@@ -4449,6 +4476,9 @@ export default function App() {
                                   <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
                                     📥 Inbound
                                   </span>
+                                  <span className="font-mono font-black text-xs text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-0.5 rounded-md shadow-2xs">
+                                    Qty: <strong className="text-blue-600 dark:text-blue-400 font-black">{item.quantity || 1} {item.unit_name || 'pc'}</strong>
+                                  </span>
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -4473,7 +4503,7 @@ export default function App() {
                                   {resolvedName}
                                 </h4>
                                 <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                                  Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
+                                  Qty: <strong className="text-slate-900 dark:text-white font-bold">{item.quantity || 1} {item.unit_name || 'pc'}</strong> • Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
                                   {(item.code || matchedProduct?.code) && <span> • SKU: {item.code || matchedProduct?.code}</span>}
                                 </div>
                               </div>
