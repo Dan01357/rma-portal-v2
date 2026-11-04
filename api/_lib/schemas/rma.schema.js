@@ -245,8 +245,8 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
   -H "Content-Type: application/json" \\
   -H "x-api-key: sk_live_rma_..." \\
   -d '{
-    "status": "resolved",
-    "disposition": "Restock to Inventory",
+    "status": "closed",
+    "disposition": "2- Restock to Inventory",
     "warehouse_location": "RACK-03-BIN-A",
     "notes": "Added to stock in ERP (Ref #INV-8821)"
   }'

@@ -145,7 +145,12 @@ export default function QuickRMAActionModal({
       setConditionGrade(report.condition_grade || 'B - Damaged Packaging Only');
       setDisposition(normalizeDispositionOption(report.disposition));
       setWarehouseLocation(report.warehouse_location || '');
-      setRmaStatus(report.status || 'received_at_dock');
+      const rawStatus = String(report.status || '').toLowerCase().trim();
+      if (rawStatus === 'resolved' || rawStatus === 'restocked' || rawStatus === 'closed' || rawStatus.includes('closed') || rawStatus.includes('restock')) {
+        setRmaStatus('closed');
+      } else {
+        setRmaStatus(report.status || 'received_at_dock');
+      }
 
       const qty = Number(report.quantity) || 1;
       if (qty > 1) {

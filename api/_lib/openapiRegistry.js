@@ -65,8 +65,8 @@ If you are syncing returned goods into your inventory management system:
    Retrieves all items that warehouse inspection approved for restocking with quantities and bin locations.
 2. **Update Inventory & Acknowledge**:
    Once added to your ERP stock, send \`PATCH /api/v1/rma/{id}\` with body:
-   \`{"status": "resolved", "notes": "Added to inventory counts"}\`
-   This marks the ticket as resolved so it won't be double-counted.
+   \`{"status": "closed", "disposition": "2- Restock to Inventory", "notes": "Added to inventory counts in ERP"}\`
+   This marks the ticket as 6- Closed / Restocked so it won't be double-counted.
 
 Click **Authorize** on the top right to test live endpoints directly from this interactive documentation.
       `,

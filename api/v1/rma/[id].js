@@ -78,6 +78,21 @@ export default async function handler(req, res) {
         });
       }
 
+      // Normalize status and disposition for seamless coworker restock updates
+      if (updateData.status) {
+        const s = String(updateData.status).toLowerCase().trim();
+        if (s === 'resolved' || s === 'restocked' || s === 'closed' || s.includes('restock')) {
+          updateData.status = 'closed';
+        }
+      }
+
+      if (updateData.disposition) {
+        const d = String(updateData.disposition).trim();
+        if (d === 'Restock to Inventory' || d === '2- Restock to Inventory' || /restock/i.test(d)) {
+          updateData.disposition = '2- Restock to Inventory';
+        }
+      }
+
       const { data, error } = await matchRma(
         supabase.from('rma_reports').update(updateData).select('*')
       );

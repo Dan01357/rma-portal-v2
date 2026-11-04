@@ -118,6 +118,7 @@ function formatLifecycleStage(status) {
       return { label: '5- Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
     case 'closed':
     case 'restocked':
+    case 'resolved':
       return { label: '6- Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
     case 'rejected':
       return { label: '7- Rejected / Invalid Claim', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
