@@ -1054,6 +1054,8 @@ export const catalogService = {
     rmaNumber: explicitRmaNumber = null,
     rma_type = 'customer_inbound',
     barcode, 
+    name = null,
+    productName = null,
     product, 
     quantity = 1, 
     reporterName,
@@ -1152,6 +1154,10 @@ export const catalogService = {
       !resolvedProduct.name?.startsWith('Unidentified Item')
     );
 
+    const userProvidedName = (name || productName || '').trim();
+    const effectiveName = userProvidedName ||
+      (isKnown ? resolvedProduct.name : (resolvedProduct?.name && !resolvedProduct.name.startsWith('Unidentified Item') ? resolvedProduct.name : (cleanBarcode ? `Unidentified Item (${cleanBarcode})` : 'General Return Item')));
+
     // Filter GPS: Only save if accuracy is <= 150 meters
     const isAccurateGps = gps && gps.latitude && gps.accuracy && Number(gps.accuracy) <= 150;
 
@@ -1160,12 +1166,12 @@ export const catalogService = {
       rma_type: rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound',
       barcode: cleanBarcode,
       code: isKnown ? (resolvedProduct.code || resolvedProduct.barcode) : null,
-      name: isKnown ? resolvedProduct.name : `Unidentified Item (${cleanBarcode})`,
+      name: effectiveName,
       quantity: Number(quantity) || 1,
       supplier_name: isKnown ? (resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Savemore') : 'Pending Assignment',
       price: isKnown ? Number(resolvedProduct.price || 0) : 0,
       price_with_vat: isKnown ? Number(resolvedProduct.price_with_vat || resolvedProduct.priceWithVat || resolvedProduct.price || 0) : 0,
-      unit_name: isKnown ? (resolvedProduct.unit_name || resolvedProduct.unitName || 'pc') : 'pc',
+      unit_name: isKnown ? (resolvedProduct.unit_name || resolvedProduct.unitName || 'pc') : (resolvedProduct?.unit_name || 'pc'),
       status: isKnown ? 'pending' : 'pending_admin_details',
       reason: reason || 'Damaged Box / Crushed Packaging',
       explanation: explanation || null,
@@ -1592,14 +1598,14 @@ export const catalogService = {
       try {
         let findQ = supabase
           .from('rma_reports')
-          .select('barcode, photos, proof_photos, photo_url, paperwork_photos, google_drive_folder_id, google_drive_folder_url')
+          .select('id, rma_number, barcode, name, photos, proof_photos, photo_url, paperwork_photos, google_drive_folder_id, google_drive_folder_url')
           .limit(1);
         if (id) findQ = findQ.eq('id', id);
         else findQ = findQ.eq('rma_number', rmaNumber);
         const { data: found } = await findQ;
         if (found && found.length > 0) {
           const foundItem = found[0];
-          if (!rmaNumber && foundItem.rma_number) rmaNumber = foundItem.rma_number;
+          if (!rmaNumber) rmaNumber = foundItem.rma_number || explicitItemOrPhotos?.rma_number;
           if (!barcodeToCheck && foundItem.barcode) barcodeToCheck = foundItem.barcode;
           if (foundItem.google_drive_folder_id) foldersToDelete.push(foundItem.google_drive_folder_id);
           if (foundItem.google_drive_folder_url) folderUrlsToDelete.push(foundItem.google_drive_folder_url);
@@ -1728,7 +1734,7 @@ export const catalogService = {
       if (ids.length > 0) {
         const { data: dbRecords } = await supabase
           .from('rma_reports')
-          .select('id, rma_number, photos, paperwork_photos, proof_photos, photo_url, google_drive_folder_id, google_drive_folder_url')
+          .select('id, rma_number, barcode, name, photos, paperwork_photos, proof_photos, photo_url, google_drive_folder_id, google_drive_folder_url')
           .in('id', ids);
         if (dbRecords && Array.isArray(dbRecords)) {
           dbRecords.forEach(harvestReportAssets);

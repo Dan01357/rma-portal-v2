@@ -7,7 +7,100 @@ import { inspectPaperworkWithGemini } from './_lib/geminiInspector.js';
  */
 let cachedToken = null;
 let tokenExpiresAt = 0;
+let cachedDriveId = null;
 const folderCache = new Map();
+
+/**
+ * Discovers and caches the Shared Drive (Team Drive) ID for Wholesale RMA Photos
+ */
+async function getSharedDriveId(creds, accessToken, signal) {
+  if (cachedDriveId) return cachedDriveId;
+  if (creds?.folderId && String(creds.folderId).startsWith('0A')) {
+    cachedDriveId = creds.folderId;
+    return cachedDriveId;
+  }
+  try {
+    const drivesRes = await fetch('https://www.googleapis.com/drive/v3/drives?pageSize=10', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal
+    });
+    if (drivesRes.ok) {
+      const dData = await drivesRes.json();
+      const matched = (dData.drives || []).find(d =>
+        /wholesale\s*rma/i.test(d.name || '') || d.name === 'Wholesale RMA Photos' || d.name === 'Wholesale RMA Reports'
+      );
+      if (matched) {
+        cachedDriveId = matched.id;
+        return cachedDriveId;
+      }
+      if (dData.drives && dData.drives.length > 0) {
+        cachedDriveId = dData.drives[0].id;
+        return cachedDriveId;
+      }
+    }
+  } catch (e) {
+    console.warn('[Google Drive] Shared Drives discovery notice:', e.message);
+  }
+  return creds?.folderId || null;
+}
+
+/**
+ * Searches Google Drive files and folders robustly across Shared Drives and My Drive.
+ * Avoids unsupported 'corpora=allDrives' query errors on service accounts.
+ */
+async function searchFiles(query, { accessToken, driveId = null, pageSize = 50, signal = null }) {
+  // Strategy 1: Search directly in Shared Drive if driveId is known
+  if (driveId) {
+    try {
+      const params = new URLSearchParams({
+        q: query,
+        corpora: 'drive',
+        driveId: driveId,
+        supportsAllDrives: 'true',
+        includeItemsFromAllDrives: 'true',
+        pageSize: String(pageSize),
+        fields: 'files(id, name, mimeType, parents, trashed)'
+      });
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.files && Array.isArray(data.files) && data.files.length > 0) {
+          return data.files;
+        }
+      }
+    } catch (e) {
+      console.warn('[Google Drive Shared Drive Search Notice]:', e.message);
+    }
+  }
+
+  // Strategy 2: Search with supportsAllDrives=true and includeItemsFromAllDrives=true
+  try {
+    const params = new URLSearchParams({
+      q: query,
+      supportsAllDrives: 'true',
+      includeItemsFromAllDrives: 'true',
+      pageSize: String(pageSize),
+      fields: 'files(id, name, mimeType, parents, trashed)'
+    });
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.files && Array.isArray(data.files)) {
+        return data.files;
+      }
+    }
+  } catch (e) {
+    console.warn('[Google Drive General Search Notice]:', e.message);
+  }
+
+  return [];
+}
 
 /**
  * Extracts Google Service Account credentials from environment variables
@@ -147,7 +240,7 @@ async function getGoogleAccessToken(creds, signal) {
  * Finds or creates a Google Drive folder by name inside a parent folder
  * Passing supportsAllDrives=true and includeItemsFromAllDrives=true for Shared Drives.
  */
-async function findOrCreateFolder(folderName, parentFolderId, accessToken, signal) {
+async function findOrCreateFolder(folderName, parentFolderId, accessToken, signal, driveId = null) {
   const safeName = (folderName || 'General').trim();
   const escapedName = safeName.replace(/'/g, "\\'");
 
@@ -156,19 +249,9 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
     query += ` and '${parentFolderId}' in parents`;
   }
 
-  const searchRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal,
-    }
-  );
-
-  if (searchRes.ok) {
-    const data = await searchRes.json();
-    if (data.files && data.files.length > 0) {
-      return data.files[0].id;
-    }
+  const existingFiles = await searchFiles(query, { accessToken, driveId, pageSize: 1, signal });
+  if (existingFiles.length > 0) {
+    return existingFiles[0].id;
   }
 
   // Create subfolder inside parent with supportsAllDrives=true
@@ -201,13 +284,13 @@ async function findOrCreateFolder(folderName, parentFolderId, accessToken, signa
 /**
  * Cached version of findOrCreateFolder to avoid redundant API queries
  */
-async function findOrCreateFolderCached(folderName, parentFolderId, accessToken, signal) {
+async function findOrCreateFolderCached(folderName, parentFolderId, accessToken, signal, driveId = null) {
   if (!parentFolderId) return null;
   const cacheKey = `${parentFolderId}::${folderName}`;
   if (folderCache.has(cacheKey)) {
     return folderCache.get(cacheKey);
   }
-  const folderId = await findOrCreateFolder(folderName, parentFolderId, accessToken, signal);
+  const folderId = await findOrCreateFolder(folderName, parentFolderId, accessToken, signal, driveId);
   if (folderId) {
     folderCache.set(cacheKey, folderId);
   }
@@ -264,43 +347,7 @@ async function resolveTargetFolder({
 
   let rootId = rootFolderId;
   if (!rootId) {
-    try {
-      // 1. Discover Shared Drives (Team Drives) accessible to service account
-      const drivesRes = await fetch(
-        'https://www.googleapis.com/drive/v3/drives?pageSize=10',
-        { headers: { Authorization: `Bearer ${accessToken}` }, signal }
-      );
-      if (drivesRes.ok) {
-        const dData = await drivesRes.json();
-        const matched = (dData.drives || []).find(d =>
-          /wholesale\s*rma/i.test(d.name || '') || d.name === 'Wholesale RMA Photos' || d.name === 'Wholesale RMA Reports'
-        );
-        if (matched) {
-          rootId = matched.id;
-        } else if (dData.drives && dData.drives.length > 0) {
-          rootId = dData.drives[0].id;
-        }
-      }
-    } catch (e) {
-      console.warn('[Google Drive] Shared Drives search notice:', e.message);
-    }
-  }
-
-  if (!rootId) {
-    try {
-      const searchRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Wholesale RMA Reports' or name = 'Wholesale RMA Photos') and trashed = false")}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
-        { headers: { Authorization: `Bearer ${accessToken}` }, signal }
-      );
-      if (searchRes.ok) {
-        const sData = await searchRes.json();
-        if (sData.files && sData.files.length > 0) {
-          rootId = sData.files[0].id;
-        }
-      }
-    } catch (e) {
-      console.warn('[Google Drive] Root search notice:', e.message);
-    }
+    rootId = await getSharedDriveId({ folderId: rootFolderId }, accessToken, signal);
   }
 
   const isProduct = category === 'product' || category === 'products' || category === 'catalog' || Boolean(sku && !rmaNumber);
@@ -308,11 +355,11 @@ async function resolveTargetFolder({
 
   if (isProduct) {
     // Hierarchy: Root -> Products -> [SKU] [Name]
-    const productsRootId = await findOrCreateFolderCached('Products', rootId, accessToken, signal);
+    const productsRootId = await findOrCreateFolderCached('Products', rootId, accessToken, signal, rootId);
     const cleanSku = (sku || 'SKU').trim();
     const cleanName = (productName || '').trim();
     const folderName = cleanName ? `${cleanSku} ${cleanName}`.replace(/[\\/:*?"<>|]/g, '-').trim() : cleanSku;
-    const prodFolderId = await findOrCreateFolderCached(folderName, productsRootId, accessToken, signal);
+    const prodFolderId = await findOrCreateFolderCached(folderName, productsRootId, accessToken, signal, rootId);
     return {
       targetFolderId: prodFolderId || productsRootId,
       rmaFolderId: prodFolderId || productsRootId,
@@ -324,8 +371,8 @@ async function resolveTargetFolder({
 
   if (isPaperwork) {
     // Hierarchy: Root -> RMA-Reports-SI/DR/PO -> [RMA_NUMBER]
-    const siDrPoRootId = await findOrCreateFolderCached('RMA-Reports-SI/DR/PO', rootId, accessToken, signal);
-    const rmaFolderId = await findOrCreateFolderCached(cleanRma, siDrPoRootId, accessToken, signal);
+    const siDrPoRootId = await findOrCreateFolderCached('RMA-Reports-SI/DR/PO', rootId, accessToken, signal, rootId);
+    const rmaFolderId = await findOrCreateFolderCached(cleanRma, siDrPoRootId, accessToken, signal, rootId);
     return {
       targetFolderId: rmaFolderId || siDrPoRootId,
       rmaFolderId: rmaFolderId || siDrPoRootId,
@@ -334,8 +381,8 @@ async function resolveTargetFolder({
   }
 
   // Default: RMA Damage Proof Items -> Root -> RMA-Reports-Item -> [RMA_NUMBER]
-  const itemRootId = await findOrCreateFolderCached('RMA-Reports-Item', rootId, accessToken, signal);
-  const rmaFolderId = await findOrCreateFolderCached(cleanRma, itemRootId, accessToken, signal);
+  const itemRootId = await findOrCreateFolderCached('RMA-Reports-Item', rootId, accessToken, signal, rootId);
+  const rmaFolderId = await findOrCreateFolderCached(cleanRma, itemRootId, accessToken, signal, rootId);
   return {
     targetFolderId: rmaFolderId || itemRootId,
     rmaFolderId: rmaFolderId || itemRootId,
@@ -371,6 +418,9 @@ export default async function handler(req, res) {
     }
 
     try {
+      const accessToken = await getGoogleAccessToken(creds);
+      const driveId = await getSharedDriveId(creds, accessToken);
+
       const rawUrlsOrIds = [];
       if (req.query?.fileId) rawUrlsOrIds.push(req.query.fileId);
       if (req.query?.fileUrl) rawUrlsOrIds.push(req.query.fileUrl);
@@ -397,7 +447,8 @@ export default async function handler(req, res) {
       if (parsedBody?.sku) skus.push(parsedBody.sku);
       if (Array.isArray(parsedBody?.skus)) skus.push(...parsedBody.skus);
 
-      const accessToken = await getGoogleAccessToken(creds);
+      const fileIdsToDelete = new Set();
+      const folderIdsToDelete = new Map(); // id -> name
       const deletedIds = [];
       const failed = [];
       const SYSTEM_PROTECTED_FOLDERS = new Set([
@@ -408,36 +459,21 @@ export default async function handler(req, res) {
         'Products'
       ]);
 
-      // 1. If RMA numbers provided, locate & delete/trash their specific folders AND all files inside them
+      // 1. If RMA numbers provided, locate their specific folders AND all files inside them
       for (const rma of [...new Set(rmaNumbers.filter(Boolean))]) {
         try {
           const cleanRma = String(rma).replace(/'/g, "\\'").trim();
           const q = `mimeType = 'application/vnd.google-apps.folder' and name = '${cleanRma}' and trashed = false`;
-          const sRes = await fetch(
-            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,parents)&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
-            { headers: { Authorization: `Bearer ${accessToken}` } }
-          );
-          if (sRes.ok) {
-            const sData = await sRes.json();
-            for (const f of (sData.files || [])) {
-              if (f.id && f.id !== creds.folderId && !SYSTEM_PROTECTED_FOLDERS.has(f.name)) {
-                // Find and delete ALL files inside this RMA folder first
-                try {
-                  const childrenRes = await fetch(
-                    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${f.id}' in parents and trashed = false`)}&fields=files(id,name)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
-                    { headers: { Authorization: `Bearer ${accessToken}` } }
-                  );
-                  if (childrenRes.ok) {
-                    const cData = await childrenRes.json();
-                    for (const child of (cData.files || [])) {
-                      rawUrlsOrIds.push(child.id);
-                    }
-                  }
-                } catch (cErr) {
-                  console.warn(`[Google Drive Folder Files Fetch Notice for ${f.id}]:`, cErr.message);
-                }
-                rawUrlsOrIds.push(f.id);
+          const foundFolders = await searchFiles(q, { accessToken, driveId, pageSize: 20 });
+          for (const f of foundFolders) {
+            if (f.id && f.id !== driveId && f.id !== creds.folderId && !SYSTEM_PROTECTED_FOLDERS.has(f.name)) {
+              // Find ALL files inside this RMA folder
+              const childrenQ = `'${f.id}' in parents and trashed = false`;
+              const children = await searchFiles(childrenQ, { accessToken, driveId, pageSize: 100 });
+              for (const child of children) {
+                if (child.id) fileIdsToDelete.add(child.id);
               }
+              folderIdsToDelete.set(f.id, f.name);
             }
           }
         } catch (e) {
@@ -445,34 +481,21 @@ export default async function handler(req, res) {
         }
       }
 
-      // 2. If SKUs provided, locate & delete/trash their specific product folders AND all files inside them
+      // 2. If SKUs provided, locate their specific product folders AND all files inside them
       for (const skuItem of [...new Set(skus.filter(Boolean))]) {
         try {
           const cleanSku = String(skuItem).replace(/'/g, "\\'").trim();
-          const q = `mimeType = 'application/vnd.google-apps.folder' and name contains '${cleanSku}' and trashed = false`;
-          const sRes = await fetch(
-            `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,parents)&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
-            { headers: { Authorization: `Bearer ${accessToken}` } }
-          );
-          if (sRes.ok) {
-            const sData = await sRes.json();
-            for (const f of (sData.files || [])) {
-              if (f.id && f.id !== creds.folderId && !SYSTEM_PROTECTED_FOLDERS.has(f.name)) {
-                try {
-                  const childrenRes = await fetch(
-                    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`'${f.id}' in parents and trashed = false`)}&fields=files(id,name)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
-                    { headers: { Authorization: `Bearer ${accessToken}` } }
-                  );
-                  if (childrenRes.ok) {
-                    const cData = await childrenRes.json();
-                    for (const child of (cData.files || [])) {
-                      rawUrlsOrIds.push(child.id);
-                    }
-                  }
-                } catch (cErr) {
-                  console.warn(`[Google Drive Product Files Fetch Notice for ${f.id}]:`, cErr.message);
+          if (cleanSku.length >= 2) {
+            const q = `mimeType = 'application/vnd.google-apps.folder' and name contains '${cleanSku}' and trashed = false`;
+            const foundFolders = await searchFiles(q, { accessToken, driveId, pageSize: 20 });
+            for (const f of foundFolders) {
+              if (f.id && f.id !== driveId && f.id !== creds.folderId && !SYSTEM_PROTECTED_FOLDERS.has(f.name)) {
+                const childrenQ = `'${f.id}' in parents and trashed = false`;
+                const children = await searchFiles(childrenQ, { accessToken, driveId, pageSize: 100 });
+                for (const child of children) {
+                  if (child.id) fileIdsToDelete.add(child.id);
                 }
-                rawUrlsOrIds.push(f.id);
+                folderIdsToDelete.set(f.id, f.name);
               }
             }
           }
@@ -481,106 +504,133 @@ export default async function handler(req, res) {
         }
       }
 
-      if (rawUrlsOrIds.length === 0 && rmaNumbers.length === 0 && skus.length === 0) {
-        return res.status(200).json({ success: true, count: 0, message: 'No assets found to delete.' });
-      }
-
+      // 3. Process explicit file/folder IDs & URLs passed from caller
       for (const item of rawUrlsOrIds) {
         if (!item) continue;
-        let fileId = null;
-
-        // Support strings or objects with url/id/fileId/folderId
         let cleanItem = '';
-        if (typeof item === 'string') {
-          cleanItem = item.trim();
-        } else if (typeof item === 'object') {
+        if (typeof item === 'string') cleanItem = item.trim();
+        else if (typeof item === 'object') {
           cleanItem = String(item.fileId || item.folderId || item.id || item.fileUrl || item.url || '').trim();
         }
-
         if (!cleanItem) continue;
 
-        // Try extracting Google Drive File/Folder ID from URL
+        let extractedId = null;
         const idMatch = cleanItem.match(/\/d\/([a-zA-Z0-9_-]+)/) || 
                         cleanItem.match(/\/folders\/([a-zA-Z0-9_-]+)/) ||
                         cleanItem.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
                         cleanItem.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
         
         if (idMatch && idMatch[1]) {
-          fileId = idMatch[1].split(/[?&=/]/)[0];
+          extractedId = idMatch[1].split(/[?&=/]/)[0];
         } else if (/^[a-zA-Z0-9_-]{15,65}$/.test(cleanItem)) {
-          // Direct fileId or folderId passed
-          fileId = cleanItem;
-        } else {
-          // Attempt filename search in Google Drive as fallback
-          const filename = cleanItem.split('/').pop()?.split('?')[0];
-          if (filename && filename.length > 5) {
+          extractedId = cleanItem;
+        }
+
+        if (extractedId) {
+          if (cleanItem.includes('/folders/') || folderIdsToDelete.has(extractedId)) {
+            folderIdsToDelete.set(extractedId, folderIdsToDelete.get(extractedId) || 'Folder');
+            // If it's a folder, also harvest child files inside it
             try {
-              const searchQ = `name = '${filename}' and trashed = false`;
-              const sRes = await fetch(
-                `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(searchQ)}&fields=files(id,name)&pageSize=5&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
-                { headers: { Authorization: `Bearer ${accessToken}` } }
-              );
-              if (sRes.ok) {
-                const sJson = await sRes.json();
-                if (sJson.files && sJson.files.length > 0) {
-                  fileId = sJson.files[0].id;
-                }
+              const children = await searchFiles(`'${extractedId}' in parents and trashed = false`, { accessToken, driveId, pageSize: 100 });
+              for (const child of children) {
+                if (child.id) fileIdsToDelete.add(child.id);
               }
-            } catch (searchErr) {
-              console.warn('[Google Drive File Search Notice]:', searchErr.message);
-            }
+            } catch (cErr) {}
+          } else {
+            fileIdsToDelete.add(extractedId);
           }
         }
+      }
 
-        if (!fileId || fileId === creds.folderId) {
-          failed.push({ item, reason: 'Invalid ID or root folder protected' });
-          continue;
-        }
+      if (fileIdsToDelete.size === 0 && folderIdsToDelete.size === 0) {
+        return res.status(200).json({ success: true, count: 0, message: 'No assets found to delete.' });
+      }
 
+      // 4. Delete/Trash all individual files
+      for (const fileId of fileIdsToDelete) {
+        if (!fileId || fileId === driveId || fileId === creds.folderId) continue;
         try {
-          // Attempt 1: Permanent delete (supported if service account has Manager/Organizer role)
-          const delRes = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
-            {
-              method: 'DELETE',
-              headers: { Authorization: `Bearer ${accessToken}` },
-            }
-          );
+          // Attempt 1: Permanent delete
+          const delRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
 
           if (delRes.status === 204 || delRes.ok || delRes.status === 404) {
-            console.log(`[Google Drive] Asset permanently deleted or already removed: ${fileId}`);
             deletedIds.push(fileId);
             continue;
           }
 
-          const delErrText = await delRes.text();
-          console.warn(`[Google Drive Permanent Delete Notice for ${fileId}]: ${delErrText}. Falling back to trash...`);
-
-          // Attempt 2: Move file or folder to trash (supported for Content Managers and Managers in Shared Drives)
-          const trashRes = await fetch(
-            `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
-            {
-              method: 'PATCH',
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ trashed: true }),
-            }
-          );
+          // Attempt 2: Trash
+          const trashRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`, {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ trashed: true }),
+          });
 
           if (trashRes.ok || trashRes.status === 200 || trashRes.status === 404) {
-            console.log(`[Google Drive] Asset successfully moved to trash: ${fileId}`);
             deletedIds.push(fileId);
             continue;
           }
 
           const trashErrText = await trashRes.text();
-          console.warn(`[Google Drive Trash Fallback Notice for ${fileId}]: ${trashErrText}`);
-          failed.push({ fileId, error: delErrText, trashError: trashErrText });
-        } catch (itemErr) {
-          console.warn(`[Google Drive Delete Error for ${fileId}]:`, itemErr.message);
-          failed.push({ fileId, error: itemErr.message });
+          failed.push({ fileId, error: trashErrText });
+        } catch (fileErr) {
+          failed.push({ fileId, error: fileErr.message });
+        }
+      }
+
+      // 5. Delete/Trash/Rename folders
+      for (const [folderId, folderName] of folderIdsToDelete.entries()) {
+        if (!folderId || folderId === driveId || folderId === creds.folderId || SYSTEM_PROTECTED_FOLDERS.has(folderName)) continue;
+        try {
+          // Attempt 1: Permanent delete
+          const delRes = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?supportsAllDrives=true`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+
+          if (delRes.status === 204 || delRes.ok || delRes.status === 404) {
+            deletedIds.push(folderId);
+            continue;
+          }
+
+          // Attempt 2: Trash
+          const trashRes = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?supportsAllDrives=true`, {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ trashed: true }),
+          });
+
+          if (trashRes.ok || trashRes.status === 200 || trashRes.status === 404) {
+            deletedIds.push(folderId);
+            continue;
+          }
+
+          // Attempt 3: Rename to [Deleted] if 403 on Shared Drive
+          const renameRes = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?supportsAllDrives=true`, {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ name: `[Deleted] ${folderName || folderId}` }),
+          });
+
+          if (renameRes.ok || renameRes.status === 200) {
+            deletedIds.push(folderId);
+          } else {
+            const renameErr = await renameRes.text();
+            failed.push({ folderId, error: renameErr });
+          }
+        } catch (folderErr) {
+          failed.push({ folderId, error: folderErr.message });
         }
       }
 

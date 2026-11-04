@@ -29,6 +29,7 @@ import {
   Users,
   ShieldAlert,
   Package,
+  Tag,
   List,
   LayoutGrid,
   ArrowUpDown,
@@ -979,6 +980,7 @@ export default function App() {
 
   // Reporter Intake Form State
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [customItemName, setCustomItemName] = useState('');
   const [detectedProduct, setDetectedProduct] = useState(null);
   const [isCheckingBarcode, setIsCheckingBarcode] = useState(false);
   const [quantity, setQuantity] = useState(1);
@@ -1458,6 +1460,7 @@ export default function App() {
     const clean = barcodeInput.trim();
     if (!clean) {
       setDetectedProduct(null);
+      setCustomItemName('');
       setIsCheckingBarcode(false);
       return;
     }
@@ -1471,6 +1474,9 @@ export default function App() {
         // Guard against race conditions: only update if this request is still the active one
         if (!isCurrent) return;
         setDetectedProduct(found);
+        if (found?.name) {
+          setCustomItemName(found.name);
+        }
         if (found?.unit_name || found?.unitName) {
           const u = (found.unit_name || found.unitName).toLowerCase();
           setUnitName(u.includes('case') ? 'case' : 'pc');
@@ -1774,6 +1780,7 @@ export default function App() {
     const submitQty = Math.max(1, parseInt(quantity, 10) || 1);
     const finalUnit = unitName || detectedProduct?.unit_name || 'pc';
     const primaryDocNumber = cleanDr || cleanSi || cleanPo || invoiceDrNumber.trim() || null;
+    const effectiveItemName = customItemName.trim() || detectedProduct?.name || (cleanBarcode ? `Unidentified Item (${cleanBarcode})` : 'General Return Item');
 
     // 3. Show success screen with full report details for QR sticker generation INSTANTLY!
     setSubmitSuccessReport({
@@ -1781,8 +1788,8 @@ export default function App() {
       rmaNumber: rmaNumber,
       rma_type: determinedRmaType,
       barcode: cleanBarcode,
-      name: detectedProduct?.name || `Barcode ${cleanBarcode}`,
-      productName: detectedProduct?.name || `Barcode ${cleanBarcode}`,
+      name: effectiveItemName,
+      productName: effectiveItemName,
       code: detectedProduct?.code || '',
       sku: detectedProduct?.code || '',
       quantity: submitQty,
@@ -1818,7 +1825,10 @@ export default function App() {
     const capturedExpiryDate = expiryDate || null;
     const capturedBatchLotNumber = batchLotNumber ? batchLotNumber.trim() : null;
     const capturedPaperworkMetadata = paperworkMetadata;
-    const capturedProduct = detectedProduct ? { ...detectedProduct, unit_name: finalUnit } : null;
+    const capturedProduct = detectedProduct
+      ? { ...detectedProduct, name: effectiveItemName, unit_name: finalUnit }
+      : { name: effectiveItemName, barcode: cleanBarcode, code: null, price: 0, unit_name: finalUnit };
+    const capturedEffectiveItemName = effectiveItemName;
     const capturedReason = selectedReason;
     const capturedExplanation = explanation;
     const capturedReporterName = reporterName;
@@ -1826,6 +1836,7 @@ export default function App() {
     const capturedGps = gpsLocation.isAccurate ? gpsLocation : null;
 
     setBarcodeInput('');
+    setCustomItemName('');
     setDetectedProduct(null);
     setQuantity(1);
     setUnitName('pc');
@@ -1899,6 +1910,8 @@ export default function App() {
         const res = await catalogService.submitReport({
           rmaNumber,
           barcode: cleanBarcode,
+          name: capturedEffectiveItemName,
+          productName: capturedEffectiveItemName,
           rma_type: determinedRmaType,
           product: capturedProduct,
           quantity: submitQty,
@@ -2325,6 +2338,40 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Item Description / Name Input (Auto-populated if recognized, user-customizable if uncatalogued) */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                        Item Description / Name
+                      </label>
+                      {detectedProduct ? (
+                        <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <CheckCircle className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                          Auto-populated
+                        </span>
+                      ) : barcodeInput.trim() ? (
+                        <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded-full">
+                          Custom name for label & triage
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="relative w-full">
+                      <Tag className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                      <input
+                        type="text"
+                        value={customItemName}
+                        onChange={(e) => setCustomItemName(e.target.value)}
+                        placeholder={detectedProduct?.name || "e.g. Oishi Prawn Crackers 60g, MSH12 Ballpen (helps warehouse identify unlisted items)"}
+                        className={`w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800 transition-colors shadow-2xs ${
+                          detectedProduct
+                            ? 'border-emerald-300 dark:border-emerald-800/80 bg-emerald-50/20'
+                            : 'border-slate-300 dark:border-slate-700'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
                   {/* Recognized Product Banner (Shows name & reference image) */}
                   {isCheckingBarcode ? (
                     <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs flex items-center gap-2 text-slate-500 dark:text-slate-400">
@@ -2369,7 +2416,7 @@ export default function App() {
                     <div className="p-3 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-2xl text-xs flex items-center gap-2 text-amber-800 dark:text-amber-200 animate-in fade-in">
                       <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                       <span>
-                        Barcode not yet registered. You can still submit! Admin staff will be notified to record the item details.
+                        Barcode not yet registered. You can enter the product name above so it appears as the Returned Item on the box label and return voucher! Admin staff will be notified to record the item details.
                       </span>
                     </div>
                   ) : null}
