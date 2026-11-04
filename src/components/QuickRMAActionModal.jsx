@@ -785,6 +785,43 @@ export default function QuickRMAActionModal({
                 </div>
               )}
 
+              {/* Manifest Items List if Batch Manifest */}
+              {Array.isArray(report.items) && report.items.length > 0 && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2 text-xs">
+                  <div className="flex items-center justify-between font-bold">
+                    <span className="flex items-center gap-1.5 text-slate-800 dark:text-slate-200 uppercase tracking-wide text-[10px]">
+                      <Package className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Multi-Item Return Manifest ({report.items.length} Line Items)</span>
+                    </span>
+                    <span className="text-[10px] font-mono font-black text-slate-600 dark:text-slate-400">
+                      Total: {report.total_quantity || report.items.reduce((s, it) => s + (Number(it.quantity) || 1), 0)} Units
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {report.items.map((it, idx) => (
+                      <div key={idx} className="p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-lg flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-extrabold text-slate-900 dark:text-white truncate">
+                            {it.name || it.productName}
+                          </div>
+                          <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                            BC: {it.barcode} {it.code || it.sku ? `• SKU: ${it.code || it.sku}` : ''}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-black text-[11px]">
+                            {it.quantity} {it.unit_name || it.unit || 'pc'}
+                          </span>
+                          <div className="text-[10px] text-rose-600 dark:text-rose-400 font-bold truncate max-w-[120px]">
+                            {it.reason}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Proof Photos Thumbnail */}
               {photoList.length > 0 && (
                 <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center gap-2">

@@ -92,6 +92,11 @@ export default function ThermalBoxLabelModal({
   const inspectedBy = report?.inspected_by || report?.reported_by || 'Warehouse Dock';
   const reporterName = report?.reporter_name || report?.reported_by || inspectedBy || 'Warehouse Staff';
   const reporterContact = report?.reporter_contact || report?.reporter_phone || report?.phone || (report?.reported_by && report.reported_by.includes('(') ? report.reported_by.replace(/.*\((.*)\).*/, '$1') : '') || 'N/A';
+  const storeBranch = report?.store_branch || report?.store || '';
+  const manifestItems = Array.isArray(report?.items) ? report.items : [];
+  const isManifest = manifestItems.length > 1 || (report?.total_items && report.total_items > 1);
+  const totalItems = report?.total_items || (manifestItems.length > 0 ? manifestItems.length : 1);
+  const totalQuantity = report?.total_quantity || (manifestItems.length > 0 ? manifestItems.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0) : quantity);
   const createdDateObj = new Date(report?.created_at || Date.now());
   const createdDateTime = createdDateObj.toLocaleString('en-US', {
     year: 'numeric',
@@ -289,31 +294,65 @@ export default function ThermalBoxLabelModal({
               </div>
             </div>
 
-            {/* Product & SKU Grid */}
-            <div className="grid grid-cols-2 gap-2 border-b-2 border-black pb-1 text-[9.5px]">
-              <div className="border-r border-black pr-2">
-                <div className="text-[7.5px] font-extrabold text-black uppercase">PRODUCT NAME</div>
-                <div className="font-extrabold text-black leading-snug text-[11px] line-clamp-2">
-                  {name}
-                </div>
-                <div className="text-[8.5px] font-mono text-black mt-0.5">
-                  BC: {barcode}
-                </div>
-              </div>
-
-              <div className="pl-1">
-                <div className="text-[7.5px] font-extrabold text-black uppercase">ASSIGNED SKU</div>
-                <div className="font-mono font-black text-[11px] text-black truncate">
-                  {sku}
-                </div>
-                <div className="mt-0.5 flex items-center justify-between">
-                  <span className="text-[7.5px] font-bold">QTY:</span>
-                  <span className="font-mono text-xs font-black text-black">
-                    {quantity} {unit}
+            {/* Product & SKU Grid (Single Item or Batch Manifest) */}
+            {isManifest ? (
+              <div className="border-b-2 border-black pb-1 text-[9px] space-y-1">
+                <div className="flex items-center justify-between font-black border-b border-black pb-0.5">
+                  <span className="uppercase text-[8px] bg-black text-white px-1">
+                    MANIFEST: {totalItems} ITEMS
                   </span>
+                  <span className="font-mono text-[11px] font-black">{totalQuantity} UNITS TOTAL</span>
+                </div>
+                {storeBranch && (
+                  <div className="text-[8.5px] font-bold text-black truncate">
+                    STORE: <span className="uppercase">{storeBranch}</span>
+                  </div>
+                )}
+                <div className="space-y-0.5 max-h-20 overflow-hidden text-[8px]">
+                  {manifestItems.slice(0, 4).map((it, idx) => (
+                    <div key={idx} className="flex justify-between items-center border-b border-dashed border-slate-300 pb-0.5">
+                      <span className="truncate pr-1">• {it.name || it.productName || it.barcode}</span>
+                      <span className="font-mono font-bold shrink-0">{it.quantity} {it.unit_name || it.unit || 'pc'}</span>
+                    </div>
+                  ))}
+                  {manifestItems.length > 4 && (
+                    <div className="text-[7.5px] font-bold text-center italic text-slate-700">
+                      + {manifestItems.length - 4} more line items in this manifest
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2 border-b-2 border-black pb-1 text-[9.5px]">
+                <div className="border-r border-black pr-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[7.5px] font-extrabold text-black uppercase">PRODUCT NAME</div>
+                    {storeBranch && (
+                      <span className="text-[7px] font-bold text-black truncate">STORE: {storeBranch}</span>
+                    )}
+                  </div>
+                  <div className="font-extrabold text-black leading-snug text-[11px] line-clamp-2">
+                    {name}
+                  </div>
+                  <div className="text-[8.5px] font-mono text-black mt-0.5">
+                    BC: {barcode}
+                  </div>
+                </div>
+
+                <div className="pl-1">
+                  <div className="text-[7.5px] font-extrabold text-black uppercase">ASSIGNED SKU</div>
+                  <div className="font-mono font-black text-[11px] text-black truncate">
+                    {sku}
+                  </div>
+                  <div className="mt-0.5 flex items-center justify-between">
+                    <span className="text-[7.5px] font-bold">QTY:</span>
+                    <span className="font-mono text-xs font-black text-black">
+                      {quantity} {unit}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Triage Destination & Condition Grade */}
             <div className="grid grid-cols-2 gap-2 border-b-2 border-black pb-1">

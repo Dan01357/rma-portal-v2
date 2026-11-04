@@ -1045,8 +1045,8 @@ export const catalogService = {
   },
 
   /**
-   * SUBMIT RMA RETURN REPORT
-   * - Photo is REQUIRED (at least 1)
+   * SUBMIT RMA RETURN REPORT (Supports Single Returns and Multi-Item Batch Manifests)
+   * - Photo is optional per line item in manifest mode
    * - Reporter Name & Contact are REQUIRED
    * - Accurate GPS ONLY: Filters out inaccurate desktop IP geolocation (> 150m accuracy is left blank)
    */
@@ -1074,13 +1074,29 @@ export const catalogService = {
     ai_document_metadata = null,
     google_drive_folder_url = null,
     google_drive_folder_id = null,
-    gps = null 
+    gps = null,
+    items = [],
+    total_items = null,
+    total_quantity = null,
+    is_parent = false,
+    parent_rma_id = null
   }) {
-    const cleanBarcode = String(barcode || '').trim();
-    if (!cleanBarcode) throw new Error('A barcode is required to report a return.');
-    if (!photos || photos.length === 0) {
-      throw new Error('Proof photo is required. Please attach at least 1 image.');
+    const hasItems = Array.isArray(items) && items.length > 0;
+    const cleanBarcode = String(barcode || (hasItems ? (items[0]?.barcode || 'MANIFEST') : '')).trim();
+    if (!cleanBarcode && !hasItems) throw new Error('A barcode is required to report a return.');
+
+    // Aggregate photos from manifest items if provided
+    let allPhotos = Array.isArray(photos) ? [...photos] : (photos ? [photos] : []);
+    if (hasItems) {
+      items.forEach(it => {
+        if (Array.isArray(it.photos)) {
+          it.photos.forEach(p => { if (p && !allPhotos.includes(p)) allPhotos.push(p); });
+        } else if (it.photos && !allPhotos.includes(it.photos)) {
+          allPhotos.push(it.photos);
+        }
+      });
     }
+
     if (!reporterName || !reporterName.trim()) {
       throw new Error('Your name is required.');
     }
@@ -1154,9 +1170,16 @@ export const catalogService = {
       !resolvedProduct.name?.startsWith('Unidentified Item')
     );
 
+    const calculatedTotalItems = total_items || (hasItems ? items.length : 1);
+    const calculatedTotalQuantity = total_quantity || (hasItems 
+      ? items.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0)
+      : (Number(quantity) || 1));
+
     const userProvidedName = (name || productName || '').trim();
     const effectiveName = userProvidedName ||
-      (isKnown ? resolvedProduct.name : (resolvedProduct?.name && !resolvedProduct.name.startsWith('Unidentified Item') ? resolvedProduct.name : (cleanBarcode ? `Unidentified Item (${cleanBarcode})` : 'General Return Item')));
+      (hasItems && items.length > 1
+        ? `Batch Return Manifest (${items.length} items)`
+        : (isKnown ? resolvedProduct.name : (resolvedProduct?.name && !resolvedProduct.name.startsWith('Unidentified Item') ? resolvedProduct.name : (cleanBarcode ? `Unidentified Item (${cleanBarcode})` : 'General Return Item'))));
 
     // Filter GPS: Only save if accuracy is <= 150 meters
     const isAccurateGps = gps && gps.latitude && gps.accuracy && Number(gps.accuracy) <= 150;
@@ -1165,17 +1188,23 @@ export const catalogService = {
       rma_number: rmaNumber,
       rma_type: rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound',
       barcode: cleanBarcode,
-      code: isKnown ? (resolvedProduct.code || resolvedProduct.barcode) : null,
+      code: isKnown ? (resolvedProduct.code || resolvedProduct.barcode) : (hasItems && items[0]?.code ? items[0].code : null),
       name: effectiveName,
-      quantity: Number(quantity) || 1,
-      supplier_name: isKnown ? (resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Savemore') : 'Pending Assignment',
-      price: isKnown ? Number(resolvedProduct.price || 0) : 0,
-      price_with_vat: isKnown ? Number(resolvedProduct.price_with_vat || resolvedProduct.priceWithVat || resolvedProduct.price || 0) : 0,
-      unit_name: isKnown ? (resolvedProduct.unit_name || resolvedProduct.unitName || 'pc') : (resolvedProduct?.unit_name || 'pc'),
-      status: isKnown ? 'pending' : 'pending_admin_details',
-      reason: reason || 'Damaged Box / Crushed Packaging',
+      quantity: calculatedTotalQuantity,
+      supplier_name: isKnown ? (resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Savemore') : (hasItems && items[0]?.supplier_name ? items[0].supplier_name : 'Pending Assignment'),
+      price: hasItems 
+        ? items.reduce((acc, it) => acc + ((Number(it.price) || 0) * (Number(it.quantity) || 1)), 0)
+        : (isKnown ? Number(resolvedProduct.price || 0) : 0),
+      price_with_vat: hasItems
+        ? items.reduce((acc, it) => acc + ((Number(it.price_with_vat || it.price) || 0) * (Number(it.quantity) || 1)), 0)
+        : (isKnown ? Number(resolvedProduct.price_with_vat || resolvedProduct.priceWithVat || resolvedProduct.price || 0) : 0),
+      unit_name: hasItems
+        ? (items.every(it => (it.unit_name || it.unit) === (items[0].unit_name || items[0].unit)) ? (items[0].unit_name || items[0].unit || 'pc') : 'mixed')
+        : (isKnown ? (resolvedProduct.unit_name || resolvedProduct.unitName || 'pc') : (resolvedProduct?.unit_name || 'pc')),
+      status: isKnown || (hasItems && items.every(it => Number(it.price) > 0)) ? 'pending' : 'pending_admin_details',
+      reason: reason || (hasItems && items.length > 1 ? `Multi-Item Defect (${items.length} items)` : 'Damaged Box / Crushed Packaging'),
       explanation: explanation || null,
-      photos: Array.isArray(photos) ? photos : [photos],
+      photos: allPhotos,
       paperwork_photos: Array.isArray(paperwork_photos) ? paperwork_photos : (paperwork_photos ? [paperwork_photos] : []),
       si_number: si_number ? String(si_number).trim() : null,
       dr_number: dr_number ? String(dr_number).trim() : null,
@@ -1202,7 +1231,13 @@ export const catalogService = {
       warehouse_location: null,
       inspected_by: null,
       inspected_at: null,
-      audit_trail: []
+      audit_trail: [],
+      // Multi-Item Manifest Fields
+      is_parent: hasItems ? true : Boolean(is_parent),
+      parent_rma_id: parent_rma_id || null,
+      items: hasItems ? items : [],
+      total_items: calculatedTotalItems,
+      total_quantity: calculatedTotalQuantity
     };
 
     // 1. Insert into rma_reports with graceful fallback if columns not yet migrated
@@ -1213,8 +1248,8 @@ export const catalogService = {
       .select()
       .single();
 
-    if (reportError && (reportError.message?.includes('paperwork_photos') || reportError.message?.includes('invoice_dr_number') || reportError.message?.includes('column'))) {
-      console.warn('Retrying insert without new AI/Drive columns (pending SQL migration):', reportError.message);
+    if (reportError && (reportError.message?.includes('paperwork_photos') || reportError.message?.includes('invoice_dr_number') || reportError.message?.includes('items') || reportError.message?.includes('column'))) {
+      console.warn('Retrying insert without new manifest/AI/Drive columns (pending SQL migration):', reportError.message);
       const fallbackRow = { ...reportRow };
       delete fallbackRow.paperwork_photos;
       delete fallbackRow.invoice_dr_number;
@@ -1227,6 +1262,11 @@ export const catalogService = {
       delete fallbackRow.ai_document_metadata;
       delete fallbackRow.google_drive_folder_url;
       delete fallbackRow.google_drive_folder_id;
+      delete fallbackRow.parent_rma_id;
+      delete fallbackRow.is_parent;
+      delete fallbackRow.items;
+      delete fallbackRow.total_items;
+      delete fallbackRow.total_quantity;
       if (reportError.message?.includes('rma_type')) {
         delete fallbackRow.rma_type;
       }
@@ -1243,7 +1283,76 @@ export const catalogService = {
       insertedReport = insertedData;
     }
 
-    const finalReport = insertedReport || reportRow;
+    const finalReport = {
+      ...(insertedReport || reportRow),
+      items: hasItems ? items : (insertedReport?.items || [reportRow]),
+      total_items: calculatedTotalItems,
+      total_quantity: calculatedTotalQuantity,
+      store_branch: store_branch || insertedReport?.store_branch
+    };
+
+    // 1.1 If this is a multi-item batch return, insert children into rma_items and child rma_reports asynchronously
+    if (finalReport?.id && hasItems && items.length > 0) {
+      try {
+        const rmaItemRows = items.map(it => ({
+          rma_report_id: finalReport.id,
+          rma_number: rmaNumber,
+          barcode: String(it.barcode || '').trim(),
+          sku: it.code || it.sku || null,
+          name: it.name || it.productName || `Item (${it.barcode})`,
+          quantity: Number(it.quantity) || 1,
+          unit_name: it.unit_name || it.unit || 'pc',
+          price: Number(it.price || 0),
+          price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
+          supplier_name: it.supplier_name || 'Savemore',
+          reason: it.reason || 'Damaged Box / Crushed Packaging',
+          explanation: it.explanation || null,
+          expiry_date: it.expiry_date || null,
+          photos: Array.isArray(it.photos) ? it.photos : (it.photos ? [it.photos] : [])
+        }));
+        await supabase.from('rma_items').insert(rmaItemRows);
+      } catch (e) {
+        console.warn('Notice inserting into rma_items (pending table creation):', e?.message || e);
+      }
+
+      try {
+        const childReportRows = items.map(it => ({
+          rma_number: rmaNumber,
+          parent_rma_id: finalReport.id,
+          is_parent: false,
+          rma_type: reportRow.rma_type,
+          barcode: String(it.barcode || '').trim(),
+          code: it.code || it.sku || null,
+          name: it.name || it.productName || `Item (${it.barcode})`,
+          quantity: Number(it.quantity) || 1,
+          unit_name: it.unit_name || it.unit || 'pc',
+          supplier_name: it.supplier_name || 'Savemore',
+          price: Number(it.price || 0),
+          price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
+          status: reportRow.status,
+          reason: it.reason || 'Damaged Box / Crushed Packaging',
+          explanation: it.explanation || null,
+          photos: Array.isArray(it.photos) ? it.photos : (it.photos ? [it.photos] : []),
+          paperwork_photos: reportRow.paperwork_photos,
+          si_number: reportRow.si_number,
+          dr_number: reportRow.dr_number,
+          po_number: reportRow.po_number,
+          invoice_dr_number: reportRow.invoice_dr_number,
+          store_branch: reportRow.store_branch,
+          expiry_date: it.expiry_date || null,
+          google_drive_folder_url: reportRow.google_drive_folder_url,
+          google_drive_folder_id: reportRow.google_drive_folder_id,
+          reporter_name: reportRow.reporter_name,
+          reporter_contact: reportRow.reporter_contact,
+          reported_by: reportRow.reported_by,
+          condition_grade: reportRow.condition_grade,
+          disposition: reportRow.disposition
+        }));
+        await supabase.from('rma_reports').insert(childReportRows);
+      } catch (e) {
+        console.warn('Notice inserting child rma_reports:', e?.message || e);
+      }
+    }
 
     // 2. Dispatch automated notification email RIGHT AWAY for every reported RMA!
     // Rule:

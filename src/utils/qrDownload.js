@@ -285,7 +285,12 @@ export async function generateBoxStickerCanvas({
   reason = 'Defective / Return',
   reporter = 'Warehouse Staff',
   reporterContact = '',
-  dateFormatted = ''
+  dateFormatted = '',
+  storeBranch = '',
+  store = '',
+  totalItems = 1,
+  totalQuantity = 1,
+  items = []
 }) {
   const svgEl = typeof svgElementOrId === 'string'
     ? document.getElementById(svgElementOrId)
@@ -294,6 +299,11 @@ export async function generateBoxStickerCanvas({
   if (!svgEl) {
     throw new Error('QR SVG element not found in DOM.');
   }
+
+  const resolvedStore = storeBranch || store || '';
+  const isManifest = (Array.isArray(items) && items.length > 1) || (Number(totalItems) > 1);
+  const effectiveTotalItems = Math.max(1, Number(totalItems) || (Array.isArray(items) ? items.length : 1));
+  const effectiveTotalQuantity = Math.max(1, Number(totalQuantity) || (Array.isArray(items) ? items.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0) : Number(quantity) || 1));
 
   const { img, blobUrl } = await svgToImage(svgEl);
 
@@ -412,58 +422,136 @@ export async function generateBoxStickerCanvas({
     ctx.lineWidth = 4;
     ctx.strokeRect(80, boxY, width - 160, boxH);
 
-    // Item details header
-    ctx.fillStyle = '#64748b';
-    ctx.font = 'bold 24px "Inter", sans-serif';
-    ctx.fillText('RETURNED ITEM DETAILS', 120, boxY + 55);
+    let div2Y = boxY + 410;
 
-    // Item name: Wrapped across up to 2 lines at 38px font (960px width) - NO TRUNCATION!
-    ctx.fillStyle = '#0f172a';
-    ctx.font = '900 38px "Inter", sans-serif';
-    const prodNextY = drawWrappedText(ctx, itemName || 'Returned Merchandise', 120, boxY + 115, 960, 48, 2);
+    if (isManifest) {
+      // Header for Batch Manifest
+      ctx.fillStyle = '#64748b';
+      ctx.font = 'bold 24px "Inter", sans-serif';
+      ctx.fillText('BATCH RETURN MANIFEST DETAILS', 120, boxY + 50);
 
-    // Barcode and SKU line (dynamically placed below wrapped item name)
-    const codeY = Math.max(prodNextY + 10, boxY + 185);
-    ctx.fillStyle = '#334155';
-    ctx.font = 'bold 30px "JetBrains Mono", Consolas, monospace';
-    let codeStr = `Barcode: ${barcode || 'N/A'}`;
-    if (sku) codeStr += `   •   SKU: ${sku}`;
-    ctx.fillText(codeStr, 120, codeY);
+      if (resolvedStore) {
+        ctx.fillStyle = '#1e3a8a';
+        ctx.font = 'bold 22px "Inter", sans-serif';
+        ctx.fillText(`STORE / BRANCH: ${resolvedStore.toUpperCase()}`, 540, boxY + 50);
+      }
 
-    // Horizontal Divider 1
-    const div1Y = codeY + 35;
-    ctx.strokeStyle = '#e2e8f0';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(120, div1Y);
-    ctx.lineTo(width - 120, div1Y);
-    ctx.stroke();
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '900 36px "Inter", sans-serif';
+      ctx.fillText(`${effectiveTotalItems} LINE ITEMS   •   ${effectiveTotalQuantity} UNITS TOTAL`, 120, boxY + 100);
 
-    // 2-Column Specs: Quantity & Defect / Return Reason
-    const row1HeaderY = div1Y + 45;
-    ctx.fillStyle = '#64748b';
-    ctx.font = 'bold 24px "Inter", sans-serif';
-    ctx.fillText('QUANTITY', 120, row1HeaderY);
-    ctx.fillText('DEFECT / RETURN REASON', 520, row1HeaderY);
+      // Divider 1
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(120, boxY + 125);
+      ctx.lineTo(width - 120, boxY + 125);
+      ctx.stroke();
 
-    const row1ValY = row1HeaderY + 50;
-    ctx.fillStyle = '#0f172a';
-    ctx.font = '900 48px "JetBrains Mono", Consolas, monospace';
-    ctx.fillText(`${quantity} ${unit || 'pc'}`, 120, row1ValY);
+      // Line items breakdown
+      ctx.fillStyle = '#475569';
+      ctx.font = 'bold 20px "Inter", sans-serif';
+      ctx.fillText('SUMMARY OF INCLUDED ITEMS IN THIS BOX:', 120, boxY + 160);
 
-    // Defect / Return Reason: Wrapped cleanly across up to 2 lines (560px width) - NO TRUNCATION!
-    ctx.fillStyle = '#b91c1c';
-    ctx.font = 'bold 32px "Inter", sans-serif';
-    const reasonNextY = drawWrappedText(ctx, reason || 'Defective / Return', 520, row1ValY - 10, 560, 42, 2);
+      let itemY = boxY + 200;
+      const manifestList = Array.isArray(items) && items.length > 0 ? items : [{ name: itemName, quantity, unit, reason, barcode }];
+      const maxDisplay = 4;
+      const displayItems = manifestList.slice(0, maxDisplay);
 
-    // Horizontal Divider 2
-    const div2Y = Math.max(row1ValY + 50, reasonNextY + 25);
-    ctx.strokeStyle = '#e2e8f0';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(120, div2Y);
-    ctx.lineTo(width - 120, div2Y);
-    ctx.stroke();
+      displayItems.forEach((it, idx) => {
+        const itName = it.name || it.productName || 'Merchandise';
+        const itQty = `${it.quantity || 1} ${it.unit_name || it.unit || 'pc'}`;
+        const itCode = it.code || it.sku || it.barcode || '';
+        const itReason = it.reason || 'Defective';
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 24px "Inter", sans-serif';
+        const lineText = `• [${itQty}] ${itName}`;
+        ctx.fillText(lineText.length > 55 ? lineText.slice(0, 52) + '...' : lineText, 120, itemY);
+
+        ctx.fillStyle = '#64748b';
+        ctx.font = 'bold 19px "JetBrains Mono", Consolas, monospace';
+        const subText = `${itCode ? `BC/SKU: ${itCode} • ` : ''}Reason: ${itReason}`;
+        ctx.fillText(subText.length > 65 ? subText.slice(0, 62) + '...' : subText, 145, itemY + 28);
+
+        itemY += 60;
+      });
+
+      if (manifestList.length > maxDisplay) {
+        ctx.fillStyle = '#2563eb';
+        ctx.font = 'bold 20px "Inter", sans-serif';
+        ctx.fillText(`+ ${manifestList.length - maxDisplay} more line item(s) listed on digital manifest`, 145, itemY + 10);
+        itemY += 35;
+      }
+
+      div2Y = Math.max(itemY + 15, boxY + 410);
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(120, div2Y);
+      ctx.lineTo(width - 120, div2Y);
+      ctx.stroke();
+
+    } else {
+      // Single Item Layout
+      ctx.fillStyle = '#64748b';
+      ctx.font = 'bold 24px "Inter", sans-serif';
+      ctx.fillText('RETURNED ITEM DETAILS', 120, boxY + 55);
+
+      if (resolvedStore) {
+        ctx.fillStyle = '#1e3a8a';
+        ctx.font = 'bold 22px "Inter", sans-serif';
+        ctx.fillText(`STORE: ${resolvedStore.toUpperCase()}`, 640, boxY + 55);
+      }
+
+      // Item name: Wrapped across up to 2 lines at 38px font (960px width) - NO TRUNCATION!
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '900 38px "Inter", sans-serif';
+      const prodNextY = drawWrappedText(ctx, itemName || 'Returned Merchandise', 120, boxY + 115, 960, 48, 2);
+
+      // Barcode and SKU line (dynamically placed below wrapped item name)
+      const codeY = Math.max(prodNextY + 10, boxY + 185);
+      ctx.fillStyle = '#334155';
+      ctx.font = 'bold 30px "JetBrains Mono", Consolas, monospace';
+      let codeStr = `Barcode: ${barcode || 'N/A'}`;
+      if (sku) codeStr += `   •   SKU: ${sku}`;
+      ctx.fillText(codeStr, 120, codeY);
+
+      // Horizontal Divider 1
+      const div1Y = codeY + 35;
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(120, div1Y);
+      ctx.lineTo(width - 120, div1Y);
+      ctx.stroke();
+
+      // 2-Column Specs: Quantity & Defect / Return Reason
+      const row1HeaderY = div1Y + 45;
+      ctx.fillStyle = '#64748b';
+      ctx.font = 'bold 24px "Inter", sans-serif';
+      ctx.fillText('QUANTITY', 120, row1HeaderY);
+      ctx.fillText('DEFECT / RETURN REASON', 520, row1HeaderY);
+
+      const row1ValY = row1HeaderY + 50;
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '900 48px "JetBrains Mono", Consolas, monospace';
+      ctx.fillText(`${quantity} ${unit || 'pc'}`, 120, row1ValY);
+
+      // Defect / Return Reason: Wrapped cleanly across up to 2 lines (560px width) - NO TRUNCATION!
+      ctx.fillStyle = '#b91c1c';
+      ctx.font = 'bold 32px "Inter", sans-serif';
+      const reasonNextY = drawWrappedText(ctx, reason || 'Defective / Return', 520, row1ValY - 10, 560, 42, 2);
+
+      // Horizontal Divider 2
+      div2Y = Math.max(row1ValY + 50, reasonNextY + 25);
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(120, div2Y);
+      ctx.lineTo(width - 120, div2Y);
+      ctx.stroke();
+    }
 
     // 2-Column Specs: Reported By & Date Recorded
     const row2HeaderY = div2Y + 45;

@@ -30,6 +30,11 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
   const reason = report.reason || report.defect_category || 'Damaged / Return';
   const reporter = report.reporter_name || report.reported_by || 'Staff';
   const reporterContact = report.reporter_contact || report.reporter_phone || report.phone || (report.reported_by && report.reported_by.includes('(') ? report.reported_by.replace(/.*\((.*)\).*/, '$1') : '') || 'N/A';
+  const storeBranch = report.store_branch || report.store || '';
+  const manifestItems = Array.isArray(report.items) ? report.items : [];
+  const isManifest = manifestItems.length > 1 || (report.total_items && report.total_items > 1);
+  const totalItems = report.total_items || (manifestItems.length > 0 ? manifestItems.length : 1);
+  const totalQuantity = report.total_quantity || (manifestItems.length > 0 ? manifestItems.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0) : quantity);
   const createdDateObj = new Date(report.created_at || Date.now());
   const dateFormatted = createdDateObj.toLocaleDateString('en-US', {
     year: 'numeric',
@@ -63,6 +68,10 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
         reporter,
         reporterContact,
         dateFormatted: dateTimeFormatted,
+        storeBranch,
+        totalItems,
+        totalQuantity,
+        items: manifestItems,
         documentTitle: `RMA-Verification-Label-${rmaNumber}`
       });
     } catch (err) {
@@ -112,7 +121,11 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
         reason,
         reporter,
         reporterContact,
-        dateFormatted: dateTimeFormatted
+        dateFormatted: dateTimeFormatted,
+        storeBranch,
+        totalItems,
+        totalQuantity,
+        items: manifestItems
       });
       setDownloadNotice('Box Sticker image downloaded!');
       setTimeout(() => setDownloadNotice(null), 3500);
@@ -218,30 +231,90 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
               </div>
             </div>
 
-            {/* Product & Defect Details Box */}
+            {/* Product & Defect Details Box (Supports Single Return and Multi-Item Batch Manifests) */}
             <div className="bg-slate-50 border border-slate-300 rounded-xl p-3 space-y-2 text-xs">
-              <div>
-                <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block">Returned Item</span>
-                <div className="font-black text-slate-900 text-xs sm:text-sm leading-snug">{itemName}</div>
-                <div className="font-mono text-[10px] sm:text-[11px] text-slate-600 mt-0.5 truncate">
-                  Barcode: <strong className="text-slate-900">{barcode}</strong> {sku ? `• SKU: ${sku}` : ''}
-                </div>
-              </div>
+              {isManifest ? (
+                <>
+                  <div className="flex items-center justify-between border-b border-slate-200 pb-1.5 flex-wrap gap-1">
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-blue-100 text-blue-800 border border-blue-200">
+                      Batch Return Manifest
+                    </span>
+                    {storeBranch && (
+                      <span className="text-[10px] font-bold text-slate-700 truncate">
+                        Store: <strong className="text-slate-900">{storeBranch}</strong>
+                      </span>
+                    )}
+                  </div>
 
-              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200">
-                <div>
-                  <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block">Quantity</span>
-                  <span className="font-mono font-black text-slate-900 text-xs">
-                    {quantity} {unit}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block">Defect Reason</span>
-                  <span className="font-bold text-rose-700 text-xs line-clamp-1">
-                    {reason}
-                  </span>
-                </div>
-              </div>
+                  <div className="grid grid-cols-2 gap-2 py-1 border-b border-slate-200">
+                    <div>
+                      <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block">Total Items</span>
+                      <span className="font-mono font-black text-blue-700 text-xs sm:text-sm">
+                        {totalItems} Line Items
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block">Total Quantity</span>
+                      <span className="font-mono font-black text-slate-900 text-xs sm:text-sm">
+                        {totalQuantity} Units Total
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Summary of Items Included */}
+                  <div className="space-y-1.5 pt-0.5">
+                    <span className="text-[9px] sm:text-[10px] uppercase font-black text-slate-500 block">
+                      Summary of Included Items:
+                    </span>
+                    <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5">
+                      {manifestItems.map((it, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-[10px] sm:text-[11px] bg-white p-1.5 rounded-lg border border-slate-200">
+                          <div className="min-w-0 flex-1 pr-2">
+                            <div className="font-bold text-slate-900 truncate">{it.name || it.productName || 'Merchandise'}</div>
+                            <div className="font-mono text-[9px] text-slate-500">
+                              BC: {it.barcode} {it.sku || it.code ? `• SKU: ${it.sku || it.code}` : ''}
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="font-black font-mono text-slate-900">{it.quantity} {it.unit_name || it.unit || 'pc'}</span>
+                            <div className="text-[9px] font-bold text-rose-600 truncate max-w-[90px]">{it.reason || 'Defective'}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block">Returned Item</span>
+                      {storeBranch && (
+                        <span className="text-[9px] font-bold text-slate-600 truncate">Store: <strong className="text-slate-900">{storeBranch}</strong></span>
+                      )}
+                    </div>
+                    <div className="font-black text-slate-900 text-xs sm:text-sm leading-snug">{itemName}</div>
+                    <div className="font-mono text-[10px] sm:text-[11px] text-slate-600 mt-0.5 truncate">
+                      Barcode: <strong className="text-slate-900">{barcode}</strong> {sku ? `• SKU: ${sku}` : ''}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200">
+                    <div>
+                      <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block">Quantity</span>
+                      <span className="font-mono font-black text-slate-900 text-xs">
+                        {quantity} {unit}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block">Defect Reason</span>
+                      <span className="font-bold text-rose-700 text-xs line-clamp-1">
+                        {reason}
+                      </span>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Bottom Strip: Reporter, Date/Time & Contact Number */}
