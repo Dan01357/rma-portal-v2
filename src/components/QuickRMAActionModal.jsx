@@ -297,7 +297,7 @@ export default function QuickRMAActionModal({
         barcode: report.barcode,
         code: report.code,
         name: report.name,
-        supplier_name: report.supplier_name || 'Savemore',
+        supplier_name: report.supplier_name || 'Pending Assignment',
         price: report.price || 0,
         price_with_vat: report.price_with_vat || 0,
         unit_name: report.unit_name || 'pc',

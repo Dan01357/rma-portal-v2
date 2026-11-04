@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-04T07:18:50.934Z
+Generated At: 2026-11-04T07:32:30.635Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -8504,7 +8504,8 @@ import {
   KeyRound,
   Sparkles,
   Calendar,
-  Building
+  Building,
+  Truck
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
@@ -25446,7 +25447,7 @@ export default function QuickRMAActionModal({
         barcode: report.barcode,
         code: report.code,
         name: report.name,
-        supplier_name: report.supplier_name || 'Savemore',
+        supplier_name: report.supplier_name || 'Pending Assignment',
         price: report.price || 0,
         price_with_vat: report.price_with_vat || 0,
         unit_name: report.unit_name || 'pc',
@@ -27263,7 +27264,8 @@ import {
   QrCode, 
   Building2, 
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  MapPin
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng, printBoxSticker } from '../utils/qrDownload';
 
@@ -27464,10 +27466,12 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
                 <div className="text-sm sm:text-xl font-black font-mono text-slate-900 tracking-tight whitespace-nowrap overflow-hidden text-ellipsis">
                   {rmaNumber}
                 </div>
-                <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-100 border border-slate-300 text-slate-800 text-[11px] sm:text-xs font-bold max-w-full truncate">
-                  <Building2 className="w-3.5 h-3.5 text-slate-600 shrink-0" />
-                  <span className="truncate">{supplier}</span>
-                </div>
+                {storeBranch ? (
+                  <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 border border-blue-200 text-blue-900 text-[11px] sm:text-xs font-bold max-w-full truncate">
+                    <MapPin className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                    <span className="truncate">{storeBranch}</span>
+                  </div>
+                ) : null}
               </div>
 
               {/* QR Code */}
@@ -37905,7 +37909,7 @@ export const catalogService = {
       code: isKnown ? (resolvedProduct.code || resolvedProduct.barcode) : (hasItems && items[0]?.code ? items[0].code : null),
       name: effectiveName,
       quantity: calculatedTotalQuantity,
-      supplier_name: isKnown ? (resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Savemore') : (hasItems && items[0]?.supplier_name ? items[0].supplier_name : 'Pending Assignment'),
+      supplier_name: isKnown ? (resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Pending Assignment') : (hasItems && items[0]?.supplier_name ? items[0].supplier_name : 'Pending Assignment'),
       price: hasItems 
         ? items.reduce((acc, it) => acc + ((Number(it.price) || 0) * (Number(it.quantity) || 1)), 0)
         : (isKnown ? Number(resolvedProduct.price || 0) : 0),
@@ -42271,7 +42275,7 @@ export async function downloadQrCodePng({
 export async function generateBoxStickerCanvas({
   svgElementOrId,
   rmaNumber = 'RMA-TICKET',
-  supplier = 'Savemore',
+  supplier = '',
   itemName = 'Returned Merchandise',
   barcode = '',
   sku = '',
@@ -42383,19 +42387,22 @@ export async function generateBoxStickerCanvas({
     ctx.fillStyle = '#0f172a';
     ctx.fillText(rmaNumber, 80, 335);
 
-    // Dynamic Supplier Tag Pill (measures text width to fit neatly)
-    const supplierText = `Supplier: ${supplier || 'Savemore'}`;
-    ctx.font = 'bold 26px "Inter", sans-serif';
-    const supplierPillWidth = Math.min(Math.max(ctx.measureText(supplierText).width + 50, 280), 610);
+    // Dynamic Branch Tag Pill (if present, shows branch instead of confusing company fallback)
+    const branchLabel = (storeBranch || store || '').trim();
+    if (branchLabel) {
+      const branchText = `Branch: ${branchLabel}`;
+      ctx.font = 'bold 26px "Inter", sans-serif';
+      const branchPillWidth = Math.min(Math.max(ctx.measureText(branchText).width + 50, 280), 610);
 
-    ctx.fillStyle = '#f1f5f9';
-    ctx.fillRect(80, 380, supplierPillWidth, 54);
-    ctx.strokeStyle = '#cbd5e1';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(80, 380, supplierPillWidth, 54);
+      ctx.fillStyle = '#eff6ff';
+      ctx.fillRect(80, 380, branchPillWidth, 54);
+      ctx.strokeStyle = '#bfdbfe';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(80, 380, branchPillWidth, 54);
 
-    ctx.fillStyle = '#334155';
-    ctx.fillText(supplierText, 105, 417);
+      ctx.fillStyle = '#1e40af';
+      ctx.fillText(branchText, 105, 417);
+    }
 
     // Verification Status Badge
     ctx.fillStyle = '#eff6ff';

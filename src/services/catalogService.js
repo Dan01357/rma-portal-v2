@@ -1191,7 +1191,7 @@ export const catalogService = {
       code: isKnown ? (resolvedProduct.code || resolvedProduct.barcode) : (hasItems && items[0]?.code ? items[0].code : null),
       name: effectiveName,
       quantity: calculatedTotalQuantity,
-      supplier_name: isKnown ? (resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Savemore') : (hasItems && items[0]?.supplier_name ? items[0].supplier_name : 'Pending Assignment'),
+      supplier_name: isKnown ? (resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Pending Assignment') : (hasItems && items[0]?.supplier_name ? items[0].supplier_name : 'Pending Assignment'),
       price: hasItems 
         ? items.reduce((acc, it) => acc + ((Number(it.price) || 0) * (Number(it.quantity) || 1)), 0)
         : (isKnown ? Number(resolvedProduct.price || 0) : 0),

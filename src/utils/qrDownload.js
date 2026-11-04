@@ -276,7 +276,7 @@ export async function downloadQrCodePng({
 export async function generateBoxStickerCanvas({
   svgElementOrId,
   rmaNumber = 'RMA-TICKET',
-  supplier = 'Savemore',
+  supplier = '',
   itemName = 'Returned Merchandise',
   barcode = '',
   sku = '',
@@ -388,19 +388,22 @@ export async function generateBoxStickerCanvas({
     ctx.fillStyle = '#0f172a';
     ctx.fillText(rmaNumber, 80, 335);
 
-    // Dynamic Supplier Tag Pill (measures text width to fit neatly)
-    const supplierText = `Supplier: ${supplier || 'Savemore'}`;
-    ctx.font = 'bold 26px "Inter", sans-serif';
-    const supplierPillWidth = Math.min(Math.max(ctx.measureText(supplierText).width + 50, 280), 610);
+    // Dynamic Branch Tag Pill (if present, shows branch instead of confusing company fallback)
+    const branchLabel = (storeBranch || store || '').trim();
+    if (branchLabel) {
+      const branchText = `Branch: ${branchLabel}`;
+      ctx.font = 'bold 26px "Inter", sans-serif';
+      const branchPillWidth = Math.min(Math.max(ctx.measureText(branchText).width + 50, 280), 610);
 
-    ctx.fillStyle = '#f1f5f9';
-    ctx.fillRect(80, 380, supplierPillWidth, 54);
-    ctx.strokeStyle = '#cbd5e1';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(80, 380, supplierPillWidth, 54);
+      ctx.fillStyle = '#eff6ff';
+      ctx.fillRect(80, 380, branchPillWidth, 54);
+      ctx.strokeStyle = '#bfdbfe';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(80, 380, branchPillWidth, 54);
 
-    ctx.fillStyle = '#334155';
-    ctx.fillText(supplierText, 105, 417);
+      ctx.fillStyle = '#1e40af';
+      ctx.fillText(branchText, 105, 417);
+    }
 
     // Verification Status Badge
     ctx.fillStyle = '#eff6ff';

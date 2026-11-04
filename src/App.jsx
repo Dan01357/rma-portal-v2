@@ -54,7 +54,8 @@ import {
   KeyRound,
   Sparkles,
   Calendar,
-  Building
+  Building,
+  Truck
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
