@@ -9,8 +9,7 @@ import {
   QrCode, 
   Building2, 
   Sparkles,
-  RefreshCw,
-  MapPin
+  RefreshCw
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng, printBoxSticker } from '../utils/qrDownload';
 
@@ -211,12 +210,6 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
                 <div className="text-sm sm:text-xl font-black font-mono text-slate-900 tracking-tight whitespace-nowrap overflow-hidden text-ellipsis">
                   {rmaNumber}
                 </div>
-                {storeBranch ? (
-                  <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 border border-blue-200 text-blue-900 text-[11px] sm:text-xs font-bold max-w-full truncate">
-                    <MapPin className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                    <span className="truncate">{storeBranch}</span>
-                  </div>
-                ) : null}
               </div>
 
               {/* QR Code */}

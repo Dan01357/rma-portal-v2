@@ -388,34 +388,6 @@ export async function generateBoxStickerCanvas({
     ctx.fillStyle = '#0f172a';
     ctx.fillText(rmaNumber, 80, 335);
 
-    // Dynamic Branch Tag Pill (if present, shows branch instead of confusing company fallback)
-    const branchLabel = (storeBranch || store || '').trim();
-    if (branchLabel) {
-      const branchText = `Branch: ${branchLabel}`;
-      ctx.font = 'bold 26px "Inter", sans-serif';
-      const branchPillWidth = Math.min(Math.max(ctx.measureText(branchText).width + 50, 280), 610);
-
-      ctx.fillStyle = '#eff6ff';
-      ctx.fillRect(80, 380, branchPillWidth, 54);
-      ctx.strokeStyle = '#bfdbfe';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(80, 380, branchPillWidth, 54);
-
-      ctx.fillStyle = '#1e40af';
-      ctx.fillText(branchText, 105, 417);
-    }
-
-    // Verification Status Badge
-    ctx.fillStyle = '#eff6ff';
-    ctx.fillRect(80, 452, 360, 48);
-    ctx.strokeStyle = '#bfdbfe';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(80, 452, 360, 48);
-
-    ctx.fillStyle = '#1d4ed8';
-    ctx.font = 'bold 22px "Inter", sans-serif';
-    ctx.fillText('STATUS: LOGGED & PENDING', 105, 484);
-
     // 6. Section 2: Returned Item Details Container Box (Taller & beautifully spaced)
     const boxY = 670;
     const boxH = 760;
