@@ -75,9 +75,18 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   useEffect(() => {
     if (isOpen) {
       if (product) {
+        const barcodeStr = product.barcode ? String(product.barcode).trim() : '';
         setName(product.name || '');
-        setBarcode(product.barcode || '');
-        setCode(product.code || '');
+        setBarcode(barcodeStr);
+
+        // SKU and Barcode are strictly different.
+        // When assigning SKU or if code is equal to barcode or placeholder, default to BLANK.
+        const rawCode = String(product.code || product.sku || '').trim();
+        const isSameAsBarcode = Boolean(barcodeStr && rawCode === barcodeStr);
+        const isPlaceholder = rawCode.toLowerCase().includes('awaiting') || rawCode.toLowerCase().includes('unidentified');
+        const initialCode = (!isSameAsBarcode && !isPlaceholder) ? rawCode : '';
+        setCode(initialCode);
+
         setSupplierName(product.supplier_name || product.supplierName || 'Savemore');
         setPrice(product.price !== undefined ? String(product.price) : '0');
         setPriceWithVat(product.price_with_vat !== undefined ? String(product.price_with_vat) : String(product.priceWithVat || '0'));
@@ -139,7 +148,13 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   const handleAutoPopulate = (item) => {
     if (!item) return;
     if (item.name) setName(item.name);
-    if (item.code || item.sku) setCode(item.code || item.sku);
+    if (item.code || item.sku) {
+      const candidateCode = String(item.code || item.sku).trim();
+      const currentBarcode = String(barcode || item.barcode || '').trim();
+      if (candidateCode !== currentBarcode) {
+        setCode(candidateCode);
+      }
+    }
     if (item.barcode && !barcode) setBarcode(item.barcode);
 
     // Auto populate existing data; if none leave blank, no fake data

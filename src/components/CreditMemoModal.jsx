@@ -8,6 +8,7 @@ import {
   Calendar, 
   CheckCircle, 
   AlertCircle, 
+  AlertTriangle,
   RefreshCw, 
   Printer, 
   Plus,
@@ -18,6 +19,7 @@ import {
 } from 'lucide-react';
 import { creditMemoService } from '../services/creditMemoService';
 import { authService } from '../services/authService';
+import { hasAssignedSku } from '../utils/rmaHelpers';
 
 export default function CreditMemoModal({
   isOpen,
@@ -28,7 +30,9 @@ export default function CreditMemoModal({
   onViewVoucher,
   currentUser,
   reportsList = [],
-  creditMemosCount = 0
+  savedProductsList = [],
+  creditMemosCount = 0,
+  onAssignSku
 }) {
   const isEditing = Boolean(creditMemo && creditMemo.credit_memo_number);
 
@@ -73,6 +77,14 @@ export default function CreditMemoModal({
     }
     return null;
   }, [report, selectedReportId, availableReports, isEditing]);
+
+  // Validation: Guard against issuing credit memo for ₱0.00 or unassigned SKU
+  const isMissingSku = useMemo(() => {
+    if (isEditing) return false;
+    const target = activeReport || report;
+    if (!target) return false;
+    return !hasAssignedSku(target, savedProductsList);
+  }, [isEditing, activeReport, report, savedProductsList]);
 
   // Synchronize all form data when an RMA return ticket is selected
   const applyReportToForm = (rep) => {
@@ -237,6 +249,10 @@ export default function CreditMemoModal({
 
   const handleSubmit = async (e, thenPrint = false) => {
     e.preventDefault();
+    if (isMissingSku) {
+      setErrorMessage("Cannot issue Finance Credit Memo for ₱0.00 or unassigned SKU. Please click 'Assign SKU' first to register the official item code and verified price in the catalog.");
+      return;
+    }
     const finalQty = parseInt(quantity, 10) || 1;
     if (finalQty <= 0) {
       setErrorMessage('Quantity must be at least 1 unit.');
@@ -396,6 +412,36 @@ export default function CreditMemoModal({
               </div>
             </div>
           </div>
+
+          {/* Financial Validation & Safety Guard Banner if item is unassigned or ₱0.00 */}
+          {isMissingSku && (
+            <div className="p-3.5 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-2xl flex items-start justify-between gap-3 animate-in fade-in">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-xs font-black text-amber-900 dark:text-amber-200">
+                    Financial Validation & Safety Guard
+                  </div>
+                  <p className="text-[11px] text-amber-800 dark:text-amber-300 mt-0.5 leading-relaxed">
+                    Cannot issue Finance Credit Memo for ₱0.00 or unassigned SKU. Please click &apos;Assign SKU&apos; first to set the official item code and verified price in the catalog.
+                  </p>
+                </div>
+              </div>
+              {onAssignSku && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onAssignSku(targetReport);
+                  }}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer"
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  <span>Assign SKU Now</span>
+                </button>
+              )}
+            </div>
+          )}
 
           <form id="credit-memo-form" onSubmit={(e) => handleSubmit(e, false)} className="space-y-3.5 text-xs">
             
@@ -636,9 +682,9 @@ export default function CreditMemoModal({
             <button
               type="button"
               onClick={(e) => handleSubmit(e, true)}
-              disabled={isLoading}
-              className="touch-target px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
-              title="Save Credit Memo and open printable official voucher"
+              disabled={isLoading || isMissingSku}
+              className="touch-target px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 disabled:opacity-50 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
+              title={isMissingSku ? "Cannot save voucher: Assign SKU first" : "Save Credit Memo and open printable official voucher"}
             >
               <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400 shrink-0" />
               <span className="truncate">Save & View Voucher</span>
@@ -647,8 +693,9 @@ export default function CreditMemoModal({
             <button
               type="submit"
               form="credit-memo-form"
-              disabled={isLoading}
+              disabled={isLoading || isMissingSku}
               className="touch-target px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all cursor-pointer active:scale-95"
+              title={isMissingSku ? "Cannot issue Credit Memo: Assign SKU first" : "Issue Credit Memo"}
             >
               {isLoading ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />

@@ -473,7 +473,7 @@ export const catalogService = {
           const matchedProd = {
             id: p.id,
             barcode: p.barcode || clean,
-            code: p.code || p.sku || clean,
+            code: (p.code && p.code !== (p.barcode || clean)) ? p.code : (p.sku && p.sku !== (p.barcode || clean) ? p.sku : null),
             name: p.name,
             price: Number(p.price || 0),
             priceWithVat: Number(p.priceWithVat || p.price_with_vat || p.price || 0),
@@ -505,9 +505,10 @@ export const catalogService = {
       if (liveProduct) {
         // Cache into Supabase products table asynchronously so subsequent searches are instant
         try {
+          const liveSku = (liveProduct.code && liveProduct.code !== clean) ? liveProduct.code : (liveProduct.sku && liveProduct.sku !== clean ? liveProduct.sku : null);
           supabase.from('products').upsert([{
             barcode: liveProduct.barcode || clean,
-            code: liveProduct.code || liveProduct.sku || clean,
+            code: liveSku,
             name: liveProduct.name,
             supplier_name: liveProduct.supplier || liveProduct.supplier_name || 'Savemore',
             price: Number(liveProduct.price || liveProduct.unit_price || 0),
@@ -522,7 +523,7 @@ export const catalogService = {
         return {
           id: liveProduct.id,
           barcode: liveProduct.barcode || clean,
-          code: liveProduct.code || liveProduct.sku || clean,
+          code: (liveProduct.code && liveProduct.code !== clean) ? liveProduct.code : (liveProduct.sku && liveProduct.sku !== clean ? liveProduct.sku : null),
           name: liveProduct.name,
           price: Number(liveProduct.price || liveProduct.unit_price || 0),
           priceWithVat: Number(liveProduct.price_with_vat || liveProduct.priceWithVat || 0),
@@ -575,7 +576,7 @@ export const catalogService = {
         return {
           id: supaItem.id,
           barcode: supaItem.barcode,
-          code: supaItem.code || supaItem.barcode,
+          code: (supaItem.code && supaItem.code !== supaItem.barcode) ? supaItem.code : (supaItem.sku && supaItem.sku !== supaItem.barcode ? supaItem.sku : null),
           name: supaItem.name,
           price: Number(supaItem.price || 0),
           priceWithVat: Number(supaItem.price_with_vat || supaItem.price || 0),
@@ -657,7 +658,7 @@ export const catalogService = {
               results.push({
                 id: item.id,
                 barcode: item.barcode,
-                code: item.code || item.sku || item.barcode,
+                code: (item.code && item.code !== item.barcode) ? item.code : (item.sku && item.sku !== item.barcode ? item.sku : null),
                 name: item.name,
                 price: Number(item.price || 0),
                 priceWithVat: Number(item.priceWithVat || item.price_with_vat || item.price || 0),
@@ -695,7 +696,7 @@ export const catalogService = {
             results.push({
               id: item.id,
               barcode: item.barcode,
-              code: item.code || item.barcode,
+              code: (item.code && item.code !== item.barcode) ? item.code : (item.sku && item.sku !== item.barcode ? item.sku : null),
               name: item.name,
               price: Number(item.price || 0),
               priceWithVat: Number(item.price_with_vat || item.price || 0),
@@ -1188,7 +1189,7 @@ export const catalogService = {
       rma_number: rmaNumber,
       rma_type: rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound',
       barcode: cleanBarcode,
-      code: isKnown ? (resolvedProduct.code || resolvedProduct.barcode) : (hasItems && items[0]?.code ? items[0].code : null),
+      code: isKnown ? ((resolvedProduct.code && resolvedProduct.code !== cleanBarcode) ? resolvedProduct.code : (resolvedProduct.sku && resolvedProduct.sku !== cleanBarcode ? resolvedProduct.sku : null)) : (hasItems && items[0]?.code ? items[0].code : null),
       name: effectiveName,
       quantity: calculatedTotalQuantity,
       supplier_name: isKnown ? (resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Pending Assignment') : (hasItems && items[0]?.supplier_name ? items[0].supplier_name : 'Pending Assignment'),
@@ -1371,7 +1372,7 @@ export const catalogService = {
         .upsert([
           {
             barcode: cleanBarcode,
-            code: resolvedProduct.code || resolvedProduct.barcode || null,
+            code: (resolvedProduct.code && resolvedProduct.code !== cleanBarcode) ? resolvedProduct.code : (resolvedProduct.sku && resolvedProduct.sku !== cleanBarcode ? resolvedProduct.sku : null),
             name: resolvedProduct.name,
             supplier_name: resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Savemore',
             price: Number(resolvedProduct.price || 0),

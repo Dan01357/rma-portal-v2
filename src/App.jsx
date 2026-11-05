@@ -89,7 +89,7 @@ import PinRequestsQueueModal from './components/PinRequestsQueueModal';
 import { accessKeyService } from './services/accessKeyService';
 import { pinRequestService } from './services/pinRequestService';
 import { QRCodeSVG } from 'qrcode.react';
-import { isSplitChildTicket, isSplitParentTicket } from './utils/rmaHelpers';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku } from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
   '1- Damaged Box / Crushed Packaging',
@@ -244,6 +244,7 @@ export default function App() {
   const [isCreditMemoModalOpen, setIsCreditMemoModalOpen] = useState(false);
   const [selectedCreditMemoReport, setSelectedCreditMemoReport] = useState(null);
   const [editingCreditMemo, setEditingCreditMemo] = useState(null);
+  const [creditMemoWarningTarget, setCreditMemoWarningTarget] = useState(null);
   const [voucherModalMemo, setVoucherModalMemo] = useState(null);
   const [voucherModalMemos, setVoucherModalMemos] = useState([]);
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
@@ -825,6 +826,14 @@ export default function App() {
 
   // Credit Memo Handlers
   const handleOpenCreditMemoForReport = (report) => {
+    if (!report) return;
+    if (!hasAssignedSku(report, savedProductsList)) {
+      setCreditMemoWarningTarget({
+        item: report,
+        message: "Cannot issue Finance Credit Memo for ₱0.00 or unassigned SKU. Please click 'Assign SKU' first to register the official item code and verified price into the catalog."
+      });
+      return;
+    }
     setSelectedCreditMemoReport(report);
     setEditingCreditMemo(null);
     setIsCreditMemoModalOpen(true);
@@ -846,19 +855,37 @@ export default function App() {
   const handleEditProductFromReport = (report) => {
     if (!report) return;
     const existing = savedProductsList.find(p => p.barcode && String(p.barcode) === String(report.barcode));
+    const barcodeStr = String(report.barcode || existing?.barcode || '').trim();
+
+    // Barcode and SKU are strictly different.
+    // Filter out barcode values or unassigned placeholders from SKU
+    const existingCode = (existing?.code && String(existing.code).trim() !== barcodeStr) ? existing.code : '';
+    const reportCode = (report.code && String(report.code).trim() !== barcodeStr)
+      ? report.code
+      : (report.sku && String(report.sku).trim() !== barcodeStr)
+        ? report.sku
+        : existingCode;
+
+    const cleanReportCode = (reportCode && !reportCode.toLowerCase().includes('awaiting') && !reportCode.toLowerCase().includes('unidentified'))
+      ? reportCode
+      : '';
+
     if (existing && existing.is_verified) {
-      setEditingProduct(existing);
+      setEditingProduct({
+        ...existing,
+        code: cleanReportCode || existingCode
+      });
     } else {
       const cleanName = report.name && !report.name.toLowerCase().includes('unidentified')
         ? report.name
-        : '';
+        : (existing?.name && !existing.name.toLowerCase().includes('unidentified') ? existing.name : '');
 
       // Unassigned barcode: MUST start with NO default product image (empty placeholder state)
       // Never preload damage / defect report photos as product catalog images!
       setEditingProduct({
         name: cleanName,
-        barcode: report.barcode || '',
-        code: report.code || report.sku || (existing?.code || ''),
+        barcode: report.barcode || existing?.barcode || '',
+        code: cleanReportCode,
         supplier_name: report.supplier_name || existing?.supplier_name || 'Savemore',
         price: report.price || existing?.price || 0,
         price_with_vat: report.price_with_vat || existing?.price_with_vat || report.price || 0,
@@ -5002,7 +5029,12 @@ export default function App() {
         creditMemo={editingCreditMemo}
         currentUser={currentUser}
         reportsList={customerInboundReports}
+        savedProductsList={savedProductsList}
         creditMemosCount={creditMemosList?.length || 0}
+        onAssignSku={(targetRep) => {
+          setIsCreditMemoModalOpen(false);
+          handleEditProductFromReport(targetRep);
+        }}
         onSaved={(memo) => {
           if (memo) {
             setRecentReportsList(prev => prev.map(r => {
@@ -5021,6 +5053,51 @@ export default function App() {
           setIsVoucherModalOpen(true);
         }}
       />
+
+      {/* FINANCIAL VALIDATION & SAFETY GUARD MODAL FOR CREDIT MEMO */}
+      {creditMemoWarningTarget && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-amber-500/30 max-w-md w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 shadow-inner">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="space-y-1.5 min-w-0">
+                <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                  Financial Validation & Safety Guard
+                </h4>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  {creditMemoWarningTarget.message || "Cannot issue Finance Credit Memo for ₱0.00 or unassigned SKU. Please click 'Assign SKU' first to register the official item code and verified price into the catalog."}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setCreditMemoWarningTarget(null)}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+              >
+                Dismiss
+              </button>
+              {creditMemoWarningTarget.item && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = creditMemoWarningTarget.item;
+                    setCreditMemoWarningTarget(null);
+                    handleEditProductFromReport(target);
+                  }}
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm shadow-blue-500/20 cursor-pointer"
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  <span>Assign SKU Now</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Official Printable Credit Memorandum Voucher Modal */}
       <CreditMemoVoucherModal

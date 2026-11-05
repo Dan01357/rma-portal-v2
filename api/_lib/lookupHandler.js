@@ -99,8 +99,8 @@ export default async function handler(req, res) {
             product: {
               id: item.id,
               barcode: item.barcode,
-              code: item.code || item.barcode,
-              sku: item.code || item.barcode,
+              code: (item.code && item.code !== item.barcode) ? item.code : null,
+              sku: (item.code && item.code !== item.barcode) ? item.code : null,
               ean_code: item.ean_code || item.barcode,
               name: item.name,
               price: Number(item.price || 0),
@@ -304,7 +304,7 @@ export default async function handler(req, res) {
           results.push({
             id: item.id,
             barcode: item.barcode,
-            code: item.code || item.barcode,
+            code: (item.code && item.code !== item.barcode) ? item.code : null,
             name: item.name,
             price: Number(item.price || 0),
             price_with_vat: Number(item.price_with_vat || item.price || 0),

@@ -75,8 +75,12 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
 
   const handleSelect = (item) => {
     setSelectedBarcode(item);
+    const itemBarcode = String(item.barcode || '').trim();
+    const rawCode = String(item.code || item.sku || '').trim();
+    const isCodeValid = rawCode && rawCode !== itemBarcode && !rawCode.toLowerCase().includes('awaiting') && !rawCode.toLowerCase().includes('unidentified');
+
     setFormData({
-      code: item.code || '',
+      code: isCodeValid ? rawCode : '',
       name: item.name && !item.name.includes('Unidentified') ? item.name : '',
       supplierName: item.supplier_name && item.supplier_name !== 'Pending Assignment' ? item.supplier_name : '',
       price: item.price ? String(item.price) : '',

@@ -182,3 +182,52 @@ export function isSplitParentTicket(item, allReports = []) {
   return Boolean(hasChildInList || hasSplitAudit || hasSplitNotes);
 }
 
+/**
+ * Validates whether a return report or product has an official assigned SKU and non-zero unit price.
+ * Barcode and SKU are strictly distinct:
+ * - A barcode value (e.g. 214124124) is NOT a valid SKU.
+ * - Placeholders like "Awaiting SKU" or "Unidentified" are NOT valid SKUs.
+ * - Unit price must be > 0.
+ * Used as a Financial Validation & Safety Guard for Credit Memos & Claims.
+ */
+export function hasAssignedSku(report, savedProductsList = []) {
+  if (!report) return false;
+  const barcodeStr = report.barcode ? String(report.barcode).trim() : '';
+
+  // Look up matched catalog product if available
+  const matched = (barcodeStr && Array.isArray(savedProductsList))
+    ? savedProductsList.find(p => p.barcode && String(p.barcode).trim() === barcodeStr)
+    : null;
+
+  // Check matched product SKU
+  const matchedCode = matched?.code || matched?.sku || '';
+  const matchedCodeStr = String(matchedCode).trim();
+  const isMatchedCodeValid = Boolean(
+    matchedCodeStr &&
+    matchedCodeStr !== barcodeStr &&
+    !matchedCodeStr.toLowerCase().includes('awaiting') &&
+    !matchedCodeStr.toLowerCase().includes('unidentified')
+  );
+
+  // Check report SKU
+  const reportCode = report.code || report.sku || '';
+  const reportCodeStr = String(reportCode).trim();
+  const isReportCodeValid = Boolean(
+    reportCodeStr &&
+    reportCodeStr !== barcodeStr &&
+    !reportCodeStr.toLowerCase().includes('awaiting') &&
+    !reportCodeStr.toLowerCase().includes('unidentified')
+  );
+
+  // Must have a real SKU assigned either directly on report or in catalog
+  const hasValidSku = isMatchedCodeValid || isReportCodeValid;
+  if (!hasValidSku) return false;
+
+  // Price validation: Credit memo / claim requires price > 0
+  const price = Number(report.price_with_vat ?? report.price ?? matched?.price_with_vat ?? matched?.price ?? 0);
+  if (price <= 0) return false;
+
+  return true;
+}
+
+
