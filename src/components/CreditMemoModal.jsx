@@ -34,6 +34,7 @@ export default function CreditMemoModal({
 
   const prevIsOpenRef = useRef(false);
   const currentEditingRef = useRef(null);
+  const prevTargetReportIdRef = useRef(null);
 
   const [selectedReportId, setSelectedReportId] = useState('');
   const [quantity, setQuantity] = useState(1);
@@ -48,26 +49,40 @@ export default function CreditMemoModal({
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
 
-  // Active report resolution: prioritize user-selected report from dropdown, then passed report, then first report
+  // Clean customer inbound return reports list (filtering out manifest sub-items to avoid duplicates)
+  const availableReports = useMemo(() => {
+    if (!Array.isArray(reportsList)) return [];
+    return reportsList.filter(r => {
+      if (r.rma_type && r.rma_type !== 'customer_inbound') return false;
+      if (r.parent_rma_id && reportsList.some(p => p.id === r.parent_rma_id && p.rma_number === r.rma_number)) {
+        return false;
+      }
+      return true;
+    });
+  }, [reportsList]);
+
+  // Active report resolution: prioritize user-selected report from dropdown, then passed report, then first available report
   const activeReport = useMemo(() => {
-    if (selectedReportId && reportsList.length > 0) {
-      const match = reportsList.find(r => String(r.id) === String(selectedReportId) || r.rma_number === selectedReportId);
+    if (selectedReportId && availableReports.length > 0) {
+      const match = availableReports.find(r => String(r.id) === String(selectedReportId) || r.rma_number === selectedReportId);
       if (match) return match;
     }
     if (report) return report;
-    if (!isEditing && reportsList.length > 0) {
-      return reportsList[0];
+    if (!isEditing && availableReports.length > 0) {
+      return availableReports[0];
     }
     return null;
-  }, [report, selectedReportId, reportsList, isEditing]);
+  }, [report, selectedReportId, availableReports, isEditing]);
 
   // Synchronize all form data when an RMA return ticket is selected
   const applyReportToForm = (rep) => {
     if (!rep) return;
+    // Always default to the exact quantity entered on the return ticket
     const qty = Math.max(1, Number(rep.quantity) || 1);
     const price = Number((Number(rep.price_with_vat ?? rep.price ?? 0)).toFixed(2));
     const gross = Number((qty * price).toFixed(2));
 
+    setSelectedReportId(rep.id || rep.rma_number || '');
     setQuantity(qty);
     setUnitName(rep.unit_name || rep.unit || 'pc');
     setUnitPrice(price.toFixed(2));
@@ -84,20 +99,23 @@ export default function CreditMemoModal({
   // Immediate handler when user picks an item from the dropdown: ALL data updates immediately
   const handleReportDropdownChange = (newVal) => {
     setSelectedReportId(newVal);
-    const found = reportsList.find(r => String(r.id) === String(newVal) || r.rma_number === newVal);
+    const found = availableReports.find(r => String(r.id) === String(newVal) || r.rma_number === newVal);
     if (found) {
       applyReportToForm(found);
     }
   };
 
-  // Sync state ONLY when modal opens or target memo explicitly switches (Prevents 3.5s background polling resets!)
+  // Sync state ONLY when modal opens or target report/memo explicitly switches
   useEffect(() => {
     const isOpening = isOpen && !prevIsOpenRef.current;
     const memoChanged = isEditing && creditMemo?.credit_memo_number !== currentEditingRef.current;
+    const currentTargetId = report?.id || report?.rma_number || null;
+    const reportChanged = !isEditing && isOpen && currentTargetId && currentTargetId !== prevTargetReportIdRef.current;
 
-    if (isOpening || memoChanged) {
+    if (isOpening || memoChanged || reportChanged) {
       prevIsOpenRef.current = isOpen;
       currentEditingRef.current = creditMemo?.credit_memo_number || null;
+      prevTargetReportIdRef.current = currentTargetId;
       setErrorMessage(null);
       setIsLoading(false);
 
@@ -114,17 +132,18 @@ export default function CreditMemoModal({
         setNotes(creditMemo.notes || '');
       } else {
         setFinanceHead('Analiza B. Benoza');
-        const initialReport = report || (reportsList.length > 0 ? reportsList[0] : null);
+        const initialReport = report || (availableReports.length > 0 ? availableReports[0] : null);
         if (initialReport) {
-          setSelectedReportId(initialReport.id || initialReport.rma_number || '');
           applyReportToForm(initialReport);
         }
       }
     } else if (!isOpen) {
       prevIsOpenRef.current = false;
       currentEditingRef.current = null;
+      prevTargetReportIdRef.current = null;
+      setSelectedReportId('');
     }
-  }, [isOpen, creditMemo, isEditing, report, reportsList, creditMemosCount]);
+  }, [isOpen, creditMemo, isEditing, report, availableReports, creditMemosCount]);
 
   const updateCalculations = (newQty, newPrice) => {
     const q = Number(newQty) || 0;
@@ -134,13 +153,21 @@ export default function CreditMemoModal({
     setCreditAmount(gross.toFixed(2));
   };
 
-  // Quantity handlers (smooth typing, backspace deletes properly, stepper buttons)
+  // Quantity handlers (smooth typing, backspace deletes cleanly without jumping, stepper buttons)
   const handleQuantityChange = (val) => {
     if (val === '') {
       setQuantity('');
+      updateCalculations(0, unitPrice);
       return;
     }
-    const parsed = parseInt(val, 10);
+    // Allow typing multi-digit numbers freely; strip any non-digit chars
+    const clean = val.replace(/[^\d]/g, '');
+    if (clean === '') {
+      setQuantity('');
+      updateCalculations(0, unitPrice);
+      return;
+    }
+    const parsed = parseInt(clean, 10);
     if (!isNaN(parsed) && parsed >= 0) {
       setQuantity(parsed);
       updateCalculations(parsed, unitPrice);
@@ -148,9 +175,12 @@ export default function CreditMemoModal({
   };
 
   const handleQuantityBlur = () => {
-    const q = Math.max(1, parseInt(quantity, 10) || 1);
-    setQuantity(q);
-    updateCalculations(q, unitPrice);
+    const parsed = parseInt(quantity, 10);
+    const target = activeReport || report;
+    const defaultQty = Math.max(1, Number(target?.quantity) || 1);
+    const finalQty = (!isNaN(parsed) && parsed > 0) ? parsed : defaultQty;
+    setQuantity(finalQty);
+    updateCalculations(finalQty, unitPrice);
   };
 
   const stepQuantity = (delta) => {
@@ -320,7 +350,7 @@ export default function CreditMemoModal({
           )}
 
           {/* Ticket Picker (Always available when creating so user can switch tickets and sync all data) */}
-          {!isEditing && reportsList.length > 0 && (
+          {!isEditing && availableReports.length > 0 && (
             <div className="space-y-1">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                 Select Linked RMA Return Ticket *
@@ -330,7 +360,7 @@ export default function CreditMemoModal({
                 onChange={(e) => handleReportDropdownChange(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800"
               >
-                {reportsList.map(r => (
+                {availableReports.map(r => (
                   <option key={r.id || r.rma_number} value={r.id || r.rma_number}>
                     {r.rma_number} — {r.name || r.barcode} (Qty: {r.quantity || 1} • {r.supplier_name || 'Warehouse'})
                   </option>
@@ -387,13 +417,15 @@ export default function CreditMemoModal({
 
                   <div className="relative flex-1">
                     <input
-                      type="number"
-                      min="1"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       required
                       value={quantity}
                       onFocus={(e) => e.target.select()}
                       onChange={(e) => handleQuantityChange(e.target.value)}
                       onBlur={handleQuantityBlur}
+                      placeholder="1"
                       className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-black font-mono text-center text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800"
                     />
                   </div>

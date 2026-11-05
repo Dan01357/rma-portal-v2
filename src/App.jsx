@@ -89,6 +89,7 @@ import PinRequestsQueueModal from './components/PinRequestsQueueModal';
 import { accessKeyService } from './services/accessKeyService';
 import { pinRequestService } from './services/pinRequestService';
 import { QRCodeSVG } from 'qrcode.react';
+import { isSplitChildTicket, isSplitParentTicket } from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
   '1- Damaged Box / Crushed Packaging',
@@ -548,11 +549,17 @@ export default function App() {
         }
       } catch (e) { }
     };
+    const handleRmaDataEvent = (e) => {
+      handleSyncTestMode();
+      if (e?.detail?.type === 'item-split' || e?.detail?.type === 'triage-updated' || e?.detail?.type === 'buffer-closed') {
+        refreshAllData();
+      }
+    };
     window.addEventListener('storage', handleSyncTestMode);
-    window.addEventListener('rma-data-changed', handleSyncTestMode);
+    window.addEventListener('rma-data-changed', handleRmaDataEvent);
     return () => {
       window.removeEventListener('storage', handleSyncTestMode);
-      window.removeEventListener('rma-data-changed', handleSyncTestMode);
+      window.removeEventListener('rma-data-changed', handleRmaDataEvent);
     };
   }, [currentUser]);
 
@@ -4108,13 +4115,13 @@ export default function App() {
                                   </div>
                                   {/* Split and Buffer Quick Badges */}
                                   <div className="flex items-center gap-1 flex-wrap mt-0.5">
-                                    {item.rma_number?.includes('-B') || item.rma_number?.includes('-C') ? (
+                                    {isSplitChildTicket(item) ? (
                                       <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
                                         <span>✂️ Part 2</span>
                                       </span>
-                                    ) : recentReportsList.some(other => other.parent_rma_id === item.id && other.rma_number !== item.rma_number) ? (
+                                    ) : isSplitParentTicket(item, recentReportsList) ? (
                                       <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Parent Ticket (Part 1)">
-                                        <span>✂️ Split</span>
+                                        <span>✂️ Part 1</span>
                                       </span>
                                     ) : null}
 
@@ -4519,6 +4526,15 @@ export default function App() {
                                   >
                                     <QrCode className="w-3.5 h-3.5" />
                                   </button>
+                                  {isSplitChildTicket(item) ? (
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
+                                      <span>✂️ Part 2</span>
+                                    </span>
+                                  ) : isSplitParentTicket(item, recentReportsList) ? (
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Parent Ticket (Part 1)">
+                                      <span>✂️ Part 1</span>
+                                    </span>
+                                  ) : null}
                                 </div>
                                 <h4 className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm mt-0.5 truncate" title={resolvedName}>
                                   {resolvedName}
@@ -4985,7 +5001,7 @@ export default function App() {
         report={selectedCreditMemoReport}
         creditMemo={editingCreditMemo}
         currentUser={currentUser}
-        reportsList={recentReportsList}
+        reportsList={customerInboundReports}
         creditMemosCount={creditMemosList?.length || 0}
         onSaved={(memo) => {
           if (memo) {

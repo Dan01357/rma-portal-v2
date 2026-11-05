@@ -39,6 +39,7 @@ import {
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
+import { isSplitChildTicket, isSplitParentTicket } from '../utils/rmaHelpers';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -1539,10 +1540,16 @@ export default function QuickRMAActionModal({
 
                 {/* Split Relationship Banners */}
                 {(() => {
+                  const isChild = isSplitChildTicket(report);
                   const splitChildTicket = recentReportsList.find(
-                    r => (r.parent_rma_id === report?.id || String(r.parent_rma_id) === String(report?.id)) && r.rma_number !== report?.rma_number
+                    r => isSplitChildTicket(r) && (
+                      r.parent_rma_id === report?.id ||
+                      String(r.parent_rma_id) === String(report?.id) ||
+                      (report?.rma_number && r.rma_number?.startsWith(report.rma_number + '-'))
+                    )
                   );
-                  if (splitChildTicket) {
+
+                  if (splitChildTicket && !isChild) {
                     return (
                       <div className="p-3 bg-blue-50 dark:bg-blue-950/70 border border-blue-300 dark:border-blue-800 rounded-xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
                         <div className="flex items-center gap-2">
@@ -1572,11 +1579,11 @@ export default function QuickRMAActionModal({
                     );
                   }
 
-                  const isChild = Boolean(
-                    report?.parent_rma_id || report?.rma_number?.includes('-B') || report?.rma_number?.includes('-C')
-                  );
                   const parentTicket = isChild
-                    ? recentReportsList.find(r => r.id === report?.parent_rma_id || r.rma_number === report?.rma_number?.replace(/-[B-Z]$/, ''))
+                    ? recentReportsList.find(r => (
+                        (report?.parent_rma_id && (r.id === report.parent_rma_id || String(r.id) === String(report.parent_rma_id))) ||
+                        (report?.rma_number && r.rma_number === report.rma_number.replace(/-[B-Z]$/i, ''))
+                      ))
                     : null;
 
                   if (isChild && parentTicket) {

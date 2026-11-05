@@ -149,3 +149,36 @@ export function generateAiDiagnosis(productName, defectCategory, photosCount = 0
 
   return diagnoses[Math.floor(Math.random() * diagnoses.length)];
 }
+
+/**
+ * Helper to identify whether a ticket is a split child ticket (Part 2 of 2)
+ * Robustly checks:
+ * 1. RMA number ends with split suffix (e.g. -B, -C, -D)
+ * 2. Or ticket explicitly references parent RMA ID with a split explanation/note
+ */
+export function isSplitChildTicket(item) {
+  if (!item) return false;
+  const num = String(item.rma_number || '');
+  const hasSplitSuffix = /-[B-Z]$/i.test(num);
+  const hasSplitNote = String(item.explanation || '').toLowerCase().includes('split from') || 
+                       String(item.notes || '').toLowerCase().includes('split from parent');
+  return Boolean(hasSplitSuffix || (item.parent_rma_id && hasSplitNote));
+}
+
+/**
+ * Helper to identify whether a ticket is a split parent ticket (Part 1 of 2)
+ */
+export function isSplitParentTicket(item, allReports = []) {
+  if (!item) return false;
+  const num = String(item.rma_number || '');
+  if (/-[B-Z]$/i.test(num)) return false; // Child cannot be parent Part 1
+  const hasChildInList = Array.isArray(allReports) && allReports.some(other => (
+    (other.parent_rma_id === item.id || String(other.parent_rma_id) === String(item.id)) &&
+    other.rma_number !== item.rma_number &&
+    /-[B-Z]$/i.test(String(other.rma_number || ''))
+  ));
+  const hasSplitAudit = Array.isArray(item.audit_trail) && item.audit_trail.some(a => a.stage === 'SPLIT_EXECUTED');
+  const hasSplitNotes = String(item.notes || '').includes('Split: Kept');
+  return Boolean(hasChildInList || hasSplitAudit || hasSplitNotes);
+}
+
