@@ -78,11 +78,21 @@ export default async function handler(req, res) {
         });
       }
 
-      // Normalize status and disposition for seamless coworker restock updates
+      // Normalize status and disposition for coworker restock & scrap/re-order sync
       if (updateData.status) {
         const s = String(updateData.status).toLowerCase().trim();
-        if (s === 'resolved' || s === 'restocked' || s === 'closed' || s.includes('restock')) {
-          updateData.status = 'closed';
+        if (s === 'restocked') {
+          updateData.status = 'restocked';
+        } else if (s === 'scrapped' || s === 'disposed') {
+          updateData.status = 'scrapped';
+        } else if (s === 'resolved' || s === 'closed') {
+          // If disposition indicates scrap, normalize to scrapped; otherwise restocked
+          const d = String(updateData.disposition || '').toLowerCase();
+          if (d.includes('scrap') || d.includes('dispose')) {
+            updateData.status = 'scrapped';
+          } else {
+            updateData.status = 'restocked';
+          }
         }
       }
 
@@ -90,6 +100,8 @@ export default async function handler(req, res) {
         const d = String(updateData.disposition).trim();
         if (d === 'Restock to Inventory' || d === '2- Restock to Inventory' || /restock/i.test(d)) {
           updateData.disposition = '2- Restock to Inventory';
+        } else if (d === 'Scrap / Dispose' || d === '5- Scrap / Dispose' || /scrap|dispose/i.test(d)) {
+          updateData.disposition = '5- Scrap / Dispose';
         }
       }
 

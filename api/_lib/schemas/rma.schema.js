@@ -6,12 +6,15 @@ export const RMAStatusEnum = z.enum([
   'under_inspection',
   'pending_finance_approval',
   'credit_memo_issued',
+  'restocked',
+  'scrapped',
   'closed',
   'rejected',
   'pending',
   'pending_admin_details',
   'resolved',
-  'logged'
+  'logged',
+  'buffer_replacement_dispatched'
 ]);
 
 export const RMAConditionGradeEnum = z.enum([
@@ -125,16 +128,24 @@ export function registerRMARoutes(registry) {
   registry.registerPath({
     method: 'get',
     path: '/api/v1/rma',
-    summary: 'List RMA Return Reports (Inventory Restock Queue)',
+    summary: 'List RMA Return Reports (Restock & Re-order Queues)',
     description: `Fetch paginated return reports with optional filtering by warehouse disposition, lifecycle status, product barcode, or search query.
 
-### 📦 Coworker Restock Guide:
+### 📦 Queue 1: Inventory Restock Queue
 To fetch all goods approved by warehouse triage for inventory restocking:
 \`\`\`bash
 curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?disposition=Restock%20to%20Inventory&status=pending" \\
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
-Reads: \`barcode\`, \`code\` (SKU), \`name\`, \`quantity\`, \`unit_name\`, and \`warehouse_location\`.`,
+Reads: \`barcode\`, \`code\` (SKU), \`name\`, \`quantity\`, \`unit_name\`, and \`warehouse_location\`.
+
+### 🗑️ Queue 2: Scrapped / Supplier Re-order Queue
+To fetch all goods deemed total loss / scrapped so your ERP can re-order replacement stock from suppliers:
+\`\`\`bash
+curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?disposition=Scrap%20%2F%20Dispose&status=pending" \\
+  -H "x-api-key: sk_live_rma_..."
+\`\`\`
+Reads: \`barcode\`, \`code\` (SKU), \`name\`, \`quantity\`, \`supplier_name\`, and \`reason\`.`,
     tags: ['RMA Reports'],
     request: {
       query: PaginationQuerySchema.extend({
@@ -235,20 +246,34 @@ Reads: \`barcode\`, \`code\` (SKU), \`name\`, \`quantity\`, \`unit_name\`, and \
   registry.registerPath({
     method: 'patch',
     path: '/api/v1/rma/{id}',
-    summary: 'Update RMA Report (Acknowledge / Mark Restocked)',
+    summary: 'Update RMA Report (Acknowledge Restocked / Scrapped)',
     description: `Update status, warehouse location, inspection notes, or details of an existing RMA report.
 
-### 📦 Coworker Inventory Restock Acknowledgment:
-When your ERP system has added the returned quantity to your warehouse stock count, call this endpoint to mark the RMA ticket as resolved so it won't be restocked again:
+### 📦 1. Coworker Inventory Restock Acknowledgment:
+When your ERP system has added the returned quantity to your warehouse stock count, call this endpoint to mark the RMA ticket as **restocked**:
 \`\`\`bash
 curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-2026-0001-6TYH" \\
   -H "Content-Type: application/json" \\
   -H "x-api-key: sk_live_rma_..." \\
   -d '{
-    "status": "closed",
+    "status": "restocked",
     "disposition": "2- Restock to Inventory",
     "warehouse_location": "RACK-03-BIN-A",
-    "notes": "Added to stock in ERP (Ref #INV-8821)"
+    "notes": "Added to inventory counts in ERP (Ref #INV-8821)"
+  }'
+\`\`\`
+
+### 🗑️ 2. Coworker Scrapped / Supplier Re-order Acknowledgment:
+When your procurement system has processed the scrapped item and placed a replacement Purchase Order to the supplier:
+\`\`\`bash
+curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-2026-0001-6TYH" \\
+  -H "Content-Type: application/json" \\
+  -H "x-api-key: sk_live_rma_..." \\
+  -d '{
+    "status": "scrapped",
+    "disposition": "5- Scrap / Dispose",
+    "warehouse_location": "SCRAP-BIN",
+    "notes": "Item marked scrapped. Replacement supplier PO #PO-2026-9901 issued."
   }'
 \`\`\``,
     tags: ['RMA Reports'],

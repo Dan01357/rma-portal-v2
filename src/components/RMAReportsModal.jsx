@@ -47,11 +47,19 @@ function formatLifecycleStage(status) {
       return { label: 'Pending Finance', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
     case 'credit_memo_issued':
       return { label: 'Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
-    case 'closed':
     case 'restocked':
+      return { label: 'Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    case 'scrapped':
+    case 'disposed':
+      return { label: 'Scrapped / Disposed', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+    case 'closed':
+    case 'resolved':
       return { label: 'Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    case 'buffer_replacement_dispatched':
+    case 'buffer_dispatched':
+      return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
     case 'rejected':
-      return { label: 'Rejected / Invalid', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+      return { label: 'Rejected / Invalid', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
     case 'pending_admin_details':
       return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
     default:
@@ -165,17 +173,15 @@ export default function RMAReportsModal({
       }
 
       if (statusFilter !== 'all') {
-        if (statusFilter === 'logged') {
-          if (item.status === 'pending_admin_details') return false;
-        } else if (statusFilter === 'unknown') {
-          if (item.status !== 'pending_admin_details') return false;
-        } else {
-          const s = String(item.status || 'received_at_dock').toLowerCase();
-          if (statusFilter === 'received_at_dock') {
-            if (s !== 'pending' && s !== 'received_at_dock') return false;
-          } else if (s !== statusFilter.toLowerCase()) {
-            return false;
-          }
+        const s = String(item.status || 'received_at_dock').toLowerCase();
+        if (statusFilter === 'received_at_dock') {
+          if (s !== 'pending' && s !== 'received_at_dock') return false;
+        } else if (statusFilter === 'restocked') {
+          if (s !== 'restocked' && s !== 'closed' && s !== 'resolved') return false;
+        } else if (statusFilter === 'scrapped') {
+          if (s !== 'scrapped' && s !== 'disposed') return false;
+        } else if (s !== statusFilter.toLowerCase()) {
+          return false;
         }
       }
 
@@ -208,10 +214,6 @@ export default function RMAReportsModal({
         case 'reporter':
           valA = String(a.reporter_name || a.reported_by || '').toLowerCase();
           valB = String(b.reporter_name || b.reported_by || '').toLowerCase();
-          break;
-        case 'catalog_status':
-          valA = a.status === 'pending_admin_details' ? 0 : 1;
-          valB = b.status === 'pending_admin_details' ? 0 : 1;
           break;
         case 'lifecycle_stage':
         case 'status':
@@ -434,14 +436,15 @@ export default function RMAReportsModal({
                 className="px-2.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-500 shadow-xs cursor-pointer"
               >
                 <option value="all">All Status & Stages</option>
+                <option value="draft">Draft / Intake</option>
                 <option value="received_at_dock">Received at Dock</option>
                 <option value="under_inspection">Under Inspection</option>
                 <option value="pending_finance_approval">Pending Finance Approval</option>
                 <option value="credit_memo_issued">Credit Memo Issued</option>
-                <option value="closed">Closed / Restocked</option>
+                <option value="restocked">Restocked</option>
+                <option value="scrapped">Scrapped / Disposed</option>
+                <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
                 <option value="rejected">Rejected / Invalid Claim</option>
-                <option value="logged">Catalog: Logged</option>
-                <option value="unknown">Catalog: Unknown Barcode</option>
               </select>
 
               {hasActiveFilters && (
@@ -544,19 +547,8 @@ export default function RMAReportsModal({
                         {renderSortIndicator('reporter')}
                       </div>
                     </th>
-                    {/* 8. Catalog Status Header */}
-                    <th 
-                      onClick={() => handleSort('catalog_status')}
-                      className="py-3 px-3 text-center font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
-                      title="Sort by Catalog Status"
-                    >
-                      <div className="flex items-center justify-center">
-                        <span>Catalog Status</span>
-                        {renderSortIndicator('catalog_status')}
-                      </div>
-                    </th>
 
-                    {/* 9. Lifecycle Stage Header */}
+                    {/* 8. Lifecycle Stage Header */}
                     <th 
                       onClick={() => handleSort('lifecycle_stage')}
                       className="py-3 px-3 text-center font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
@@ -719,18 +711,7 @@ export default function RMAReportsModal({
                           )}
                         </td>
 
-                        {/* 8. Catalog Status */}
-                        <td className="py-3 px-3 text-center whitespace-nowrap">
-                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider inline-block ${
-                            isPendingUnknown
-                              ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                              : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                          }`}>
-                            {isPendingUnknown ? 'Pending SKU' : 'Logged'}
-                          </span>
-                        </td>
-
-                        {/* 9. Lifecycle Stage */}
+                        {/* 8. Lifecycle Stage */}
                         <td className="py-3 px-3 text-center whitespace-nowrap">
                           {(() => {
                             const stageInfo = formatLifecycleStage(item.status);

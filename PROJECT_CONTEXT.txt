@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-04T09:14:06.442Z
+Generated At: 2026-11-05T00:36:58.246Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -5748,8 +5748,12 @@ export default async function handler(req, res) {
         const cleanStatus = status.trim().toLowerCase();
         if (cleanStatus === 'pending' || cleanStatus === 'received_at_dock') {
           query = query.in('status', ['pending', 'received_at_dock']);
+        } else if (cleanStatus === 'restocked') {
+          query = query.in('status', ['restocked', 'closed', 'resolved']);
+        } else if (cleanStatus === 'scrapped' || cleanStatus === 'disposed') {
+          query = query.in('status', ['scrapped', 'disposed']);
         } else if (cleanStatus === 'open') {
-          query = query.not('status', 'in', '("closed","resolved","rejected","deleted")');
+          query = query.not('status', 'in', '("closed","resolved","rejected","deleted","restocked","scrapped","disposed")');
         } else {
           query = query.eq('status', status.trim());
         }
@@ -6031,11 +6035,21 @@ export default async function handler(req, res) {
         });
       }
 
-      // Normalize status and disposition for seamless coworker restock updates
+      // Normalize status and disposition for coworker restock & scrap/re-order sync
       if (updateData.status) {
         const s = String(updateData.status).toLowerCase().trim();
-        if (s === 'resolved' || s === 'restocked' || s === 'closed' || s.includes('restock')) {
-          updateData.status = 'closed';
+        if (s === 'restocked') {
+          updateData.status = 'restocked';
+        } else if (s === 'scrapped' || s === 'disposed') {
+          updateData.status = 'scrapped';
+        } else if (s === 'resolved' || s === 'closed') {
+          // If disposition indicates scrap, normalize to scrapped; otherwise restocked
+          const d = String(updateData.disposition || '').toLowerCase();
+          if (d.includes('scrap') || d.includes('dispose')) {
+            updateData.status = 'scrapped';
+          } else {
+            updateData.status = 'restocked';
+          }
         }
       }
 
@@ -6043,6 +6057,8 @@ export default async function handler(req, res) {
         const d = String(updateData.disposition).trim();
         if (d === 'Restock to Inventory' || d === '2- Restock to Inventory' || /restock/i.test(d)) {
           updateData.disposition = '2- Restock to Inventory';
+        } else if (d === 'Scrap / Dispose' || d === '5- Scrap / Dispose' || /scrap|dispose/i.test(d)) {
+          updateData.disposition = '5- Scrap / Dispose';
         }
       }
 
@@ -7121,15 +7137,41 @@ Pass your secret API key in all requests:
 - \`x-api-key: sk_live_rma_...\`
 - Or \`Authorization: Bearer sk_live_rma_...\`
 
-### 📦 Coworker Inventory Integration Guide (Restocking Queue):
-If you are syncing returned goods into your inventory management system:
+### 📦 Coworker Inventory Integration Guide:
+
+#### 1. Inventory Restock Queue:
+If you are syncing returned goods back into your warehouse inventory:
 1. **Query Pending Restock Items**:
    Send \`GET /api/v1/rma?disposition=Restock to Inventory&status=pending\`
    Retrieves all items that warehouse inspection approved for restocking with quantities and bin locations.
 2. **Update Inventory & Acknowledge**:
    Once added to your ERP stock, send \`PATCH /api/v1/rma/{id}\` with body:
-   \`{"status": "closed", "disposition": "2- Restock to Inventory", "notes": "Added to inventory counts in ERP"}\`
-   This marks the ticket as 6- Closed / Restocked so it won't be double-counted.
+   \`\`\`json
+   {
+     "status": "restocked",
+     "disposition": "2- Restock to Inventory",
+     "warehouse_location": "RACK-03-BIN-A",
+     "notes": "Added to inventory counts in ERP"
+   }
+   \`\`\`
+   This marks the ticket as **6- Restocked** so it won't be double-counted.
+
+#### 2. Scrapped / Supplier Re-Order Queue:
+If you need to know which items were scrapped (damaged beyond repair / expired) so your procurement system can re-order replacement stock from suppliers:
+1. **Query Scrapped Items**:
+   Send \`GET /api/v1/rma?disposition=Scrap / Dispose&status=pending\`
+   Retrieves all items that were deemed total loss with defect reason, quantity, and supplier details.
+2. **Place Replacement PO & Acknowledge**:
+   Once your procurement system places a replacement Purchase Order to the supplier, send \`PATCH /api/v1/rma/{id}\` with body:
+   \`\`\`json
+   {
+     "status": "scrapped",
+     "disposition": "5- Scrap / Dispose",
+     "warehouse_location": "SCRAP-BIN",
+     "notes": "Item marked scrapped. Replacement supplier PO #PO-2026-9901 issued."
+   }
+   \`\`\`
+   This marks the ticket as **7- Scrapped / Disposed**.
 
 Click **Authorize** on the top right to test live endpoints directly from this interactive documentation.
       `,
@@ -7689,12 +7731,15 @@ export const RMAStatusEnum = z.enum([
   'under_inspection',
   'pending_finance_approval',
   'credit_memo_issued',
+  'restocked',
+  'scrapped',
   'closed',
   'rejected',
   'pending',
   'pending_admin_details',
   'resolved',
-  'logged'
+  'logged',
+  'buffer_replacement_dispatched'
 ]);
 
 export const RMAConditionGradeEnum = z.enum([
@@ -7808,16 +7853,24 @@ export function registerRMARoutes(registry) {
   registry.registerPath({
     method: 'get',
     path: '/api/v1/rma',
-    summary: 'List RMA Return Reports (Inventory Restock Queue)',
+    summary: 'List RMA Return Reports (Restock & Re-order Queues)',
     description: `Fetch paginated return reports with optional filtering by warehouse disposition, lifecycle status, product barcode, or search query.
 
-### 📦 Coworker Restock Guide:
+### 📦 Queue 1: Inventory Restock Queue
 To fetch all goods approved by warehouse triage for inventory restocking:
 \`\`\`bash
 curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?disposition=Restock%20to%20Inventory&status=pending" \\
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
-Reads: \`barcode\`, \`code\` (SKU), \`name\`, \`quantity\`, \`unit_name\`, and \`warehouse_location\`.`,
+Reads: \`barcode\`, \`code\` (SKU), \`name\`, \`quantity\`, \`unit_name\`, and \`warehouse_location\`.
+
+### 🗑️ Queue 2: Scrapped / Supplier Re-order Queue
+To fetch all goods deemed total loss / scrapped so your ERP can re-order replacement stock from suppliers:
+\`\`\`bash
+curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?disposition=Scrap%20%2F%20Dispose&status=pending" \\
+  -H "x-api-key: sk_live_rma_..."
+\`\`\`
+Reads: \`barcode\`, \`code\` (SKU), \`name\`, \`quantity\`, \`supplier_name\`, and \`reason\`.`,
     tags: ['RMA Reports'],
     request: {
       query: PaginationQuerySchema.extend({
@@ -7918,20 +7971,34 @@ Reads: \`barcode\`, \`code\` (SKU), \`name\`, \`quantity\`, \`unit_name\`, and \
   registry.registerPath({
     method: 'patch',
     path: '/api/v1/rma/{id}',
-    summary: 'Update RMA Report (Acknowledge / Mark Restocked)',
+    summary: 'Update RMA Report (Acknowledge Restocked / Scrapped)',
     description: `Update status, warehouse location, inspection notes, or details of an existing RMA report.
 
-### 📦 Coworker Inventory Restock Acknowledgment:
-When your ERP system has added the returned quantity to your warehouse stock count, call this endpoint to mark the RMA ticket as resolved so it won't be restocked again:
+### 📦 1. Coworker Inventory Restock Acknowledgment:
+When your ERP system has added the returned quantity to your warehouse stock count, call this endpoint to mark the RMA ticket as **restocked**:
 \`\`\`bash
 curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-2026-0001-6TYH" \\
   -H "Content-Type: application/json" \\
   -H "x-api-key: sk_live_rma_..." \\
   -d '{
-    "status": "closed",
+    "status": "restocked",
     "disposition": "2- Restock to Inventory",
     "warehouse_location": "RACK-03-BIN-A",
-    "notes": "Added to stock in ERP (Ref #INV-8821)"
+    "notes": "Added to inventory counts in ERP (Ref #INV-8821)"
+  }'
+\`\`\`
+
+### 🗑️ 2. Coworker Scrapped / Supplier Re-order Acknowledgment:
+When your procurement system has processed the scrapped item and placed a replacement Purchase Order to the supplier:
+\`\`\`bash
+curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-2026-0001-6TYH" \\
+  -H "Content-Type: application/json" \\
+  -H "x-api-key: sk_live_rma_..." \\
+  -d '{
+    "status": "scrapped",
+    "disposition": "5- Scrap / Dispose",
+    "warehouse_location": "SCRAP-BIN",
+    "notes": "Item marked scrapped. Replacement supplier PO #PO-2026-9901 issued."
   }'
 \`\`\``,
     tags: ['RMA Reports'],
@@ -8577,15 +8644,19 @@ function formatLifecycleStage(status) {
       return { label: '4- Pending Finance Approval', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
     case 'credit_memo_issued':
       return { label: '5- Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
-    case 'closed':
     case 'restocked':
+      return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    case 'scrapped':
+    case 'disposed':
+      return { label: '7- Scrapped / Disposed', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+    case 'closed':
     case 'resolved':
-      return { label: '6- Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+      return { label: 'Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
     case 'buffer_replacement_dispatched':
     case 'buffer_dispatched':
       return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
     case 'rejected':
-      return { label: '7- Rejected / Invalid Claim', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+      return { label: '8- Rejected / Invalid Claim', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
     case 'pending_admin_details':
       return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
     default:
@@ -9625,17 +9696,15 @@ export default function App() {
       }
 
       if (reportsStatusFilter !== 'all') {
-        if (reportsStatusFilter === 'logged') {
-          if (item.status === 'pending_admin_details') return false;
-        } else if (reportsStatusFilter === 'unknown') {
-          if (item.status !== 'pending_admin_details') return false;
-        } else {
-          const s = String(item.status || 'received_at_dock').toLowerCase();
-          if (reportsStatusFilter === 'received_at_dock') {
-            if (s !== 'pending' && s !== 'received_at_dock') return false;
-          } else if (s !== reportsStatusFilter.toLowerCase()) {
-            return false;
-          }
+        const s = String(item.status || 'received_at_dock').toLowerCase();
+        if (reportsStatusFilter === 'received_at_dock') {
+          if (s !== 'pending' && s !== 'received_at_dock') return false;
+        } else if (reportsStatusFilter === 'restocked') {
+          if (s !== 'restocked' && s !== 'closed' && s !== 'resolved') return false;
+        } else if (reportsStatusFilter === 'scrapped') {
+          if (s !== 'scrapped' && s !== 'disposed') return false;
+        } else if (s !== reportsStatusFilter.toLowerCase()) {
+          return false;
         }
       }
 
@@ -9704,10 +9773,6 @@ export default function App() {
         case 'invoice_dr_number':
           valA = String(a.invoice_dr_number || a.dr_number || a.si_number || a.po_number || '').toLowerCase();
           valB = String(b.invoice_dr_number || b.dr_number || b.si_number || b.po_number || '').toLowerCase();
-          break;
-        case 'catalog_status':
-          valA = a.status === 'pending_admin_details' ? 0 : 1;
-          valB = b.status === 'pending_admin_details' ? 0 : 1;
           break;
         case 'status':
         case 'lifecycle_stage':
@@ -12201,10 +12266,10 @@ export default function App() {
                       <option value="under_inspection">3- Under Inspection</option>
                       <option value="pending_finance_approval">4- Pending Finance Approval</option>
                       <option value="credit_memo_issued">5- Credit Memo Issued</option>
-                      <option value="closed">6- Closed / Restocked</option>
-                      <option value="rejected">7- Rejected / Invalid Claim</option>
-                      <option value="logged">Catalog: Logged</option>
-                      <option value="unknown">Catalog: Unknown Barcode</option>
+                      <option value="restocked">6- Restocked</option>
+                      <option value="scrapped">7- Scrapped / Disposed</option>
+                      <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
+                      <option value="rejected">8- Rejected / Invalid Claim</option>
                     </select>
 
                     {/* Date Range Picker: Neatly split in 2 columns */}
@@ -12433,21 +12498,8 @@ export default function App() {
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
                             </th>
-                            {/* 8. Catalog Status Header */}
-                            <th
-                              onClick={() => handleReportsSort('catalog_status')}
-                              className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Catalog Status"
-                            >
-                              <div className="flex items-center justify-center">
-                                <span>Catalog Status</span>
-                                {reportsSortField === 'catalog_status' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
 
-                            {/* 9. Lifecycle Stage Header */}
+                            {/* 8. Lifecycle Stage Header */}
                             <th
                               onClick={() => handleReportsSort('lifecycle_stage')}
                               className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
@@ -12709,17 +12761,7 @@ export default function App() {
                                   })()}
                                 </td>
 
-                                {/* 8. Catalog Status */}
-                                <td className="py-3 px-3 text-center whitespace-nowrap">
-                                  <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider inline-block ${isPendingUnknown
-                                      ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                                      : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                                    }`}>
-                                    {isPendingUnknown ? 'Pending SKU' : 'Logged'}
-                                  </span>
-                                </td>
-
-                                {/* 9. Lifecycle Stage */}
+                                {/* 8. Lifecycle Stage */}
                                 <td className="py-3 px-3 text-center whitespace-nowrap">
                                   {(() => {
                                     const stageInfo = formatLifecycleStage(item.status);
@@ -25301,7 +25343,9 @@ export default function QuickRMAActionModal({
       setWarehouseLocation(report.warehouse_location || '');
       const rawStatus = String(report.status || '').toLowerCase().trim();
       if (rawStatus === 'resolved' || rawStatus === 'restocked' || rawStatus === 'closed' || rawStatus.includes('closed') || rawStatus.includes('restock')) {
-        setRmaStatus('closed');
+        setRmaStatus('restocked');
+      } else if (rawStatus === 'scrapped' || rawStatus === 'disposed' || rawStatus.includes('scrap') || rawStatus.includes('dispose')) {
+        setRmaStatus('scrapped');
       } else {
         setRmaStatus(report.status || 'received_at_dock');
       }
@@ -26117,13 +26161,6 @@ export default function QuickRMAActionModal({
                   </span>
                   <div className="text-lg font-black font-mono text-slate-900 dark:text-white flex items-center gap-2">
                     <span>{report.rma_number || rmaNumber}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                      report.status === 'logged' || isSavedInProducts
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
-                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
-                    }`}>
-                      {report.status === 'logged' || isSavedInProducts ? 'LOGGED' : 'UNKNOWN'}
-                    </span>
                   </div>
                 </div>
 
@@ -27101,7 +27138,17 @@ export default function QuickRMAActionModal({
                     </label>
                     <select
                       value={normalizeDispositionOption(disposition)}
-                      onChange={(e) => setDisposition(e.target.value)}
+                      onChange={(e) => {
+                        const newDisp = e.target.value;
+                        setDisposition(newDisp);
+                        if (newDisp === '2- Restock to Inventory') {
+                          setRmaStatus('restocked');
+                        } else if (newDisp === '5- Scrap / Dispose') {
+                          setRmaStatus('scrapped');
+                        } else if (newDisp === '6- Buffer Stock Exchange') {
+                          setRmaStatus('buffer_replacement_dispatched');
+                        }
+                      }}
                       className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
                     >
                       <option value="1- Pending Triage">1- Pending Triage</option>
@@ -27136,7 +27183,7 @@ export default function QuickRMAActionModal({
                       Lifecycle Stage
                     </label>
                     <select
-                      value={rmaStatus}
+                      value={rmaStatus === 'closed' || rmaStatus === 'resolved' ? 'restocked' : rmaStatus}
                       onChange={(e) => setRmaStatus(e.target.value)}
                       className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
                     >
@@ -27145,9 +27192,10 @@ export default function QuickRMAActionModal({
                       <option value="under_inspection">3- Under Inspection</option>
                       <option value="pending_finance_approval">4- Pending Finance Approval</option>
                       <option value="credit_memo_issued">5- Credit Memo Issued</option>
-                      <option value="closed">6- Closed / Restocked</option>
+                      <option value="restocked">6- Restocked</option>
+                      <option value="scrapped">7- Scrapped / Disposed</option>
                       <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
-                      <option value="rejected">7- Rejected / Invalid Claim</option>
+                      <option value="rejected">8- Rejected / Invalid Claim</option>
                     </select>
                   </div>
                 </div>
@@ -27178,65 +27226,7 @@ export default function QuickRMAActionModal({
                 </div>
               </div>
 
-              {/* ENTERPRISE ACTION 2: ASSIGN SKU & SAVE TO CATALOG */}
-              <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-2.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className={`p-2 rounded-xl ${isSavedInProducts ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300'}`}>
-                      <Package className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-black text-slate-900 dark:text-white">
-                        {isSavedInProducts ? 'Catalog Status: Saved & Verified' : 'Catalog Status: Not Saved in Products'}
-                      </h5>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {isSavedInProducts
-                          ? `Registered under Pingcon SKU "${matchedProduct?.code || 'Assigned'}" • ${matchedProduct?.name || ''}`
-                          : 'Assign an official SKU and register this barcode in master products catalog.'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0 ${
-                    isSavedInProducts
-                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
-                      : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
-                  }`}>
-                    {isSavedInProducts ? 'Verified SKU' : 'Action Needed'}
-                  </span>
-                </div>
-
-                {!isSavedInProducts ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (onAssignSku && report) {
-                        onAssignSku(report);
-                      }
-                    }}
-                    className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
-                  >
-                    <Package className="w-4 h-4" />
-                    <span>Assign SKU & Save to Products</span>
-                  </button>
-                ) : (
-                  <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
-                    <div className="font-mono text-[11px] text-slate-600 dark:text-slate-300">
-                      SKU: <strong className="text-slate-900 dark:text-white">{matchedProduct.code}</strong> • ₱{Number(matchedProduct.price || 0).toFixed(2)}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onAssignSku && onAssignSku(report)}
-                      className="text-xs text-blue-600 dark:text-blue-400 font-bold hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                      <span>Update SKU Details</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* ENTERPRISE ACTION 3: FINANCE CREDIT MEMO WITH FINANCIAL SAFEGUARD */}
+              {/* ENTERPRISE ACTION 2: FINANCE CREDIT MEMO WITH FINANCIAL SAFEGUARD */}
               <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-2.5">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2">
@@ -27888,11 +27878,19 @@ function formatLifecycleStage(status) {
       return { label: 'Pending Finance', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
     case 'credit_memo_issued':
       return { label: 'Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
-    case 'closed':
     case 'restocked':
+      return { label: 'Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    case 'scrapped':
+    case 'disposed':
+      return { label: 'Scrapped / Disposed', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+    case 'closed':
+    case 'resolved':
       return { label: 'Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    case 'buffer_replacement_dispatched':
+    case 'buffer_dispatched':
+      return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
     case 'rejected':
-      return { label: 'Rejected / Invalid', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+      return { label: 'Rejected / Invalid', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
     case 'pending_admin_details':
       return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
     default:
@@ -28006,17 +28004,15 @@ export default function RMAReportsModal({
       }
 
       if (statusFilter !== 'all') {
-        if (statusFilter === 'logged') {
-          if (item.status === 'pending_admin_details') return false;
-        } else if (statusFilter === 'unknown') {
-          if (item.status !== 'pending_admin_details') return false;
-        } else {
-          const s = String(item.status || 'received_at_dock').toLowerCase();
-          if (statusFilter === 'received_at_dock') {
-            if (s !== 'pending' && s !== 'received_at_dock') return false;
-          } else if (s !== statusFilter.toLowerCase()) {
-            return false;
-          }
+        const s = String(item.status || 'received_at_dock').toLowerCase();
+        if (statusFilter === 'received_at_dock') {
+          if (s !== 'pending' && s !== 'received_at_dock') return false;
+        } else if (statusFilter === 'restocked') {
+          if (s !== 'restocked' && s !== 'closed' && s !== 'resolved') return false;
+        } else if (statusFilter === 'scrapped') {
+          if (s !== 'scrapped' && s !== 'disposed') return false;
+        } else if (s !== statusFilter.toLowerCase()) {
+          return false;
         }
       }
 
@@ -28049,10 +28045,6 @@ export default function RMAReportsModal({
         case 'reporter':
           valA = String(a.reporter_name || a.reported_by || '').toLowerCase();
           valB = String(b.reporter_name || b.reported_by || '').toLowerCase();
-          break;
-        case 'catalog_status':
-          valA = a.status === 'pending_admin_details' ? 0 : 1;
-          valB = b.status === 'pending_admin_details' ? 0 : 1;
           break;
         case 'lifecycle_stage':
         case 'status':
@@ -28275,14 +28267,15 @@ export default function RMAReportsModal({
                 className="px-2.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-500 shadow-xs cursor-pointer"
               >
                 <option value="all">All Status & Stages</option>
+                <option value="draft">Draft / Intake</option>
                 <option value="received_at_dock">Received at Dock</option>
                 <option value="under_inspection">Under Inspection</option>
                 <option value="pending_finance_approval">Pending Finance Approval</option>
                 <option value="credit_memo_issued">Credit Memo Issued</option>
-                <option value="closed">Closed / Restocked</option>
+                <option value="restocked">Restocked</option>
+                <option value="scrapped">Scrapped / Disposed</option>
+                <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
                 <option value="rejected">Rejected / Invalid Claim</option>
-                <option value="logged">Catalog: Logged</option>
-                <option value="unknown">Catalog: Unknown Barcode</option>
               </select>
 
               {hasActiveFilters && (
@@ -28385,19 +28378,8 @@ export default function RMAReportsModal({
                         {renderSortIndicator('reporter')}
                       </div>
                     </th>
-                    {/* 8. Catalog Status Header */}
-                    <th 
-                      onClick={() => handleSort('catalog_status')}
-                      className="py-3 px-3 text-center font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
-                      title="Sort by Catalog Status"
-                    >
-                      <div className="flex items-center justify-center">
-                        <span>Catalog Status</span>
-                        {renderSortIndicator('catalog_status')}
-                      </div>
-                    </th>
 
-                    {/* 9. Lifecycle Stage Header */}
+                    {/* 8. Lifecycle Stage Header */}
                     <th 
                       onClick={() => handleSort('lifecycle_stage')}
                       className="py-3 px-3 text-center font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
@@ -28560,18 +28542,7 @@ export default function RMAReportsModal({
                           )}
                         </td>
 
-                        {/* 8. Catalog Status */}
-                        <td className="py-3 px-3 text-center whitespace-nowrap">
-                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider inline-block ${
-                            isPendingUnknown
-                              ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                              : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                          }`}>
-                            {isPendingUnknown ? 'Pending SKU' : 'Logged'}
-                          </span>
-                        </td>
-
-                        {/* 9. Lifecycle Stage */}
+                        {/* 8. Lifecycle Stage */}
                         <td className="py-3 px-3 text-center whitespace-nowrap">
                           {(() => {
                             const stageInfo = formatLifecycleStage(item.status);

@@ -58,15 +58,41 @@ Pass your secret API key in all requests:
 - \`x-api-key: sk_live_rma_...\`
 - Or \`Authorization: Bearer sk_live_rma_...\`
 
-### 📦 Coworker Inventory Integration Guide (Restocking Queue):
-If you are syncing returned goods into your inventory management system:
+### 📦 Coworker Inventory Integration Guide:
+
+#### 1. Inventory Restock Queue:
+If you are syncing returned goods back into your warehouse inventory:
 1. **Query Pending Restock Items**:
    Send \`GET /api/v1/rma?disposition=Restock to Inventory&status=pending\`
    Retrieves all items that warehouse inspection approved for restocking with quantities and bin locations.
 2. **Update Inventory & Acknowledge**:
    Once added to your ERP stock, send \`PATCH /api/v1/rma/{id}\` with body:
-   \`{"status": "closed", "disposition": "2- Restock to Inventory", "notes": "Added to inventory counts in ERP"}\`
-   This marks the ticket as 6- Closed / Restocked so it won't be double-counted.
+   \`\`\`json
+   {
+     "status": "restocked",
+     "disposition": "2- Restock to Inventory",
+     "warehouse_location": "RACK-03-BIN-A",
+     "notes": "Added to inventory counts in ERP"
+   }
+   \`\`\`
+   This marks the ticket as **6- Restocked** so it won't be double-counted.
+
+#### 2. Scrapped / Supplier Re-Order Queue:
+If you need to know which items were scrapped (damaged beyond repair / expired) so your procurement system can re-order replacement stock from suppliers:
+1. **Query Scrapped Items**:
+   Send \`GET /api/v1/rma?disposition=Scrap / Dispose&status=pending\`
+   Retrieves all items that were deemed total loss with defect reason, quantity, and supplier details.
+2. **Place Replacement PO & Acknowledge**:
+   Once your procurement system places a replacement Purchase Order to the supplier, send \`PATCH /api/v1/rma/{id}\` with body:
+   \`\`\`json
+   {
+     "status": "scrapped",
+     "disposition": "5- Scrap / Dispose",
+     "warehouse_location": "SCRAP-BIN",
+     "notes": "Item marked scrapped. Replacement supplier PO #PO-2026-9901 issued."
+   }
+   \`\`\`
+   This marks the ticket as **7- Scrapped / Disposed**.
 
 Click **Authorize** on the top right to test live endpoints directly from this interactive documentation.
       `,

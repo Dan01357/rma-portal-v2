@@ -127,15 +127,19 @@ function formatLifecycleStage(status) {
       return { label: '4- Pending Finance Approval', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
     case 'credit_memo_issued':
       return { label: '5- Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
-    case 'closed':
     case 'restocked':
+      return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    case 'scrapped':
+    case 'disposed':
+      return { label: '7- Scrapped / Disposed', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+    case 'closed':
     case 'resolved':
-      return { label: '6- Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+      return { label: 'Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
     case 'buffer_replacement_dispatched':
     case 'buffer_dispatched':
       return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
     case 'rejected':
-      return { label: '7- Rejected / Invalid Claim', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+      return { label: '8- Rejected / Invalid Claim', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
     case 'pending_admin_details':
       return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
     default:
@@ -1175,17 +1179,15 @@ export default function App() {
       }
 
       if (reportsStatusFilter !== 'all') {
-        if (reportsStatusFilter === 'logged') {
-          if (item.status === 'pending_admin_details') return false;
-        } else if (reportsStatusFilter === 'unknown') {
-          if (item.status !== 'pending_admin_details') return false;
-        } else {
-          const s = String(item.status || 'received_at_dock').toLowerCase();
-          if (reportsStatusFilter === 'received_at_dock') {
-            if (s !== 'pending' && s !== 'received_at_dock') return false;
-          } else if (s !== reportsStatusFilter.toLowerCase()) {
-            return false;
-          }
+        const s = String(item.status || 'received_at_dock').toLowerCase();
+        if (reportsStatusFilter === 'received_at_dock') {
+          if (s !== 'pending' && s !== 'received_at_dock') return false;
+        } else if (reportsStatusFilter === 'restocked') {
+          if (s !== 'restocked' && s !== 'closed' && s !== 'resolved') return false;
+        } else if (reportsStatusFilter === 'scrapped') {
+          if (s !== 'scrapped' && s !== 'disposed') return false;
+        } else if (s !== reportsStatusFilter.toLowerCase()) {
+          return false;
         }
       }
 
@@ -1254,10 +1256,6 @@ export default function App() {
         case 'invoice_dr_number':
           valA = String(a.invoice_dr_number || a.dr_number || a.si_number || a.po_number || '').toLowerCase();
           valB = String(b.invoice_dr_number || b.dr_number || b.si_number || b.po_number || '').toLowerCase();
-          break;
-        case 'catalog_status':
-          valA = a.status === 'pending_admin_details' ? 0 : 1;
-          valB = b.status === 'pending_admin_details' ? 0 : 1;
           break;
         case 'status':
         case 'lifecycle_stage':
@@ -3751,10 +3749,10 @@ export default function App() {
                       <option value="under_inspection">3- Under Inspection</option>
                       <option value="pending_finance_approval">4- Pending Finance Approval</option>
                       <option value="credit_memo_issued">5- Credit Memo Issued</option>
-                      <option value="closed">6- Closed / Restocked</option>
-                      <option value="rejected">7- Rejected / Invalid Claim</option>
-                      <option value="logged">Catalog: Logged</option>
-                      <option value="unknown">Catalog: Unknown Barcode</option>
+                      <option value="restocked">6- Restocked</option>
+                      <option value="scrapped">7- Scrapped / Disposed</option>
+                      <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
+                      <option value="rejected">8- Rejected / Invalid Claim</option>
                     </select>
 
                     {/* Date Range Picker: Neatly split in 2 columns */}
@@ -3983,21 +3981,8 @@ export default function App() {
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
                               </div>
                             </th>
-                            {/* 8. Catalog Status Header */}
-                            <th
-                              onClick={() => handleReportsSort('catalog_status')}
-                              className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Catalog Status"
-                            >
-                              <div className="flex items-center justify-center">
-                                <span>Catalog Status</span>
-                                {reportsSortField === 'catalog_status' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
 
-                            {/* 9. Lifecycle Stage Header */}
+                            {/* 8. Lifecycle Stage Header */}
                             <th
                               onClick={() => handleReportsSort('lifecycle_stage')}
                               className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
@@ -4259,17 +4244,7 @@ export default function App() {
                                   })()}
                                 </td>
 
-                                {/* 8. Catalog Status */}
-                                <td className="py-3 px-3 text-center whitespace-nowrap">
-                                  <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider inline-block ${isPendingUnknown
-                                      ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                                      : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                                    }`}>
-                                    {isPendingUnknown ? 'Pending SKU' : 'Logged'}
-                                  </span>
-                                </td>
-
-                                {/* 9. Lifecycle Stage */}
+                                {/* 8. Lifecycle Stage */}
                                 <td className="py-3 px-3 text-center whitespace-nowrap">
                                   {(() => {
                                     const stageInfo = formatLifecycleStage(item.status);

@@ -151,7 +151,9 @@ export default function QuickRMAActionModal({
       setWarehouseLocation(report.warehouse_location || '');
       const rawStatus = String(report.status || '').toLowerCase().trim();
       if (rawStatus === 'resolved' || rawStatus === 'restocked' || rawStatus === 'closed' || rawStatus.includes('closed') || rawStatus.includes('restock')) {
-        setRmaStatus('closed');
+        setRmaStatus('restocked');
+      } else if (rawStatus === 'scrapped' || rawStatus === 'disposed' || rawStatus.includes('scrap') || rawStatus.includes('dispose')) {
+        setRmaStatus('scrapped');
       } else {
         setRmaStatus(report.status || 'received_at_dock');
       }
@@ -967,13 +969,6 @@ export default function QuickRMAActionModal({
                   </span>
                   <div className="text-lg font-black font-mono text-slate-900 dark:text-white flex items-center gap-2">
                     <span>{report.rma_number || rmaNumber}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                      report.status === 'logged' || isSavedInProducts
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
-                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
-                    }`}>
-                      {report.status === 'logged' || isSavedInProducts ? 'LOGGED' : 'UNKNOWN'}
-                    </span>
                   </div>
                 </div>
 
@@ -1951,7 +1946,17 @@ export default function QuickRMAActionModal({
                     </label>
                     <select
                       value={normalizeDispositionOption(disposition)}
-                      onChange={(e) => setDisposition(e.target.value)}
+                      onChange={(e) => {
+                        const newDisp = e.target.value;
+                        setDisposition(newDisp);
+                        if (newDisp === '2- Restock to Inventory') {
+                          setRmaStatus('restocked');
+                        } else if (newDisp === '5- Scrap / Dispose') {
+                          setRmaStatus('scrapped');
+                        } else if (newDisp === '6- Buffer Stock Exchange') {
+                          setRmaStatus('buffer_replacement_dispatched');
+                        }
+                      }}
                       className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
                     >
                       <option value="1- Pending Triage">1- Pending Triage</option>
@@ -1986,7 +1991,7 @@ export default function QuickRMAActionModal({
                       Lifecycle Stage
                     </label>
                     <select
-                      value={rmaStatus}
+                      value={rmaStatus === 'closed' || rmaStatus === 'resolved' ? 'restocked' : rmaStatus}
                       onChange={(e) => setRmaStatus(e.target.value)}
                       className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
                     >
@@ -1995,9 +2000,10 @@ export default function QuickRMAActionModal({
                       <option value="under_inspection">3- Under Inspection</option>
                       <option value="pending_finance_approval">4- Pending Finance Approval</option>
                       <option value="credit_memo_issued">5- Credit Memo Issued</option>
-                      <option value="closed">6- Closed / Restocked</option>
+                      <option value="restocked">6- Restocked</option>
+                      <option value="scrapped">7- Scrapped / Disposed</option>
                       <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
-                      <option value="rejected">7- Rejected / Invalid Claim</option>
+                      <option value="rejected">8- Rejected / Invalid Claim</option>
                     </select>
                   </div>
                 </div>
@@ -2028,65 +2034,7 @@ export default function QuickRMAActionModal({
                 </div>
               </div>
 
-              {/* ENTERPRISE ACTION 2: ASSIGN SKU & SAVE TO CATALOG */}
-              <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-2.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className={`p-2 rounded-xl ${isSavedInProducts ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300'}`}>
-                      <Package className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-black text-slate-900 dark:text-white">
-                        {isSavedInProducts ? 'Catalog Status: Saved & Verified' : 'Catalog Status: Not Saved in Products'}
-                      </h5>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {isSavedInProducts
-                          ? `Registered under Pingcon SKU "${matchedProduct?.code || 'Assigned'}" • ${matchedProduct?.name || ''}`
-                          : 'Assign an official SKU and register this barcode in master products catalog.'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0 ${
-                    isSavedInProducts
-                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
-                      : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
-                  }`}>
-                    {isSavedInProducts ? 'Verified SKU' : 'Action Needed'}
-                  </span>
-                </div>
-
-                {!isSavedInProducts ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (onAssignSku && report) {
-                        onAssignSku(report);
-                      }
-                    }}
-                    className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
-                  >
-                    <Package className="w-4 h-4" />
-                    <span>Assign SKU & Save to Products</span>
-                  </button>
-                ) : (
-                  <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
-                    <div className="font-mono text-[11px] text-slate-600 dark:text-slate-300">
-                      SKU: <strong className="text-slate-900 dark:text-white">{matchedProduct.code}</strong> • ₱{Number(matchedProduct.price || 0).toFixed(2)}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onAssignSku && onAssignSku(report)}
-                      className="text-xs text-blue-600 dark:text-blue-400 font-bold hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                      <span>Update SKU Details</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* ENTERPRISE ACTION 3: FINANCE CREDIT MEMO WITH FINANCIAL SAFEGUARD */}
+              {/* ENTERPRISE ACTION 2: FINANCE CREDIT MEMO WITH FINANCIAL SAFEGUARD */}
               <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-2.5">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2">

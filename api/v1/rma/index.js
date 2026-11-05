@@ -31,8 +31,12 @@ export default async function handler(req, res) {
         const cleanStatus = status.trim().toLowerCase();
         if (cleanStatus === 'pending' || cleanStatus === 'received_at_dock') {
           query = query.in('status', ['pending', 'received_at_dock']);
+        } else if (cleanStatus === 'restocked') {
+          query = query.in('status', ['restocked', 'closed', 'resolved']);
+        } else if (cleanStatus === 'scrapped' || cleanStatus === 'disposed') {
+          query = query.in('status', ['scrapped', 'disposed']);
         } else if (cleanStatus === 'open') {
-          query = query.not('status', 'in', '("closed","resolved","rejected","deleted")');
+          query = query.not('status', 'in', '("closed","resolved","rejected","deleted","restocked","scrapped","disposed")');
         } else {
           query = query.eq('status', status.trim());
         }
