@@ -853,54 +853,55 @@ export default function App() {
   };
 
   // Edit item from Return Reports to save into Products catalog
-  const handleEditProductFromReport = (report) => {
-    if (!report) return;
-    const existing = savedProductsList.find(p => p.barcode && String(p.barcode) === String(report.barcode));
-    const barcodeStr = String(report.barcode || existing?.barcode || '').trim();
+  const handleEditProductFromReport = (reportOrChild) => {
+    if (!reportOrChild) return;
+    const isChild = Boolean(reportOrChild.is_manifest_child);
+    const barcodeStr = String(reportOrChild.barcode || '').trim();
+    const explicitName = String(reportOrChild.name || reportOrChild.item_name || reportOrChild.productName || '').trim();
+
+    // Look up existing catalog entry strictly by this exact barcode
+    const existing = barcodeStr ? savedProductsList.find(p => p.barcode && String(p.barcode).trim() === barcodeStr) : null;
 
     // Barcode and SKU are strictly different.
     // Filter out barcode values or unassigned placeholders from SKU
     const existingCode = (existing?.code && String(existing.code).trim() !== barcodeStr) ? existing.code : '';
-    const reportCode = (report.code && String(report.code).trim() !== barcodeStr)
-      ? report.code
-      : (report.sku && String(report.sku).trim() !== barcodeStr)
-        ? report.sku
+    const reportCode = (reportOrChild.code && String(reportOrChild.code).trim() !== barcodeStr)
+      ? reportOrChild.code
+      : (reportOrChild.sku && String(reportOrChild.sku).trim() !== barcodeStr)
+        ? reportOrChild.sku
         : existingCode;
 
     const cleanReportCode = (reportCode && !reportCode.toLowerCase().includes('awaiting') && !reportCode.toLowerCase().includes('unidentified'))
       ? reportCode
       : '';
 
-    if (existing && existing.is_verified) {
-      const isBatchManifestExisting = existing.name && existing.name.toLowerCase().startsWith('batch return manifest');
-      setEditingProduct({
-        ...existing,
-        name: isBatchManifestExisting ? '' : existing.name,
-        code: cleanReportCode || existingCode
-      });
-    } else {
-      const isBatchManifestTitle = report.name && report.name.toLowerCase().startsWith('batch return manifest');
-      const cleanName = report.name && !report.name.toLowerCase().includes('unidentified') && !isBatchManifestTitle
-        ? report.name
-        : (existing?.name && !existing.name.toLowerCase().includes('unidentified') && !existing.name.toLowerCase().startsWith('batch return manifest') ? existing.name : '');
+    // If a child item is passed, strictly prioritize THAT child item's name and barcode.
+    // Never fall back to another sibling or "Batch Return Manifest" title!
+    const isBatchManifestTitle = explicitName.toLowerCase().startsWith('batch return manifest');
+    const cleanItemName = (!isBatchManifestTitle && !explicitName.toLowerCase().includes('unidentified'))
+      ? explicitName
+      : (existing?.name && !existing.name.toLowerCase().startsWith('batch return manifest') ? existing.name : '');
 
-      // Unassigned barcode: MUST start with NO default product image (empty placeholder state)
-      // Never preload damage / defect report photos as product catalog images!
-      setEditingProduct({
-        name: cleanName,
-        barcode: report.barcode || existing?.barcode || '',
-        code: cleanReportCode,
-        supplier_name: report.supplier_name || existing?.supplier_name || 'Savemore',
-        price: report.price || existing?.price || 0,
-        price_with_vat: report.price_with_vat || existing?.price_with_vat || report.price || 0,
-        unit_name: report.unit_name || existing?.unit_name || 'pc',
-        image_url: '', // Strictly empty state / placeholder
-        ae_name: report.ae_name || existing?.ae_name || '',
-        ae_email: report.ae_email || existing?.ae_email || '',
-        company: 'Wholesale Distribution',
-        is_verified: false
-      });
-    }
+    setEditingProduct({
+      ...(existing && existing.is_verified ? existing : {}),
+      id: existing?.id || undefined,
+      child_id: reportOrChild.child_id || reportOrChild.id,
+      name: cleanItemName,
+      barcode: barcodeStr || existing?.barcode || '',
+      code: cleanReportCode || existingCode,
+      supplier_name: reportOrChild.supplier_name || existing?.supplier_name || 'Savemore',
+      price: reportOrChild.price !== undefined ? reportOrChild.price : (existing?.price || 0),
+      price_with_vat: reportOrChild.price_with_vat !== undefined ? reportOrChild.price_with_vat : (existing?.price_with_vat || reportOrChild.price || 0),
+      unit_name: reportOrChild.unit_name || existing?.unit_name || 'pc',
+      image_url: existing?.is_verified ? (existing.image_url || '') : '',
+      ae_name: reportOrChild.ae_name || existing?.ae_name || '',
+      ae_email: reportOrChild.ae_email || existing?.ae_email || '',
+      company: 'Wholesale Distribution',
+      is_verified: Boolean(existing?.is_verified),
+      is_manifest_child: isChild,
+      parent_rma_id: reportOrChild.parent_rma_id,
+      rma_number: reportOrChild.rma_number
+    });
     setIsProductEditOpen(true);
   };
 
@@ -4549,18 +4550,18 @@ export default function App() {
                                       </div>
 
                                       {/* Child Items Table */}
-                                      <div className="overflow-x-auto">
+                                      <div className="overflow-x-auto lg:overflow-x-visible">
                                         <table className="w-full text-left text-xs border-collapse">
                                           <thead>
                                             <tr className="bg-slate-50/80 dark:bg-slate-800/50 text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
-                                              <th className="py-2 px-3 text-center w-12">#</th>
-                                              <th className="py-2 px-3 text-center w-14">Photo</th>
+                                              <th className="py-2 px-3 text-center w-10">#</th>
+                                              <th className="py-2 px-2 text-center w-[48px]">Photo</th>
                                               <th className="py-2 px-3">Product Description / Name</th>
-                                              <th className="py-2 px-3 font-mono">Barcode</th>
-                                              <th className="py-2 px-3 font-mono">Assigned SKU</th>
-                                              <th className="py-2 px-3 text-center">Qty & Location</th>
-                                              <th className="py-2 px-3">Disposition & Defect</th>
-                                              <th className="py-2 px-3 text-center">Actions</th>
+                                              <th className="py-2 px-3 font-mono w-[120px]">Barcode</th>
+                                              <th className="py-2 px-3 font-mono w-[110px]">Assigned SKU</th>
+                                              <th className="py-2 px-3 text-center w-[80px]">Qty</th>
+                                              <th className="py-2 px-3 w-[160px]">Triage &amp; Reason</th>
+                                              <th className="py-2 px-3 text-center w-[180px]">Actions</th>
                                             </tr>
                                           </thead>
                                           <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
@@ -4620,16 +4621,17 @@ export default function App() {
                                                   customer_branch: item.store_branch,
                                                   ae_name: item.ae_name,
                                                   ae_email: item.ae_email,
+                                                  child_id: child.id,
                                                   is_manifest_child: true,
                                                   parent_rma_id: item.id
                                                 };
 
                                                 return (
                                                   <tr key={child.id || `child_${cIdx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                                                    <td className="py-2 px-3 text-center text-slate-400 font-mono text-[11px]">
+                                                    <td className="py-2 px-3 text-center text-slate-400 font-mono text-[11px] w-10">
                                                       {cIdx + 1}
                                                     </td>
-                                                    <td className="py-2 px-3 text-center">
+                                                    <td className="py-2 px-2 text-center w-[48px]">
                                                       {cPhotoUrl ? (
                                                         <button
                                                           type="button"
@@ -4640,27 +4642,27 @@ export default function App() {
                                                             title: childName,
                                                             subtitle: `Manifest item #${cIdx + 1} of ${item.rma_number} • ${childReason}`
                                                           })}
-                                                          className="w-9 h-9 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 inline-block hover:scale-105 transition-transform cursor-zoom-in"
+                                                          className="w-8 h-8 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 inline-block hover:scale-105 transition-transform cursor-zoom-in"
                                                           title="Click to zoom image"
                                                         >
-                                                          <img src={cPhotoUrl} alt={childName} className="w-full h-full object-cover" />
+                                                          <img src={cPhotoUrl} alt={childName} className="w-8 h-8 rounded-lg object-cover mx-auto" />
                                                         </button>
                                                       ) : (
-                                                        <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
+                                                        <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
                                                           <ImageIcon className="w-3.5 h-3.5" />
                                                         </div>
                                                       )}
                                                     </td>
-                                                    <td className="py-2 px-3 font-bold text-slate-900 dark:text-white">
-                                                      <div>{childName}</div>
+                                                    <td className="py-2 px-3 font-bold text-slate-900 dark:text-white max-w-[220px] sm:max-w-xs truncate" title={childName}>
+                                                      <div className="truncate">{childName}</div>
                                                       {child.defect_details && (
-                                                        <div className="text-[10px] text-slate-400 font-normal italic">{child.defect_details}</div>
+                                                        <div className="text-[10px] text-slate-400 font-normal italic truncate" title={child.defect_details}>{child.defect_details}</div>
                                                       )}
                                                     </td>
-                                                    <td className="py-2 px-3 font-mono font-bold text-slate-700 dark:text-slate-300">
+                                                    <td className="py-2 px-3 font-mono font-bold text-slate-700 dark:text-slate-300 w-[120px] truncate" title={childBarcode || '—'}>
                                                       {childBarcode || '—'}
                                                     </td>
-                                                    <td className="py-2 px-3 font-mono text-slate-600 dark:text-slate-400">
+                                                    <td className="py-2 px-3 font-mono text-slate-600 dark:text-slate-400 w-[110px] truncate">
                                                       {isSkuAssigned ? (
                                                         <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800">
                                                           {effectiveSku}
@@ -4671,7 +4673,7 @@ export default function App() {
                                                         </span>
                                                       )}
                                                     </td>
-                                                    <td className="py-2 px-3 text-center font-mono">
+                                                    <td className="py-2 px-3 text-center font-mono w-[80px]">
                                                       <div className="flex flex-col items-center gap-0.5">
                                                         <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-md text-[11px]">
                                                           {childQty} {childUnit}
@@ -4683,7 +4685,7 @@ export default function App() {
                                                         )}
                                                       </div>
                                                     </td>
-                                                    <td className="py-2 px-3">
+                                                    <td className="py-2 px-3 w-[160px]">
                                                       <div className="space-y-1">
                                                         <div>
                                                           <span className="px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-semibold text-[10px] inline-block">
@@ -4697,13 +4699,15 @@ export default function App() {
                                                         </div>
                                                       </div>
                                                     </td>
-                                                    <td className="py-2 px-3 text-center">
-                                                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                                    <td className="py-2 px-3 text-center w-[180px]">
+                                                      <div className="flex items-center justify-center gap-1.5 flex-nowrap">
                                                         {canEditProducts && (
                                                           <button
                                                             type="button"
                                                             onClick={() => {
                                                               handleEditProductFromReport({
+                                                                id: child.id,
+                                                                child_id: child.id,
                                                                 name: childName,
                                                                 barcode: childBarcode,
                                                                 code: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
@@ -4712,7 +4716,9 @@ export default function App() {
                                                                 price_with_vat: child.price_with_vat || child.price || 0,
                                                                 unit_name: childUnit,
                                                                 supplier_name: child.supplier_name || item.supplier_name || 'Savemore',
-                                                                rma_number: item.rma_number
+                                                                rma_number: item.rma_number,
+                                                                is_manifest_child: true,
+                                                                parent_rma_id: item.id
                                                               });
                                                             }}
                                                             className={`px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs border ${
@@ -5165,6 +5171,7 @@ export default function App() {
                                       customer_branch: item.store_branch,
                                       ae_name: item.ae_name,
                                       ae_email: item.ae_email,
+                                      child_id: child.id,
                                       is_manifest_child: true,
                                       parent_rma_id: item.id
                                     };
@@ -5202,6 +5209,8 @@ export default function App() {
                                                 type="button"
                                                 onClick={() => {
                                                   handleEditProductFromReport({
+                                                    id: child.id,
+                                                    child_id: child.id,
                                                     name: childName,
                                                     barcode: childBarcode,
                                                     code: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
@@ -5210,7 +5219,9 @@ export default function App() {
                                                     price_with_vat: child.price_with_vat || child.price || 0,
                                                     unit_name: childUnit,
                                                     supplier_name: child.supplier_name || item.supplier_name || 'Savemore',
-                                                    rma_number: item.rma_number
+                                                    rma_number: item.rma_number,
+                                                    is_manifest_child: true,
+                                                    parent_rma_id: item.id
                                                   });
                                                 }}
                                                 className={`px-2 py-0.5 rounded text-[10px] font-bold border inline-flex items-center gap-1 cursor-pointer transition-all ${
@@ -5460,6 +5471,7 @@ export default function App() {
           const unitName = prod?.unit_name || prod?.unitName || 'pc';
           const aeName = prod?.ae_name || prod?.aeName || null;
           const aeEmail = prod?.ae_email || prod?.aeEmail || null;
+          const childIdToMatch = prod?.child_id || editingProduct?.child_id;
 
           if (barcode) {
             // Optimistically update in-memory reports state so UI shows Logged & SKU immediately
@@ -5485,7 +5497,9 @@ export default function App() {
               if (parsedItems.length > 0) {
                 let itemsChanged = false;
                 parsedItems = parsedItems.map(it => {
-                  if (it.barcode && String(it.barcode).trim() === barcode) {
+                  const matchesBarcode = barcode && it.barcode && String(it.barcode).trim() === barcode;
+                  const matchesId = childIdToMatch && it.id && String(it.id) === String(childIdToMatch);
+                  if (matchesBarcode || matchesId) {
                     itemsChanged = true;
                     return {
                       ...it,
@@ -5534,7 +5548,21 @@ export default function App() {
 
             // Persist to Supabase rma_items, parent rma_reports items array, and report records
             try {
-              // 1. Update rma_items child table
+              // 1. Update rma_items child table by child id and barcode
+              if (childIdToMatch) {
+                await supabase
+                  .from('rma_items')
+                  .update({
+                    sku: code,
+                    code: code,
+                    name: name,
+                    price: price,
+                    price_with_vat: priceWithVat,
+                    supplier_name: supplierName,
+                    unit_name: unitName
+                  })
+                  .eq('id', childIdToMatch);
+              }
               await supabase
                 .from('rma_items')
                 .update({
@@ -5561,7 +5589,9 @@ export default function App() {
                     : (typeof pr.items === 'string' ? JSON.parse(pr.items || '[]') : []);
                   let hasMatch = false;
                   pItems = pItems.map(it => {
-                    if (it.barcode && String(it.barcode).trim() === barcode) {
+                    const matchesBarcode = barcode && it.barcode && String(it.barcode).trim() === barcode;
+                    const matchesId = childIdToMatch && it.id && String(it.id) === String(childIdToMatch);
+                    if (matchesBarcode || matchesId) {
                       hasMatch = true;
                       return {
                         ...it,

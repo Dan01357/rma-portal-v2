@@ -996,6 +996,25 @@ Each test scenario defines:
     3. Displays a summary footer row showing total replacement units across all manifest items.
     4. Official dispatch signatures (Driver, Warehouse Dispatcher, Receiving Store) and Gate Pass voucher number remain fully formatted for print/PDF export.
 
+- [ ] **TC-MAN-04 (Manifest Drawer Exact SKU Item Targeting & Responsive Layout)**
+  * **Location**: Customer RMA Hub -> Expand Manifest Drawer Table / Cards View
+  * **Action**: Click "Assign SKU" or "Edit SKU" on a specific child line item inside a multi-item manifest drawer.
+  * **Expected Behavior**:
+    1. `ProductEditModal` opens strictly pre-populated with THAT individual child item's barcode, name, and unit price. It never loads sibling item data or the generic "Batch Return Manifest" title.
+    2. Saving the product assigns the SKU only to that child item in `rma_items` and updates the parent report's `items` array.
+    3. The line item's badge immediately updates from amber "Awaiting SKU" to verified green SKU code.
+    4. The drawer table features proportional column widths (#: 40px, Photo: 48px, Barcode: 120px, SKU: 110px, Qty: 80px, Triage: 160px, Actions: 180px) and truncates long product titles with native tooltips, preventing horizontal scroll clipping on desktop screens.
+
+### 12.4 Batch Manifest Split Guard & Double-Compensation Safeguard
+- [ ] **TC-MAN-05 (Parent Split Qty Guard for Multi-Item Batches)**
+  * **Location**: `QuickRMAActionModal` -> Top Action Bar
+  * **Action**: Open Quick RMA Processing modal for a batch manifest (`items.length > 1` or `is_parent: true`).
+  * **Expected Behavior**:
+    1. The generic parent-level "Split Qty" button is disabled with cursor-not-allowed and tooltip: *"Multi-item manifest: Each product's disposition is triaged individually in the line items below."*
+    2. The single parent-level "+ Issue Credit Memo" button is hidden, replaced with an informative banner directing finance staff to issue credit memos per verified child item in the Hub drawer.
+    3. The Triage section displays a clear guide: *"💡 Multi-item manifest: Each product's disposition (Restock, Scrap, RTV, Quarantine) is triaged individually in the line items below."*
+    4. If a linked Credit Memo has already been issued for this return, opening the Buffer Replacement Slip displays an amber double-compensation alert: *"⚠️ Note: A Finance Credit Memo was already issued for this return. Only dispatch buffer stock if physical replacement is also authorized."* (hidden in print layout).
+
 ---
 
 ## QA Director Sign-Off & Verification Protocol

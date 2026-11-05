@@ -288,7 +288,10 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         savedProductData = res?.product || payload;
       }
 
-      if (onSaved) onSaved(savedProductData);
+      if (onSaved) onSaved({
+        ...savedProductData,
+        child_id: product?.child_id
+      });
       onClose();
     } catch (err) {
       setErrorNotice(err.message);

@@ -8,7 +8,8 @@ export default function BufferExchangeSlipModal({
   onClose,
   report,
   reports = [],
-  onDispatched
+  onDispatched,
+  hasCreditMemo = false
 }) {
   if (!isOpen) return null;
 
@@ -273,6 +274,14 @@ export default function BufferExchangeSlipModal({
             </button>
           </div>
         </div>
+
+        {/* Double-Compensation Safety Warning (Credit Memo already issued) */}
+        {hasCreditMemo && (
+          <div className="mx-4 sm:mx-6 mt-4 p-3.5 bg-amber-50 border-2 border-amber-300 rounded-2xl text-amber-900 text-xs font-bold flex items-center gap-2.5 shadow-2xs print:hidden animate-in fade-in">
+            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+            <span>⚠️ Note: A Finance Credit Memo was already issued for this return. Only dispatch buffer stock if physical replacement is also authorized.</span>
+          </div>
+        )}
 
         {/* Success Alert Banner */}
         {dispatchSuccess && (

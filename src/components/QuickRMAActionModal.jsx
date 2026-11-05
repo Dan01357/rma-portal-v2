@@ -34,7 +34,8 @@ import {
   Truck,
   Plus,
   Minus,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Info
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
@@ -991,6 +992,18 @@ export default function QuickRMAActionModal({
     ? creditMemosList.find(m => m.rma_number === report?.rma_number || String(m.report_id) === String(report?.id))
     : null;
 
+  const hasLinkedCreditMemo = Boolean(
+    existingMemo ||
+    (report?.rma_number && creditMemosList.some(m => m.rma_number === report?.rma_number))
+  );
+
+  const isMultiItemManifest = Boolean(
+    report?.is_parent ||
+    manifestItems.length > 1 ||
+    (Array.isArray(report?.items) && report.items.length > 1) ||
+    (typeof report?.name === 'string' && report.name.toLowerCase().startsWith('batch return manifest'))
+  );
+
   // Enterprise Multi-Tier Financial Threshold Rule:
   // If total claim exceeds ₱10,000, Super Admin authorization is required to activate Credit Memo button
   const itemQty = Number(report?.quantity) || 1;
@@ -1702,7 +1715,7 @@ export default function QuickRMAActionModal({
                             type="button"
                             disabled
                             className="px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-60 shadow-none shrink-0"
-                            title="For multi-item manifests, adjust quantities or triage dispositions in the Line-Item Triage section below."
+                            title="Multi-item manifest: Each product's disposition is triaged individually in the line items below."
                           >
                             <Scissors className="w-3.5 h-3.5 text-slate-400" />
                             <span>Split Qty</span>
@@ -1747,6 +1760,14 @@ export default function QuickRMAActionModal({
                     </button>
                   </div>
                 </div>
+
+                {/* Double-Compensation Safety Warning (Credit Memo already issued) */}
+                {hasLinkedCreditMemo && (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-xl text-amber-900 dark:text-amber-200 text-xs font-semibold flex items-center gap-2.5 shadow-2xs">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>⚠️ Note: A Finance Credit Memo was already issued for this return. Only dispatch buffer stock if physical replacement is also authorized.</span>
+                  </div>
+                )}
 
                 {/* Split Relationship Banners */}
                 {(() => {
@@ -2156,6 +2177,14 @@ export default function QuickRMAActionModal({
                       </span>
                     </div>
 
+                    {/* Helpful Multi-Item Manifest Triage Note */}
+                    <div className="p-2.5 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/80 rounded-xl text-xs text-blue-900 dark:text-blue-200 flex items-center gap-2">
+                      <span className="text-sm shrink-0">💡</span>
+                      <span className="font-semibold text-[11px]">
+                        Multi-item manifest: Each product's disposition (Restock, Scrap, RTV, Quarantine) is triaged individually in the line items below.
+                      </span>
+                    </div>
+
                     {manifestTriageSuccess && (
                       <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 rounded-xl text-xs font-bold text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -2437,7 +2466,14 @@ export default function QuickRMAActionModal({
                   </div>
                 )}
 
-                {!existingMemo ? (
+                {isMultiItemManifest ? (
+                  <div className="p-3 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 rounded-xl flex items-center gap-2.5 text-xs text-blue-900 dark:text-blue-200 shadow-2xs">
+                    <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                    <span className="font-semibold text-[11px]">
+                      ℹ️ Multi-Item Manifest: Finance Credit Memos are issued individually per line item in the Customer RMA Hub drawer table.
+                    </span>
+                  </div>
+                ) : !existingMemo ? (
                   <button
                     type="button"
                     disabled={!canIssueCreditMemo}
@@ -2528,6 +2564,7 @@ export default function QuickRMAActionModal({
           isOpen={isBufferSlipOpen}
           onClose={() => setIsBufferSlipOpen(false)}
           report={report}
+          hasCreditMemo={hasLinkedCreditMemo}
           onDispatched={(updatedReport) => {
             setReport(updatedReport);
             setRmaStatus('buffer_replacement_dispatched');
