@@ -746,7 +746,7 @@ export default function QuickRMAActionModal({
     setSyncAttempt(1);
 
     (async () => {
-      const maxAttempts = 5;
+      const maxAttempts = 12;
       let foundRecord = null;
 
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -778,9 +778,9 @@ export default function QuickRMAActionModal({
           console.warn(`RMA sync attempt ${attempt} notice:`, e?.message);
         }
 
-        // Delay 800ms before next attempt if record not yet available
+        // Delay 1000ms before next attempt if record not yet available
         if (attempt < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 800));
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
 
@@ -1063,7 +1063,7 @@ export default function QuickRMAActionModal({
             <div className="py-8 text-center space-y-3">
               <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
               <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                Finalizing return submission sync... Attempt {syncAttempt} of 5
+                Finalizing return submission sync... Attempt {syncAttempt} of 12
               </p>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 Polling local buffer and Supabase database for return authorization <span className="font-mono font-bold text-blue-600">{rmaNumber}</span>...
@@ -1693,21 +1693,38 @@ export default function QuickRMAActionModal({
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {Number(report?.quantity) > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => setIsSplitting(prev => !prev)}
-                        className={`px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer ${
-                          isSplitting
-                            ? 'bg-blue-700 text-white dark:bg-blue-600'
-                            : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800'
-                        }`}
-                        title="Split quantity into partial restock / scrap"
-                      >
-                        <Scissors className="w-3.5 h-3.5" />
-                        <span>{isSplitting ? 'Close Split' : `Split Qty (${report?.quantity})`}</span>
-                      </button>
-                    )}
+                    {(() => {
+                      const isMultiItemManifest = Boolean(report?.is_parent || manifestItems.length > 1 || (Array.isArray(report?.items) && report.items.length > 1) || (typeof report?.name === 'string' && report.name.toLowerCase().startsWith('batch return manifest')));
+                      if (Number(report?.quantity) <= 1) return null;
+                      if (isMultiItemManifest) {
+                        return (
+                          <button
+                            type="button"
+                            disabled
+                            className="px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-60 shadow-none shrink-0"
+                            title="For multi-item manifests, adjust quantities or triage dispositions in the Line-Item Triage section below."
+                          >
+                            <Scissors className="w-3.5 h-3.5 text-slate-400" />
+                            <span>Split Qty</span>
+                          </button>
+                        );
+                      }
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setIsSplitting(prev => !prev)}
+                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0 ${
+                            isSplitting
+                              ? 'bg-blue-700 text-white dark:bg-blue-600'
+                              : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800'
+                          }`}
+                          title="Split quantity into partial restock / scrap"
+                        >
+                          <Scissors className="w-3.5 h-3.5" />
+                          <span>{isSplitting ? 'Close Split' : `Split Qty (${report?.quantity})`}</span>
+                        </button>
+                      );
+                    })()}
 
                     <button
                       type="button"
@@ -1858,7 +1875,7 @@ export default function QuickRMAActionModal({
                 )}
 
                 {/* INLINE PARTIAL TRIAGE & LINE ITEM SPLIT MODULE */}
-                {isSplitting && (
+                {isSplitting && !Boolean(report?.is_parent || manifestItems.length > 1 || (Array.isArray(report?.items) && report.items.length > 1) || (typeof report?.name === 'string' && report.name.toLowerCase().startsWith('batch return manifest'))) && (
                   <div className="p-3.5 bg-blue-50/80 dark:bg-blue-950/40 border-2 border-blue-300 dark:border-blue-800 rounded-2xl space-y-3.5 my-2 animate-in fade-in duration-200">
                     <div className="flex items-center justify-between border-b border-blue-200 dark:border-blue-800/80 pb-2 flex-wrap gap-2">
                       <div className="flex items-center gap-2">

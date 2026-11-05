@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-05T07:33:21.496Z
+Generated At: 2026-11-05T08:39:32.330Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -3079,11 +3079,11 @@ Each test scenario defines:
   * **Location**: Public Portal -> Return Submission Success -> Print Box Sticker QR Code -> Scan with mobile device or navigate to `/admin?rma=RMA-XXXX`
   * **Action**: Immediately open the Quick RMA Action Modal right after a return is submitted.
   * **Expected Behavior**:
-    1. If the Supabase write or network replication is still syncing, modal does NOT immediately display a red "Return Record Not Found" error.
-    2. Displays a clean loading state with spinning loader and attempt counter: *"Finalizing return submission sync... Attempt X of 5"*.
-    3. Retries every 800ms up to 5 attempts, continuously checking both local in-memory report list and Supabase `rma_reports`.
+    1. If the Supabase write or network replication is still syncing (e.g. background Google Drive photo uploads), modal does NOT immediately display a red "Return Record Not Found" error.
+    2. Displays a clean loading state with spinning loader and attempt counter: *"Finalizing return submission sync... Attempt X of 12"*.
+    3. Retries every 1000ms up to 12 attempts (12-second tolerance window), continuously checking both local in-memory report list and Supabase `rma_reports`.
     4. Upon successful sync resolution, seamlessly renders the ticket details and triage controls without page reload.
-    5. If record is still not found after 5 attempts, presents a red error notice with an interactive **"Retry Sync"** button that restarts the 5-attempt polling sequence.
+    5. If record is still not found after 12 attempts, presents a red error notice with an interactive **"Retry Sync"** button that restarts the 12-attempt polling sequence.
 
 ### 12.2 Multi-Item Manifest Handling & Line-Item Triage
 - [ ] **TC-MAN-02 (Multi-Item Manifest Line-Item Triage & SKU Assignment)**
@@ -3093,6 +3093,8 @@ Each test scenario defines:
     1. Parent row displays `📦 Manifest (2)` badge and expandable chevron; parent row does NOT display a generic "Assign SKU" button.
     2. Clicking the manifest badge or row expander reveals a dedicated sub-table drawer displaying each distinct child line item with its own photo thumbnail, name, barcode, quantity, defect reason, and SKU status.
     3. Each child line item features an independent **"Assign SKU"** button that opens `ProductEditModal` pre-populated with that child's exact barcode and product name (strictly NEVER pre-populating with "Batch Return Manifest").
+    4. Once an official SKU is assigned, the badge turns green and a "+ Credit Memo" action button is enabled for that specific child line item to issue a credit memo pre-populated with that child's SKU and quantity.
+    5. Warehouse location tags (e.g. 📍 RACK-A-01) and saved triage dispositions are displayed directly in the drawer beside each item's quantity.
   * **Expected Behavior in Quick RMA Processing Modal**:
     1. Opening the quick triage modal for a multi-item manifest displays the *"Multi-Item Manifest Triage"* section with individual line items.
     2. Warehouse staff can triage each item independently: select condition grade (A/B/C/D), enter rack/bin location (e.g., `RACK-A-01`), and choose physical disposition (Restock, Scrap/Dispose, RTV, Buffer Swap) per line item.
@@ -10501,9 +10503,11 @@ export default function App() {
     const totalItemsCount = itemsToSubmit.length;
     const totalQuantityCount = itemsToSubmit.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0);
     const commonUnit = itemsToSubmit.every(it => it.unit_name === itemsToSubmit[0].unit_name) ? itemsToSubmit[0].unit_name : 'mixed';
-    const primaryBarcode = itemsToSubmit[0]?.barcode || rmaNumber;
-    const primaryName = itemsToSubmit.length === 1 ? itemsToSubmit[0].name : `Batch Return Manifest (${itemsToSubmit.length} items)`;
-    const primaryReason = itemsToSubmit.length === 1 ? itemsToSubmit[0].reason : `Multi-Item Defect (${itemsToSubmit.length} items)`;
+    const isBatchManifestTicket = itemsToSubmit.length > 1;
+    // For batch manifests, barcode is strictly rmaNumber to completely prevent child item barcode contamination
+    const primaryBarcode = isBatchManifestTicket ? rmaNumber : (itemsToSubmit[0]?.barcode || rmaNumber);
+    const primaryName = isBatchManifestTicket ? `Batch Return Manifest (${itemsToSubmit.length} items)` : itemsToSubmit[0].name;
+    const primaryReason = isBatchManifestTicket ? `Multi-Item Defect (${itemsToSubmit.length} items)` : itemsToSubmit[0].reason;
     const primaryDocNumber = cleanDr || cleanSi || cleanPo || invoiceDrNumber.trim() || null;
 
     // 4. Show success screen with full report details for QR sticker generation INSTANTLY!
@@ -10514,13 +10518,14 @@ export default function App() {
       barcode: primaryBarcode,
       name: primaryName,
       productName: primaryName,
-      code: itemsToSubmit[0]?.code || '',
-      sku: itemsToSubmit[0]?.code || '',
+      code: isBatchManifestTicket ? '' : (itemsToSubmit[0]?.code || ''),
+      sku: isBatchManifestTicket ? '' : (itemsToSubmit[0]?.code || ''),
       quantity: totalQuantityCount,
       unit_name: commonUnit,
       unit: commonUnit,
       total_items: totalItemsCount,
       total_quantity: totalQuantityCount,
+      is_parent: isBatchManifestTicket,
       store_branch: resolvedBranch,
       store: resolvedBranch,
       supplier_name: itemsToSubmit[0]?.supplier_name || 'Warehouse',
@@ -10643,7 +10648,8 @@ export default function App() {
           name: primaryName,
           productName: primaryName,
           rma_type: determinedRmaType,
-          product: capturedItems[0]?.detectedProduct || null,
+          is_parent: isBatchManifestTicket,
+          product: isBatchManifestTicket ? null : (capturedItems[0]?.detectedProduct || null),
           quantity: totalQuantityCount,
           total_items: totalItemsCount,
           total_quantity: totalQuantityCount,
@@ -12985,6 +12991,34 @@ export default function App() {
                                     )}
 
                                     {(() => {
+                                      if (isManifest) {
+                                        const linkedMemos = creditMemosList.filter(m => m.rma_number === item.rma_number || m.report_id === item.id);
+                                        if (linkedMemos.length > 0) {
+                                          return (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleViewCreditMemoVoucher(linkedMemos.length === 1 ? linkedMemos[0] : linkedMemos)}
+                                              className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                              title={`View ${linkedMemos.length} Credit Memo Voucher(s) for this batch`}
+                                            >
+                                              <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                              <span>CM Voucher{linkedMemos.length > 1 ? ` (${linkedMemos.length})` : ''}</span>
+                                            </button>
+                                          );
+                                        }
+                                        return (
+                                          <button
+                                            type="button"
+                                            onClick={() => toggleManifestExpand(manifestKey)}
+                                            className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/70 dark:hover:bg-purple-900/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                            title="View manifest line items to issue individual Credit Memos"
+                                          >
+                                            <Receipt className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                                            <span>CM in Drawer</span>
+                                          </button>
+                                        );
+                                      }
+
                                       const existingMemo = creditMemosList.find(m => m.rma_number === item.rma_number || m.report_id === item.id);
                                       if (existingMemo) {
                                         return (
@@ -13082,9 +13116,9 @@ export default function App() {
                                               <th className="py-2 px-3">Product Description / Name</th>
                                               <th className="py-2 px-3 font-mono">Barcode</th>
                                               <th className="py-2 px-3 font-mono">Assigned SKU</th>
-                                              <th className="py-2 px-3 text-center">Qty & Unit</th>
-                                              <th className="py-2 px-3">Defect Reason</th>
-                                              <th className="py-2 px-3 text-center">Catalog Action</th>
+                                              <th className="py-2 px-3 text-center">Qty & Location</th>
+                                              <th className="py-2 px-3">Disposition & Defect</th>
+                                              <th className="py-2 px-3 text-center">Actions</th>
                                             </tr>
                                           </thead>
                                           <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
@@ -13102,18 +13136,51 @@ export default function App() {
                                                 const childQty = Number(child.quantity || child.qty) || 1;
                                                 const childUnit = child.unit_name || child.unit || item.unit_name || 'pc';
                                                 const childReason = child.reason || child.defect_reason || item.reason || 'Damaged';
+                                                const childLocation = (child.warehouse_location || child.location || '').trim();
+                                                const childDisposition = child.disposition || '1- Pending Triage';
                                                 const matchedChild = savedProductsList.find(p => p.barcode && String(p.barcode) === String(childBarcode));
                                                 const isSkuAssigned = Boolean(
-                                                  (matchedChild?.code && String(matchedChild.code) !== String(childBarcode)) ||
+                                                  (matchedChild?.code && String(matchedChild.code) !== String(childBarcode) && !matchedChild.code.toLowerCase().includes('awaiting')) ||
                                                   (childSku && String(childSku) !== String(childBarcode) && !childSku.toLowerCase().includes('awaiting'))
                                                 );
-                                                const effectiveSku = matchedChild?.code || (childSku && String(childSku) !== String(childBarcode) ? childSku : '—');
+                                                const effectiveSku = (matchedChild?.code && String(matchedChild.code) !== String(childBarcode))
+                                                  ? matchedChild.code
+                                                  : (childSku && String(childSku) !== String(childBarcode) && !childSku.toLowerCase().includes('awaiting') ? childSku : '—');
 
                                                 // Extract child photos
                                                 const cPhotos = Array.isArray(child.photos)
                                                   ? child.photos
                                                   : (Array.isArray(child.photoFiles) ? child.photoFiles : (child.photo_url ? [child.photo_url] : []));
                                                 const cPhotoUrl = cPhotos[0] || (photoList[cIdx] || null);
+
+                                                const childExistingMemo = creditMemosList.find(m => 
+                                                  (m.rma_number === item.rma_number && (
+                                                    (childBarcode && String(m.barcode).trim() === childBarcode) ||
+                                                    (child.id && String(m.report_id) === String(child.id)) ||
+                                                    (m.product_name && m.product_name === childName)
+                                                  ))
+                                                );
+
+                                                const childReportObject = {
+                                                  id: child.id || `${item.id || item.rma_number}_${childBarcode}`,
+                                                  rma_number: item.rma_number,
+                                                  barcode: childBarcode,
+                                                  code: effectiveSku !== '—' ? effectiveSku : (childSku || ''),
+                                                  sku: effectiveSku !== '—' ? effectiveSku : (childSku || ''),
+                                                  name: childName,
+                                                  product_name: childName,
+                                                  quantity: childQty,
+                                                  unit_name: childUnit,
+                                                  price: Number(child.price || matchedChild?.price || 0),
+                                                  price_with_vat: Number(child.price_with_vat || child.price || matchedChild?.price_with_vat || matchedChild?.price || 0),
+                                                  supplier_name: child.supplier_name || matchedChild?.supplier_name || item.supplier_name || 'Savemore',
+                                                  store_branch: item.store_branch,
+                                                  customer_branch: item.store_branch,
+                                                  ae_name: item.ae_name,
+                                                  ae_email: item.ae_email,
+                                                  is_manifest_child: true,
+                                                  parent_rma_id: item.id
+                                                };
 
                                                 return (
                                                   <tr key={child.id || `child_${cIdx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
@@ -13163,43 +13230,84 @@ export default function App() {
                                                       )}
                                                     </td>
                                                     <td className="py-2 px-3 text-center font-mono">
-                                                      <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-md text-[11px]">
-                                                        {childQty} {childUnit}
-                                                      </span>
+                                                      <div className="flex flex-col items-center gap-0.5">
+                                                        <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-md text-[11px]">
+                                                          {childQty} {childUnit}
+                                                        </span>
+                                                        {childLocation && (
+                                                          <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold">
+                                                            📍 {childLocation}
+                                                          </span>
+                                                        )}
+                                                      </div>
                                                     </td>
                                                     <td className="py-2 px-3">
-                                                      <span className="px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-semibold text-[10px] inline-block">
-                                                        {childReason}
-                                                      </span>
+                                                      <div className="space-y-1">
+                                                        <div>
+                                                          <span className="px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-semibold text-[10px] inline-block">
+                                                            {childReason}
+                                                          </span>
+                                                        </div>
+                                                        <div>
+                                                          <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-medium text-[10px] inline-block">
+                                                            {childDisposition}
+                                                          </span>
+                                                        </div>
+                                                      </div>
                                                     </td>
                                                     <td className="py-2 px-3 text-center">
-                                                      {canEditProducts && (
-                                                        <button
-                                                          type="button"
-                                                          onClick={() => {
-                                                            handleEditProductFromReport({
-                                                              name: childName,
-                                                              barcode: childBarcode,
-                                                              code: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
-                                                              sku: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
-                                                              price: child.price || 0,
-                                                              price_with_vat: child.price_with_vat || child.price || 0,
-                                                              unit_name: childUnit,
-                                                              supplier_name: child.supplier_name || item.supplier_name || 'Savemore',
-                                                              rma_number: item.rma_number
-                                                            });
-                                                          }}
-                                                          className={`px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs border ${
-                                                            isSkuAssigned
-                                                              ? 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                                                              : 'bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
-                                                          }`}
-                                                          title={`Assign or edit official catalog SKU for "${childName}"`}
-                                                        >
-                                                          <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                                                          <span>{isSkuAssigned ? 'Edit SKU' : 'Assign SKU'}</span>
-                                                        </button>
-                                                      )}
+                                                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                                        {canEditProducts && (
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                              handleEditProductFromReport({
+                                                                name: childName,
+                                                                barcode: childBarcode,
+                                                                code: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
+                                                                sku: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
+                                                                price: child.price || 0,
+                                                                price_with_vat: child.price_with_vat || child.price || 0,
+                                                                unit_name: childUnit,
+                                                                supplier_name: child.supplier_name || item.supplier_name || 'Savemore',
+                                                                rma_number: item.rma_number
+                                                              });
+                                                            }}
+                                                            className={`px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs border ${
+                                                              isSkuAssigned
+                                                                ? 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                                                                : 'bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                                            }`}
+                                                            title={`Assign or edit official catalog SKU for "${childName}"`}
+                                                          >
+                                                            <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                                                            <span>{isSkuAssigned ? 'Edit SKU' : 'Assign SKU'}</span>
+                                                          </button>
+                                                        )}
+                                                        {childExistingMemo ? (
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => handleViewCreditMemoVoucher(childExistingMemo)}
+                                                            className="px-2 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                                            title={`View Official Credit Memo Voucher: ${childExistingMemo.credit_memo_number}`}
+                                                          >
+                                                            <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                                            <span>CM Voucher</span>
+                                                          </button>
+                                                        ) : (
+                                                          canEditProducts && (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => handleOpenCreditMemoForReport(childReportObject)}
+                                                              className="px-2 py-1 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                                              title={`Issue Finance Credit Memo for ${childName} (${childQty} ${childUnit})`}
+                                                            >
+                                                              <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                                              <span>+ Credit Memo</span>
+                                                            </button>
+                                                          )
+                                                        )}
+                                                      </div>
                                                     </td>
                                                   </tr>
                                                 );
@@ -13410,6 +13518,34 @@ export default function App() {
                                   </button>
                                 )}
                                 {(() => {
+                                  if (isManifest) {
+                                    const linkedMemos = creditMemosList.filter(m => m.rma_number === item.rma_number || m.report_id === item.id);
+                                    if (linkedMemos.length > 0) {
+                                      return (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleViewCreditMemoVoucher(linkedMemos.length === 1 ? linkedMemos[0] : linkedMemos)}
+                                          className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer"
+                                          title={`View ${linkedMemos.length} Credit Memo Voucher(s) for this batch`}
+                                        >
+                                          <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                          <span>Vouchers ({linkedMemos.length})</span>
+                                        </button>
+                                      );
+                                    }
+                                    return (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleManifestExpand(manifestKey)}
+                                        className="px-2 py-0.5 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                        title="View manifest line items in drawer"
+                                      >
+                                        <Receipt className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                                        <span>CM Drawer</span>
+                                      </button>
+                                    );
+                                  }
+
                                   const existingMemo = creditMemosList.find(m => m.rma_number === item.rma_number || m.report_id === item.id);
                                   if (existingMemo) {
                                     return (
@@ -13541,9 +13677,9 @@ export default function App() {
                               <div className="mt-3 pt-3 border-t border-purple-200 dark:border-purple-900/50 space-y-2">
                                 <div className="flex items-center justify-between text-[11px] font-bold text-purple-900 dark:text-purple-200">
                                   <span>📦 Manifest Items Breakdown ({manifestChildren.length})</span>
-                                  <span className="text-slate-500 font-normal">Line-Item SKU Assignment</span>
+                                  <span className="text-slate-500 font-normal">Line-Item SKU & Credit Memo</span>
                                 </div>
-                                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                                   {manifestChildren.map((child, cIdx) => {
                                     const childName = (child.name || child.item_name || child.productName || `Item #${cIdx + 1}`).trim();
                                     const childBarcode = (child.barcode || child.item_barcode || '').trim();
@@ -13551,48 +13687,126 @@ export default function App() {
                                     const childQty = Number(child.quantity || child.qty) || 1;
                                     const childUnit = child.unit_name || child.unit || item.unit_name || 'pc';
                                     const childReason = child.reason || child.defect_reason || item.reason || 'Damaged';
+                                    const childLocation = (child.warehouse_location || child.location || '').trim();
+                                    const childDisposition = child.disposition || '1- Pending Triage';
                                     const matchedChild = savedProductsList.find(p => p.barcode && String(p.barcode) === String(childBarcode));
                                     const isSkuAssigned = Boolean(
-                                      (matchedChild?.code && String(matchedChild.code) !== String(childBarcode)) ||
+                                      (matchedChild?.code && String(matchedChild.code) !== String(childBarcode) && !matchedChild.code.toLowerCase().includes('awaiting')) ||
                                       (childSku && String(childSku) !== String(childBarcode) && !childSku.toLowerCase().includes('awaiting'))
                                     );
-                                    const effectiveSku = matchedChild?.code || (childSku && String(childSku) !== String(childBarcode) ? childSku : '—');
+                                    const effectiveSku = (matchedChild?.code && String(matchedChild.code) !== String(childBarcode))
+                                      ? matchedChild.code
+                                      : (childSku && String(childSku) !== String(childBarcode) && !childSku.toLowerCase().includes('awaiting') ? childSku : '—');
+
+                                    const childExistingMemo = creditMemosList.find(m => 
+                                      (m.rma_number === item.rma_number && (
+                                        (childBarcode && String(m.barcode).trim() === childBarcode) ||
+                                        (child.id && String(m.report_id) === String(child.id)) ||
+                                        (m.product_name && m.product_name === childName)
+                                      ))
+                                    );
+
+                                    const childReportObject = {
+                                      id: child.id || `${item.id || item.rma_number}_${childBarcode}`,
+                                      rma_number: item.rma_number,
+                                      barcode: childBarcode,
+                                      code: effectiveSku !== '—' ? effectiveSku : (childSku || ''),
+                                      sku: effectiveSku !== '—' ? effectiveSku : (childSku || ''),
+                                      name: childName,
+                                      product_name: childName,
+                                      quantity: childQty,
+                                      unit_name: childUnit,
+                                      price: Number(child.price || matchedChild?.price || 0),
+                                      price_with_vat: Number(child.price_with_vat || child.price || matchedChild?.price_with_vat || matchedChild?.price || 0),
+                                      supplier_name: child.supplier_name || matchedChild?.supplier_name || item.supplier_name || 'Savemore',
+                                      store_branch: item.store_branch,
+                                      customer_branch: item.store_branch,
+                                      ae_name: item.ae_name,
+                                      ae_email: item.ae_email,
+                                      is_manifest_child: true,
+                                      parent_rma_id: item.id
+                                    };
 
                                     return (
-                                      <div key={child.id || `card_child_${cIdx}`} className="p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 shadow-2xs">
-                                        <div className="min-w-0">
-                                          <div className="font-bold text-xs text-slate-900 dark:text-white truncate">{childName}</div>
-                                          <div className="text-[10px] text-slate-500 font-mono">
-                                            BC: {childBarcode || '—'} • SKU: <span className={isSkuAssigned ? "font-bold text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>{effectiveSku}</span> • Qty: {childQty} {childUnit} • <span className="text-rose-600 dark:text-rose-400 font-medium">{childReason}</span>
+                                      <div key={child.id || `card_child_${cIdx}`} className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1.5 shadow-2xs">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                                            #{cIdx + 1} {childName}
+                                          </div>
+                                          <span className="font-mono font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded text-[10px]">
+                                            {childQty} {childUnit}
+                                          </span>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 font-mono">
+                                          <span>BC: {childBarcode || '—'}</span>
+                                          <span>•</span>
+                                          <span>SKU: <span className={isSkuAssigned ? "font-bold text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400 font-semibold"}>{effectiveSku}</span></span>
+                                          {childLocation && (
+                                            <>
+                                              <span>•</span>
+                                              <span className="text-indigo-600 dark:text-indigo-400 font-bold">📍 {childLocation}</span>
+                                            </>
+                                          )}
+                                        </div>
+                                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100 dark:border-slate-700/50">
+                                          <div className="flex items-center gap-1 text-[10px]">
+                                            <span className="text-rose-600 dark:text-rose-400 font-medium">{childReason}</span>
+                                            <span className="text-slate-400">•</span>
+                                            <span className="text-blue-600 dark:text-blue-400 font-semibold">{childDisposition}</span>
+                                          </div>
+                                          <div className="flex items-center gap-1.5">
+                                            {canEditProducts && (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  handleEditProductFromReport({
+                                                    name: childName,
+                                                    barcode: childBarcode,
+                                                    code: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
+                                                    sku: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
+                                                    price: child.price || 0,
+                                                    price_with_vat: child.price_with_vat || child.price || 0,
+                                                    unit_name: childUnit,
+                                                    supplier_name: child.supplier_name || item.supplier_name || 'Savemore',
+                                                    rma_number: item.rma_number
+                                                  });
+                                                }}
+                                                className={`px-2 py-0.5 rounded text-[10px] font-bold border inline-flex items-center gap-1 cursor-pointer transition-all ${
+                                                  isSkuAssigned
+                                                    ? 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                                                    : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300'
+                                                }`}
+                                                title={`Assign or edit official catalog SKU for "${childName}"`}
+                                              >
+                                                <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                                                <span>{isSkuAssigned ? 'Edit SKU' : 'Assign SKU'}</span>
+                                              </button>
+                                            )}
+                                            {childExistingMemo ? (
+                                              <button
+                                                type="button"
+                                                onClick={() => handleViewCreditMemoVoucher(childExistingMemo)}
+                                                className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded text-[10px] font-black inline-flex items-center gap-1 cursor-pointer shadow-2xs"
+                                                title={`View Voucher: ${childExistingMemo.credit_memo_number}`}
+                                              >
+                                                <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                                <span>Voucher</span>
+                                              </button>
+                                            ) : (
+                                              canEditProducts && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleOpenCreditMemoForReport(childReportObject)}
+                                                  className="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer shadow-2xs"
+                                                  title={`Issue Credit Memo for ${childName}`}
+                                                >
+                                                  <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                                  <span>+ CM</span>
+                                                </button>
+                                              )
+                                            )}
                                           </div>
                                         </div>
-                                        {canEditProducts && (
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              handleEditProductFromReport({
-                                                name: childName,
-                                                barcode: childBarcode,
-                                                code: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
-                                                sku: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
-                                                price: child.price || 0,
-                                                price_with_vat: child.price_with_vat || child.price || 0,
-                                                unit_name: childUnit,
-                                                supplier_name: child.supplier_name || item.supplier_name || 'Savemore',
-                                                rma_number: item.rma_number
-                                              });
-                                            }}
-                                            className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 border inline-flex items-center gap-1 cursor-pointer transition-all ${
-                                              isSkuAssigned
-                                                ? 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                                                : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300'
-                                            }`}
-                                            title={`Assign or edit official catalog SKU for "${childName}"`}
-                                          >
-                                            <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                                            <span>{isSkuAssigned ? 'Edit SKU' : 'Assign SKU'}</span>
-                                          </button>
-                                        )}
                                       </div>
                                     );
                                   })}
@@ -13806,12 +14020,14 @@ export default function App() {
           const aeEmail = prod?.ae_email || prod?.aeEmail || null;
 
           if (barcode) {
-            // Optimistically update in-memory reports state so UI shows Logged immediately
+            // Optimistically update in-memory reports state so UI shows Logged & SKU immediately
             setRecentReportsList(prev => prev.map(rep => {
+              let updated = { ...rep };
+              const isManifestParent = rep.is_parent || (String(rep.name || '').toLowerCase().startsWith('batch return manifest'));
               if (rep.barcode && String(rep.barcode).trim() === barcode) {
-                return {
-                  ...rep,
-                  name: name || rep.name,
+                updated = {
+                  ...updated,
+                  name: isManifestParent ? rep.name : (name || rep.name),
                   code: code || rep.code,
                   status: 'logged',
                   supplier_name: supplierName,
@@ -13820,11 +14036,115 @@ export default function App() {
                   unit_name: unitName
                 };
               }
-              return rep;
+              // Also update child items inside rep.items JSON array
+              let parsedItems = Array.isArray(updated.items)
+                ? [...updated.items]
+                : (typeof updated.items === 'string' ? JSON.parse(updated.items || '[]') : []);
+              if (parsedItems.length > 0) {
+                let itemsChanged = false;
+                parsedItems = parsedItems.map(it => {
+                  if (it.barcode && String(it.barcode).trim() === barcode) {
+                    itemsChanged = true;
+                    return {
+                      ...it,
+                      code: code,
+                      sku: code,
+                      name: name || it.name,
+                      productName: name || it.productName || it.name,
+                      price: price,
+                      price_with_vat: priceWithVat,
+                      supplier_name: supplierName,
+                      unit_name: unitName
+                    };
+                  }
+                  return it;
+                });
+                if (itemsChanged) {
+                  updated.items = parsedItems;
+                }
+              }
+              return updated;
             }));
 
-            // Persist to Supabase rma_reports table and alert on newly verified pending reports
+            // Optimistically update savedProductsList so manifest drawer badge immediately turns green
+            setSavedProductsList(prev => {
+              const idx = prev.findIndex(p => p.barcode && String(p.barcode).trim() === barcode);
+              const newEntry = {
+                ...(idx >= 0 ? prev[idx] : {}),
+                ...prod,
+                barcode,
+                code,
+                sku: code,
+                name: name || (idx >= 0 ? prev[idx].name : ''),
+                price,
+                price_with_vat: priceWithVat,
+                unit_name: unitName,
+                supplier_name: supplierName,
+                is_verified: true
+              };
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = newEntry;
+                return next;
+              }
+              return [...prev, newEntry];
+            });
+
+            // Persist to Supabase rma_items, parent rma_reports items array, and report records
             try {
+              // 1. Update rma_items child table
+              await supabase
+                .from('rma_items')
+                .update({
+                  sku: code,
+                  code: code,
+                  name: name,
+                  price: price,
+                  price_with_vat: priceWithVat,
+                  supplier_name: supplierName,
+                  unit_name: unitName
+                })
+                .eq('barcode', barcode);
+
+              // 2. Update parent rma_reports JSON items array
+              const { data: parentsWithItems } = await supabase
+                .from('rma_reports')
+                .select('id, items')
+                .not('items', 'is', null);
+
+              if (parentsWithItems && parentsWithItems.length > 0) {
+                for (const pr of parentsWithItems) {
+                  let pItems = Array.isArray(pr.items)
+                    ? pr.items
+                    : (typeof pr.items === 'string' ? JSON.parse(pr.items || '[]') : []);
+                  let hasMatch = false;
+                  pItems = pItems.map(it => {
+                    if (it.barcode && String(it.barcode).trim() === barcode) {
+                      hasMatch = true;
+                      return {
+                        ...it,
+                        code: code,
+                        sku: code,
+                        name: name || it.name,
+                        productName: name || it.productName || it.name,
+                        price: price,
+                        price_with_vat: priceWithVat,
+                        supplier_name: supplierName,
+                        unit_name: unitName
+                      };
+                    }
+                    return it;
+                  });
+                  if (hasMatch) {
+                    await supabase
+                      .from('rma_reports')
+                      .update({ items: pItems })
+                      .eq('id', pr.id);
+                  }
+                }
+              }
+
+              // 3. Update rma_reports matching barcode (strictly protect parent manifest names)
               const { data: matchedPending } = await supabase
                 .from('rma_reports')
                 .select('*')
@@ -13834,7 +14154,6 @@ export default function App() {
               await supabase
                 .from('rma_reports')
                 .update({
-                  name: name,
                   code: code,
                   price: price,
                   price_with_vat: priceWithVat,
@@ -13845,6 +14164,14 @@ export default function App() {
                   status: 'logged'
                 })
                 .eq('barcode', barcode);
+
+              // Update name only on non-parent records
+              await supabase
+                .from('rma_reports')
+                .update({ name: name })
+                .eq('barcode', barcode)
+                .neq('is_parent', true)
+                .not('name', 'ilike', 'Batch Return Manifest%');
 
               // If this return was waiting for SKU assignment, dispatch the official RMA report notification email!
               if (matchedPending && matchedPending.length > 0) {
@@ -15762,7 +16089,15 @@ export default function CreditMemoModal({
 
   // Active report resolution: prioritize user-selected report from dropdown, then passed report, then first available report
   const activeReport = useMemo(() => {
-    if (selectedReportId && availableReports.length > 0) {
+    if (selectedReportId) {
+      if (report && (
+        String(report.id) === String(selectedReportId) ||
+        String(report.rma_number) === String(selectedReportId) ||
+        String(report.barcode) === String(selectedReportId) ||
+        `${report.rma_number}_${report.barcode}` === String(selectedReportId)
+      )) {
+        return report;
+      }
       const match = availableReports.find(r => String(r.id) === String(selectedReportId) || r.rma_number === selectedReportId);
       if (match) return match;
     }
@@ -15789,7 +16124,8 @@ export default function CreditMemoModal({
     const price = Number((Number(rep.price_with_vat ?? rep.price ?? 0)).toFixed(2));
     const gross = Number((qty * price).toFixed(2));
 
-    setSelectedReportId(rep.id || rep.rma_number || '');
+    const targetKey = rep.id || (rep.barcode ? `${rep.rma_number}_${rep.barcode}` : rep.rma_number) || '';
+    setSelectedReportId(targetKey);
     setQuantity(qty);
     setUnitName(rep.unit_name || rep.unit || 'pc');
     setUnitPrice(price.toFixed(2));
@@ -15806,6 +16142,14 @@ export default function CreditMemoModal({
   // Immediate handler when user picks an item from the dropdown: ALL data updates immediately
   const handleReportDropdownChange = (newVal) => {
     setSelectedReportId(newVal);
+    if (report && (
+      String(report.id) === String(newVal) ||
+      String(report.rma_number) === String(newVal) ||
+      `${report.rma_number}_${report.barcode}` === String(newVal)
+    )) {
+      applyReportToForm(report);
+      return;
+    }
     const found = availableReports.find(r => String(r.id) === String(newVal) || r.rma_number === newVal);
     if (found) {
       applyReportToForm(found);
@@ -15816,7 +16160,7 @@ export default function CreditMemoModal({
   useEffect(() => {
     const isOpening = isOpen && !prevIsOpenRef.current;
     const memoChanged = isEditing && creditMemo?.credit_memo_number !== currentEditingRef.current;
-    const currentTargetId = report?.id || report?.rma_number || null;
+    const currentTargetId = report ? (report.id ? String(report.id) : (report.barcode ? `${report.rma_number}_${report.barcode}` : report.rma_number)) : null;
     const reportChanged = !isEditing && isOpen && currentTargetId && currentTargetId !== prevTargetReportIdRef.current;
 
     if (isOpening || memoChanged || reportChanged) {
@@ -16061,16 +16405,21 @@ export default function CreditMemoModal({
           )}
 
           {/* Ticket Picker (Always available when creating so user can switch tickets and sync all data) */}
-          {!isEditing && availableReports.length > 0 && (
+          {!isEditing && (availableReports.length > 0 || report) && (
             <div className="space-y-1">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                 Select Linked RMA Return Ticket *
               </label>
               <select
-                value={selectedReportId || activeReport?.id || activeReport?.rma_number || ''}
+                value={selectedReportId || (activeReport?.id ? String(activeReport.id) : (activeReport?.barcode ? `${activeReport.rma_number}_${activeReport.barcode}` : activeReport?.rma_number)) || ''}
                 onChange={(e) => handleReportDropdownChange(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800"
               >
+                {report && (report.is_manifest_child || !availableReports.some(r => String(r.id) === String(report.id) || (r.rma_number === report.rma_number && r.barcode === report.barcode))) && (
+                  <option value={report.id || `${report.rma_number}_${report.barcode}`}>
+                    {report.rma_number} — {report.name || report.product_name || report.barcode} (Line Item: {report.quantity || 1} {report.unit_name || 'pc'} • {report.supplier_name || 'Savemore'})
+                  </option>
+                )}
                 {availableReports.map(r => (
                   <option key={r.id || r.rma_number} value={r.id || r.rma_number}>
                     {r.rma_number} — {r.name || r.barcode} (Qty: {r.quantity || 1} • {r.supplier_name || 'Warehouse'})
@@ -26547,7 +26896,7 @@ export default function QuickRMAActionModal({
     setSyncAttempt(1);
 
     (async () => {
-      const maxAttempts = 5;
+      const maxAttempts = 12;
       let foundRecord = null;
 
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -26579,9 +26928,9 @@ export default function QuickRMAActionModal({
           console.warn(`RMA sync attempt ${attempt} notice:`, e?.message);
         }
 
-        // Delay 800ms before next attempt if record not yet available
+        // Delay 1000ms before next attempt if record not yet available
         if (attempt < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 800));
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
 
@@ -26864,7 +27213,7 @@ export default function QuickRMAActionModal({
             <div className="py-8 text-center space-y-3">
               <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
               <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                Finalizing return submission sync... Attempt {syncAttempt} of 5
+                Finalizing return submission sync... Attempt {syncAttempt} of 12
               </p>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 Polling local buffer and Supabase database for return authorization <span className="font-mono font-bold text-blue-600">{rmaNumber}</span>...
@@ -27494,21 +27843,38 @@ export default function QuickRMAActionModal({
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {Number(report?.quantity) > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => setIsSplitting(prev => !prev)}
-                        className={`px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer ${
-                          isSplitting
-                            ? 'bg-blue-700 text-white dark:bg-blue-600'
-                            : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800'
-                        }`}
-                        title="Split quantity into partial restock / scrap"
-                      >
-                        <Scissors className="w-3.5 h-3.5" />
-                        <span>{isSplitting ? 'Close Split' : `Split Qty (${report?.quantity})`}</span>
-                      </button>
-                    )}
+                    {(() => {
+                      const isMultiItemManifest = Boolean(report?.is_parent || manifestItems.length > 1 || (Array.isArray(report?.items) && report.items.length > 1) || (typeof report?.name === 'string' && report.name.toLowerCase().startsWith('batch return manifest')));
+                      if (Number(report?.quantity) <= 1) return null;
+                      if (isMultiItemManifest) {
+                        return (
+                          <button
+                            type="button"
+                            disabled
+                            className="px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-60 shadow-none shrink-0"
+                            title="For multi-item manifests, adjust quantities or triage dispositions in the Line-Item Triage section below."
+                          >
+                            <Scissors className="w-3.5 h-3.5 text-slate-400" />
+                            <span>Split Qty</span>
+                          </button>
+                        );
+                      }
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setIsSplitting(prev => !prev)}
+                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0 ${
+                            isSplitting
+                              ? 'bg-blue-700 text-white dark:bg-blue-600'
+                              : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800'
+                          }`}
+                          title="Split quantity into partial restock / scrap"
+                        >
+                          <Scissors className="w-3.5 h-3.5" />
+                          <span>{isSplitting ? 'Close Split' : `Split Qty (${report?.quantity})`}</span>
+                        </button>
+                      );
+                    })()}
 
                     <button
                       type="button"
@@ -27659,7 +28025,7 @@ export default function QuickRMAActionModal({
                 )}
 
                 {/* INLINE PARTIAL TRIAGE & LINE ITEM SPLIT MODULE */}
-                {isSplitting && (
+                {isSplitting && !Boolean(report?.is_parent || manifestItems.length > 1 || (Array.isArray(report?.items) && report.items.length > 1) || (typeof report?.name === 'string' && report.name.toLowerCase().startsWith('batch return manifest'))) && (
                   <div className="p-3.5 bg-blue-50/80 dark:bg-blue-950/40 border-2 border-blue-300 dark:border-blue-800 rounded-2xl space-y-3.5 my-2 animate-in fade-in duration-200">
                     <div className="flex items-center justify-between border-b border-blue-200 dark:border-blue-800/80 pb-2 flex-wrap gap-2">
                       <div className="flex items-center gap-2">
@@ -38851,7 +39217,8 @@ export const catalogService = {
     parent_rma_id = null
   }) {
     const hasItems = Array.isArray(items) && items.length > 0;
-    const cleanBarcode = String(barcode || (hasItems ? (items[0]?.barcode || 'MANIFEST') : '')).trim();
+    const isBatch = hasItems && items.length > 1;
+    let cleanBarcode = String(barcode || (hasItems ? (isBatch ? (explicitRmaNumber || 'MANIFEST') : (items[0]?.barcode || 'MANIFEST')) : '')).trim();
     if (!cleanBarcode && !hasItems) throw new Error('A barcode is required to report a return.');
 
     // Aggregate photos from manifest items if provided
@@ -38945,10 +39312,14 @@ export const catalogService = {
       : (Number(quantity) || 1));
 
     const userProvidedName = (name || productName || '').trim();
-    const effectiveName = userProvidedName ||
-      (hasItems && items.length > 1
-        ? `Batch Return Manifest (${items.length} items)`
-        : (isKnown ? resolvedProduct.name : (resolvedProduct?.name && !resolvedProduct.name.startsWith('Unidentified Item') ? resolvedProduct.name : (cleanBarcode ? `Unidentified Item (${cleanBarcode})` : 'General Return Item'))));
+    const effectiveName = isBatch
+      ? `Batch Return Manifest (${items.length} items)`
+      : (userProvidedName || (isKnown ? resolvedProduct.name : (resolvedProduct?.name && !resolvedProduct.name.startsWith('Unidentified Item') ? resolvedProduct.name : (cleanBarcode ? `Unidentified Item (${cleanBarcode})` : 'General Return Item'))));
+
+    // Ensure manifest barcode is strictly rmaNumber or a dedicated manifest identifier, never a child item's barcode
+    const finalBarcode = isBatch
+      ? (cleanBarcode && cleanBarcode !== 'MANIFEST' && !items.some(it => String(it.barcode).trim() === cleanBarcode) ? cleanBarcode : rmaNumber)
+      : cleanBarcode;
 
     // Filter GPS: Only save if accuracy is <= 150 meters
     const isAccurateGps = gps && gps.latitude && gps.accuracy && Number(gps.accuracy) <= 150;
@@ -38956,8 +39327,8 @@ export const catalogService = {
     const reportRow = {
       rma_number: rmaNumber,
       rma_type: rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound',
-      barcode: cleanBarcode,
-      code: isKnown ? ((resolvedProduct.code && resolvedProduct.code !== cleanBarcode) ? resolvedProduct.code : (resolvedProduct.sku && resolvedProduct.sku !== cleanBarcode ? resolvedProduct.sku : null)) : (hasItems && items[0]?.code ? items[0].code : null),
+      barcode: finalBarcode,
+      code: isBatch ? null : (isKnown ? ((resolvedProduct.code && resolvedProduct.code !== finalBarcode) ? resolvedProduct.code : (resolvedProduct.sku && resolvedProduct.sku !== finalBarcode ? resolvedProduct.sku : null)) : (hasItems && items[0]?.code ? items[0].code : null)),
       name: effectiveName,
       quantity: calculatedTotalQuantity,
       supplier_name: isKnown ? (resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Pending Assignment') : (hasItems && items[0]?.supplier_name ? items[0].supplier_name : 'Pending Assignment'),

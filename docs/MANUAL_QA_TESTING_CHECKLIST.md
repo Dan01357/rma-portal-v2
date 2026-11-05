@@ -965,11 +965,11 @@ Each test scenario defines:
   * **Location**: Public Portal -> Return Submission Success -> Print Box Sticker QR Code -> Scan with mobile device or navigate to `/admin?rma=RMA-XXXX`
   * **Action**: Immediately open the Quick RMA Action Modal right after a return is submitted.
   * **Expected Behavior**:
-    1. If the Supabase write or network replication is still syncing, modal does NOT immediately display a red "Return Record Not Found" error.
-    2. Displays a clean loading state with spinning loader and attempt counter: *"Finalizing return submission sync... Attempt X of 5"*.
-    3. Retries every 800ms up to 5 attempts, continuously checking both local in-memory report list and Supabase `rma_reports`.
+    1. If the Supabase write or network replication is still syncing (e.g. background Google Drive photo uploads), modal does NOT immediately display a red "Return Record Not Found" error.
+    2. Displays a clean loading state with spinning loader and attempt counter: *"Finalizing return submission sync... Attempt X of 12"*.
+    3. Retries every 1000ms up to 12 attempts (12-second tolerance window), continuously checking both local in-memory report list and Supabase `rma_reports`.
     4. Upon successful sync resolution, seamlessly renders the ticket details and triage controls without page reload.
-    5. If record is still not found after 5 attempts, presents a red error notice with an interactive **"Retry Sync"** button that restarts the 5-attempt polling sequence.
+    5. If record is still not found after 12 attempts, presents a red error notice with an interactive **"Retry Sync"** button that restarts the 12-attempt polling sequence.
 
 ### 12.2 Multi-Item Manifest Handling & Line-Item Triage
 - [ ] **TC-MAN-02 (Multi-Item Manifest Line-Item Triage & SKU Assignment)**
@@ -979,6 +979,8 @@ Each test scenario defines:
     1. Parent row displays `📦 Manifest (2)` badge and expandable chevron; parent row does NOT display a generic "Assign SKU" button.
     2. Clicking the manifest badge or row expander reveals a dedicated sub-table drawer displaying each distinct child line item with its own photo thumbnail, name, barcode, quantity, defect reason, and SKU status.
     3. Each child line item features an independent **"Assign SKU"** button that opens `ProductEditModal` pre-populated with that child's exact barcode and product name (strictly NEVER pre-populating with "Batch Return Manifest").
+    4. Once an official SKU is assigned, the badge turns green and a "+ Credit Memo" action button is enabled for that specific child line item to issue a credit memo pre-populated with that child's SKU and quantity.
+    5. Warehouse location tags (e.g. 📍 RACK-A-01) and saved triage dispositions are displayed directly in the drawer beside each item's quantity.
   * **Expected Behavior in Quick RMA Processing Modal**:
     1. Opening the quick triage modal for a multi-item manifest displays the *"Multi-Item Manifest Triage"* section with individual line items.
     2. Warehouse staff can triage each item independently: select condition grade (A/B/C/D), enter rack/bin location (e.g., `RACK-A-01`), and choose physical disposition (Restock, Scrap/Dispose, RTV, Buffer Swap) per line item.

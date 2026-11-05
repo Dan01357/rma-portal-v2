@@ -1083,7 +1083,8 @@ export const catalogService = {
     parent_rma_id = null
   }) {
     const hasItems = Array.isArray(items) && items.length > 0;
-    const cleanBarcode = String(barcode || (hasItems ? (items[0]?.barcode || 'MANIFEST') : '')).trim();
+    const isBatch = hasItems && items.length > 1;
+    let cleanBarcode = String(barcode || (hasItems ? (isBatch ? (explicitRmaNumber || 'MANIFEST') : (items[0]?.barcode || 'MANIFEST')) : '')).trim();
     if (!cleanBarcode && !hasItems) throw new Error('A barcode is required to report a return.');
 
     // Aggregate photos from manifest items if provided
@@ -1177,10 +1178,14 @@ export const catalogService = {
       : (Number(quantity) || 1));
 
     const userProvidedName = (name || productName || '').trim();
-    const effectiveName = userProvidedName ||
-      (hasItems && items.length > 1
-        ? `Batch Return Manifest (${items.length} items)`
-        : (isKnown ? resolvedProduct.name : (resolvedProduct?.name && !resolvedProduct.name.startsWith('Unidentified Item') ? resolvedProduct.name : (cleanBarcode ? `Unidentified Item (${cleanBarcode})` : 'General Return Item'))));
+    const effectiveName = isBatch
+      ? `Batch Return Manifest (${items.length} items)`
+      : (userProvidedName || (isKnown ? resolvedProduct.name : (resolvedProduct?.name && !resolvedProduct.name.startsWith('Unidentified Item') ? resolvedProduct.name : (cleanBarcode ? `Unidentified Item (${cleanBarcode})` : 'General Return Item'))));
+
+    // Ensure manifest barcode is strictly rmaNumber or a dedicated manifest identifier, never a child item's barcode
+    const finalBarcode = isBatch
+      ? (cleanBarcode && cleanBarcode !== 'MANIFEST' && !items.some(it => String(it.barcode).trim() === cleanBarcode) ? cleanBarcode : rmaNumber)
+      : cleanBarcode;
 
     // Filter GPS: Only save if accuracy is <= 150 meters
     const isAccurateGps = gps && gps.latitude && gps.accuracy && Number(gps.accuracy) <= 150;
@@ -1188,8 +1193,8 @@ export const catalogService = {
     const reportRow = {
       rma_number: rmaNumber,
       rma_type: rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound',
-      barcode: cleanBarcode,
-      code: isKnown ? ((resolvedProduct.code && resolvedProduct.code !== cleanBarcode) ? resolvedProduct.code : (resolvedProduct.sku && resolvedProduct.sku !== cleanBarcode ? resolvedProduct.sku : null)) : (hasItems && items[0]?.code ? items[0].code : null),
+      barcode: finalBarcode,
+      code: isBatch ? null : (isKnown ? ((resolvedProduct.code && resolvedProduct.code !== finalBarcode) ? resolvedProduct.code : (resolvedProduct.sku && resolvedProduct.sku !== finalBarcode ? resolvedProduct.sku : null)) : (hasItems && items[0]?.code ? items[0].code : null)),
       name: effectiveName,
       quantity: calculatedTotalQuantity,
       supplier_name: isKnown ? (resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Pending Assignment') : (hasItems && items[0]?.supplier_name ? items[0].supplier_name : 'Pending Assignment'),

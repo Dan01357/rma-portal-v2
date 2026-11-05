@@ -67,7 +67,15 @@ export default function CreditMemoModal({
 
   // Active report resolution: prioritize user-selected report from dropdown, then passed report, then first available report
   const activeReport = useMemo(() => {
-    if (selectedReportId && availableReports.length > 0) {
+    if (selectedReportId) {
+      if (report && (
+        String(report.id) === String(selectedReportId) ||
+        String(report.rma_number) === String(selectedReportId) ||
+        String(report.barcode) === String(selectedReportId) ||
+        `${report.rma_number}_${report.barcode}` === String(selectedReportId)
+      )) {
+        return report;
+      }
       const match = availableReports.find(r => String(r.id) === String(selectedReportId) || r.rma_number === selectedReportId);
       if (match) return match;
     }
@@ -94,7 +102,8 @@ export default function CreditMemoModal({
     const price = Number((Number(rep.price_with_vat ?? rep.price ?? 0)).toFixed(2));
     const gross = Number((qty * price).toFixed(2));
 
-    setSelectedReportId(rep.id || rep.rma_number || '');
+    const targetKey = rep.id || (rep.barcode ? `${rep.rma_number}_${rep.barcode}` : rep.rma_number) || '';
+    setSelectedReportId(targetKey);
     setQuantity(qty);
     setUnitName(rep.unit_name || rep.unit || 'pc');
     setUnitPrice(price.toFixed(2));
@@ -111,6 +120,14 @@ export default function CreditMemoModal({
   // Immediate handler when user picks an item from the dropdown: ALL data updates immediately
   const handleReportDropdownChange = (newVal) => {
     setSelectedReportId(newVal);
+    if (report && (
+      String(report.id) === String(newVal) ||
+      String(report.rma_number) === String(newVal) ||
+      `${report.rma_number}_${report.barcode}` === String(newVal)
+    )) {
+      applyReportToForm(report);
+      return;
+    }
     const found = availableReports.find(r => String(r.id) === String(newVal) || r.rma_number === newVal);
     if (found) {
       applyReportToForm(found);
@@ -121,7 +138,7 @@ export default function CreditMemoModal({
   useEffect(() => {
     const isOpening = isOpen && !prevIsOpenRef.current;
     const memoChanged = isEditing && creditMemo?.credit_memo_number !== currentEditingRef.current;
-    const currentTargetId = report?.id || report?.rma_number || null;
+    const currentTargetId = report ? (report.id ? String(report.id) : (report.barcode ? `${report.rma_number}_${report.barcode}` : report.rma_number)) : null;
     const reportChanged = !isEditing && isOpen && currentTargetId && currentTargetId !== prevTargetReportIdRef.current;
 
     if (isOpening || memoChanged || reportChanged) {
@@ -366,16 +383,21 @@ export default function CreditMemoModal({
           )}
 
           {/* Ticket Picker (Always available when creating so user can switch tickets and sync all data) */}
-          {!isEditing && availableReports.length > 0 && (
+          {!isEditing && (availableReports.length > 0 || report) && (
             <div className="space-y-1">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                 Select Linked RMA Return Ticket *
               </label>
               <select
-                value={selectedReportId || activeReport?.id || activeReport?.rma_number || ''}
+                value={selectedReportId || (activeReport?.id ? String(activeReport.id) : (activeReport?.barcode ? `${activeReport.rma_number}_${activeReport.barcode}` : activeReport?.rma_number)) || ''}
                 onChange={(e) => handleReportDropdownChange(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 focus:bg-white dark:focus:bg-slate-800"
               >
+                {report && (report.is_manifest_child || !availableReports.some(r => String(r.id) === String(report.id) || (r.rma_number === report.rma_number && r.barcode === report.barcode))) && (
+                  <option value={report.id || `${report.rma_number}_${report.barcode}`}>
+                    {report.rma_number} — {report.name || report.product_name || report.barcode} (Line Item: {report.quantity || 1} {report.unit_name || 'pc'} • {report.supplier_name || 'Savemore'})
+                  </option>
+                )}
                 {availableReports.map(r => (
                   <option key={r.id || r.rma_number} value={r.id || r.rma_number}>
                     {r.rma_number} — {r.name || r.barcode} (Qty: {r.quantity || 1} • {r.supplier_name || 'Warehouse'})
