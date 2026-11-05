@@ -21,6 +21,7 @@ import {
   ArrowRight,
   ExternalLink,
   ChevronRight,
+  ChevronDown,
   User,
   Phone,
   Mail,
@@ -89,7 +90,7 @@ import PinRequestsQueueModal from './components/PinRequestsQueueModal';
 import { accessKeyService } from './services/accessKeyService';
 import { pinRequestService } from './services/pinRequestService';
 import { QRCodeSVG } from 'qrcode.react';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku } from './utils/rmaHelpers';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest } from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
   '1- Damaged Box / Crushed Packaging',
@@ -871,14 +872,17 @@ export default function App() {
       : '';
 
     if (existing && existing.is_verified) {
+      const isBatchManifestExisting = existing.name && existing.name.toLowerCase().startsWith('batch return manifest');
       setEditingProduct({
         ...existing,
+        name: isBatchManifestExisting ? '' : existing.name,
         code: cleanReportCode || existingCode
       });
     } else {
-      const cleanName = report.name && !report.name.toLowerCase().includes('unidentified')
+      const isBatchManifestTitle = report.name && report.name.toLowerCase().startsWith('batch return manifest');
+      const cleanName = report.name && !report.name.toLowerCase().includes('unidentified') && !isBatchManifestTitle
         ? report.name
-        : (existing?.name && !existing.name.toLowerCase().includes('unidentified') ? existing.name : '');
+        : (existing?.name && !existing.name.toLowerCase().includes('unidentified') && !existing.name.toLowerCase().startsWith('batch return manifest') ? existing.name : '');
 
       // Unassigned barcode: MUST start with NO default product image (empty placeholder state)
       // Never preload damage / defect report photos as product catalog images!
@@ -1096,6 +1100,15 @@ export default function App() {
   const [reportsCurrentPage, setReportsCurrentPage] = useState(1);
   const [reportsPageSize, setReportsPageSize] = useState(10);
   const [selectedReportIds, setSelectedReportIds] = useState(new Set());
+  const [expandedManifestIds, setExpandedManifestIds] = useState(new Set());
+  const toggleManifestExpand = (id) => {
+    setExpandedManifestIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Automatically prune orphan report selection IDs whenever recentReportsList updates
   useEffect(() => {
@@ -4086,9 +4099,14 @@ export default function App() {
                               : (matchedProduct?.name || item.name || `Unidentified (${item.barcode})`);
                             const isPendingUnknown = !matchedProduct && item.status === 'pending_admin_details';
 
+                            const isManifest = isBatchManifest(item, recentReportsList);
+                            const manifestChildren = isManifest ? getReportManifestItems(item, recentReportsList) : [];
+                            const manifestKey = item.id || item.rma_number;
+                            const isManifestExpanded = expandedManifestIds.has(manifestKey);
+
                             return (
+                              <React.Fragment key={manifestKey}>
                               <tr
-                                key={item.id || item.rma_number}
                                 onClick={(e) => {
                                   if (e.target.closest('input, button, a')) return;
                                   setQuickRmaNumber(item.rma_number);
@@ -4140,8 +4158,26 @@ export default function App() {
                                       <QrCode className="w-3.5 h-3.5" />
                                     </button>
                                   </div>
-                                  {/* Split and Buffer Quick Badges */}
+                                  {/* Split, Buffer, and Manifest Quick Badges */}
                                   <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                                    {isManifest && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleManifestExpand(manifestKey);
+                                        }}
+                                        className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 shadow-2xs transition-colors cursor-pointer ${
+                                          isManifestExpanded
+                                            ? 'bg-purple-600 text-white border border-purple-700'
+                                            : 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 dark:hover:bg-purple-900/80 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800'
+                                        }`}
+                                        title={isManifestExpanded ? "Collapse Manifest Items" : "Expand Manifest Items"}
+                                      >
+                                        <span>📦 Manifest ({manifestChildren.length})</span>
+                                        <ChevronDown className={`w-2.5 h-2.5 transform transition-transform ${isManifestExpanded ? 'rotate-180' : ''}`} />
+                                      </button>
+                                    )}
                                     {isSplitChildTicket(item) ? (
                                       <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
                                         <span>✂️ Part 2</span>
@@ -4198,7 +4234,22 @@ export default function App() {
 
                                 {/* 5. Item Name */}
                                 <td className="py-3 px-3.5 font-bold text-slate-900 dark:text-white max-w-[200px]" title={resolvedName}>
-                                  <div className="truncate">{resolvedName}</div>
+                                  <div className="flex items-center gap-1.5">
+                                    <div className="truncate">{resolvedName}</div>
+                                    {isManifest && manifestChildren.length > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleManifestExpand(manifestKey);
+                                        }}
+                                        className="p-0.5 text-purple-600 hover:text-purple-800 dark:text-purple-400 dark:hover:text-purple-300 rounded hover:bg-purple-50 dark:hover:bg-purple-950/60 transition-colors shrink-0"
+                                        title={isManifestExpanded ? "Collapse Manifest Items" : "Expand Manifest Items"}
+                                      >
+                                        <ChevronDown className={`w-3.5 h-3.5 transform transition-transform ${isManifestExpanded ? 'rotate-180' : ''}`} />
+                                      </button>
+                                    )}
+                                  </div>
                                   {(item.batch_lot_number || item.expiry_date) && (
                                     <div className="flex items-center gap-1.5 flex-wrap mt-0.5 font-normal">
                                       {item.batch_lot_number && (
@@ -4364,7 +4415,8 @@ export default function App() {
                                       <span>Inspect / Triage</span>
                                     </button>
 
-                                    {canEditProducts && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
+                                    {/* Do NOT render Assign SKU on parent row if batch manifest */}
+                                    {!isManifest && canEditProducts && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                                       <button
                                         type="button"
                                         onClick={() => handleEditProductFromReport(item)}
@@ -4431,6 +4483,180 @@ export default function App() {
                                   </div>
                                 </td>
                               </tr>
+
+                              {/* Expandable Multi-Item Manifest Sub-Table Drawer */}
+                              {isManifest && isManifestExpanded && (
+                                <tr className="bg-purple-50/40 dark:bg-slate-900/90 border-y-2 border-purple-200 dark:border-purple-900/60">
+                                  <td colSpan={15} className="p-3 sm:p-4">
+                                    <div className="bg-white dark:bg-slate-800/90 rounded-xl border border-purple-200 dark:border-purple-800/60 shadow-sm overflow-hidden">
+                                      {/* Manifest Header */}
+                                      <div className="p-3 bg-purple-50/70 dark:bg-purple-950/40 border-b border-purple-200/80 dark:border-purple-900/50 flex flex-wrap items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2">
+                                          <span className="p-1 rounded-md bg-purple-600 text-white">
+                                            <Package className="w-3.5 h-3.5" />
+                                          </span>
+                                          <span className="font-extrabold text-xs text-purple-900 dark:text-purple-200 uppercase tracking-wider">
+                                            Batch Return Manifest Items ({manifestChildren.length})
+                                          </span>
+                                          <span className="text-[11px] text-purple-700 dark:text-purple-300 font-mono">
+                                            RMA: {item.rma_number}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                            Total manifest quantity: <strong className="text-slate-900 dark:text-white font-bold">{manifestChildren.reduce((acc, c) => acc + (Number(c.quantity || c.qty) || 1), 0)} units</strong>
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => toggleManifestExpand(manifestKey)}
+                                            className="text-xs text-purple-700 dark:text-purple-300 hover:text-purple-900 font-bold px-2 py-0.5 rounded hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors"
+                                          >
+                                            Collapse ▲
+                                          </button>
+                                        </div>
+                                      </div>
+
+                                      {/* Child Items Table */}
+                                      <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-xs border-collapse">
+                                          <thead>
+                                            <tr className="bg-slate-50/80 dark:bg-slate-800/50 text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
+                                              <th className="py-2 px-3 text-center w-12">#</th>
+                                              <th className="py-2 px-3 text-center w-14">Photo</th>
+                                              <th className="py-2 px-3">Product Description / Name</th>
+                                              <th className="py-2 px-3 font-mono">Barcode</th>
+                                              <th className="py-2 px-3 font-mono">Assigned SKU</th>
+                                              <th className="py-2 px-3 text-center">Qty & Unit</th>
+                                              <th className="py-2 px-3">Defect Reason</th>
+                                              <th className="py-2 px-3 text-center">Catalog Action</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                                            {manifestChildren.length === 0 ? (
+                                              <tr>
+                                                <td colSpan={8} className="py-4 text-center text-slate-400 italic">
+                                                  No line item breakdown records found for this batch manifest.
+                                                </td>
+                                              </tr>
+                                            ) : (
+                                              manifestChildren.map((child, cIdx) => {
+                                                const childName = (child.name || child.item_name || child.productName || `Item #${cIdx + 1}`).trim();
+                                                const childBarcode = (child.barcode || child.item_barcode || '').trim();
+                                                const childSku = (child.sku || child.code || '').trim();
+                                                const childQty = Number(child.quantity || child.qty) || 1;
+                                                const childUnit = child.unit_name || child.unit || item.unit_name || 'pc';
+                                                const childReason = child.reason || child.defect_reason || item.reason || 'Damaged';
+                                                const matchedChild = savedProductsList.find(p => p.barcode && String(p.barcode) === String(childBarcode));
+                                                const isSkuAssigned = Boolean(
+                                                  (matchedChild?.code && String(matchedChild.code) !== String(childBarcode)) ||
+                                                  (childSku && String(childSku) !== String(childBarcode) && !childSku.toLowerCase().includes('awaiting'))
+                                                );
+                                                const effectiveSku = matchedChild?.code || (childSku && String(childSku) !== String(childBarcode) ? childSku : '—');
+
+                                                // Extract child photos
+                                                const cPhotos = Array.isArray(child.photos)
+                                                  ? child.photos
+                                                  : (Array.isArray(child.photoFiles) ? child.photoFiles : (child.photo_url ? [child.photo_url] : []));
+                                                const cPhotoUrl = cPhotos[0] || (photoList[cIdx] || null);
+
+                                                return (
+                                                  <tr key={child.id || `child_${cIdx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                                                    <td className="py-2 px-3 text-center text-slate-400 font-mono text-[11px]">
+                                                      {cIdx + 1}
+                                                    </td>
+                                                    <td className="py-2 px-3 text-center">
+                                                      {cPhotoUrl ? (
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => setLightboxPhoto({
+                                                            images: [cPhotoUrl],
+                                                            initialIndex: 0,
+                                                            url: cPhotoUrl,
+                                                            title: childName,
+                                                            subtitle: `Manifest item #${cIdx + 1} of ${item.rma_number} • ${childReason}`
+                                                          })}
+                                                          className="w-9 h-9 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 inline-block hover:scale-105 transition-transform cursor-zoom-in"
+                                                          title="Click to zoom image"
+                                                        >
+                                                          <img src={cPhotoUrl} alt={childName} className="w-full h-full object-cover" />
+                                                        </button>
+                                                      ) : (
+                                                        <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
+                                                          <ImageIcon className="w-3.5 h-3.5" />
+                                                        </div>
+                                                      )}
+                                                    </td>
+                                                    <td className="py-2 px-3 font-bold text-slate-900 dark:text-white">
+                                                      <div>{childName}</div>
+                                                      {child.defect_details && (
+                                                        <div className="text-[10px] text-slate-400 font-normal italic">{child.defect_details}</div>
+                                                      )}
+                                                    </td>
+                                                    <td className="py-2 px-3 font-mono font-bold text-slate-700 dark:text-slate-300">
+                                                      {childBarcode || '—'}
+                                                    </td>
+                                                    <td className="py-2 px-3 font-mono text-slate-600 dark:text-slate-400">
+                                                      {isSkuAssigned ? (
+                                                        <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800">
+                                                          {effectiveSku}
+                                                        </span>
+                                                      ) : (
+                                                        <span className="text-amber-600 dark:text-amber-400 font-semibold text-[10px]">
+                                                          Awaiting SKU
+                                                        </span>
+                                                      )}
+                                                    </td>
+                                                    <td className="py-2 px-3 text-center font-mono">
+                                                      <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-md text-[11px]">
+                                                        {childQty} {childUnit}
+                                                      </span>
+                                                    </td>
+                                                    <td className="py-2 px-3">
+                                                      <span className="px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-semibold text-[10px] inline-block">
+                                                        {childReason}
+                                                      </span>
+                                                    </td>
+                                                    <td className="py-2 px-3 text-center">
+                                                      {canEditProducts && (
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => {
+                                                            handleEditProductFromReport({
+                                                              name: childName,
+                                                              barcode: childBarcode,
+                                                              code: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
+                                                              sku: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
+                                                              price: child.price || 0,
+                                                              price_with_vat: child.price_with_vat || child.price || 0,
+                                                              unit_name: childUnit,
+                                                              supplier_name: child.supplier_name || item.supplier_name || 'Savemore',
+                                                              rma_number: item.rma_number
+                                                            });
+                                                          }}
+                                                          className={`px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs border ${
+                                                            isSkuAssigned
+                                                              ? 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                                                              : 'bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                                          }`}
+                                                          title={`Assign or edit official catalog SKU for "${childName}"`}
+                                                        >
+                                                          <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                                                          <span>{isSkuAssigned ? 'Edit SKU' : 'Assign SKU'}</span>
+                                                        </button>
+                                                      )}
+                                                    </td>
+                                                  </tr>
+                                                );
+                                              })
+                                            )}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                              </React.Fragment>
                             );
                           })}
                         </tbody>
@@ -4508,6 +4734,11 @@ export default function App() {
                           : (matchedProduct?.name || item.name || `Unidentified (${item.barcode})`);
                         const isPendingUnknown = !matchedProduct && item.status === 'pending_admin_details';
 
+                        const isManifest = isBatchManifest(item, recentReportsList);
+                        const manifestChildren = isManifest ? getReportManifestItems(item, recentReportsList) : [];
+                        const manifestKey = item.id || item.rma_number;
+                        const isManifestExpanded = expandedManifestIds.has(manifestKey);
+
                         return (
                           <div
                             key={item.id || item.rma_number}
@@ -4553,6 +4784,21 @@ export default function App() {
                                   >
                                     <QrCode className="w-3.5 h-3.5" />
                                   </button>
+                                  {isManifest && (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleManifestExpand(manifestKey)}
+                                      className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 shadow-2xs cursor-pointer ${
+                                        isManifestExpanded
+                                          ? 'bg-purple-600 text-white border border-purple-700'
+                                          : 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800'
+                                      }`}
+                                      title={isManifestExpanded ? "Collapse Manifest Items" : "Expand Manifest Items"}
+                                    >
+                                      <span>📦 Manifest ({manifestChildren.length})</span>
+                                      <ChevronDown className={`w-2.5 h-2.5 transform transition-transform ${isManifestExpanded ? 'rotate-180' : ''}`} />
+                                    </button>
+                                  )}
                                   {isSplitChildTicket(item) ? (
                                     <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
                                       <span>✂️ Part 2</span>
@@ -4596,7 +4842,7 @@ export default function App() {
                                   <span>Triage</span>
                                 </button>
 
-                                {canEditProducts && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
+                                {canEditProducts && !isManifest && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                                   <button
                                     type="button"
                                     onClick={() => handleEditProductFromReport(item)}
@@ -4730,6 +4976,70 @@ export default function App() {
                                       />
                                     </button>
                                   ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Expandable Multi-Item Manifest Line Items for Cards View */}
+                            {isManifest && isManifestExpanded && (
+                              <div className="mt-3 pt-3 border-t border-purple-200 dark:border-purple-900/50 space-y-2">
+                                <div className="flex items-center justify-between text-[11px] font-bold text-purple-900 dark:text-purple-200">
+                                  <span>📦 Manifest Items Breakdown ({manifestChildren.length})</span>
+                                  <span className="text-slate-500 font-normal">Line-Item SKU Assignment</span>
+                                </div>
+                                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                                  {manifestChildren.map((child, cIdx) => {
+                                    const childName = (child.name || child.item_name || child.productName || `Item #${cIdx + 1}`).trim();
+                                    const childBarcode = (child.barcode || child.item_barcode || '').trim();
+                                    const childSku = (child.sku || child.code || '').trim();
+                                    const childQty = Number(child.quantity || child.qty) || 1;
+                                    const childUnit = child.unit_name || child.unit || item.unit_name || 'pc';
+                                    const childReason = child.reason || child.defect_reason || item.reason || 'Damaged';
+                                    const matchedChild = savedProductsList.find(p => p.barcode && String(p.barcode) === String(childBarcode));
+                                    const isSkuAssigned = Boolean(
+                                      (matchedChild?.code && String(matchedChild.code) !== String(childBarcode)) ||
+                                      (childSku && String(childSku) !== String(childBarcode) && !childSku.toLowerCase().includes('awaiting'))
+                                    );
+                                    const effectiveSku = matchedChild?.code || (childSku && String(childSku) !== String(childBarcode) ? childSku : '—');
+
+                                    return (
+                                      <div key={child.id || `card_child_${cIdx}`} className="p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 shadow-2xs">
+                                        <div className="min-w-0">
+                                          <div className="font-bold text-xs text-slate-900 dark:text-white truncate">{childName}</div>
+                                          <div className="text-[10px] text-slate-500 font-mono">
+                                            BC: {childBarcode || '—'} • SKU: <span className={isSkuAssigned ? "font-bold text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>{effectiveSku}</span> • Qty: {childQty} {childUnit} • <span className="text-rose-600 dark:text-rose-400 font-medium">{childReason}</span>
+                                          </div>
+                                        </div>
+                                        {canEditProducts && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              handleEditProductFromReport({
+                                                name: childName,
+                                                barcode: childBarcode,
+                                                code: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
+                                                sku: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
+                                                price: child.price || 0,
+                                                price_with_vat: child.price_with_vat || child.price || 0,
+                                                unit_name: childUnit,
+                                                supplier_name: child.supplier_name || item.supplier_name || 'Savemore',
+                                                rma_number: item.rma_number
+                                              });
+                                            }}
+                                            className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 border inline-flex items-center gap-1 cursor-pointer transition-all ${
+                                              isSkuAssigned
+                                                ? 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                                                : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300'
+                                            }`}
+                                            title={`Assign or edit official catalog SKU for "${childName}"`}
+                                          >
+                                            <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                                            <span>{isSkuAssigned ? 'Edit SKU' : 'Assign SKU'}</span>
+                                          </button>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               </div>
                             )}

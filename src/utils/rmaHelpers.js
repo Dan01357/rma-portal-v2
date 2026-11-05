@@ -230,4 +230,41 @@ export function hasAssignedSku(report, savedProductsList = []) {
   return true;
 }
 
+/**
+ * Safely extracts child line items from a batch manifest report
+ */
+export function getReportManifestItems(report, allReports = []) {
+  if (!report) return [];
+  if (Array.isArray(report.items) && report.items.length > 0) return report.items;
+  if (typeof report.items === 'string' && report.items.trim()) {
+    try {
+      const parsed = JSON.parse(report.items);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch (e) {}
+  }
+  if (Array.isArray(allReports) && allReports.length > 0 && report.id) {
+    const children = allReports.filter(r => (
+      (r.parent_rma_id === report.id || String(r.parent_rma_id) === String(report.id)) &&
+      r.id !== report.id &&
+      !r.is_parent
+    ));
+    if (children.length > 0) return children;
+  }
+  return [];
+}
+
+/**
+ * Checks whether an RMA return ticket is a multi-item batch manifest
+ */
+export function isBatchManifest(report, allReports = []) {
+  if (!report) return false;
+  if (report.is_parent) return true;
+  const items = getReportManifestItems(report, allReports);
+  if (items.length > 1) return true;
+  const nameStr = String(report.name || '');
+  if (nameStr.toLowerCase().startsWith('batch return manifest')) return true;
+  return false;
+}
+
+
 

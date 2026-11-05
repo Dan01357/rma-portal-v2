@@ -76,7 +76,9 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
     if (isOpen) {
       if (product) {
         const barcodeStr = product.barcode ? String(product.barcode).trim() : '';
-        setName(product.name || '');
+        const rawName = String(product.name || '').trim();
+        const isBatchManifestTitle = rawName.toLowerCase().startsWith('batch return manifest');
+        setName(isBatchManifestTitle ? '' : rawName);
         setBarcode(barcodeStr);
 
         // SKU and Barcode are strictly different.

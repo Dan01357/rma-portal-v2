@@ -418,33 +418,100 @@ export default function BufferExchangeSlipModal({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 bg-white">
-                      <tr>
-                        <td className="py-3 px-3">
-                          <div className="font-black text-slate-900 text-xs sm:text-sm">{rep.name}</div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            Original Defect: <strong className="text-amber-700">{rep.reason || 'Damaged packaging'}</strong>
-                          </div>
-                        </td>
-                        <td className="py-3 px-3 font-mono font-bold text-slate-700">
-                          <div>{rep.barcode}</div>
-                          {rep.code && <div className="text-[10px] text-slate-400">SKU: {rep.code}</div>}
-                        </td>
-                        <td className="py-3 px-3 text-center font-bold text-slate-700 uppercase">
-                          {rep.unit_name || 'pc'}
-                        </td>
-                        <td className="py-3 px-3 text-center">
-                          <span className="inline-block px-2.5 py-1 bg-emerald-100 text-emerald-900 rounded-lg font-black text-sm">
-                            {rep.quantity} {rep.unit_name || 'pc'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
-                            <ArrowLeftRight className="w-3 h-3 text-indigo-600" />
-                            <span>1-to-1 Buffer Swap</span>
-                          </span>
-                          <div className="text-[9.5px] text-slate-500 mt-0.5">Zero Balance Deduction</div>
-                        </td>
-                      </tr>
+                      {(() => {
+                        const lineItems = (Array.isArray(rep.items) && rep.items.length > 0)
+                          ? rep.items
+                          : (typeof rep.items === 'string' && rep.items.trim()
+                              ? (() => { try { const p = JSON.parse(rep.items); return Array.isArray(p) ? p : []; } catch(e){ return []; } })()
+                              : []);
+
+                        if (lineItems.length > 1) {
+                          const totalQty = lineItems.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0);
+                          return (
+                            <>
+                              {lineItems.map((it, itIdx) => (
+                                <tr key={it.id || itIdx}>
+                                  <td className="py-2.5 px-3">
+                                    <div className="font-black text-slate-900 text-xs sm:text-sm">
+                                      {it.name || it.productName || `Item #${itIdx + 1}`}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 mt-0.5">
+                                      Original Defect: <strong className="text-amber-700">{it.reason || rep.reason || 'Damaged packaging'}</strong>
+                                    </div>
+                                  </td>
+                                  <td className="py-2.5 px-3 font-mono font-bold text-slate-700">
+                                    <div>{it.barcode}</div>
+                                    {(it.code || it.sku) && <div className="text-[10px] text-slate-400">SKU: {it.code || it.sku}</div>}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center font-bold text-slate-700 uppercase">
+                                    {it.unit_name || it.unit || rep.unit_name || 'pc'}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center">
+                                    <span className="inline-block px-2.5 py-1 bg-emerald-100 text-emerald-900 rounded-lg font-black text-sm">
+                                      {it.quantity || 1} {it.unit_name || it.unit || rep.unit_name || 'pc'}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-3">
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+                                      <ArrowLeftRight className="w-3 h-3 text-indigo-600" />
+                                      <span>1-to-1 Buffer Swap</span>
+                                    </span>
+                                    <div className="text-[9.5px] text-slate-500 mt-0.5">Zero Balance Deduction</div>
+                                  </td>
+                                </tr>
+                              ))}
+                              {/* Total Multi-Item Summary Row */}
+                              <tr className="bg-slate-50 border-t-2 border-slate-300 font-black">
+                                <td colSpan={2} className="py-2.5 px-3 text-right uppercase text-[10px] text-slate-600">
+                                  Total Multi-Item Buffer Replacement ({lineItems.length} Products):
+                                </td>
+                                <td className="py-2.5 px-3 text-center text-slate-500 text-[10px] uppercase">
+                                  Total Qty
+                                </td>
+                                <td className="py-2.5 px-3 text-center">
+                                  <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-900 rounded-lg font-black text-sm font-mono">
+                                    {totalQty} {rep.unit_name || 'pcs'}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 text-[10px] font-bold text-emerald-700">
+                                  ✓ Full Manifest Dispatched
+                                </td>
+                              </tr>
+                            </>
+                          );
+                        }
+
+                        // Standard Single Item Fallback
+                        return (
+                          <tr>
+                            <td className="py-3 px-3">
+                              <div className="font-black text-slate-900 text-xs sm:text-sm">{rep.name}</div>
+                              <div className="text-[10px] text-slate-500 mt-0.5">
+                                Original Defect: <strong className="text-amber-700">{rep.reason || 'Damaged packaging'}</strong>
+                              </div>
+                            </td>
+                            <td className="py-3 px-3 font-mono font-bold text-slate-700">
+                              <div>{rep.barcode}</div>
+                              {rep.code && <div className="text-[10px] text-slate-400">SKU: {rep.code}</div>}
+                            </td>
+                            <td className="py-3 px-3 text-center font-bold text-slate-700 uppercase">
+                              {rep.unit_name || 'pc'}
+                            </td>
+                            <td className="py-3 px-3 text-center">
+                              <span className="inline-block px-2.5 py-1 bg-emerald-100 text-emerald-900 rounded-lg font-black text-sm">
+                                {rep.quantity} {rep.unit_name || 'pc'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+                                <ArrowLeftRight className="w-3 h-3 text-indigo-600" />
+                                <span>1-to-1 Buffer Swap</span>
+                              </span>
+                              <div className="text-[9.5px] text-slate-500 mt-0.5">Zero Balance Deduction</div>
+                            </td>
+                          </tr>
+                        );
+                      })()}
                     </tbody>
                   </table>
                 </div>

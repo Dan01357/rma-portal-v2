@@ -958,6 +958,44 @@ Each test scenario defines:
 
 ---
 
+## Section 12: Multi-Item Manifest Operations & Asynchronous Polling
+
+### 12.1 Quick Processing Modal Asynchronous Sync Polling
+- [ ] **TC-MAN-01 (Async Polling on Box Sticker Quick Actions)**
+  * **Location**: Public Portal -> Return Submission Success -> Print Box Sticker QR Code -> Scan with mobile device or navigate to `/admin?rma=RMA-XXXX`
+  * **Action**: Immediately open the Quick RMA Action Modal right after a return is submitted.
+  * **Expected Behavior**:
+    1. If the Supabase write or network replication is still syncing, modal does NOT immediately display a red "Return Record Not Found" error.
+    2. Displays a clean loading state with spinning loader and attempt counter: *"Finalizing return submission sync... Attempt X of 5"*.
+    3. Retries every 800ms up to 5 attempts, continuously checking both local in-memory report list and Supabase `rma_reports`.
+    4. Upon successful sync resolution, seamlessly renders the ticket details and triage controls without page reload.
+    5. If record is still not found after 5 attempts, presents a red error notice with an interactive **"Retry Sync"** button that restarts the 5-attempt polling sequence.
+
+### 12.2 Multi-Item Manifest Handling & Line-Item Triage
+- [ ] **TC-MAN-02 (Multi-Item Manifest Line-Item Triage & SKU Assignment)**
+  * **Location**: Admin Dashboard -> Customer RMA Hub (Rows List & Cards View)
+  * **Action**: Submit a multi-item return manifest containing 2 or more distinct products (e.g., 5x Oishi Snacks, 10x Detergent).
+  * **Expected Behavior in Customer RMA Hub**:
+    1. Parent row displays `📦 Manifest (2)` badge and expandable chevron; parent row does NOT display a generic "Assign SKU" button.
+    2. Clicking the manifest badge or row expander reveals a dedicated sub-table drawer displaying each distinct child line item with its own photo thumbnail, name, barcode, quantity, defect reason, and SKU status.
+    3. Each child line item features an independent **"Assign SKU"** button that opens `ProductEditModal` pre-populated with that child's exact barcode and product name (strictly NEVER pre-populating with "Batch Return Manifest").
+  * **Expected Behavior in Quick RMA Processing Modal**:
+    1. Opening the quick triage modal for a multi-item manifest displays the *"Multi-Item Manifest Triage"* section with individual line items.
+    2. Warehouse staff can triage each item independently: select condition grade (A/B/C/D), enter rack/bin location (e.g., `RACK-A-01`), and choose physical disposition (Restock, Scrap/Dispose, RTV, Buffer Swap) per line item.
+    3. Clicking **"Save Manifest Triage"** updates all child records in `rma_items`, updates parent report items array in `rma_reports`, logs audit trail, and shows success toast.
+
+### 12.3 Multi-Item Buffer Stock Replacement Dispatch Slip
+- [ ] **TC-MAN-03 (Multi-Item Buffer Slip Print Breakdown)**
+  * **Location**: Customer RMA Hub or Quick Processing Modal -> Dispatch 1-to-1 Buffer Stock Replacement -> `BufferExchangeSlipModal`
+  * **Action**: Open Buffer Replacement Dispatch Slip for a multi-item return manifest.
+  * **Expected Behavior**:
+    1. The printable slip renders each distinct product as an individual line in the replacement merchandise table (e.g., Row 1: 5 pc Oishi Snacks, Row 2: 10 pc Detergent), displaying individual SKU/barcode, unit name, defect reason, and replacement quantity.
+    2. Strictly does NOT collapse all items into a single generic row of "Batch Return Manifest".
+    3. Displays a summary footer row showing total replacement units across all manifest items.
+    4. Official dispatch signatures (Driver, Warehouse Dispatcher, Receiving Store) and Gate Pass voucher number remain fully formatted for print/PDF export.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -972,4 +1010,5 @@ Each test scenario defines:
 | **Phase 8: Column Separation & Instant Submit** | Table Views & Storage Cleanup | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 9: Role-Based QR Gatekeeper & PIN Queue** | Gatekeeper Engine & SMTP Approvals | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 10: Inbound vs Outbound Logistics Segregation** | Customer RMA & Supplier RTV Hubs | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 11: Multi-Item Manifest & Polling** | Customer Hub & Quick Actions | `READY FOR TESTING` | *Lead QA Director* |
 

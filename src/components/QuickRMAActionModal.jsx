@@ -82,6 +82,8 @@ export default function QuickRMAActionModal({
   const [report, setReport] = useState(null);
   const [isLoadingReport, setIsLoadingReport] = useState(false);
   const [reportError, setReportError] = useState(null);
+  const [syncAttempt, setSyncAttempt] = useState(1);
+  const [retryTrigger, setRetryTrigger] = useState(0);
 
   // Enterprise Warehouse Triage & Disposition State
   const [conditionGrade, setConditionGrade] = useState('B - Damaged Packaging Only');
@@ -94,6 +96,11 @@ export default function QuickRMAActionModal({
   const [isBufferSlipOpen, setIsBufferSlipOpen] = useState(false);
   const [isUpdatingType, setIsUpdatingType] = useState(false);
   const [typeFeedback, setTypeFeedback] = useState(null);
+
+  // Multi-Item Manifest Line-Item Triage State
+  const [manifestItems, setManifestItems] = useState([]);
+  const [isSavingManifestTriage, setIsSavingManifestTriage] = useState(false);
+  const [manifestTriageSuccess, setManifestTriageSuccess] = useState(false);
 
   // Partial Triage & Line Item Split State
   const [isSplitting, setIsSplitting] = useState(false);
@@ -165,6 +172,59 @@ export default function QuickRMAActionModal({
         setSplitPart1Location(report.warehouse_location || '');
         setSplitPart2Reason(report.reason || 'Damaged packaging / Defective units');
       }
+
+      // Synchronize multi-item manifest items for line-item level triage
+      const directItems = Array.isArray(report.items) && report.items.length > 0
+        ? report.items
+        : (typeof report.items === 'string' && report.items.trim()
+            ? (() => { try { const p = JSON.parse(report.items); return Array.isArray(p) ? p : []; } catch(e){ return []; } })()
+            : []);
+
+      if (directItems.length > 0) {
+        setManifestItems(directItems.map((it, idx) => ({
+          index: idx,
+          id: it.id || `item-${idx}`,
+          name: it.name || it.productName || `Item #${idx + 1}`,
+          barcode: String(it.barcode || '').trim(),
+          sku: it.code || it.sku || '',
+          quantity: Number(it.quantity) || 1,
+          unit_name: it.unit_name || it.unit || 'pc',
+          price: Number(it.price || 0),
+          reason: it.reason || report.reason || 'Damaged packaging',
+          condition_grade: it.condition_grade || report.condition_grade || 'B - Damaged Packaging Only',
+          warehouse_location: it.warehouse_location || report.warehouse_location || '',
+          disposition: it.disposition || report.disposition || '1- Pending Triage'
+        })));
+      } else if (report.id) {
+        supabase.from('rma_items')
+          .select('*')
+          .eq('rma_report_id', report.id)
+          .then(({ data, error }) => {
+            if (!error && Array.isArray(data) && data.length > 1) {
+              setManifestItems(data.map((it, idx) => ({
+                index: idx,
+                id: it.id || `item-${idx}`,
+                name: it.name || `Item #${idx + 1}`,
+                barcode: String(it.barcode || '').trim(),
+                sku: it.sku || it.code || '',
+                quantity: Number(it.quantity) || 1,
+                unit_name: it.unit_name || 'pc',
+                price: Number(it.price || 0),
+                reason: it.reason || report.reason || 'Damaged packaging',
+                condition_grade: it.condition_grade || report.condition_grade || 'B - Damaged Packaging Only',
+                warehouse_location: it.warehouse_location || report.warehouse_location || '',
+                disposition: it.disposition || report.disposition || '1- Pending Triage'
+              })));
+            } else {
+              setManifestItems([]);
+            }
+          })
+          .catch(() => setManifestItems([]));
+      } else {
+        setManifestItems([]);
+      }
+    } else {
+      setManifestItems([]);
     }
   }, [report]);
 
@@ -216,6 +276,102 @@ export default function QuickRMAActionModal({
       alert(`Error updating triage: ${err.message}`);
     } finally {
       setIsSavingTriage(false);
+    }
+  };
+
+  const updateManifestItemField = (index, field, value) => {
+    setManifestItems(prev => prev.map((item, idx) => {
+      if (idx === index) {
+        return { ...item, [field]: value };
+      }
+      return item;
+    }));
+  };
+
+  const handleSaveManifestTriage = async () => {
+    if (!report || !manifestItems.length) return;
+    setIsSavingManifestTriage(true);
+    try {
+      const inspectorName = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
+      const existingAudit = Array.isArray(report.audit_trail) ? [...report.audit_trail] : [];
+      existingAudit.push({
+        timestamp: new Date().toISOString(),
+        stage: 'MANIFEST_TRIAGE',
+        actor: inspectorName,
+        note: `Manifest line-item triage completed for ${manifestItems.length} items by ${inspectorName}`
+      });
+
+      // 1. Update items in parent report
+      const updatedReportRow = {
+        ...report,
+        items: manifestItems,
+        inspected_by: inspectorName,
+        inspected_at: new Date().toISOString(),
+        audit_trail: existingAudit
+      };
+
+      const { error: repErr } = await supabase
+        .from('rma_reports')
+        .update({
+          items: manifestItems,
+          inspected_by: inspectorName,
+          inspected_at: new Date().toISOString(),
+          audit_trail: existingAudit
+        })
+        .eq('id', report.id);
+
+      if (repErr) {
+        console.warn('Notice updating rma_reports with manifest triage:', repErr.message);
+      }
+
+      // 2. Update child rma_items records in Supabase
+      try {
+        for (const item of manifestItems) {
+          await supabase
+            .from('rma_items')
+            .update({
+              condition_grade: item.condition_grade,
+              warehouse_location: (item.warehouse_location || '').trim().toUpperCase(),
+              disposition: item.disposition
+            })
+            .eq('rma_report_id', report.id)
+            .eq('barcode', item.barcode);
+        }
+      } catch (e) {
+        console.warn('Notice updating rma_items table:', e?.message);
+      }
+
+      // 3. Update child rma_reports records if they exist
+      try {
+        for (const item of manifestItems) {
+          await supabase
+            .from('rma_reports')
+            .update({
+              condition_grade: item.condition_grade,
+              warehouse_location: (item.warehouse_location || '').trim().toUpperCase(),
+              disposition: item.disposition,
+              inspected_by: inspectorName,
+              inspected_at: new Date().toISOString()
+            })
+            .eq('parent_rma_id', report.id)
+            .eq('barcode', item.barcode);
+        }
+      } catch (e) {
+        console.warn('Notice updating child rma_reports:', e?.message);
+      }
+
+      setReport(updatedReportRow);
+      setManifestTriageSuccess(true);
+      setTimeout(() => setManifestTriageSuccess(false), 4000);
+
+      if (onRefresh) onRefresh(updatedReportRow);
+      window.dispatchEvent(new CustomEvent('rma-data-changed', {
+        detail: { type: 'manifest-triage-updated', report: updatedReportRow }
+      }));
+    } catch (err) {
+      alert(`Error saving manifest triage: ${err.message}`);
+    } finally {
+      setIsSavingManifestTriage(false);
     }
   };
 
@@ -555,72 +711,95 @@ export default function QuickRMAActionModal({
     return () => clearInterval(timer);
   }, [countdown]);
 
-  // 1. Primary fetch when modal opens or rmaNumber changes
+  // 1. Primary fetch when modal opens, rmaNumber changes, or manual retry requested
   useEffect(() => {
     if (!isOpen || !rmaNumber) {
       setReport(null);
       setReportError(null);
       setIsLoadingReport(false);
+      setSyncAttempt(1);
       return;
     }
 
     let isMounted = true;
     const cleanRma = String(rmaNumber).trim();
 
-    // Try local list first for instant responsiveness - ALWAYS prefer parent record (!r.parent_rma_id)
-    const localMatch = recentReportsList.find(
-      r => (String(r.rma_number || '').toUpperCase() === cleanRma.toUpperCase() && !r.parent_rma_id) ||
-           String(r.id) === cleanRma
-    ) || recentReportsList.find(
-      r => String(r.rma_number || '').toUpperCase() === cleanRma.toUpperCase()
-    );
+    const findInReports = (list) => {
+      if (!Array.isArray(list) || !cleanRma) return null;
+      const target = cleanRma.toUpperCase();
+      return list.find(r => (String(r.rma_number || '').toUpperCase() === target && !r.parent_rma_id) || String(r.id) === cleanRma)
+          || list.find(r => String(r.rma_number || '').toUpperCase() === target);
+    };
 
-    if (localMatch) {
-      setReport(localMatch);
+    // Try local list first for instant responsiveness
+    const immediateMatch = findInReports(recentReportsList);
+    if (immediateMatch) {
+      setReport(immediateMatch);
       setIsLoadingReport(false);
-    } else {
-      setIsLoadingReport(true);
+      setReportError(null);
+      return;
     }
+
+    // Begin asynchronous polling loop (retry every 800ms up to 5 attempts)
+    setIsLoadingReport(true);
     setReportError(null);
+    setSyncAttempt(1);
 
-    // Fetch fresh record from Supabase
     (async () => {
-      try {
-        let query = supabase.from('rma_reports').select('*');
-        if (/^\d+$/.test(cleanRma)) {
-          query = query.or(`rma_number.ilike.${cleanRma},id.eq.${cleanRma}`);
-        } else {
-          query = query.ilike('rma_number', cleanRma);
-        }
+      const maxAttempts = 5;
+      let foundRecord = null;
 
-        const { data, error } = await query;
-
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         if (!isMounted) return;
+        setSyncAttempt(attempt);
 
-        if (error) {
-          console.warn('Supabase fetch RMA notice:', error);
-          if (!localMatch) {
-            setReportError(`Failed to load RMA record: ${error.message}`);
+        // Check recentReportsList on each retry tick
+        const tickMatch = findInReports(recentReportsList);
+        if (tickMatch) {
+          foundRecord = tickMatch;
+          break;
+        }
+
+        // Query Supabase
+        try {
+          let query = supabase.from('rma_reports').select('*');
+          if (/^\d+$/.test(cleanRma)) {
+            query = query.or(`rma_number.ilike.${cleanRma},id.eq.${cleanRma}`);
+          } else {
+            query = query.ilike('rma_number', cleanRma);
           }
-        } else if (data && data.length > 0) {
-          const primary = data.find(d => !d.parent_rma_id) || data[0];
-          setReport(primary);
-        } else if (!localMatch) {
-          setReportError(`No return report found matching "${cleanRma}". Please check the QR code or serial number.`);
+
+          const { data, error } = await query;
+          if (!error && Array.isArray(data) && data.length > 0) {
+            foundRecord = data.find(d => !d.parent_rma_id) || data[0];
+            break;
+          }
+        } catch (e) {
+          console.warn(`RMA sync attempt ${attempt} notice:`, e?.message);
         }
-      } catch (err) {
-        if (isMounted && !localMatch) {
-          setReportError(`Error looking up RMA: ${err.message}`);
+
+        // Delay 800ms before next attempt if record not yet available
+        if (attempt < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 800));
         }
-      } finally {
-        if (isMounted) setIsLoadingReport(false);
+      }
+
+      if (!isMounted) return;
+
+      if (foundRecord) {
+        setReport(foundRecord);
+        setIsLoadingReport(false);
+        setReportError(null);
+      } else {
+        setIsLoadingReport(false);
+        setReportError(`No return report found matching "${cleanRma}". The record may still be syncing to the cloud or the QR code may be invalid.`);
       }
     })();
 
     return () => {
       isMounted = false;
     };
-  }, [isOpen, rmaNumber]);
+  }, [isOpen, rmaNumber, retryTrigger]);
 
   // 2. Silent background sync when recentReportsList updates (WITHOUT triggering loading spinners or unmounting UI)
   useEffect(() => {
@@ -879,28 +1058,42 @@ export default function QuickRMAActionModal({
         {/* Modal Body */}
         <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto overscroll-contain">
 
-          {/* 1. Loading State (Only if not yet loaded) */}
+          {/* 1. Loading State with Asynchronous Sync Counter */}
           {isLoadingReport && !report && (
             <div className="py-8 text-center space-y-3">
               <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
-              <p className="text-xs font-bold text-slate-600 dark:text-slate-400">
-                Retrieving Return Authorization details for <span className="font-mono">{rmaNumber}</span>...
+              <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                Finalizing return submission sync... Attempt {syncAttempt} of 5
+              </p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Polling local buffer and Supabase database for return authorization <span className="font-mono font-bold text-blue-600">{rmaNumber}</span>...
               </p>
             </div>
           )}
 
-          {/* 2. Error Loading Report */}
+          {/* 2. Error Loading Report with Manual Retry Option */}
           {reportError && !report && (
             <div className="p-4 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-2xl flex items-start gap-3 text-rose-800 dark:text-rose-200">
               <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-              <div className="space-y-1 text-xs">
+              <div className="space-y-1.5 text-xs flex-1">
                 <div className="font-bold">Return Record Not Found</div>
-                <p>{reportError}</p>
-                <div className="pt-2">
+                <p className="leading-relaxed">{reportError}</p>
+                <div className="pt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReportError(null);
+                      setRetryTrigger(prev => prev + 1);
+                    }}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Retry Sync</span>
+                  </button>
                   <button
                     type="button"
                     onClick={onClose}
-                    className="px-3 py-1.5 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition-colors"
+                    className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                   >
                     Close Window
                   </button>
@@ -1928,117 +2121,246 @@ export default function QuickRMAActionModal({
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                  {/* Condition Grade */}
-                  <div>
-                    <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                      Condition Grade
-                    </label>
-                    <select
-                      value={conditionGrade}
-                      onChange={(e) => setConditionGrade(e.target.value)}
-                      className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
-                    >
-                      <option value="A - Like New / Resellable">A - Like New / Resellable</option>
-                      <option value="B - Damaged Packaging Only">B - Damaged Packaging Only</option>
-                      <option value="C - Defective / Parts Only">C - Defective / Parts Only</option>
-                      <option value="D - Total Loss / Scrap">D - Total Loss / Scrap</option>
-                    </select>
-                  </div>
+                {manifestItems.length > 1 ? (
+                  /* MULTI-ITEM MANIFEST LINE-ITEM LEVEL TRIAGE */
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-200 dark:border-slate-800">
+                      <div>
+                        <div className="font-black text-xs text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
+                          <Package className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                          <span>Multi-Item Manifest Line-Item Triage</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Assign condition grade, rack/bin location, and disposition for each line item individually.
+                        </p>
+                      </div>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                        {manifestItems.length} Products
+                      </span>
+                    </div>
 
-                  {/* Disposition */}
-                  <div>
-                    <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                      Warehouse Disposition
-                    </label>
-                    <select
-                      value={normalizeDispositionOption(disposition)}
-                      onChange={(e) => {
-                        const newDisp = e.target.value;
-                        setDisposition(newDisp);
-                        if (newDisp === '2- Restock to Inventory') {
-                          setRmaStatus('restocked');
-                        } else if (newDisp === '5- Scrap / Dispose') {
-                          setRmaStatus('scrapped');
-                        } else if (newDisp === '6- Buffer Stock Exchange') {
-                          setRmaStatus('buffer_replacement_dispatched');
-                        }
-                      }}
-                      className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
-                    >
-                      <option value="1- Pending Triage">1- Pending Triage</option>
-                      <option value="2- Restock to Inventory">2- Restock to Inventory</option>
-                      <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
-                      <option value="4- Quarantine">4- Quarantine</option>
-                      <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
-                      <option value="6- Buffer Stock Exchange">6- Buffer Stock Exchange</option>
-                    </select>
-                  </div>
+                    {manifestTriageSuccess && (
+                      <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 rounded-xl text-xs font-bold text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Line-item manifest triage saved successfully for all {manifestItems.length} products!</span>
+                      </div>
+                    )}
 
-                  {/* Warehouse Location (Bin / Rack) */}
-                  <div>
-                    <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                      Warehouse Rack / Bin Location
-                    </label>
-                    <div className="relative">
-                      <MapPin className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                      <input
-                        type="text"
-                        value={warehouseLocation}
-                        onChange={(e) => setWarehouseLocation(e.target.value)}
-                        placeholder="e.g. RACK-03-BIN-A"
-                        className="w-full pl-8 pr-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-mono text-xs font-bold text-slate-900 dark:text-white uppercase placeholder:normal-case placeholder-slate-400 focus:outline-none focus:border-blue-600"
-                      />
+                    <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                      {manifestItems.map((it, idx) => (
+                        <div key={it.id || idx} className="p-3 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-2 shadow-2xs">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="font-black text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
+                                <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[9px] font-black flex items-center justify-center shrink-0">
+                                  {idx + 1}
+                                </span>
+                                <span className="truncate">{it.name}</span>
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-0.5">
+                                Barcode: {it.barcode} {it.sku ? `• SKU: ${it.sku}` : ''} • Qty: <strong className="text-slate-800 dark:text-slate-200">{it.quantity} {it.unit_name || 'pc'}</strong>
+                              </div>
+                            </div>
+                            <span className="text-[10px] font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/60 px-2 py-0.5 rounded-md border border-rose-200 dark:border-rose-800 shrink-0">
+                              {it.reason || 'Damaged packaging'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                            {/* Condition Grade */}
+                            <div>
+                              <label className="text-[9.5px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-0.5">
+                                Condition Grade
+                              </label>
+                              <select
+                                value={it.condition_grade || 'B - Damaged Packaging Only'}
+                                onChange={(e) => updateManifestItemField(idx, 'condition_grade', e.target.value)}
+                                className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
+                              >
+                                <option value="A - Like New / Resellable">A - Resellable</option>
+                                <option value="B - Damaged Packaging Only">B - Damaged Packaging</option>
+                                <option value="C - Defective / Parts Only">C - Defective / Parts</option>
+                                <option value="D - Total Loss / Scrap">D - Scrap / Total Loss</option>
+                              </select>
+                            </div>
+
+                            {/* Rack / Bin Location */}
+                            <div>
+                              <label className="text-[9.5px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-0.5">
+                                Bin / Rack Location
+                              </label>
+                              <input
+                                type="text"
+                                value={it.warehouse_location || ''}
+                                onChange={(e) => updateManifestItemField(idx, 'warehouse_location', e.target.value.toUpperCase())}
+                                placeholder="e.g. BIN-04-A"
+                                className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white uppercase focus:outline-none focus:border-blue-600"
+                              />
+                            </div>
+
+                            {/* Disposition */}
+                            <div>
+                              <label className="text-[9.5px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-0.5">
+                                Disposition
+                              </label>
+                              <select
+                                value={it.disposition || '1- Pending Triage'}
+                                onChange={(e) => updateManifestItemField(idx, 'disposition', e.target.value)}
+                                className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
+                              >
+                                <option value="1- Pending Triage">1- Pending Triage</option>
+                                <option value="2- Restock to Inventory">2- Restock to Inventory</option>
+                                <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
+                                <option value="4- Quarantine">4- Quarantine</option>
+                                <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
+                                <option value="6- Buffer Stock Exchange">6- Buffer Stock Exchange</option>
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-400">
+                        Inspected by: <strong className="text-slate-700 dark:text-slate-300">{report?.inspected_by || verifiedAdmin?.name || 'Staff'}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleSaveManifestTriage}
+                        disabled={isSavingManifestTriage}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        {isSavingManifestTriage ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Saving Manifest...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Save Manifest Triage</span>
+                          </>
+                        )}
+                      </button>
                     </div>
                   </div>
+                ) : (
+                  /* STANDARD SINGLE-ITEM TRIAGE INTERFACE */
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                      {/* Condition Grade */}
+                      <div>
+                        <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                          Condition Grade
+                        </label>
+                        <select
+                          value={conditionGrade}
+                          onChange={(e) => setConditionGrade(e.target.value)}
+                          className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
+                        >
+                          <option value="A - Like New / Resellable">A - Like New / Resellable</option>
+                          <option value="B - Damaged Packaging Only">B - Damaged Packaging Only</option>
+                          <option value="C - Defective / Parts Only">C - Defective / Parts Only</option>
+                          <option value="D - Total Loss / Scrap">D - Total Loss / Scrap</option>
+                        </select>
+                      </div>
 
-                  {/* RMA Lifecycle Status */}
-                  <div>
-                    <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                      Lifecycle Stage
-                    </label>
-                    <select
-                      value={rmaStatus === 'closed' || rmaStatus === 'resolved' ? 'restocked' : rmaStatus}
-                      onChange={(e) => setRmaStatus(e.target.value)}
-                      className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
-                    >
-                      <option value="draft">1- Draft / Intake</option>
-                      <option value="received_at_dock">2- Received at Dock</option>
-                      <option value="under_inspection">3- Under Inspection</option>
-                      <option value="pending_finance_approval">4- Pending Finance Approval</option>
-                      <option value="credit_memo_issued">5- Credit Memo Issued</option>
-                      <option value="restocked">6- Restocked</option>
-                      <option value="scrapped">7- Scrapped / Disposed</option>
-                      <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
-                      <option value="rejected">8- Rejected / Invalid Claim</option>
-                    </select>
-                  </div>
-                </div>
+                      {/* Disposition */}
+                      <div>
+                        <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                          Warehouse Disposition
+                        </label>
+                        <select
+                          value={normalizeDispositionOption(disposition)}
+                          onChange={(e) => {
+                            const newDisp = e.target.value;
+                            setDisposition(newDisp);
+                            if (newDisp === '2- Restock to Inventory') {
+                              setRmaStatus('restocked');
+                            } else if (newDisp === '5- Scrap / Dispose') {
+                              setRmaStatus('scrapped');
+                            } else if (newDisp === '6- Buffer Stock Exchange') {
+                              setRmaStatus('buffer_replacement_dispatched');
+                            }
+                          }}
+                          className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
+                        >
+                          <option value="1- Pending Triage">1- Pending Triage</option>
+                          <option value="2- Restock to Inventory">2- Restock to Inventory</option>
+                          <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
+                          <option value="4- Quarantine">4- Quarantine</option>
+                          <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
+                          <option value="6- Buffer Stock Exchange">6- Buffer Stock Exchange</option>
+                        </select>
+                      </div>
 
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-[10px] text-slate-400">
-                    Inspected by: <strong className="text-slate-700 dark:text-slate-300">{report?.inspected_by || verifiedAdmin?.name || 'Staff'}</strong>
-                  </span>
+                      {/* Warehouse Location (Bin / Rack) */}
+                      <div>
+                        <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                          Warehouse Rack / Bin Location
+                        </label>
+                        <div className="relative">
+                          <MapPin className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                          <input
+                            type="text"
+                            value={warehouseLocation}
+                            onChange={(e) => setWarehouseLocation(e.target.value)}
+                            placeholder="e.g. RACK-03-BIN-A"
+                            className="w-full pl-8 pr-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-mono text-xs font-bold text-slate-900 dark:text-white uppercase placeholder:normal-case placeholder-slate-400 focus:outline-none focus:border-blue-600"
+                          />
+                        </div>
+                      </div>
 
-                  <button
-                    type="button"
-                    onClick={handleSaveTriage}
-                    disabled={isSavingTriage}
-                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    {isSavingTriage ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        <span>Saving...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Save Physical Triage</span>
-                      </>
-                    )}
-                  </button>
-                </div>
+                      {/* RMA Lifecycle Status */}
+                      <div>
+                        <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                          Lifecycle Stage
+                        </label>
+                        <select
+                          value={rmaStatus === 'closed' || rmaStatus === 'resolved' ? 'restocked' : rmaStatus}
+                          onChange={(e) => setRmaStatus(e.target.value)}
+                          className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
+                        >
+                          <option value="draft">1- Draft / Intake</option>
+                          <option value="received_at_dock">2- Received at Dock</option>
+                          <option value="under_inspection">3- Under Inspection</option>
+                          <option value="pending_finance_approval">4- Pending Finance Approval</option>
+                          <option value="credit_memo_issued">5- Credit Memo Issued</option>
+                          <option value="restocked">6- Restocked</option>
+                          <option value="scrapped">7- Scrapped / Disposed</option>
+                          <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
+                          <option value="rejected">8- Rejected / Invalid Claim</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-[10px] text-slate-400">
+                        Inspected by: <strong className="text-slate-700 dark:text-slate-300">{report?.inspected_by || verifiedAdmin?.name || 'Staff'}</strong>
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={handleSaveTriage}
+                        disabled={isSavingTriage}
+                        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        {isSavingTriage ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Saving...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Save Physical Triage</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* ENTERPRISE ACTION 2: FINANCE CREDIT MEMO WITH FINANCIAL SAFEGUARD */}
