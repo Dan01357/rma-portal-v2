@@ -59,7 +59,38 @@ export function formatRemainingCountdown(expiresAt, status = 'active') {
   return { text: `${days}d ${remHours}h remaining`, isExpired: false };
 }
 
+/**
+ * Cryptographic Google OAuth Identity Verification
+ * Validates whether the authenticated Google account matches the invite's authorized email.
+ */
+export function verifyGoogleIdentity(user, invite) {
+  if (!user || !user.email) {
+    return { verified: false, error: 'NO_AUTHENTICATED_USER' };
+  }
+  if (!invite || !invite.authorized_email) {
+    return { verified: false, error: 'NO_INVITE_EMAIL' };
+  }
+  const userEmail = user.email.toLowerCase().trim();
+  const authorizedEmail = invite.authorized_email.toLowerCase().trim();
+
+  if (userEmail !== authorizedEmail) {
+    return {
+      verified: false,
+      userEmail: user.email,
+      authorizedEmail: invite.authorized_email,
+      error: 'IDENTITY_MISMATCH'
+    };
+  }
+
+  return {
+    verified: true,
+    userEmail: user.email,
+    authorizedEmail: invite.authorized_email
+  };
+}
+
 export const inviteService = {
+  verifyGoogleIdentity,
   /**
    * Fetch all invites from Supabase (table or fallback settings)
    */

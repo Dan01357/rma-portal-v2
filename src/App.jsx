@@ -1861,8 +1861,9 @@ export default function App() {
     const cleanSi = siNumber.trim();
     const cleanDr = drNumber.trim();
     const cleanPo = poNumber.trim();
+    const effectiveContact = (gateSession?.authorized_email || reporterContact || '').trim();
 
-    if (!reporterName.trim() || !reporterContact.trim()) {
+    if (!reporterName.trim() || !effectiveContact) {
       showToast('Please provide your name and contact information.', 'warning');
       return;
     }
@@ -1876,7 +1877,7 @@ export default function App() {
     // Persist reporter contact info in localStorage for 1-tap zero-typing returns
     try {
       localStorage.setItem('rma_reporter_name', reporterName.trim());
-      localStorage.setItem('rma_reporter_contact', reporterContact.trim());
+      localStorage.setItem('rma_reporter_contact', effectiveContact);
     } catch {}
 
     // 2. Determine RMA Type based on station Gatekeeper profile (internal warehouse vs external customer)
@@ -1916,7 +1917,7 @@ export default function App() {
       supplier: itemsToSubmit[0]?.supplier_name || 'Warehouse',
       reason: primaryReason,
       reporter_name: reporterName || 'Staff',
-      reporter_contact: reporterContact || '',
+      reporter_contact: effectiveContact,
       si_number: cleanSi || null,
       dr_number: cleanDr || null,
       po_number: cleanPo || null,
@@ -1942,7 +1943,7 @@ export default function App() {
     const capturedBatchLotNumber = batchLotNumber ? batchLotNumber.trim() : null;
     const capturedPaperworkMetadata = paperworkMetadata;
     const capturedReporterName = reporterName;
-    const capturedReporterContact = reporterContact;
+    const capturedReporterContact = effectiveContact;
     const capturedGps = gpsLocation.isAccurate ? gpsLocation : null;
 
     setManifestItems([]);
