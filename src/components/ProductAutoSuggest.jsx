@@ -121,42 +121,48 @@ export default function ProductAutoSuggest({
             const pBarcode = String(p.barcode || '').toLowerCase();
             return pName.includes(cleanLower) || pCode.includes(cleanLower) || pBarcode.includes(cleanLower);
           })
-          .map(p => ({
-            id: p.id || p.code || p.sku,
-            name: p.name || '',
-            code: p.code || p.sku || '',
-            sku: p.code || p.sku || '',
-            barcode: p.barcode || '',
-            supplierName: p.supplier_name || p.supplierName || '',
-            price: Number(p.price || 0),
-            priceWithVat: Number(p.price_with_vat || (p.price ? p.price * 1.12 : 0)).toFixed(2),
-            unitName: p.unit_name || p.unitName || 'pc',
-            imageUrl: p.image_url || p.imageUrl || '',
-            brandName: p.brand_name || p.brand || '',
-            source: 'Master Catalog',
-            isCatalog: true
-          }));
+          .map(p => {
+            const rawSku = (p.code && p.code !== p.barcode) ? p.code : ((p.sku && p.sku !== p.barcode) ? p.sku : '');
+            return {
+              id: p.id || p.code || p.sku,
+              name: p.name || '',
+              code: rawSku,
+              sku: rawSku,
+              barcode: p.barcode || '',
+              supplierName: p.supplier_name || p.supplierName || '',
+              price: Number(p.price || 0),
+              priceWithVat: Number(p.price_with_vat || (p.price ? p.price * 1.12 : 0)).toFixed(2),
+              unitName: p.unit_name || p.unitName || 'pc',
+              imageUrl: p.image_url || p.imageUrl || '',
+              brandName: p.brand_name || p.brand || '',
+              source: 'Master Catalog',
+              isCatalog: true
+            };
+          });
 
         // 2. Query live database API (via unified catalogService serverless proxy & purchaseOrdersApi)
         let apiMatches = [];
         try {
           const remoteResults = await catalogService.searchAllProducts(query, 30);
           if (Array.isArray(remoteResults) && remoteResults.length > 0) {
-            apiMatches = remoteResults.map(item => ({
-              id: item.id || item.code || item.sku,
-              name: item.name || '',
-              code: item.code || item.sku || '',
-              sku: item.code || item.sku || '',
-              barcode: item.barcode || '',
-              supplierName: item.supplierName || item.supplier_name || '',
-              price: Number(item.price || 0),
-              priceWithVat: Number(item.priceWithVat || item.price_with_vat || (item.price ? item.price * 1.12 : 0)).toFixed(2),
-              unitName: item.unitName || item.unit_name || 'pc',
-              imageUrl: item.imageUrl || item.image_url || '',
-              brandName: item.brandName || item.brand_name || '',
-              source: item.source || 'Catalog API',
-              isCatalog: false
-            }));
+            apiMatches = remoteResults.map(item => {
+              const rawSku = (item.code && item.code !== item.barcode) ? item.code : ((item.sku && item.sku !== item.barcode) ? item.sku : '');
+              return {
+                id: item.id || item.code || item.sku,
+                name: item.name || '',
+                code: rawSku,
+                sku: rawSku,
+                barcode: item.barcode || '',
+                supplierName: item.supplierName || item.supplier_name || '',
+                price: Number(item.price || 0),
+                priceWithVat: Number(item.priceWithVat || item.price_with_vat || (item.price ? item.price * 1.12 : 0)).toFixed(2),
+                unitName: item.unitName || item.unit_name || 'pc',
+                imageUrl: item.imageUrl || item.image_url || '',
+                brandName: item.brandName || item.brand_name || '',
+                source: item.source || 'Catalog API',
+                isCatalog: false
+              };
+            });
           } else {
             const fallbackResults = await purchaseOrdersApi.searchProducts(query, 30);
             if (Array.isArray(fallbackResults)) {
@@ -165,12 +171,13 @@ export default function ProductAutoSuggest({
                 const pVat = item.raw_data?.priceWithVat 
                   ? Number(item.raw_data.priceWithVat).toFixed(2)
                   : (basePrice ? (basePrice * 1.12).toFixed(2) : '0.00');
+                const rawSku = (item.sku && item.sku !== item.barcode) ? item.sku : ((item.code && item.code !== item.barcode) ? item.code : '');
 
                 return {
                   id: item.id || item.sku,
                   name: item.name || '',
-                  code: item.sku || item.barcode || '',
-                  sku: item.sku || '',
+                  code: rawSku,
+                  sku: rawSku,
                   barcode: item.barcode || '',
                   supplierName: item.supplier || item.raw_data?.supplierName || '',
                   price: Number(basePrice.toFixed(2)),
@@ -231,7 +238,10 @@ export default function ProductAutoSuggest({
     if (onSelectProduct) {
       onSelectProduct(product);
     } else if (onChange) {
-      onChange(mode === 'code' ? (product.code || product.sku) : product.name);
+      const cleanSku = (product.code && product.code !== product.barcode) 
+        ? product.code 
+        : ((product.sku && product.sku !== product.barcode) ? product.sku : '');
+      onChange(mode === 'code' ? cleanSku : product.name);
     }
   };
 

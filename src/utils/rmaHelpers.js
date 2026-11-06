@@ -266,5 +266,18 @@ export function isBatchManifest(report, allReports = []) {
   return false;
 }
 
+/**
+ * Safely extracts clean SKU decoupling it strictly from barcode.
+ * Returns empty string if sku matches barcode, or is empty/placeholder.
+ */
+export function getCleanSku(skuOrCode, barcode) {
+  if (!skuOrCode) return '';
+  const cleanCode = String(skuOrCode).trim();
+  const cleanBarcode = String(barcode || '').trim();
+  if (cleanBarcode && cleanCode === cleanBarcode) return '';
+  if (cleanCode.toLowerCase().includes('awaiting') || cleanCode.toLowerCase().includes('unidentified')) return '';
+  return cleanCode;
+}
+
 
 

@@ -1017,6 +1017,25 @@ Each test scenario defines:
 
 ---
 
+## Section 13: Strict Barcode vs SKU Decoupling & Empty SKU Governance
+
+- [ ] **TC-SKU-01 (Strict Barcode vs SKU Decoupling & Empty SKU Defaulting)**
+  * **Location**: Public Portal (`/`), Customer RMA Hub Drawer, Quick RMA Processing Modal, and Product Catalog Edit Modal
+  * **Action**:
+    1. Scan or type an unregistered custom barcode (e.g. `214124124`) in the public return intake form or batch manifest builder.
+    2. Inspect the submitted report and queued manifest items.
+    3. Open `QuickRMAActionModal` and inspect line items.
+    4. Click "Assign SKU" to open `ProductEditModal`.
+    5. Test `ProductAutoSuggest` selection.
+  * **Expected Behavior**:
+    1. `sku` and `code` never default to the barcode value. If no verified SKU exists, `sku` remains empty/null.
+    2. The UI renders an amber badge: `Awaiting SKU` (or `SKU: Awaiting SKU` in Quick Processing line items), strictly preventing raw barcode digits from masquerading as official SKUs.
+    3. In `ProductEditModal`, if `product.code === product.barcode`, the SKU input field renders blank for the user to assign, strictly independent of the locked barcode input.
+    4. `ProductAutoSuggest` suggestions only populate valid SKUs and never inject barcode values into the SKU field.
+    5. `api/_lib/lookupHandler.js` and `catalogService.js` strictly return `code: item.code !== item.barcode ? item.code : null` across all lookup methods.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -1032,4 +1051,5 @@ Each test scenario defines:
 | **Phase 9: Role-Based QR Gatekeeper & PIN Queue** | Gatekeeper Engine & SMTP Approvals | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 10: Inbound vs Outbound Logistics Segregation** | Customer RMA & Supplier RTV Hubs | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 11: Multi-Item Manifest & Polling** | Customer Hub & Quick Actions | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 12: SKU & Barcode Decoupling** | Product Engine & RMA Manifests | `READY FOR TESTING` | *Lead QA Director* |
 

@@ -172,16 +172,17 @@ export default async function handler(req, res) {
       }
 
       if (matchedItem) {
-        const sku = matchedItem.code || matchedItem.sku || `SKU-${matchedItem.id}`;
         const barcodeVal = matchedItem.ean_code || matchedItem.code2 || cleanBarcode;
+        const rawSku = matchedItem.code || matchedItem.sku || null;
+        const cleanSku = (rawSku && rawSku !== barcodeVal) ? rawSku : null;
         const priceWithVat = parseFloat(matchedItem.priceWithVat) || parseFloat(matchedItem.price) || 0;
         const netPrice = parseFloat(matchedItem.price) || (priceWithVat / 1.12);
 
         const normalized = {
-          id: String(matchedItem.id || sku),
+          id: String(matchedItem.id || cleanSku || barcodeVal),
           barcode: barcodeVal,
-          code: sku,
-          sku: sku,
+          code: cleanSku,
+          sku: cleanSku,
           ean_code: matchedItem.ean_code || null,
           name: matchedItem.name || '',
           price: netPrice,
@@ -241,8 +242,8 @@ export default async function handler(req, res) {
           product: {
             id: mock.id,
             barcode: mock.barcode,
-            code: mock.sku,
-            sku: mock.sku,
+            code: (mock.sku && mock.sku !== mock.barcode) ? mock.sku : null,
+            sku: (mock.sku && mock.sku !== mock.barcode) ? mock.sku : null,
             name: mock.name,
             price: Number(mock.unit_price || 0),
             price_with_vat: Number(mock.unit_price || 0) * 1.12,
@@ -334,17 +335,19 @@ export default async function handler(req, res) {
           const jsonSearch = await resSearch.json();
           if (jsonSearch.data && Array.isArray(jsonSearch.data)) {
             for (const item of jsonSearch.data) {
-              const sku = item.code || item.sku || `SKU-${item.id}`;
-              const barcodeVal = item.ean_code || item.code2 || sku;
-              const prodKey = String(barcodeVal || sku || item.id).trim().toLowerCase();
+              const barcodeVal = item.ean_code || item.code2 || item.barcode || null;
+              const rawSku = item.code || item.sku || null;
+              const cleanSku = (rawSku && rawSku !== barcodeVal) ? rawSku : null;
+              const prodKey = String(barcodeVal || cleanSku || item.id).trim().toLowerCase();
               if (!seenKeys.has(prodKey)) {
                 seenKeys.add(prodKey);
                 const priceWithVat = parseFloat(item.priceWithVat) || parseFloat(item.price) || 0;
                 const netPrice = parseFloat(item.price) || (priceWithVat / 1.12);
                 results.push({
-                  id: String(item.id || sku),
-                  barcode: barcodeVal,
-                  code: sku,
+                  id: String(item.id || cleanSku || barcodeVal),
+                  barcode: barcodeVal || cleanSku,
+                  code: cleanSku,
+                  sku: cleanSku,
                   name: item.name || '',
                   price: netPrice,
                   price_with_vat: priceWithVat,
@@ -376,7 +379,8 @@ export default async function handler(req, res) {
             results.push({
               id: mock.id,
               barcode: mock.barcode,
-              code: mock.sku,
+              code: (mock.sku && mock.sku !== mock.barcode) ? mock.sku : null,
+              sku: (mock.sku && mock.sku !== mock.barcode) ? mock.sku : null,
               name: mock.name,
               price: Number(mock.unit_price || 0),
               price_with_vat: Number(mock.unit_price || 0) * 1.12,

@@ -150,12 +150,12 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   const handleAutoPopulate = (item) => {
     if (!item) return;
     if (item.name) setName(item.name);
-    if (item.code || item.sku) {
-      const candidateCode = String(item.code || item.sku).trim();
-      const currentBarcode = String(barcode || item.barcode || '').trim();
-      if (candidateCode !== currentBarcode) {
-        setCode(candidateCode);
-      }
+    const candidateCode = String(item.code || item.sku || '').trim();
+    const currentBarcode = String(barcode || item.barcode || '').trim();
+    if (candidateCode && candidateCode !== currentBarcode && !candidateCode.toLowerCase().includes('awaiting') && !candidateCode.toLowerCase().includes('unidentified')) {
+      setCode(candidateCode);
+    } else {
+      setCode('');
     }
     if (item.barcode && !barcode) setBarcode(item.barcode);
 

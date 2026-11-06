@@ -1810,11 +1810,15 @@ export default function App() {
     const submitQty = Math.max(1, parseInt(quantity, 10) || 1);
     const finalUnit = unitName || detectedProduct?.unit_name || 'pc';
 
+    const cleanSku = (detectedProduct?.code && detectedProduct.code !== cleanBarcode)
+      ? detectedProduct.code
+      : ((detectedProduct?.sku && detectedProduct.sku !== cleanBarcode) ? detectedProduct.sku : '');
+
     const newItem = {
       id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
       barcode: cleanBarcode,
-      code: detectedProduct?.code || cleanBarcode,
-      sku: detectedProduct?.code || '',
+      code: cleanSku,
+      sku: cleanSku,
       name: effectiveItemName,
       productName: effectiveItemName,
       quantity: submitQty,
@@ -1883,11 +1887,15 @@ export default function App() {
       const submitQty = Math.max(1, parseInt(quantity, 10) || 1);
       const finalUnit = unitName || detectedProduct?.unit_name || 'pc';
 
+      const cleanActiveSku = (detectedProduct?.code && detectedProduct.code !== activeBarcode)
+        ? detectedProduct.code
+        : ((detectedProduct?.sku && detectedProduct.sku !== activeBarcode) ? detectedProduct.sku : '');
+
       itemsToSubmit.push({
         id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
         barcode: activeBarcode,
-        code: detectedProduct?.code || activeBarcode,
-        sku: detectedProduct?.code || '',
+        code: cleanActiveSku,
+        sku: cleanActiveSku,
         name: effectiveItemName,
         productName: effectiveItemName,
         quantity: submitQty,
@@ -1961,8 +1969,8 @@ export default function App() {
       barcode: primaryBarcode,
       name: primaryName,
       productName: primaryName,
-      code: isBatchManifestTicket ? '' : (itemsToSubmit[0]?.code || ''),
-      sku: isBatchManifestTicket ? '' : (itemsToSubmit[0]?.code || ''),
+      code: isBatchManifestTicket ? '' : ((itemsToSubmit[0]?.code && itemsToSubmit[0]?.code !== primaryBarcode) ? itemsToSubmit[0]?.code : ''),
+      sku: isBatchManifestTicket ? '' : ((itemsToSubmit[0]?.sku && itemsToSubmit[0]?.sku !== primaryBarcode) ? itemsToSubmit[0]?.sku : ''),
       quantity: totalQuantityCount,
       unit_name: commonUnit,
       unit: commonUnit,
@@ -2098,8 +2106,8 @@ export default function App() {
           total_quantity: totalQuantityCount,
           items: capturedItems.map(it => ({
             barcode: it.barcode,
-            code: it.code || it.sku,
-            sku: it.sku || it.code,
+            code: (it.code && it.code !== it.barcode) ? it.code : ((it.sku && it.sku !== it.barcode) ? it.sku : null),
+            sku: (it.sku && it.sku !== it.barcode) ? it.sku : ((it.code && it.code !== it.barcode) ? it.code : null),
             name: it.name,
             productName: it.name,
             quantity: it.quantity,
@@ -4551,23 +4559,22 @@ export default function App() {
 
                                       {/* Child Items Table */}
                                       <div className="overflow-x-auto lg:overflow-x-visible">
-                                        <table className="w-full text-left text-xs border-collapse">
+                                        <table className="table-fixed w-full text-left text-xs border-collapse">
                                           <thead>
                                             <tr className="bg-slate-50/80 dark:bg-slate-800/50 text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
-                                              <th className="py-2 px-3 text-center w-10">#</th>
-                                              <th className="py-2 px-2 text-center w-[48px]">Photo</th>
-                                              <th className="py-2 px-3">Product Description / Name</th>
-                                              <th className="py-2 px-3 font-mono w-[120px]">Barcode</th>
-                                              <th className="py-2 px-3 font-mono w-[110px]">Assigned SKU</th>
-                                              <th className="py-2 px-3 text-center w-[80px]">Qty</th>
-                                              <th className="py-2 px-3 w-[160px]">Triage &amp; Reason</th>
-                                              <th className="py-2 px-3 text-center w-[180px]">Actions</th>
+                                              <th className="py-2 px-1 text-center w-[50px]">Item</th>
+                                              <th className="py-2 px-3 min-w-[200px]">Product Description / Name</th>
+                                              <th className="py-2 px-3 font-mono w-[140px]">Barcode</th>
+                                              <th className="py-2 px-3 font-mono w-[120px]">Assigned SKU</th>
+                                              <th className="py-2 px-3 text-center w-[80px]">Qty &amp; Unit</th>
+                                              <th className="py-2 px-3 w-[170px]">Triage &amp; Reason</th>
+                                              <th className="py-2 px-2 text-center w-[170px]">Actions</th>
                                             </tr>
                                           </thead>
                                           <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
                                             {manifestChildren.length === 0 ? (
                                               <tr>
-                                                <td colSpan={8} className="py-4 text-center text-slate-400 italic">
+                                                <td colSpan={7} className="py-4 text-center text-slate-400 italic">
                                                   No line item breakdown records found for this batch manifest.
                                                 </td>
                                               </tr>
@@ -4628,43 +4635,47 @@ export default function App() {
 
                                                 return (
                                                   <tr key={child.id || `child_${cIdx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                                                    <td className="py-2 px-3 text-center text-slate-400 font-mono text-[11px] w-10">
-                                                      {cIdx + 1}
+                                                    {/* Line # / Photo: 50px */}
+                                                    <td className="py-2 px-1 text-center w-[50px]">
+                                                      <div className="flex flex-col items-center justify-center gap-1">
+                                                        <span className="text-[10px] text-slate-400 font-mono font-bold leading-none">#{cIdx + 1}</span>
+                                                        {cPhotoUrl ? (
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => setLightboxPhoto({
+                                                              images: [cPhotoUrl],
+                                                              initialIndex: 0,
+                                                              url: cPhotoUrl,
+                                                              title: childName,
+                                                              subtitle: `Manifest item #${cIdx + 1} of ${item.rma_number} • ${childReason}`
+                                                            })}
+                                                            className="w-7 h-7 rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 inline-block hover:scale-105 transition-transform cursor-zoom-in"
+                                                            title="Click to zoom image"
+                                                          >
+                                                            <img src={cPhotoUrl} alt={childName} className="w-full h-full object-cover" />
+                                                          </button>
+                                                        ) : (
+                                                          <div className="w-7 h-7 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
+                                                            <ImageIcon className="w-3 h-3" />
+                                                          </div>
+                                                        )}
+                                                      </div>
                                                     </td>
-                                                    <td className="py-2 px-2 text-center w-[48px]">
-                                                      {cPhotoUrl ? (
-                                                        <button
-                                                          type="button"
-                                                          onClick={() => setLightboxPhoto({
-                                                            images: [cPhotoUrl],
-                                                            initialIndex: 0,
-                                                            url: cPhotoUrl,
-                                                            title: childName,
-                                                            subtitle: `Manifest item #${cIdx + 1} of ${item.rma_number} • ${childReason}`
-                                                          })}
-                                                          className="w-8 h-8 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 inline-block hover:scale-105 transition-transform cursor-zoom-in"
-                                                          title="Click to zoom image"
-                                                        >
-                                                          <img src={cPhotoUrl} alt={childName} className="w-8 h-8 rounded-lg object-cover mx-auto" />
-                                                        </button>
-                                                      ) : (
-                                                        <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
-                                                          <ImageIcon className="w-3.5 h-3.5" />
-                                                        </div>
-                                                      )}
-                                                    </td>
-                                                    <td className="py-2 px-3 font-bold text-slate-900 dark:text-white max-w-[220px] sm:max-w-xs truncate" title={childName}>
+                                                    {/* Product Description: min-w-[200px] with truncate and title={it.name} */}
+                                                    <td className="py-2 px-3 font-bold text-slate-900 dark:text-white min-w-[200px] truncate" title={childName}>
                                                       <div className="truncate">{childName}</div>
                                                       {child.defect_details && (
                                                         <div className="text-[10px] text-slate-400 font-normal italic truncate" title={child.defect_details}>{child.defect_details}</div>
                                                       )}
                                                     </td>
-                                                    <td className="py-2 px-3 font-mono font-bold text-slate-700 dark:text-slate-300 w-[120px] truncate" title={childBarcode || '—'}>
+                                                    {/* Barcode: 140px font-mono */}
+                                                    <td className="py-2 px-3 font-mono font-bold text-slate-700 dark:text-slate-300 w-[140px] truncate" title={childBarcode || '—'}>
                                                       {childBarcode || '—'}
                                                     </td>
-                                                    <td className="py-2 px-3 font-mono text-slate-600 dark:text-slate-400 w-[110px] truncate">
+                                                    {/* Assigned SKU: 120px */}
+                                                    <td className="py-2 px-3 font-mono text-slate-600 dark:text-slate-400 w-[120px] truncate">
                                                       {isSkuAssigned ? (
-                                                        <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800">
+                                                        <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800 text-[11px]">
                                                           {effectiveSku}
                                                         </span>
                                                       ) : (
@@ -4673,34 +4684,37 @@ export default function App() {
                                                         </span>
                                                       )}
                                                     </td>
+                                                    {/* Qty & Unit: 80px */}
                                                     <td className="py-2 px-3 text-center font-mono w-[80px]">
                                                       <div className="flex flex-col items-center gap-0.5">
-                                                        <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-md text-[11px]">
+                                                        <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded-md text-[11px] truncate">
                                                           {childQty} {childUnit}
                                                         </span>
                                                         {childLocation && (
-                                                          <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold">
+                                                          <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold truncate max-w-[75px]" title={childLocation}>
                                                             📍 {childLocation}
                                                           </span>
                                                         )}
                                                       </div>
                                                     </td>
-                                                    <td className="py-2 px-3 w-[160px]">
+                                                    {/* Triage & Reason: 170px */}
+                                                    <td className="py-2 px-3 w-[170px]">
                                                       <div className="space-y-1">
-                                                        <div>
-                                                          <span className="px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-semibold text-[10px] inline-block">
+                                                        <div className="truncate" title={childReason}>
+                                                          <span className="px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-semibold text-[10px] inline-block truncate max-w-[160px]">
                                                             {childReason}
                                                           </span>
                                                         </div>
-                                                        <div>
-                                                          <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-medium text-[10px] inline-block">
+                                                        <div className="truncate" title={childDisposition}>
+                                                          <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-medium text-[10px] inline-block truncate max-w-[160px]">
                                                             {childDisposition}
                                                           </span>
                                                         </div>
                                                       </div>
                                                     </td>
-                                                    <td className="py-2 px-3 text-center w-[180px]">
-                                                      <div className="flex items-center justify-center gap-1.5 flex-nowrap">
+                                                    {/* Actions: 170px */}
+                                                    <td className="py-2 px-2 text-center w-[170px]">
+                                                      <div className="flex items-center justify-center gap-1 flex-nowrap">
                                                         {canEditProducts && (
                                                           <button
                                                             type="button"

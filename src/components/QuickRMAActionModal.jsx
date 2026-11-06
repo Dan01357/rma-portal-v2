@@ -182,40 +182,50 @@ export default function QuickRMAActionModal({
             : []);
 
       if (directItems.length > 0) {
-        setManifestItems(directItems.map((it, idx) => ({
-          index: idx,
-          id: it.id || `item-${idx}`,
-          name: it.name || it.productName || `Item #${idx + 1}`,
-          barcode: String(it.barcode || '').trim(),
-          sku: it.code || it.sku || '',
-          quantity: Number(it.quantity) || 1,
-          unit_name: it.unit_name || it.unit || 'pc',
-          price: Number(it.price || 0),
-          reason: it.reason || report.reason || 'Damaged packaging',
-          condition_grade: it.condition_grade || report.condition_grade || 'B - Damaged Packaging Only',
-          warehouse_location: it.warehouse_location || report.warehouse_location || '',
-          disposition: it.disposition || report.disposition || '1- Pending Triage'
-        })));
+        setManifestItems(directItems.map((it, idx) => {
+          const itBarcode = String(it.barcode || '').trim();
+          const itSku = String(it.code || it.sku || '').trim();
+          const cleanSku = (itSku && itSku !== itBarcode && !itSku.toLowerCase().includes('awaiting')) ? itSku : '';
+          return {
+            index: idx,
+            id: it.id || `item-${idx}`,
+            name: it.name || it.productName || `Item #${idx + 1}`,
+            barcode: itBarcode,
+            sku: cleanSku,
+            quantity: Number(it.quantity) || 1,
+            unit_name: it.unit_name || it.unit || 'pc',
+            price: Number(it.price || 0),
+            reason: it.reason || report.reason || 'Damaged packaging',
+            condition_grade: it.condition_grade || report.condition_grade || 'B - Damaged Packaging Only',
+            warehouse_location: it.warehouse_location || report.warehouse_location || '',
+            disposition: it.disposition || report.disposition || '1- Pending Triage'
+          };
+        }));
       } else if (report.id) {
         supabase.from('rma_items')
           .select('*')
           .eq('rma_report_id', report.id)
           .then(({ data, error }) => {
             if (!error && Array.isArray(data) && data.length > 1) {
-              setManifestItems(data.map((it, idx) => ({
-                index: idx,
-                id: it.id || `item-${idx}`,
-                name: it.name || `Item #${idx + 1}`,
-                barcode: String(it.barcode || '').trim(),
-                sku: it.sku || it.code || '',
-                quantity: Number(it.quantity) || 1,
-                unit_name: it.unit_name || 'pc',
-                price: Number(it.price || 0),
-                reason: it.reason || report.reason || 'Damaged packaging',
-                condition_grade: it.condition_grade || report.condition_grade || 'B - Damaged Packaging Only',
-                warehouse_location: it.warehouse_location || report.warehouse_location || '',
-                disposition: it.disposition || report.disposition || '1- Pending Triage'
-              })));
+              setManifestItems(data.map((it, idx) => {
+                const itBarcode = String(it.barcode || '').trim();
+                const itSku = String(it.sku || it.code || '').trim();
+                const cleanSku = (itSku && itSku !== itBarcode && !itSku.toLowerCase().includes('awaiting')) ? itSku : '';
+                return {
+                  index: idx,
+                  id: it.id || `item-${idx}`,
+                  name: it.name || `Item #${idx + 1}`,
+                  barcode: itBarcode,
+                  sku: cleanSku,
+                  quantity: Number(it.quantity) || 1,
+                  unit_name: it.unit_name || 'pc',
+                  price: Number(it.price || 0),
+                  reason: it.reason || report.reason || 'Damaged packaging',
+                  condition_grade: it.condition_grade || report.condition_grade || 'B - Damaged Packaging Only',
+                  warehouse_location: it.warehouse_location || report.warehouse_location || '',
+                  disposition: it.disposition || report.disposition || '1- Pending Triage'
+                };
+              }));
             } else {
               setManifestItems([]);
             }
@@ -1317,8 +1327,19 @@ export default function QuickRMAActionModal({
                           <div className="font-extrabold text-slate-900 dark:text-white truncate">
                             {it.name || it.productName}
                           </div>
-                          <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                            BC: {it.barcode} {it.code || it.sku ? `• SKU: ${it.code || it.sku}` : ''}
+                          <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400 truncate flex items-center gap-1.5 flex-wrap">
+                            <span>BC: {it.barcode}</span>
+                            <span>•</span>
+                            {(() => {
+                              const itBarcode = String(it.barcode || '').trim();
+                              const rawSku = String(it.code || it.sku || '').trim();
+                              const isSkuValid = rawSku && rawSku !== itBarcode && !rawSku.toLowerCase().includes('awaiting');
+                              return isSkuValid ? (
+                                <span className="text-emerald-600 dark:text-emerald-400 font-bold">SKU: {rawSku}</span>
+                              ) : (
+                                <span className="text-amber-600 dark:text-amber-400 font-bold">SKU: Awaiting SKU</span>
+                              );
+                            })()}
                           </div>
                         </div>
                         <div className="text-right shrink-0">
@@ -2203,8 +2224,21 @@ export default function QuickRMAActionModal({
                                 </span>
                                 <span className="truncate">{it.name}</span>
                               </div>
-                              <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-0.5">
-                                Barcode: {it.barcode} {it.sku ? `• SKU: ${it.sku}` : ''} • Qty: <strong className="text-slate-800 dark:text-slate-200">{it.quantity} {it.unit_name || 'pc'}</strong>
+                              <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                <span>Barcode: {it.barcode}</span>
+                                <span>•</span>
+                                {(() => {
+                                  const itBarcode = String(it.barcode || '').trim();
+                                  const rawSku = String(it.sku || it.code || '').trim();
+                                  const isSkuValid = rawSku && rawSku !== itBarcode && !rawSku.toLowerCase().includes('awaiting');
+                                  return isSkuValid ? (
+                                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">SKU: {rawSku}</span>
+                                  ) : (
+                                    <span className="text-amber-600 dark:text-amber-400 font-bold">SKU: Awaiting SKU</span>
+                                  );
+                                })()}
+                                <span>•</span>
+                                <span>Qty: <strong className="text-slate-800 dark:text-slate-200">{it.quantity} {it.unit_name || 'pc'}</strong></span>
                               </div>
                             </div>
                             <span className="text-[10px] font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/60 px-2 py-0.5 rounded-md border border-rose-200 dark:border-rose-800 shrink-0">

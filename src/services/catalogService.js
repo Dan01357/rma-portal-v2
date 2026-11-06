@@ -609,7 +609,8 @@ export const catalogService = {
       return {
         id: mockItem.id,
         barcode: mockItem.barcode,
-        code: mockItem.sku,
+        code: (mockItem.sku && mockItem.sku !== mockItem.barcode) ? mockItem.sku : null,
+        sku: (mockItem.sku && mockItem.sku !== mockItem.barcode) ? mockItem.sku : null,
         name: mockItem.name,
         price: Number(mockItem.unit_price || 0),
         priceWithVat: Number(mockItem.unit_price || 0) * 1.12,
@@ -725,7 +726,8 @@ export const catalogService = {
           results.push({
             id: mock.id,
             barcode: mock.barcode,
-            code: mock.sku,
+            code: (mock.sku && mock.sku !== mock.barcode) ? mock.sku : null,
+            sku: (mock.sku && mock.sku !== mock.barcode) ? mock.sku : null,
             name: mock.name,
             price: Number(mock.unit_price || 0),
             priceWithVat: Number(mock.unit_price || 0) * 1.12,
