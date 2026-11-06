@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-06T07:49:06.256Z
+Generated At: 2026-11-06T08:09:27.841Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -19938,12 +19938,16 @@ export default function GatekeeperPinModal({
   }, [isOpen]);
 
   // 2. Cryptographic Google OAuth Identity Verification
-  const verifyIdentityWithSupabase = useCallback(async (invite) => {
+  const verifyIdentityWithSupabase = useCallback(async (invite, sessionUser = null) => {
     if (!invite?.authorized_email) return;
     setIsCheckingAuth(true);
 
     try {
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      let user = sessionUser;
+      if (!user) {
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        user = currentUser;
+      }
 
       if (user && user.email) {
         const userEmail = user.email.toLowerCase().trim();
@@ -19970,6 +19974,11 @@ export default function GatekeeperPinModal({
             localStorage.setItem('rma_portal_gate_session', JSON.stringify(unlockedSession));
             localStorage.setItem('rma_reporter_contact', user.email);
             localStorage.setItem('rma_portal_verified_email', user.email);
+
+            // Clean up OAuth tokens from URL hash for a clean address bar
+            if (window.location.hash && window.location.hash.includes('access_token')) {
+              window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            }
           } catch {}
 
           if (onUnlock) {
@@ -20034,7 +20043,7 @@ export default function GatekeeperPinModal({
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && session?.user) {
         if (validationResult?.valid && validationResult?.invite) {
-          await verifyIdentityWithSupabase(validationResult.invite);
+          await verifyIdentityWithSupabase(validationResult.invite, session.user);
         }
       }
     });
@@ -20075,10 +20084,14 @@ export default function GatekeeperPinModal({
       }
 
       const redirectTo = window.location.href;
+      
+      // Step A: Use skipBrowserRedirect: true first to safely verify the provider is enabled
+      // without crashing the browser onto an unhandled raw JSON 400 error page.
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo,
+          skipBrowserRedirect: true,
           queryParams: {
             prompt: 'select_account',
             login_hint: validationResult.invite.authorized_email
@@ -20089,6 +20102,31 @@ export default function GatekeeperPinModal({
       if (error) {
         console.error('Google OAuth sign-in error:', error);
         setOauthError(error.message || 'Failed to initialize Google Authentication.');
+        setIsSigningIn(false);
+        return;
+      }
+
+      if (data?.url) {
+        // Step B: Pre-flight probe to verify Supabase has Google OAuth enabled in the dashboard
+        try {
+          const probeRes = await fetch(data.url, { method: 'GET' });
+          if (!probeRes.ok) {
+            const probeJson = await probeRes.json().catch(() => null);
+            const errMsg = probeJson?.msg || 'Google OAuth provider is not enabled in your Supabase project.';
+            setOauthError(errMsg);
+            setIsSigningIn(false);
+            return;
+          }
+        } catch (probeErr) {
+          // If fetch throws a network/CORS redirect error when encountering accounts.google.com,
+          // that indicates Supabase returned a valid 302 redirect to Google!
+          console.log('OAuth probe indicates redirection to Google login flow:', probeErr);
+        }
+
+        // Safe to navigate to Google OAuth!
+        window.location.assign(data.url);
+      } else {
+        setOauthError('Unable to generate Google authentication URL.');
         setIsSigningIn(false);
       }
     } catch (err) {
@@ -20328,19 +20366,46 @@ export default function GatekeeperPinModal({
 
             {/* Google OAuth Error Alert */}
             {oauthError && (
-              <div className="p-3.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-2xl text-xs text-rose-800 dark:text-rose-300 text-left space-y-1.5">
-                <div className="font-bold flex items-center gap-1.5">
+              <div className="p-4 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-900 rounded-2xl text-xs text-rose-800 dark:text-rose-300 text-left space-y-2.5 animate-in fade-in">
+                <div className="font-bold flex items-center gap-2 text-rose-700 dark:text-rose-300">
                   <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  <span>Google Authentication Notice</span>
+                  <span>Google Authentication Configuration Required</span>
                 </div>
                 <p className="text-[11px] leading-relaxed text-rose-700 dark:text-rose-400">
                   {oauthError}
                 </p>
+
                 {oauthError.toLowerCase().includes('provider is not enabled') && (
-                  <div className="text-[10px] bg-white/70 dark:bg-black/30 p-2 rounded-lg font-mono text-slate-700 dark:text-slate-300 leading-normal">
-                    <strong>Admin Notice:</strong> Enable Google provider in Supabase Dashboard &rarr; Authentication &rarr; Providers &rarr; Google.
+                  <div className="text-[11px] bg-white/80 dark:bg-black/40 p-3 rounded-xl border border-rose-200 dark:border-rose-900/60 text-slate-700 dark:text-slate-300 space-y-2 leading-relaxed">
+                    <div className="font-bold text-slate-900 dark:text-white">
+                      🛠️ How to Enable Google OAuth in Supabase:
+                    </div>
+                    <ol className="list-decimal pl-4 space-y-1 text-[10.5px]">
+                      <li>
+                        Go to <a href="https://supabase.com/dashboard/project/lschluviltzsknptwgrz/auth/providers" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline font-bold">Supabase Dashboard &rarr; Authentication &rarr; Providers &rarr; Google</a>.
+                      </li>
+                      <li>Toggle <strong>Enable Google</strong> to ON.</li>
+                      <li>Enter your Google Cloud <strong>Client ID</strong> and <strong>Client Secret</strong>.</li>
+                      <li>Set Authorized Redirect URI in Google Cloud Console to:
+                        <code className="block mt-1 p-1 bg-slate-100 dark:bg-slate-800 rounded text-[10px] break-all select-all font-mono">
+                          https://lschluviltzsknptwgrz.supabase.co/auth/v1/callback
+                        </code>
+                      </li>
+                    </ol>
                   </div>
                 )}
+
+                {/* Instant Sandbox Bypass so testing is never blocked */}
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={handleTestModeBypass}
+                    className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                  >
+                    <UserCheck className="w-4 h-4" />
+                    <span>⚡ Unlock via Sandbox Bypass (Testing Only)</span>
+                  </button>
+                </div>
               </div>
             )}
 
