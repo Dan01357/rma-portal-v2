@@ -286,6 +286,19 @@ Each test scenario defines:
     3. Defect reason wraps cleanly across 2 lines (up to 560px width).
     4. Dashed cut line and footer instructions are crisp and legible.
 
+- [ ] **TC-PUB-13 (Optional Document Numbers & 10 Photo Max)**
+  * **Location**: Public Portal (`/`) -> Section 1 (Item Photos) & Section 2 (Commercial Document Numbers)
+  * **Action**:
+    1. Select multiple damaged product photos in Section 1 (up to 10 photos).
+    2. Leave Sales Invoice (SI) #, Delivery Receipt (DR) #, and Purchase Order (PO) # completely blank.
+    3. Fill in required reporter name, contact, and store branch.
+    4. Click "Submit Return Report".
+  * **Expected Behavior**:
+    1. Photo counter badge shows `{count}/10 photos` and allows snapping or uploading up to 10 photos.
+    2. Section 2 label displays `(Optional / Recommended)`.
+    3. Form submits successfully without requiring any commercial document numbers.
+    4. The generated RMA report is saved with `si_number = null`, `dr_number = null`, `po_number = null`.
+
 - [ ] **TC-PUB-09 (Uncatalogued Return Catalog Isolation)**
   * **Location**: Public Portal (`/`) -> Submission
   * **Action**: Submit an uncatalogued barcode return (e.g. barcode `999123`).
@@ -776,6 +789,20 @@ Each test scenario defines:
        - **Deselect All / Clear**: Clears selection state.
     2. The yellow/amber "Generate Claim" button is **excluded** from Select All, the top banner, and the selection toolbar to eliminate confusion and completely prevent doubling or re-generating vouchers for transactions that already have one.
     3. Debit claim generation is handled strictly individually per row via amber **"+ Debit Claim"** (for unassigned claims) or emerald **"RTV Voucher"** (for reviewing already logged claims).
+
+- [ ] **TC-RTV-08 (Supplier Hub Line-Item Isolation & Duplicate Elimination)**
+  * **Location**: Admin Portal -> Supplier Hub (RTV Claims) Tab
+  * **Action**:
+    1. Submit a multi-item batch manifest return with 3 distinct items.
+    2. Navigate to the Supplier Hub tab.
+    3. Inspect the table rows, Vendor dropdown, and debit claim actions.
+    4. Generate an RTV Debit Claim for an item.
+  * **Expected Behavior**:
+    1. Generic parent manifest rows (`Batch Return Manifest...`, `is_parent: true`) are strictly filtered out; only individual product line items are displayed.
+    2. Each line item appears exactly once with its true SKU, name, quantity, and unit price (zero duplicate rows).
+    3. Vendor / Supplier filter dropdown reflects real master vendors (e.g. Liwayway, Mondelez, Jentech, Savemore), never grouping unrelated items under a blank vendor.
+    4. When an RTV Debit Claim is generated, the item's lifecycle stage updates to `vendor_claimed` (or `under_inspection`), and an emerald badge `RTV Voucher Active` appears on the row.
+    5. In the printable voucher, "Prepared By (Logistics / Warehouse)" defaults cleanly to `currentUser?.name || 'Warehouse Staff'` without any role prefixes.
 
 - [ ] **TC-DEL-GD-01 (Google Drive Shared Drive Photo Deletion & Trash Fallback)**
   * **Location**: RMA Reports / Supplier Claims Delete Action

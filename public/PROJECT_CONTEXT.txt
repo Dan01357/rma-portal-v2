@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-06T01:26:47.361Z
+Generated At: 2026-11-06T03:04:07.568Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -2400,6 +2400,19 @@ Each test scenario defines:
     3. Defect reason wraps cleanly across 2 lines (up to 560px width).
     4. Dashed cut line and footer instructions are crisp and legible.
 
+- [ ] **TC-PUB-13 (Optional Document Numbers & 10 Photo Max)**
+  * **Location**: Public Portal (`/`) -> Section 1 (Item Photos) & Section 2 (Commercial Document Numbers)
+  * **Action**:
+    1. Select multiple damaged product photos in Section 1 (up to 10 photos).
+    2. Leave Sales Invoice (SI) #, Delivery Receipt (DR) #, and Purchase Order (PO) # completely blank.
+    3. Fill in required reporter name, contact, and store branch.
+    4. Click "Submit Return Report".
+  * **Expected Behavior**:
+    1. Photo counter badge shows `{count}/10 photos` and allows snapping or uploading up to 10 photos.
+    2. Section 2 label displays `(Optional / Recommended)`.
+    3. Form submits successfully without requiring any commercial document numbers.
+    4. The generated RMA report is saved with `si_number = null`, `dr_number = null`, `po_number = null`.
+
 - [ ] **TC-PUB-09 (Uncatalogued Return Catalog Isolation)**
   * **Location**: Public Portal (`/`) -> Submission
   * **Action**: Submit an uncatalogued barcode return (e.g. barcode `999123`).
@@ -2890,6 +2903,20 @@ Each test scenario defines:
        - **Deselect All / Clear**: Clears selection state.
     2. The yellow/amber "Generate Claim" button is **excluded** from Select All, the top banner, and the selection toolbar to eliminate confusion and completely prevent doubling or re-generating vouchers for transactions that already have one.
     3. Debit claim generation is handled strictly individually per row via amber **"+ Debit Claim"** (for unassigned claims) or emerald **"RTV Voucher"** (for reviewing already logged claims).
+
+- [ ] **TC-RTV-08 (Supplier Hub Line-Item Isolation & Duplicate Elimination)**
+  * **Location**: Admin Portal -> Supplier Hub (RTV Claims) Tab
+  * **Action**:
+    1. Submit a multi-item batch manifest return with 3 distinct items.
+    2. Navigate to the Supplier Hub tab.
+    3. Inspect the table rows, Vendor dropdown, and debit claim actions.
+    4. Generate an RTV Debit Claim for an item.
+  * **Expected Behavior**:
+    1. Generic parent manifest rows (`Batch Return Manifest...`, `is_parent: true`) are strictly filtered out; only individual product line items are displayed.
+    2. Each line item appears exactly once with its true SKU, name, quantity, and unit price (zero duplicate rows).
+    3. Vendor / Supplier filter dropdown reflects real master vendors (e.g. Liwayway, Mondelez, Jentech, Savemore), never grouping unrelated items under a blank vendor.
+    4. When an RTV Debit Claim is generated, the item's lifecycle stage updates to `vendor_claimed` (or `under_inspection`), and an emerald badge `RTV Voucher Active` appears on the row.
+    5. In the printable voucher, "Prepared By (Logistics / Warehouse)" defaults cleanly to `currentUser?.name || 'Warehouse Staff'` without any role prefixes.
 
 - [ ] **TC-DEL-GD-01 (Google Drive Shared Drive Photo Deletion & Trash Fallback)**
   * **Location**: RMA Reports / Supplier Claims Delete Action
@@ -5931,6 +5958,8 @@ export default async function handler(req, res) {
           if (!status && !queue) {
             query = query.not('status', 'in', '("scrapped","disposed","restocked","closed","resolved","rejected","deleted")');
           }
+        } else if (/rtv|return to vendor/i.test(cleanDisp)) {
+          query = query.or('disposition.ilike.%Return to Vendor%,disposition.ilike.%RTV%');
         } else {
           query = query.ilike('disposition', `%${cleanDisp}%`);
         }
@@ -5960,13 +5989,23 @@ export default async function handler(req, res) {
         });
       }
 
+      const enrichedData = (data || []).map(item => ({
+        ...item,
+        sku: (item.code && item.code !== item.barcode) ? item.code : (item.sku && item.sku !== item.barcode ? item.sku : null),
+        code: (item.code && item.code !== item.barcode) ? item.code : (item.sku && item.sku !== item.barcode ? item.sku : null),
+        supplier_name: item.supplier_name || 'Savemore',
+        price: Number(item.price_with_vat || item.price || 0),
+        warehouse_location: item.warehouse_location || null,
+        batch_lot_number: item.batch_lot_number || null
+      }));
+
       return sendJson(res, 200, {
         success: true,
         client: client.name,
         total: count || 0,
         limit: numLimit,
         offset: numOffset,
-        data: data || []
+        data: enrichedData
       });
     } catch (err) {
       console.error('[API v1 RMA GET] Server error:', err);
@@ -8969,6 +9008,8 @@ function formatLifecycleStage(status) {
       return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
     case 'rejected':
       return { label: '8- Rejected / Invalid Claim', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
+    case 'vendor_claimed':
+      return { label: 'RTV Claimed', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' };
     case 'pending_admin_details':
       return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
     default:
@@ -10472,17 +10513,17 @@ export default function App() {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
-    // Enforce Max 3 photos for Damaged Product
-    const availableSlots = 3 - photoFiles.length;
+    // Enforce Max 10 photos for Damaged Product
+    const availableSlots = 10 - photoFiles.length;
     if (availableSlots <= 0) {
-      showToast('Maximum of 3 damaged item photos allowed.', 'warning');
+      showToast('Maximum of 10 damaged item photos allowed.', 'warning');
       if (e.target) e.target.value = '';
       return;
     }
 
     const filesToProcess = files.slice(0, availableSlots);
     if (files.length > availableSlots) {
-      showToast(`Added ${availableSlots} photo(s). Maximum 3 photos allowed.`, 'info');
+      showToast(`Added ${availableSlots} photo(s). Maximum 10 photos allowed.`, 'info');
     }
 
     // Keep photos local in browser until final report submission (prevents orphan Google Drive uploads)
@@ -10753,12 +10794,6 @@ export default function App() {
     const cleanSi = siNumber.trim();
     const cleanDr = drNumber.trim();
     const cleanPo = poNumber.trim();
-
-    // At least one commercial document number (SI#, DR#, or PO#) is required
-    if (!cleanSi && !cleanDr && !cleanPo) {
-      showToast('Please provide at least one commercial document number: Sales Invoice (SI) #, Delivery Receipt (DR) #, or Purchase Order (PO) #.', 'warning');
-      return;
-    }
 
     if (!reporterName.trim() || !reporterContact.trim()) {
       showToast('Please provide your name and contact information.', 'warning');
@@ -11568,7 +11603,7 @@ export default function App() {
                         </span>
                       </span>
                       <span className="text-[10px] text-slate-400 font-bold">
-                        {photoFiles.length}/3 photos
+                        {photoFiles.length}/10 photos
                       </span>
                     </div>
 
@@ -11656,11 +11691,11 @@ export default function App() {
                           </div>
                         ))}
 
-                        {photoFiles.length < 3 && (
+                        {photoFiles.length < 10 && (
                           <label className="relative aspect-square rounded-xl border-2 border-dashed border-rose-300 dark:border-rose-700 hover:border-rose-500 bg-white dark:bg-slate-850 hover:bg-rose-50/50 flex flex-col items-center justify-center cursor-pointer transition-all active:scale-95 text-center group">
                             <Camera className="w-4 h-4 text-rose-600 dark:text-rose-400 group-hover:scale-110 transition-transform" />
                             <span className="text-[10px] font-black text-rose-700 dark:text-rose-300 mt-1">
-                              + Add ({photoFiles.length}/3)
+                              + Add ({photoFiles.length}/10)
                             </span>
                             <input
                               type="file"
@@ -11977,8 +12012,8 @@ export default function App() {
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                       <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5 flex-wrap">
                         <span>Commercial Document Numbers</span>
-                        <span className="text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/70 border border-rose-200 dark:border-rose-900/60 px-2 py-0.5 rounded-full lowercase first-letter:uppercase">
-                          * At least 1 required (SI#, DR#, or PO#)
+                        <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded-full lowercase first-letter:uppercase">
+                          (Optional / Recommended)
                         </span>
                       </label>
                       {(siNumber || drNumber || poNumber) && (
@@ -11989,7 +12024,7 @@ export default function App() {
                       )}
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Snap official paperwork above to auto-detect, or enter manually below. At least one document number is required.
+                      Snap official paperwork above to auto-detect, or enter manually below (Optional / Recommended).
                     </p>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -28906,6 +28941,14 @@ export default function QuickRMAActionModal({
                       </div>
                     </div>
 
+                    {/* Amber Outbound RTV Info Badge */}
+                    {Boolean(disposition && (disposition.includes('Return to Vendor') || disposition.includes('RTV'))) && (
+                      <div className="p-3 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-xl text-xs font-semibold text-amber-900 dark:text-amber-200 flex items-start gap-2 animate-in fade-in">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                        <span>📦 Outbound RTV: Goods are scheduled for return to master vendor. Inventory must be deducted upon vendor dispatch.</span>
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between pt-1">
                       <span className="text-[10px] text-slate-400">
                         Inspected by: <strong className="text-slate-700 dark:text-slate-300">{report?.inspected_by || verifiedAdmin?.name || 'Staff'}</strong>
@@ -33769,10 +33812,10 @@ export default function SupplierClaimsTab({
     const code = r.code || r.sku || matched?.code || matched?.sku || '';
 
     const rawSupplier = r.supplier_name || '';
-    const isPendingVendor = !rawSupplier || rawSupplier.toLowerCase().includes('pending') || rawSupplier.toLowerCase().includes('unassigned');
+    const isPendingVendor = !rawSupplier || rawSupplier.toLowerCase().includes('pending') || rawSupplier.toLowerCase().includes('unassigned') || rawSupplier.toLowerCase() === 'warehouse';
     const supplier = isPendingVendor
-      ? (matched?.supplier_name || rawSupplier || 'Pending Assignment')
-      : rawSupplier;
+      ? (matched?.supplier_name || (rawSupplier && rawSupplier.toLowerCase() !== 'warehouse' ? rawSupplier : 'Pending Assignment'))
+      : (rawSupplier === 'Warehouse' && matched?.supplier_name ? matched.supplier_name : rawSupplier);
 
     const qty = Number(r.quantity || 1);
     const price = Number(r.price_with_vat || r.price || matched?.price_with_vat || matched?.price || 0);
@@ -33803,14 +33846,25 @@ export default function SupplierClaimsTab({
     return () => { isMounted = false; };
   }, [reportsList]);
 
-  // Extract unique suppliers from reports
+  // Extract unique suppliers from reports & catalog
   const suppliers = useMemo(() => {
     const set = new Set();
     reportsList.forEach(r => {
+      if (r.is_parent || (r.name && String(r.name).toLowerCase().startsWith('batch return manifest'))) return;
       const res = resolveReportProduct(r);
-      const sup = res.supplier.trim();
-      if (sup) set.add(sup);
+      const sup = res.supplier?.trim();
+      if (sup && sup !== 'Pending Assignment' && sup !== 'Unassigned' && sup !== 'Warehouse') {
+        set.add(sup);
+      }
     });
+
+    (savedProductsList || []).forEach(p => {
+      const sup = (p.supplier_name || p.supplierName || '').trim();
+      if (sup && sup !== 'Pending Assignment' && sup !== 'Unassigned' && sup !== 'Warehouse') {
+        set.add(sup);
+      }
+    });
+
     return ['All', ...Array.from(set).sort()];
   }, [reportsList, savedProductsList]);
 
@@ -33831,13 +33885,85 @@ export default function SupplierClaimsTab({
 
   // Filter & sort reports suitable for Supplier Outbound / RTV
   const rtvCandidates = useMemo(() => {
-    let list = reportsList.filter(r => {
+    // 1. Gather all line-item candidates, unpacking parent manifests if needed
+    const rawItems = [];
+
+    // Identify which parent IDs have individual child reports already present in reportsList
+    const parentIdsWithDirectChildren = new Set();
+    reportsList.forEach(r => {
+      if (r.parent_rma_id) {
+        parentIdsWithDirectChildren.add(String(r.parent_rma_id));
+      }
+    });
+
+    reportsList.forEach(r => {
       // Must be supplier outbound OR have an RTV disposition
       const isSupplierCandidate = (r.rma_type === 'supplier_outbound') ||
         (r.disposition && (r.disposition.toLowerCase().includes('return to vendor') || r.disposition.toLowerCase().includes('rtv')));
 
-      if (!isSupplierCandidate) return false;
+      if (!isSupplierCandidate) return;
 
+      const isParentManifest = Boolean(
+        r.is_parent ||
+        (Number(r.total_items) > 1 && String(r.name || '').toLowerCase().startsWith('batch return manifest')) ||
+        String(r.name || '').toLowerCase().startsWith('batch return manifest')
+      );
+
+      // If it is a generic parent manifest container:
+      if (isParentManifest) {
+        // If its child rows already exist in reportsList, completely skip the parent container
+        if (parentIdsWithDirectChildren.has(String(r.id))) {
+          return;
+        }
+
+        // If child rows are not separate rows in reportsList, unpack r.items into individual line items
+        if (Array.isArray(r.items) && r.items.length > 0) {
+          r.items.forEach((childIt, idx) => {
+            rawItems.push({
+              ...r,
+              id: `${r.id || r.rma_number}_item_${childIt.barcode || idx}`,
+              child_id: childIt.id || idx,
+              barcode: childIt.barcode || r.barcode,
+              code: (childIt.code && childIt.code !== childIt.barcode) ? childIt.code : (childIt.sku && childIt.sku !== childIt.barcode ? childIt.sku : ''),
+              sku: (childIt.sku && childIt.sku !== childIt.barcode) ? childIt.sku : (childIt.code && childIt.code !== childIt.barcode ? childIt.code : ''),
+              name: childIt.name || childIt.productName || 'Line Item',
+              quantity: Number(childIt.quantity) || 1,
+              unit_name: childIt.unit_name || childIt.unit || r.unit_name || 'pc',
+              price: Number(childIt.price_with_vat || childIt.price || 0),
+              price_with_vat: Number(childIt.price_with_vat || childIt.price || 0),
+              supplier_name: childIt.supplier_name || r.supplier_name,
+              reason: childIt.reason || r.reason,
+              photos: Array.isArray(childIt.photos) && childIt.photos.length > 0 ? childIt.photos : r.photos,
+              is_parent: false,
+              is_manifest_child: true
+            });
+          });
+          return;
+        }
+        // If empty parent manifest, skip
+        return;
+      }
+
+      // Single item or child line item
+      rawItems.push(r);
+    });
+
+    // 2. Eliminate duplicate rows: ensure each unique RMA line item appears exactly once
+    const dedupedItems = [];
+    const seenKeys = new Set();
+    rawItems.forEach(item => {
+      const uniqueKey = item.parent_rma_id 
+        ? `${item.rma_number}_${item.barcode}_${item.id || item.child_id}`
+        : (item.id ? String(item.id) : `${item.rma_number}_${item.barcode}`);
+
+      if (!seenKeys.has(uniqueKey)) {
+        seenKeys.add(uniqueKey);
+        dedupedItems.push(item);
+      }
+    });
+
+    // 3. Filter by Supplier, Disposition, and Search
+    let list = dedupedItems.filter(r => {
       const res = resolveReportProduct(r);
 
       const matchesSupplier = selectedSupplier === 'All' || 
@@ -33956,14 +34082,11 @@ export default function SupplierClaimsTab({
     setSelectedRmaIds(new Set());
   };
 
-  // Helper to extract user clean name (roles removed, Danilo Alvaro excluded as requested)
+  // Helper to extract user clean name (roles removed)
   const getCleanUserName = (user) => {
     const raw = user?.name || 'Warehouse Staff';
-    let clean = raw.replace(/\s*\([^)]*\)/g, '').trim();
-    if (!clean || clean.toLowerCase().includes('danilo alvaro')) {
-      clean = 'Warehouse Staff';
-    }
-    return clean;
+    const clean = raw.replace(/\s*\([^)]*\)/g, '').trim();
+    return clean || 'Warehouse Staff';
   };
 
   // Helper to safely extract photo URLs
@@ -34734,6 +34857,14 @@ export default function SupplierClaimsTab({
                             </a>
                           )}
                         </div>
+                        {existingClaim && (
+                          <div className="mt-1">
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 inline-flex items-center gap-0.5 shadow-2xs" title={`Official RTV Voucher Active: ${existingClaim.claimNumber || existingClaim.claim_number}`}>
+                              <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
+                              <span>RTV Voucher Active</span>
+                            </span>
+                          </div>
+                        )}
                       </td>
 
                       {/* Vendor / Supplier & Warehouse Bin */}
@@ -34854,7 +34985,7 @@ export default function SupplierClaimsTab({
                               title={`View Official RTV Debit Claim Voucher: ${existingClaim.claimNumber || existingClaim.claim_number}`}
                             >
                               <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                              <span>RTV Voucher</span>
+                              <span>RTV Voucher Active</span>
                             </button>
                           ) : !isClaimable ? (
                             <button
@@ -42762,6 +42893,7 @@ export const supplierClaimService = {
           await supabase
             .from('rma_reports')
             .update({
+              status: 'vendor_claimed',
               disposition: 'Return to Vendor (RTV)',
               audit_trail: updatedAudit,
               notes: updatedNotes

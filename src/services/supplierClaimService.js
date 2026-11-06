@@ -235,6 +235,7 @@ export const supplierClaimService = {
           await supabase
             .from('rma_reports')
             .update({
+              status: 'vendor_claimed',
               disposition: 'Return to Vendor (RTV)',
               audit_trail: updatedAudit,
               notes: updatedNotes

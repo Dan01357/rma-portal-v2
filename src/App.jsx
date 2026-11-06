@@ -142,6 +142,8 @@ function formatLifecycleStage(status) {
       return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
     case 'rejected':
       return { label: '8- Rejected / Invalid Claim', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
+    case 'vendor_claimed':
+      return { label: 'RTV Claimed', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' };
     case 'pending_admin_details':
       return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
     default:
@@ -1645,17 +1647,17 @@ export default function App() {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
-    // Enforce Max 3 photos for Damaged Product
-    const availableSlots = 3 - photoFiles.length;
+    // Enforce Max 10 photos for Damaged Product
+    const availableSlots = 10 - photoFiles.length;
     if (availableSlots <= 0) {
-      showToast('Maximum of 3 damaged item photos allowed.', 'warning');
+      showToast('Maximum of 10 damaged item photos allowed.', 'warning');
       if (e.target) e.target.value = '';
       return;
     }
 
     const filesToProcess = files.slice(0, availableSlots);
     if (files.length > availableSlots) {
-      showToast(`Added ${availableSlots} photo(s). Maximum 3 photos allowed.`, 'info');
+      showToast(`Added ${availableSlots} photo(s). Maximum 10 photos allowed.`, 'info');
     }
 
     // Keep photos local in browser until final report submission (prevents orphan Google Drive uploads)
@@ -1926,12 +1928,6 @@ export default function App() {
     const cleanSi = siNumber.trim();
     const cleanDr = drNumber.trim();
     const cleanPo = poNumber.trim();
-
-    // At least one commercial document number (SI#, DR#, or PO#) is required
-    if (!cleanSi && !cleanDr && !cleanPo) {
-      showToast('Please provide at least one commercial document number: Sales Invoice (SI) #, Delivery Receipt (DR) #, or Purchase Order (PO) #.', 'warning');
-      return;
-    }
 
     if (!reporterName.trim() || !reporterContact.trim()) {
       showToast('Please provide your name and contact information.', 'warning');
@@ -2741,7 +2737,7 @@ export default function App() {
                         </span>
                       </span>
                       <span className="text-[10px] text-slate-400 font-bold">
-                        {photoFiles.length}/3 photos
+                        {photoFiles.length}/10 photos
                       </span>
                     </div>
 
@@ -2829,11 +2825,11 @@ export default function App() {
                           </div>
                         ))}
 
-                        {photoFiles.length < 3 && (
+                        {photoFiles.length < 10 && (
                           <label className="relative aspect-square rounded-xl border-2 border-dashed border-rose-300 dark:border-rose-700 hover:border-rose-500 bg-white dark:bg-slate-850 hover:bg-rose-50/50 flex flex-col items-center justify-center cursor-pointer transition-all active:scale-95 text-center group">
                             <Camera className="w-4 h-4 text-rose-600 dark:text-rose-400 group-hover:scale-110 transition-transform" />
                             <span className="text-[10px] font-black text-rose-700 dark:text-rose-300 mt-1">
-                              + Add ({photoFiles.length}/3)
+                              + Add ({photoFiles.length}/10)
                             </span>
                             <input
                               type="file"
@@ -3150,8 +3146,8 @@ export default function App() {
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                       <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5 flex-wrap">
                         <span>Commercial Document Numbers</span>
-                        <span className="text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/70 border border-rose-200 dark:border-rose-900/60 px-2 py-0.5 rounded-full lowercase first-letter:uppercase">
-                          * At least 1 required (SI#, DR#, or PO#)
+                        <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded-full lowercase first-letter:uppercase">
+                          (Optional / Recommended)
                         </span>
                       </label>
                       {(siNumber || drNumber || poNumber) && (
@@ -3162,7 +3158,7 @@ export default function App() {
                       )}
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Snap official paperwork above to auto-detect, or enter manually below. At least one document number is required.
+                      Snap official paperwork above to auto-detect, or enter manually below (Optional / Recommended).
                     </p>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">

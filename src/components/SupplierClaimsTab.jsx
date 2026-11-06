@@ -80,10 +80,10 @@ export default function SupplierClaimsTab({
     const code = r.code || r.sku || matched?.code || matched?.sku || '';
 
     const rawSupplier = r.supplier_name || '';
-    const isPendingVendor = !rawSupplier || rawSupplier.toLowerCase().includes('pending') || rawSupplier.toLowerCase().includes('unassigned');
+    const isPendingVendor = !rawSupplier || rawSupplier.toLowerCase().includes('pending') || rawSupplier.toLowerCase().includes('unassigned') || rawSupplier.toLowerCase() === 'warehouse';
     const supplier = isPendingVendor
-      ? (matched?.supplier_name || rawSupplier || 'Pending Assignment')
-      : rawSupplier;
+      ? (matched?.supplier_name || (rawSupplier && rawSupplier.toLowerCase() !== 'warehouse' ? rawSupplier : 'Pending Assignment'))
+      : (rawSupplier === 'Warehouse' && matched?.supplier_name ? matched.supplier_name : rawSupplier);
 
     const qty = Number(r.quantity || 1);
     const price = Number(r.price_with_vat || r.price || matched?.price_with_vat || matched?.price || 0);
@@ -114,14 +114,25 @@ export default function SupplierClaimsTab({
     return () => { isMounted = false; };
   }, [reportsList]);
 
-  // Extract unique suppliers from reports
+  // Extract unique suppliers from reports & catalog
   const suppliers = useMemo(() => {
     const set = new Set();
     reportsList.forEach(r => {
+      if (r.is_parent || (r.name && String(r.name).toLowerCase().startsWith('batch return manifest'))) return;
       const res = resolveReportProduct(r);
-      const sup = res.supplier.trim();
-      if (sup) set.add(sup);
+      const sup = res.supplier?.trim();
+      if (sup && sup !== 'Pending Assignment' && sup !== 'Unassigned' && sup !== 'Warehouse') {
+        set.add(sup);
+      }
     });
+
+    (savedProductsList || []).forEach(p => {
+      const sup = (p.supplier_name || p.supplierName || '').trim();
+      if (sup && sup !== 'Pending Assignment' && sup !== 'Unassigned' && sup !== 'Warehouse') {
+        set.add(sup);
+      }
+    });
+
     return ['All', ...Array.from(set).sort()];
   }, [reportsList, savedProductsList]);
 
@@ -142,13 +153,85 @@ export default function SupplierClaimsTab({
 
   // Filter & sort reports suitable for Supplier Outbound / RTV
   const rtvCandidates = useMemo(() => {
-    let list = reportsList.filter(r => {
+    // 1. Gather all line-item candidates, unpacking parent manifests if needed
+    const rawItems = [];
+
+    // Identify which parent IDs have individual child reports already present in reportsList
+    const parentIdsWithDirectChildren = new Set();
+    reportsList.forEach(r => {
+      if (r.parent_rma_id) {
+        parentIdsWithDirectChildren.add(String(r.parent_rma_id));
+      }
+    });
+
+    reportsList.forEach(r => {
       // Must be supplier outbound OR have an RTV disposition
       const isSupplierCandidate = (r.rma_type === 'supplier_outbound') ||
         (r.disposition && (r.disposition.toLowerCase().includes('return to vendor') || r.disposition.toLowerCase().includes('rtv')));
 
-      if (!isSupplierCandidate) return false;
+      if (!isSupplierCandidate) return;
 
+      const isParentManifest = Boolean(
+        r.is_parent ||
+        (Number(r.total_items) > 1 && String(r.name || '').toLowerCase().startsWith('batch return manifest')) ||
+        String(r.name || '').toLowerCase().startsWith('batch return manifest')
+      );
+
+      // If it is a generic parent manifest container:
+      if (isParentManifest) {
+        // If its child rows already exist in reportsList, completely skip the parent container
+        if (parentIdsWithDirectChildren.has(String(r.id))) {
+          return;
+        }
+
+        // If child rows are not separate rows in reportsList, unpack r.items into individual line items
+        if (Array.isArray(r.items) && r.items.length > 0) {
+          r.items.forEach((childIt, idx) => {
+            rawItems.push({
+              ...r,
+              id: `${r.id || r.rma_number}_item_${childIt.barcode || idx}`,
+              child_id: childIt.id || idx,
+              barcode: childIt.barcode || r.barcode,
+              code: (childIt.code && childIt.code !== childIt.barcode) ? childIt.code : (childIt.sku && childIt.sku !== childIt.barcode ? childIt.sku : ''),
+              sku: (childIt.sku && childIt.sku !== childIt.barcode) ? childIt.sku : (childIt.code && childIt.code !== childIt.barcode ? childIt.code : ''),
+              name: childIt.name || childIt.productName || 'Line Item',
+              quantity: Number(childIt.quantity) || 1,
+              unit_name: childIt.unit_name || childIt.unit || r.unit_name || 'pc',
+              price: Number(childIt.price_with_vat || childIt.price || 0),
+              price_with_vat: Number(childIt.price_with_vat || childIt.price || 0),
+              supplier_name: childIt.supplier_name || r.supplier_name,
+              reason: childIt.reason || r.reason,
+              photos: Array.isArray(childIt.photos) && childIt.photos.length > 0 ? childIt.photos : r.photos,
+              is_parent: false,
+              is_manifest_child: true
+            });
+          });
+          return;
+        }
+        // If empty parent manifest, skip
+        return;
+      }
+
+      // Single item or child line item
+      rawItems.push(r);
+    });
+
+    // 2. Eliminate duplicate rows: ensure each unique RMA line item appears exactly once
+    const dedupedItems = [];
+    const seenKeys = new Set();
+    rawItems.forEach(item => {
+      const uniqueKey = item.parent_rma_id 
+        ? `${item.rma_number}_${item.barcode}_${item.id || item.child_id}`
+        : (item.id ? String(item.id) : `${item.rma_number}_${item.barcode}`);
+
+      if (!seenKeys.has(uniqueKey)) {
+        seenKeys.add(uniqueKey);
+        dedupedItems.push(item);
+      }
+    });
+
+    // 3. Filter by Supplier, Disposition, and Search
+    let list = dedupedItems.filter(r => {
       const res = resolveReportProduct(r);
 
       const matchesSupplier = selectedSupplier === 'All' || 
@@ -267,14 +350,11 @@ export default function SupplierClaimsTab({
     setSelectedRmaIds(new Set());
   };
 
-  // Helper to extract user clean name (roles removed, Danilo Alvaro excluded as requested)
+  // Helper to extract user clean name (roles removed)
   const getCleanUserName = (user) => {
     const raw = user?.name || 'Warehouse Staff';
-    let clean = raw.replace(/\s*\([^)]*\)/g, '').trim();
-    if (!clean || clean.toLowerCase().includes('danilo alvaro')) {
-      clean = 'Warehouse Staff';
-    }
-    return clean;
+    const clean = raw.replace(/\s*\([^)]*\)/g, '').trim();
+    return clean || 'Warehouse Staff';
   };
 
   // Helper to safely extract photo URLs
@@ -1045,6 +1125,14 @@ export default function SupplierClaimsTab({
                             </a>
                           )}
                         </div>
+                        {existingClaim && (
+                          <div className="mt-1">
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 inline-flex items-center gap-0.5 shadow-2xs" title={`Official RTV Voucher Active: ${existingClaim.claimNumber || existingClaim.claim_number}`}>
+                              <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
+                              <span>RTV Voucher Active</span>
+                            </span>
+                          </div>
+                        )}
                       </td>
 
                       {/* Vendor / Supplier & Warehouse Bin */}
@@ -1165,7 +1253,7 @@ export default function SupplierClaimsTab({
                               title={`View Official RTV Debit Claim Voucher: ${existingClaim.claimNumber || existingClaim.claim_number}`}
                             >
                               <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                              <span>RTV Voucher</span>
+                              <span>RTV Voucher Active</span>
                             </button>
                           ) : !isClaimable ? (
                             <button

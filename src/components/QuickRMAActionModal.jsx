@@ -2416,6 +2416,14 @@ export default function QuickRMAActionModal({
                       </div>
                     </div>
 
+                    {/* Amber Outbound RTV Info Badge */}
+                    {Boolean(disposition && (disposition.includes('Return to Vendor') || disposition.includes('RTV'))) && (
+                      <div className="p-3 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-xl text-xs font-semibold text-amber-900 dark:text-amber-200 flex items-start gap-2 animate-in fade-in">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                        <span>📦 Outbound RTV: Goods are scheduled for return to master vendor. Inventory must be deducted upon vendor dispatch.</span>
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between pt-1">
                       <span className="text-[10px] text-slate-400">
                         Inspected by: <strong className="text-slate-700 dark:text-slate-300">{report?.inspected_by || verifiedAdmin?.name || 'Staff'}</strong>

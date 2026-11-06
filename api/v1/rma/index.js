@@ -82,6 +82,8 @@ export default async function handler(req, res) {
           if (!status && !queue) {
             query = query.not('status', 'in', '("scrapped","disposed","restocked","closed","resolved","rejected","deleted")');
           }
+        } else if (/rtv|return to vendor/i.test(cleanDisp)) {
+          query = query.or('disposition.ilike.%Return to Vendor%,disposition.ilike.%RTV%');
         } else {
           query = query.ilike('disposition', `%${cleanDisp}%`);
         }
@@ -111,13 +113,23 @@ export default async function handler(req, res) {
         });
       }
 
+      const enrichedData = (data || []).map(item => ({
+        ...item,
+        sku: (item.code && item.code !== item.barcode) ? item.code : (item.sku && item.sku !== item.barcode ? item.sku : null),
+        code: (item.code && item.code !== item.barcode) ? item.code : (item.sku && item.sku !== item.barcode ? item.sku : null),
+        supplier_name: item.supplier_name || 'Savemore',
+        price: Number(item.price_with_vat || item.price || 0),
+        warehouse_location: item.warehouse_location || null,
+        batch_lot_number: item.batch_lot_number || null
+      }));
+
       return sendJson(res, 200, {
         success: true,
         client: client.name,
         total: count || 0,
         limit: numLimit,
         offset: numOffset,
-        data: data || []
+        data: enrichedData
       });
     } catch (err) {
       console.error('[API v1 RMA GET] Server error:', err);
