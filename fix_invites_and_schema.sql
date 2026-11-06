@@ -126,3 +126,4 @@ BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.rma_invites;
   END IF;
 END $$;
+

@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-06T09:02:51.599Z
+Generated At: 2026-11-06T09:30:30.500Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -1141,6 +1141,7 @@ BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.rma_invites;
   END IF;
 END $$;
+
 
 --- END FILE: fix_invites_and_schema.sql ---
 
@@ -2329,14 +2330,24 @@ Each test scenario defines:
     6. Store/Branch is auto-populated if included in the invite.
     7. Clicking `[ Lock Device ]` clears the gate session, calls `supabase.auth.signOut({ scope: 'local' })`, and re-locks the station.
 
-- [ ] **TC-GATE-05 (Admin Customer RMA Invites Generator)**
-  * **Location**: Admin Dashboard -> **"🎫 Customer RMA Invites"** Modal
+- [ ] **TC-GATE-05A (Customer Return vs Supplier RTV Invite Creation)**
+  * **Location**: Admin Dashboard -> **"🎫 Customer & Supplier RMA Invites"** Modal
   * **Action**:
-    1. Input Customer Google Email (`daniloalvaro031717@gmail.com`).
-    2. Input Store / Branch Name (`Savemore Market Taguig`).
-    3. Set Expiration: Choose preset chips (`15m`, `2h`, `12h`, `24h`, `2d`, `7d`) or input custom number + unit (`minutes`, `hours`, `days`).
-    4. Click **"Generate Secure Return Link"**.
-  * **Expected Behavior**: Generates cryptographic token `inv_...`. Saves record to Supabase `rma_invites` table with `rma_settings` fallback. Displays 1-click **"Copy Link"** and **"📧 Send Return Link to Customer Email"** buttons.
+    1. Select stream toggle: `[ 📥 Customer Return Invite ]` vs `[ 📤 Supplier RTV Invite ]`.
+    2. For Customer Return: Enter Customer Google Email and Store / Supermarket Branch Location (`Savemore Taguig`).
+    3. For Supplier RTV: Enter Supplier / Vendor Representative Email and Master Supplier / Vendor Name (`Liwayway Marketing`).
+    4. Set Expiration: Choose preset chips (`15m`, `2h`, `12h`, `24h`, `2d`, `7d`) or input custom number + unit (`minutes`, `hours`, `days`).
+    5. Click **"Generate Customer Return Invite"** or **"Generate Supplier RTV Invite"**.
+  * **Expected Behavior**: Generates cryptographic token `inv_...`. Saves record to Supabase `rma_invites` table (`stream_type: customer_inbound | supplier_outbound`) with `rma_settings` fallback. Displays 1-click **"Copy Private Link"** and **"📧 Send Invite Email"** buttons with stream-tailored email templates.
+
+- [ ] **TC-GATE-05B (Intake Stream Lock & Automatic Field ReadOnly Guard)**
+  * **Location**: Intake Portal (`/intake?token=inv_...`)
+  * **Action**: Authenticate via matching Google account for a Customer Return vs Supplier RTV invite.
+  * **Expected Behavior**:
+    1. For `customer_inbound`: Section 3 is labeled *"3. Store / Branch Location *"*, locked to the invite's branch name, and marked `readOnly` with badge `Locked via Customer Invite`.
+    2. For `supplier_outbound`: Section 3 is labeled *"3. Master Supplier / Vendor Name *"*, locked to the master supplier name, and marked `readOnly` with purple badge `Locked via Supplier RTV Invite`.
+    3. Section 4 (Reporter Contact) is permanently locked to the authenticated Google email as `readOnly` with badge `✓ Verified Google Identity`.
+    4. Submitting the RMA assigns the ticket's `rma_type` to match the invite stream (`customer_inbound` vs `supplier_outbound`).
 
 - [ ] **TC-GATE-06 (QA Sandbox Test Mode Bypass)**
   * **Location**: Gatekeeper Modal when `isTestMode: true`
@@ -9396,8 +9407,9 @@ export default function App() {
     if (gateSession?.authorized_email) {
       setReporterContact(gateSession.authorized_email);
     }
-    if (gateSession?.store_branch && !storeBranch) {
-      setStoreBranch(gateSession.store_branch);
+    const resolvedEntity = gateSession?.entity_name || gateSession?.store_branch;
+    if (resolvedEntity) {
+      setStoreBranch(resolvedEntity);
     }
   }, [gateSession]);
 
@@ -10975,8 +10987,8 @@ export default function App() {
       localStorage.setItem('rma_reporter_contact', effectiveContact);
     } catch {}
 
-    // 2. Determine RMA Type based on station Gatekeeper profile (internal warehouse vs external customer)
-    const determinedRmaType = (gateSession?.type === 'internal_warehouse') ? 'supplier_outbound' : 'customer_inbound';
+    // 2. Determine RMA Type based on station Gatekeeper profile (internal warehouse vs external customer / supplier invite)
+    const determinedRmaType = (gateSession?.stream_type === 'supplier_outbound' || gateSession?.type === 'internal_warehouse') ? 'supplier_outbound' : 'customer_inbound';
 
     // 3. Generate ONE unique RMA Number for the batch ticket
     const rmaNumber = catalogService.generateRMANumber(recentReportsList);
@@ -12245,14 +12257,27 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 3. STORE / BRANCH LOCATION */}
+                {/* 3. STORE / BRANCH OR SUPPLIER LOCATION */}
                 <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                       <Building className="w-4 h-4 text-blue-600" />
-                      <span>3. Store / Branch Location *</span>
+                      <span>
+                        {gateSession?.stream_type === 'supplier_outbound'
+                          ? '3. Master Supplier / Vendor Name *'
+                          : '3. Store / Branch Location *'}
+                      </span>
                     </label>
-                    {storeBranch && paperworkMetadata?.store_branch ? (
+                    {(gateSession?.entity_name || gateSession?.store_branch) ? (
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+                        gateSession?.stream_type === 'supplier_outbound'
+                          ? 'text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 border-purple-200 dark:border-purple-800'
+                          : 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800'
+                      }`}>
+                        <CheckCircle className="w-3 h-3" />
+                        <span>Locked via {gateSession?.stream_type === 'supplier_outbound' ? 'Supplier RTV' : 'Customer'} Invite</span>
+                      </span>
+                    ) : storeBranch && paperworkMetadata?.store_branch ? (
                       <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                         <Sparkles className="w-3 h-3" />
                         Auto-filled from Paperwork
@@ -12267,11 +12292,24 @@ export default function App() {
                       type="text"
                       required
                       value={storeBranch}
-                      onChange={(e) => setStoreBranch(e.target.value)}
-                      placeholder="e.g., Savemore Taguig, Puregold Cubao, or Dock Bay 4 (or auto-filled from DR)"
-                      className="w-full px-3.5 py-3 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 focus:border-blue-600 dark:focus:border-blue-500 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-2xs transition-all"
+                      onChange={(e) => {
+                        if (!gateSession?.entity_name && !gateSession?.store_branch) {
+                          setStoreBranch(e.target.value);
+                        }
+                      }}
+                      readOnly={Boolean(gateSession?.entity_name || gateSession?.store_branch)}
+                      placeholder={
+                        gateSession?.stream_type === 'supplier_outbound'
+                          ? 'e.g., Liwayway Marketing, Mondelez, Universal Robina'
+                          : 'e.g., Savemore Taguig, Puregold Cubao, or Dock Bay 4 (or auto-filled from DR)'
+                      }
+                      className={`w-full px-3.5 py-3 border-2 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none shadow-2xs transition-all ${
+                        (gateSession?.entity_name || gateSession?.store_branch)
+                          ? 'bg-slate-100 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700 cursor-not-allowed text-slate-700 dark:text-slate-300'
+                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20'
+                      }`}
                     />
-                    {storeBranch && (
+                    {storeBranch && !gateSession?.entity_name && !gateSession?.store_branch && (
                       <button
                         type="button"
                         onClick={() => setStoreBranch('')}
@@ -12283,7 +12321,9 @@ export default function App() {
                     )}
                   </div>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                    Type your store branch or let Gemini Flash detect it automatically from the attached receipt / invoice.
+                    {gateSession?.stream_type === 'supplier_outbound'
+                      ? 'Authorized supplier organization handling return-to-vendor logistics.'
+                      : 'Type your store branch or let Gemini Flash detect it automatically from the attached receipt / invoice.'}
                   </p>
                 </div>
 
@@ -14955,8 +14995,9 @@ export default function App() {
           if (session?.authorized_email) {
             setReporterContact(session.authorized_email);
           }
-          if (session?.store_branch && !storeBranch) {
-            setStoreBranch(session.store_branch);
+          const entity = session?.entity_name || session?.store_branch;
+          if (entity) {
+            setStoreBranch(entity);
           }
           showToast(`Portal Unlocked: ${session.profileName || session.authorized_email}`, 'success');
         }}
@@ -18498,12 +18539,13 @@ import {
   ShieldCheck, 
   AlertCircle, 
   RefreshCw, 
-  ExternalLink,
-  Plus,
-  Ticket
+  Plus, 
+  Ticket,
+  Truck,
+  Store,
+  Filter
 } from 'lucide-react';
 import { inviteService, formatRemainingCountdown } from '../services/inviteService';
-import { formatMilitaryDateTime } from '../utils/exportCsv';
 
 const PRESET_EXPIRIES = [
   { label: '15 Mins', num: 15, unit: 'minutes' },
@@ -18520,12 +18562,18 @@ const PRESET_EXPIRIES = [
 export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }) {
   const [invites, setInvites] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Stream Type Toggle: 'customer_inbound' (Customer Return) vs 'supplier_outbound' (Supplier RTV)
+  const [streamType, setStreamType] = useState('customer_inbound');
   const [authorizedEmail, setAuthorizedEmail] = useState('');
-  const [storeBranch, setStoreBranch] = useState('');
+  const [entityName, setEntityName] = useState('');
   
   // Customizable expiration limit (input number + unit: minutes, hours, days)
   const [expiryNumber, setExpiryNumber] = useState(24);
   const [expiryUnit, setExpiryUnit] = useState('hours');
+
+  // Filter for the invites table
+  const [streamFilter, setStreamFilter] = useState('all'); // 'all' | 'customer_inbound' | 'supplier_outbound'
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedInvite, setGeneratedInvite] = useState(null);
@@ -18574,7 +18622,11 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   const handleGenerate = async (e) => {
     e.preventDefault();
     if (!authorizedEmail.trim()) {
-      setErrorMessage('Please enter the customer / reporter email.');
+      setErrorMessage(
+        streamType === 'supplier_outbound'
+          ? 'Please enter the authorized supplier / vendor representative email.'
+          : 'Please enter the authorized customer / reporter email.'
+      );
       return;
     }
 
@@ -18583,16 +18635,22 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     try {
       const createdBy = currentUser?.name || 'Pingcon Staff';
       const newInv = await inviteService.createInvite({
+        streamType,
         authorizedEmail: authorizedEmail.trim(),
-        storeBranch: storeBranch.trim(),
+        entityName: entityName.trim(),
+        storeBranch: entityName.trim(),
         durationValue: expiryNumber,
         durationUnit: expiryUnit,
         createdBy
       });
       setGeneratedInvite(newInv);
       setAuthorizedEmail('');
-      setStoreBranch('');
-      showToast('Customer RMA Invite generated successfully!');
+      setEntityName('');
+      showToast(
+        streamType === 'supplier_outbound'
+          ? 'Supplier RTV Invite generated successfully!'
+          : 'Customer RMA Return Invite generated successfully!'
+      );
       loadInvites();
     } catch (err) {
       setErrorMessage(err.message || 'Failed to generate invite.');
@@ -18606,7 +18664,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     const link = `${origin}/intake?token=${encodeURIComponent(token)}`;
     navigator.clipboard.writeText(link);
     setCopiedToken(token);
-    showToast('Link copied to clipboard!');
+    showToast('Secure link copied to clipboard!');
     setTimeout(() => setCopiedToken(null), 2500);
   };
 
@@ -18623,7 +18681,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   };
 
   const handleRevoke = async (token) => {
-    if (!window.confirm('Are you sure you want to revoke this customer return link? Access will be blocked immediately.')) {
+    if (!window.confirm('Are you sure you want to revoke this authorization link? Access will be blocked immediately.')) {
       return;
     }
     try {
@@ -18637,6 +18695,19 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       alert(`Failed to revoke invite: ${err.message}`);
     }
   };
+
+  const filteredInvites = useMemo(() => {
+    if (streamFilter === 'all') return invites;
+    return invites.filter(i => (i.stream_type || 'customer_inbound') === streamFilter);
+  }, [invites, streamFilter]);
+
+  const customerCount = useMemo(() => {
+    return invites.filter(i => (i.stream_type || 'customer_inbound') === 'customer_inbound').length;
+  }, [invites]);
+
+  const supplierCount = useMemo(() => {
+    return invites.filter(i => i.stream_type === 'supplier_outbound').length;
+  }, [invites]);
 
   if (!isOpen) return null;
 
@@ -18653,14 +18724,14 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                  Customer RMA Invites
+                  Customer & Supplier RMA Invites
                 </h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300">
                   Google Identity Lock
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Generate private return links tied strictly to authorized customer Google accounts.
+                Generate private return links tied strictly to authorized Google accounts.
               </p>
             </div>
           </div>
@@ -18692,12 +18763,61 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
             </div>
           )}
 
+          {/* Stream Type Selector Toggle */}
+          <div className="flex p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl gap-2 border border-slate-200 dark:border-slate-700">
+            <button
+              type="button"
+              onClick={() => {
+                setStreamType('customer_inbound');
+                setErrorMessage(null);
+              }}
+              className={`flex-1 py-3 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                streamType === 'customer_inbound'
+                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-md border border-slate-200 dark:border-slate-700 scale-[1.01]'
+                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Store className="w-4 h-4" />
+              <span>📥 Customer Return Invite</span>
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300">
+                Inbound
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setStreamType('supplier_outbound');
+                setErrorMessage(null);
+              }}
+              className={`flex-1 py-3 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                streamType === 'supplier_outbound'
+                  ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-md border border-slate-200 dark:border-slate-700 scale-[1.01]'
+                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Truck className="w-4 h-4" />
+              <span>📤 Supplier RTV Invite</span>
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300">
+                Outbound RTV
+              </span>
+            </button>
+          </div>
+
           {/* Invite Generator Form Card */}
-          <form onSubmit={handleGenerate} className="p-4 sm:p-5 bg-slate-50/80 dark:bg-slate-800/40 border-2 border-slate-200 dark:border-slate-800 rounded-3xl space-y-4 shadow-xs">
+          <form onSubmit={handleGenerate} className={`p-4 sm:p-5 rounded-3xl space-y-4 shadow-xs border-2 ${
+            streamType === 'supplier_outbound'
+              ? 'bg-purple-50/40 dark:bg-purple-950/20 border-purple-200 dark:border-purple-900/60'
+              : 'bg-slate-50/80 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800'
+          }`}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <span className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                <Plus className="w-4 h-4 text-blue-600" />
-                <span>Create New Customer Return Invite</span>
+                <Plus className={`w-4 h-4 ${streamType === 'supplier_outbound' ? 'text-purple-600' : 'text-blue-600'}`} />
+                <span>
+                  {streamType === 'supplier_outbound'
+                    ? 'Create New Supplier RTV Invite'
+                    : 'Create New Customer Return Invite'}
+                </span>
               </span>
               <span className="text-[10px] text-slate-500 font-bold">
                 Anti-Hacker: Forwarding to unauthorized accounts is strictly blocked
@@ -18705,10 +18825,12 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Customer Email */}
+              {/* Authorized Google Email */}
               <div className="sm:col-span-1 space-y-1">
                 <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                  Customer Google Email *
+                  {streamType === 'supplier_outbound'
+                    ? 'Authorized Supplier / Vendor Representative Email *'
+                    : 'Authorized Customer Google Email *'}
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -18717,27 +18839,48 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                     required
                     value={authorizedEmail}
                     onChange={(e) => setAuthorizedEmail(e.target.value)}
-                    placeholder="e.g. daniloalvaro031717@gmail.com"
+                    placeholder={
+                      streamType === 'supplier_outbound'
+                        ? 'e.g. vendor.qa@liwayway.com'
+                        : 'e.g. daniloalvaro031717@gmail.com'
+                    }
                     className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
                   />
                 </div>
+                <p className="text-[10px] text-slate-400">
+                  {streamType === 'supplier_outbound'
+                    ? 'Vendor QA or delivery lead Google account'
+                    : 'Store manager or receiving supervisor Google account'}
+                </p>
               </div>
 
-              {/* Store / Branch Name */}
+              {/* Entity / Branch Name */}
               <div className="sm:col-span-1 space-y-1">
                 <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                  Store / Branch Name (Optional)
+                  {streamType === 'supplier_outbound'
+                    ? 'Master Supplier / Vendor Name *'
+                    : 'Store / Supermarket Branch Location *'}
                 </label>
                 <div className="relative">
                   <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
                     type="text"
-                    value={storeBranch}
-                    onChange={(e) => setStoreBranch(e.target.value)}
-                    placeholder="e.g. Savemore Market Taguig"
+                    required
+                    value={entityName}
+                    onChange={(e) => setEntityName(e.target.value)}
+                    placeholder={
+                      streamType === 'supplier_outbound'
+                        ? 'e.g. Liwayway Marketing, Mondelez'
+                        : 'e.g. Savemore Market Taguig, SM Fairview'
+                    }
                     className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
                   />
                 </div>
+                <p className="text-[10px] text-slate-400">
+                  {streamType === 'supplier_outbound'
+                    ? 'Locks the Supplier field on the RTV intake form'
+                    : 'Locks the Store/Branch field on the Customer intake form'}
+                </p>
               </div>
 
               {/* Customizable Expiry Duration (Input Number + Unit Selector) */}
@@ -18746,7 +18889,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                   <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
                     Expiry Duration *
                   </label>
-                  <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold truncate">
+                  <span className={`text-[10px] font-bold truncate ${streamType === 'supplier_outbound' ? 'text-purple-600 dark:text-purple-400' : 'text-blue-600 dark:text-blue-400'}`}>
                     {computedExpiryPreview}
                   </span>
                 </div>
@@ -18796,7 +18939,9 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                     }}
                     className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
                       isSelected
-                        ? 'bg-blue-600 text-white shadow-2xs'
+                        ? streamType === 'supplier_outbound'
+                          ? 'bg-purple-600 text-white shadow-2xs'
+                          : 'bg-blue-600 text-white shadow-2xs'
                         : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-blue-400'
                     }`}
                   >
@@ -18809,8 +18954,12 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
             <div className="flex justify-end pt-1">
               <button
                 type="submit"
-                disabled={isGenerating || !authorizedEmail.trim()}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all cursor-pointer"
+                disabled={isGenerating || !authorizedEmail.trim() || !entityName.trim()}
+                className={`px-5 py-2.5 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer disabled:opacity-50 ${
+                  streamType === 'supplier_outbound'
+                    ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-600/20'
+                    : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
+                }`}
               >
                 {isGenerating ? (
                   <>
@@ -18820,7 +18969,11 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 ) : (
                   <>
                     <Ticket className="w-3.5 h-3.5" />
-                    <span>Generate Customer Invite</span>
+                    <span>
+                      {streamType === 'supplier_outbound'
+                        ? 'Generate Supplier RTV Invite'
+                        : 'Generate Customer Return Invite'}
+                    </span>
                   </>
                 )}
               </button>
@@ -18829,38 +18982,50 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
 
           {/* Generated Invite Link Banner */}
           {generatedInvite && (
-            <div className="p-4 sm:p-5 bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-300 dark:border-emerald-800 rounded-3xl space-y-3 animate-in fade-in">
+            <div className={`p-4 sm:p-5 rounded-3xl space-y-3 animate-in fade-in border-2 ${
+              generatedInvite.stream_type === 'supplier_outbound'
+                ? 'bg-purple-50 dark:bg-purple-950/40 border-purple-300 dark:border-purple-800'
+                : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
+            }`}>
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                  <h3 className="text-xs font-black uppercase tracking-wider text-emerald-950 dark:text-emerald-200">
-                    Ready: Personalized Return Link Generated!
+                  <ShieldCheck className={`w-5 h-5 ${
+                    generatedInvite.stream_type === 'supplier_outbound'
+                      ? 'text-purple-600 dark:text-purple-400'
+                      : 'text-emerald-600 dark:text-emerald-400'
+                  }`} />
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                    Ready: {generatedInvite.stream_type === 'supplier_outbound' ? 'Supplier RTV Link' : 'Customer Return Link'} Generated!
                   </h3>
                 </div>
-                <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/60 px-2.5 py-0.5 rounded-full">
+                <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                  generatedInvite.stream_type === 'supplier_outbound'
+                    ? 'text-purple-800 dark:text-purple-300 bg-purple-200/60 dark:bg-purple-900/60'
+                    : 'text-emerald-800 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/60'
+                }`}>
                   Validity: {generatedInvite.duration_display || 'Custom'} • Expires: {new Date(generatedInvite.expires_at).toLocaleString()}
                 </span>
               </div>
 
-              <div className="p-3 bg-white dark:bg-slate-900 rounded-2xl border border-emerald-200 dark:border-emerald-800 font-mono text-xs text-slate-800 dark:text-slate-200 break-all select-all flex items-center justify-between gap-2">
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 font-mono text-xs text-slate-800 dark:text-slate-200 break-all select-all flex items-center justify-between gap-2">
                 <span>{typeof window !== 'undefined' ? `${window.location.origin}/intake?token=${generatedInvite.token}` : generatedInvite.token}</span>
               </div>
 
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
                 <button
                   type="button"
                   onClick={() => handleCopyLink(generatedInvite.token)}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  className="px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
                 >
                   {copiedToken === generatedInvite.token ? (
                     <>
-                      <Check className="w-4 h-4" />
-                      <span>Copied!</span>
+                      <Check className="w-4 h-4 text-emerald-600" />
+                      <span>Copied to Clipboard!</span>
                     </>
                   ) : (
                     <>
-                      <Copy className="w-4 h-4" />
-                      <span>Copy Link</span>
+                      <Copy className="w-4 h-4 text-slate-500" />
+                      <span>Copy Private Link</span>
                     </>
                   )}
                 </button>
@@ -18869,7 +19034,11 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                   type="button"
                   onClick={() => handleSendEmail(generatedInvite)}
                   disabled={isSendingEmail}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  className={`px-4 py-2 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer ${
+                    generatedInvite.stream_type === 'supplier_outbound'
+                      ? 'bg-purple-600 hover:bg-purple-700'
+                      : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
                 >
                   {isSendingEmail ? (
                     <>
@@ -18889,10 +19058,52 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
 
           {/* Active / Past Invites Management Table */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Authorized Customer Invites ({invites.length})
-              </h3>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Authorized Invites ({filteredInvites.length})
+                </h3>
+
+                {/* Filter Tabs */}
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl text-[10.5px]">
+                  <button
+                    type="button"
+                    onClick={() => setStreamFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                      streamFilter === 'all'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    All ({invites.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStreamFilter('customer_inbound')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      streamFilter === 'customer_inbound'
+                        ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <span>📥 Customer</span>
+                    <span className="text-[9px] opacity-75">({customerCount})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStreamFilter('supplier_outbound')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      streamFilter === 'supplier_outbound'
+                        ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <span>📤 Supplier</span>
+                    <span className="text-[9px] opacity-75">({supplierCount})</span>
+                  </button>
+                </div>
+              </div>
+
               <button
                 type="button"
                 onClick={loadInvites}
@@ -18903,17 +19114,18 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
               </button>
             </div>
 
-            {invites.length === 0 ? (
+            {filteredInvites.length === 0 ? (
               <div className="p-8 text-center bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 rounded-2xl text-xs text-slate-400 font-semibold">
-                No customer RMA invites generated yet. Use the form above to generate your first secure return link.
+                No authorization invites found for this filter. Use the form above to generate your first secure return link.
               </div>
             ) : (
               <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
                     <tr>
-                      <th className="p-3">Customer Email</th>
-                      <th className="p-3">Store / Branch</th>
+                      <th className="p-3">Stream</th>
+                      <th className="p-3">Authorized Email</th>
+                      <th className="p-3">Store Branch / Supplier</th>
                       <th className="p-3">Duration</th>
                       <th className="p-3">Remaining</th>
                       <th className="p-3">Status</th>
@@ -18921,18 +19133,32 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {invites.map((inv) => {
+                    {filteredInvites.map((inv) => {
                       const countdown = formatRemainingCountdown(inv.expires_at, inv.status);
                       const isRevoked = inv.status === 'revoked';
                       const isExpired = countdown.isExpired;
+                      const isSupplier = inv.stream_type === 'supplier_outbound';
 
                       return (
                         <tr key={inv.token || inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="p-3">
+                            {isSupplier ? (
+                              <span className="px-2 py-0.5 rounded text-[9.5px] font-black uppercase bg-purple-100 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1">
+                                <Truck className="w-3 h-3" />
+                                <span>Supplier RTV</span>
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded text-[9.5px] font-black uppercase bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 inline-flex items-center gap-1">
+                                <Store className="w-3 h-3" />
+                                <span>Customer Return</span>
+                              </span>
+                            )}
+                          </td>
                           <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">
                             {inv.authorized_email}
                           </td>
                           <td className="p-3 text-slate-700 dark:text-slate-300 font-semibold">
-                            {inv.store_branch || <span className="text-slate-400 italic">Unassigned</span>}
+                            {inv.entity_name || inv.store_branch || <span className="text-slate-400 italic">Unassigned</span>}
                           </td>
                           <td className="p-3 text-slate-600 dark:text-slate-400 font-mono text-[11px]">
                             {inv.duration_display || '24 hour(s)'}
@@ -19004,7 +19230,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
         {/* Modal Footer */}
         <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/60 dark:bg-slate-900">
           <span className="text-[11px] text-slate-400">
-            Pingcon RMA Operations • Customer Return Governance
+            Pingcon Operations • Customer Return & Supplier RTV Governance
           </span>
           <button
             type="button"
@@ -19019,7 +19245,6 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     </div>
   );
 }
-
 --- END FILE: src/components/CustomerRMAInvitesModal.jsx ---
 
 --- START FILE: src/components/DeleteConfirmationModal.jsx ---
@@ -20041,7 +20266,9 @@ import {
   Building2,
   Clock,
   Mail,
-  UserCheck
+  UserCheck,
+  Truck,
+  Store
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { inviteService, formatRemainingCountdown } from '../services/inviteService';
@@ -20114,15 +20341,20 @@ export default function GatekeeperPinModal({
           setIdentityMismatch(null);
           setOauthError(null);
 
+          const resolvedEntity = invite.entity_name || invite.store_branch || '';
+          const resolvedStream = invite.stream_type || 'customer_inbound';
+
           const unlockedSession = {
             type: 'external_customer',
             token: invite.token,
+            stream_type: resolvedStream,
             authorized_email: authorizedEmail,
-            store_branch: invite.store_branch || '',
+            entity_name: resolvedEntity,
+            store_branch: resolvedEntity,
             user_email: userEmail,
             user_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
             expires_at: invite.expires_at,
-            profileName: invite.store_branch || authorizedEmail,
+            profileName: resolvedEntity || authorizedEmail,
             unlockedAt: new Date().toISOString()
           };
 
@@ -20298,15 +20530,20 @@ export default function GatekeeperPinModal({
   const handleTestModeBypass = () => {
     if (!validationResult?.invite) return;
     const inv = validationResult.invite;
+    const resolvedEntity = inv.entity_name || inv.store_branch || '';
+    const resolvedStream = inv.stream_type || 'customer_inbound';
+
     const bypassSession = {
       type: 'external_customer',
       token: inv.token,
+      stream_type: resolvedStream,
       authorized_email: inv.authorized_email.toLowerCase().trim(),
-      store_branch: inv.store_branch || '',
+      entity_name: resolvedEntity,
+      store_branch: resolvedEntity,
       user_email: inv.authorized_email.toLowerCase().trim(),
-      user_name: inv.store_branch || inv.authorized_email,
+      user_name: resolvedEntity || inv.authorized_email,
       expires_at: inv.expires_at,
-      profileName: inv.store_branch || inv.authorized_email,
+      profileName: resolvedEntity || inv.authorized_email,
       isTestBypass: true,
       unlockedAt: new Date().toISOString()
     };
@@ -20320,6 +20557,8 @@ export default function GatekeeperPinModal({
   };
 
   if (!isOpen) return null;
+
+  const isSupplier = validationResult?.invite?.stream_type === 'supplier_outbound';
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in">
@@ -20362,7 +20601,7 @@ export default function GatekeeperPinModal({
                 <strong className="block text-emerald-600 dark:text-emerald-400 font-mono mt-0.5 text-sm">{identityMismatch.authorizedEmail}</strong>
               </p>
               <div className="text-[11px] text-rose-700 dark:text-rose-300 font-bold pt-2 border-t border-rose-200 dark:border-rose-900/40">
-                Forwarding private return links is prohibited under Pingcon Wholesale Governance.
+                Forwarding return links is prohibited under Pingcon Wholesale Governance.
               </div>
             </div>
 
@@ -20455,11 +20694,11 @@ export default function GatekeeperPinModal({
             <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-2xl text-xs text-left space-y-2 text-slate-700 dark:text-slate-300">
               <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400">
                 {validationResult?.error === 'REVOKED'
-                  ? 'This customer return authorization was revoked by Pingcon Operations.'
+                  ? 'This return authorization was revoked by Pingcon Operations.'
                   : 'This personalized return link has exceeded its validity period and expired.'}
               </p>
               <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400 font-bold">
-                Please contact your Pingcon representative to generate a fresh return authorization link for your store.
+                Please contact your Pingcon representative to generate a fresh return authorization link for your account.
               </p>
             </div>
 
@@ -20476,16 +20715,34 @@ export default function GatekeeperPinModal({
         ) : (
           /* 5. Valid Token -> 1-Click Google Identity Lock OAuth Screen (Zero Manual Email Typing) */
           <div className="space-y-5 animate-in zoom-in-95">
-            <div className="w-16 h-16 rounded-3xl bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-inner">
-              <ShieldCheck className="w-8 h-8" />
+            <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mx-auto shadow-inner ${
+              isSupplier 
+                ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-600 dark:text-purple-400' 
+                : 'bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400'
+            }`}>
+              {isSupplier ? <Truck className="w-8 h-8" /> : <ShieldCheck className="w-8 h-8" />}
             </div>
 
             <div className="space-y-1">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                Verified Return Authorization
+              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border inline-flex items-center gap-1 ${
+                isSupplier
+                  ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border-purple-300 dark:border-purple-700'
+                  : 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
+              }`}>
+                {isSupplier ? (
+                  <>
+                    <Truck className="w-3 h-3" />
+                    <span>Supplier RTV Authorization</span>
+                  </>
+                ) : (
+                  <>
+                    <Store className="w-3 h-3" />
+                    <span>Customer Return Authorization</span>
+                  </>
+                )}
               </span>
               <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
-                Pingcon RMA Portal
+                {isSupplier ? 'Pingcon Return to Vendor Portal' : 'Pingcon RMA Portal'}
               </h2>
             </div>
 
@@ -20494,16 +20751,28 @@ export default function GatekeeperPinModal({
               <div className="text-[10px] uppercase font-bold text-slate-400">
                 Private Return Link Issued Exclusively To:
               </div>
-              <div className="font-mono font-black text-blue-600 dark:text-blue-400 text-sm flex items-center gap-1.5 break-all">
-                <Mail className="w-4 h-4 shrink-0 text-blue-600" />
+              <div className={`font-mono font-black text-sm flex items-center gap-1.5 break-all ${
+                isSupplier ? 'text-purple-600 dark:text-purple-400' : 'text-blue-600 dark:text-blue-400'
+              }`}>
+                <Mail className={`w-4 h-4 shrink-0 ${isSupplier ? 'text-purple-600' : 'text-blue-600'}`} />
                 <span>{validationResult.invite.authorized_email}</span>
               </div>
-              {validationResult.invite.store_branch && (
-                <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1 pt-0.5 font-bold">
-                  <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <span>{validationResult.invite.store_branch}</span>
+              
+              {/* Entity Name (Store Branch or Supplier) */}
+              {(validationResult.invite.entity_name || validationResult.invite.store_branch) && (
+                <div className="text-[11px] text-slate-700 dark:text-slate-300 flex items-center gap-1 pt-0.5 font-bold">
+                  {isSupplier ? (
+                    <Truck className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                  ) : (
+                    <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  )}
+                  <span>
+                    {isSupplier ? 'Master Supplier / Vendor: ' : 'Store / Branch: '}
+                    <strong>{validationResult.invite.entity_name || validationResult.invite.store_branch}</strong>
+                  </span>
                 </div>
               )}
+
               {countdownStr && (
                 <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 pt-0.5">
                   <Clock className="w-3 h-3 shrink-0" />
@@ -20519,7 +20788,7 @@ export default function GatekeeperPinModal({
                 <span>Google Identity Lock</span>
               </div>
               <p className="leading-relaxed">
-                To prevent fraud and unauthorized returns, access is cryptographically locked to the authorized Google account above.
+                To prevent unauthorized submissions, access is cryptographically locked to the authorized Google account above.
               </p>
             </div>
 
@@ -41517,6 +41786,8 @@ export const inviteService = {
       if (!error && Array.isArray(data)) {
         const normalized = data.map(i => ({
           ...i,
+          stream_type: i.stream_type || 'customer_inbound',
+          entity_name: i.entity_name || i.store_branch || '',
           store_branch: i.store_branch || i.entity_name || ''
         }));
         saveLocalInvites(normalized);
@@ -41546,10 +41817,12 @@ export const inviteService = {
   },
 
   /**
-   * Create a new Customer RMA Invite with customizable duration (minutes, hours, days)
+   * Create a new Customer or Supplier RMA Invite with customizable duration (minutes, hours, days)
    */
   async createInvite({
+    streamType = 'customer_inbound',
     authorizedEmail,
+    entityName = '',
     storeBranch = '',
     durationValue = 24,
     durationUnit = 'hours',
@@ -41557,11 +41830,14 @@ export const inviteService = {
     createdBy = 'Staff'
   }) {
     if (!authorizedEmail || !authorizedEmail.trim()) {
-      throw new Error('Customer / Reporter Email is required.');
+      throw new Error('Authorized Google Email is required.');
     }
 
+    const cleanStream = streamType === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
     const cleanEmail = authorizedEmail.trim().toLowerCase();
-    const cleanBranch = storeBranch ? storeBranch.trim() : '';
+    const cleanEntity = (entityName || storeBranch || '').trim();
+    const fallbackEntity = cleanStream === 'supplier_outbound' ? 'Master Supplier Partner' : 'Pingcon Wholesale Client';
+    const resolvedEntity = cleanEntity || fallbackEntity;
 
     // Calculate expiration in milliseconds based on user-customized input number and unit
     let durationMs = 24 * 3600 * 1000;
@@ -41587,10 +41863,10 @@ export const inviteService = {
 
     const insertPayload = {
       token,
-      stream_type: 'customer_inbound',
+      stream_type: cleanStream,
       authorized_email: cleanEmail,
-      entity_name: cleanBranch || 'Pingcon Wholesale Client',
-      store_branch: cleanBranch,
+      entity_name: resolvedEntity,
+      store_branch: cleanEntity,
       duration_value: num,
       duration_unit: unit,
       duration_display: durationDisplay,
@@ -41613,7 +41889,9 @@ export const inviteService = {
       if (!error && data) {
         createdRecord = {
           ...data,
-          store_branch: data.store_branch || data.entity_name || ''
+          stream_type: data.stream_type || cleanStream,
+          entity_name: data.entity_name || resolvedEntity,
+          store_branch: data.store_branch || data.entity_name || resolvedEntity
         };
       }
     } catch {
@@ -41666,6 +41944,8 @@ export const inviteService = {
       if (!error && data) {
         invite = {
           ...data,
+          stream_type: data.stream_type || 'customer_inbound',
+          entity_name: data.entity_name || data.store_branch || '',
           store_branch: data.store_branch || data.entity_name || ''
         };
       }
@@ -41676,6 +41956,14 @@ export const inviteService = {
     if (!invite) {
       const all = await this.getInvites();
       invite = all.find(i => i.token === cleanToken) || null;
+      if (invite) {
+        invite = {
+          ...invite,
+          stream_type: invite.stream_type || 'customer_inbound',
+          entity_name: invite.entity_name || invite.store_branch || '',
+          store_branch: invite.store_branch || invite.entity_name || ''
+        };
+      }
     }
 
     if (!invite) {
@@ -41742,40 +42030,49 @@ export const inviteService = {
 
     const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://rma-portal-pingconmarketing.vercel.app';
     const inviteUrl = `${baseUrl}/intake?token=${encodeURIComponent(invite.token)}`;
+    const isSupplierRtv = invite.stream_type === 'supplier_outbound';
+    const entityLabel = invite.entity_name || invite.store_branch || (isSupplierRtv ? 'Vendor Partner' : 'Store Partner');
     const expDateStr = new Date(invite.expires_at).toLocaleString();
 
-    const subject = `[Authorized Access] Your Pingcon RMA Return Portal Link (${invite.store_branch || 'Store Partner'})`;
+    const subject = isSupplierRtv
+      ? `[Authorized Supplier RTV Access] Pingcon Return to Vendor Portal Link (${entityLabel})`
+      : `[Authorized Access] Your Pingcon RMA Return Portal Link (${entityLabel})`;
+
     const html = `
       <!DOCTYPE html>
       <html>
       <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; padding: 24px; margin: 0; color: #1e293b;">
         <div style="max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-          <div style="background: linear-gradient(135deg, #1e3a8a, #2563eb); padding: 24px; text-align: center; color: #ffffff;">
-            <h1 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">Pingcon RMA Operations</h1>
-            <p style="margin: 4px 0 0 0; font-size: 12px; opacity: 0.9;">Secure Return Merchandise Authorization Portal</p>
+          <div style="background: ${isSupplierRtv ? 'linear-gradient(135deg, #581c87, #7e22ce)' : 'linear-gradient(135deg, #1e3a8a, #2563eb)'}; padding: 24px; text-align: center; color: #ffffff;">
+            <h1 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">
+              ${isSupplierRtv ? 'Pingcon Supplier RTV Operations' : 'Pingcon RMA Operations'}
+            </h1>
+            <p style="margin: 4px 0 0 0; font-size: 12px; opacity: 0.9;">
+              ${isSupplierRtv ? 'Secure Return to Vendor Authorization Portal' : 'Secure Return Merchandise Authorization Portal'}
+            </p>
           </div>
           <div style="padding: 24px;">
             <p style="font-size: 14px; margin-top: 0;">Hello <strong>${invite.authorized_email}</strong>,</p>
             <p style="font-size: 13px; line-height: 1.6; color: #475569;">
-              You have been granted official authorization to submit returns${invite.store_branch ? ` for <strong>${invite.store_branch}</strong>` : ''}.
+              You have been granted official authorization to ${isSupplierRtv ? 'process return claims / RTV' : 'submit returns'} for <strong>${entityLabel}</strong>.
             </p>
             <div style="background: #f1f5f9; border-radius: 12px; padding: 16px; margin: 20px 0; border: 1px solid #cbd5e1;">
               <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Security Notice</div>
               <div style="font-size: 12px; margin-top: 4px; color: #1e293b; line-height: 1.5;">
-                🔒 This link is locked to your Google Account (<strong>${invite.authorized_email}</strong>). Forwarding is prohibited.
+                🔒 This link is cryptographically locked to your Google Account (<strong>${invite.authorized_email}</strong>). Forwarding is strictly prohibited.
               </div>
               <div style="font-size: 11px; color: #64748b; margin-top: 8px;">
                 ⏱️ Link Validity: <strong>${invite.duration_display || '24 hours'}</strong> (Expires: ${expDateStr})
               </div>
             </div>
             <div style="text-align: center; margin: 28px 0;">
-              <a href="${inviteUrl}" style="background: #2563eb; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 12px; font-weight: 800; font-size: 14px; display: inline-block; box-shadow: 0 4px 12px rgba(37,99,235,0.3);">
-                Access Return Portal &rarr;
+              <a href="${inviteUrl}" style="background: ${isSupplierRtv ? '#7e22ce' : '#2563eb'}; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 12px; font-weight: 800; font-size: 14px; display: inline-block; box-shadow: 0 4px 12px ${isSupplierRtv ? 'rgba(126,34,206,0.3)' : 'rgba(37,99,235,0.3)'};">
+                Access ${isSupplierRtv ? 'Supplier RTV Portal' : 'Return Portal'} &rarr;
               </a>
             </div>
             <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-bottom: 0;">
               Or copy this direct link into your browser:<br>
-              <a href="${inviteUrl}" style="color: #2563eb; word-break: break-all;">${inviteUrl}</a>
+              <a href="${inviteUrl}" style="color: ${isSupplierRtv ? '#7e22ce' : '#2563eb'}; word-break: break-all;">${inviteUrl}</a>
             </p>
           </div>
           <div style="background: #f8fafc; padding: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 11px; color: #94a3b8;">

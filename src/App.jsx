@@ -304,8 +304,9 @@ export default function App() {
     if (gateSession?.authorized_email) {
       setReporterContact(gateSession.authorized_email);
     }
-    if (gateSession?.store_branch && !storeBranch) {
-      setStoreBranch(gateSession.store_branch);
+    const resolvedEntity = gateSession?.entity_name || gateSession?.store_branch;
+    if (resolvedEntity) {
+      setStoreBranch(resolvedEntity);
     }
   }, [gateSession]);
 
@@ -1883,8 +1884,8 @@ export default function App() {
       localStorage.setItem('rma_reporter_contact', effectiveContact);
     } catch {}
 
-    // 2. Determine RMA Type based on station Gatekeeper profile (internal warehouse vs external customer)
-    const determinedRmaType = (gateSession?.type === 'internal_warehouse') ? 'supplier_outbound' : 'customer_inbound';
+    // 2. Determine RMA Type based on station Gatekeeper profile (internal warehouse vs external customer / supplier invite)
+    const determinedRmaType = (gateSession?.stream_type === 'supplier_outbound' || gateSession?.type === 'internal_warehouse') ? 'supplier_outbound' : 'customer_inbound';
 
     // 3. Generate ONE unique RMA Number for the batch ticket
     const rmaNumber = catalogService.generateRMANumber(recentReportsList);
@@ -3153,14 +3154,27 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 3. STORE / BRANCH LOCATION */}
+                {/* 3. STORE / BRANCH OR SUPPLIER LOCATION */}
                 <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                       <Building className="w-4 h-4 text-blue-600" />
-                      <span>3. Store / Branch Location *</span>
+                      <span>
+                        {gateSession?.stream_type === 'supplier_outbound'
+                          ? '3. Master Supplier / Vendor Name *'
+                          : '3. Store / Branch Location *'}
+                      </span>
                     </label>
-                    {storeBranch && paperworkMetadata?.store_branch ? (
+                    {(gateSession?.entity_name || gateSession?.store_branch) ? (
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+                        gateSession?.stream_type === 'supplier_outbound'
+                          ? 'text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 border-purple-200 dark:border-purple-800'
+                          : 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800'
+                      }`}>
+                        <CheckCircle className="w-3 h-3" />
+                        <span>Locked via {gateSession?.stream_type === 'supplier_outbound' ? 'Supplier RTV' : 'Customer'} Invite</span>
+                      </span>
+                    ) : storeBranch && paperworkMetadata?.store_branch ? (
                       <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                         <Sparkles className="w-3 h-3" />
                         Auto-filled from Paperwork
@@ -3175,11 +3189,24 @@ export default function App() {
                       type="text"
                       required
                       value={storeBranch}
-                      onChange={(e) => setStoreBranch(e.target.value)}
-                      placeholder="e.g., Savemore Taguig, Puregold Cubao, or Dock Bay 4 (or auto-filled from DR)"
-                      className="w-full px-3.5 py-3 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 focus:border-blue-600 dark:focus:border-blue-500 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-2xs transition-all"
+                      onChange={(e) => {
+                        if (!gateSession?.entity_name && !gateSession?.store_branch) {
+                          setStoreBranch(e.target.value);
+                        }
+                      }}
+                      readOnly={Boolean(gateSession?.entity_name || gateSession?.store_branch)}
+                      placeholder={
+                        gateSession?.stream_type === 'supplier_outbound'
+                          ? 'e.g., Liwayway Marketing, Mondelez, Universal Robina'
+                          : 'e.g., Savemore Taguig, Puregold Cubao, or Dock Bay 4 (or auto-filled from DR)'
+                      }
+                      className={`w-full px-3.5 py-3 border-2 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none shadow-2xs transition-all ${
+                        (gateSession?.entity_name || gateSession?.store_branch)
+                          ? 'bg-slate-100 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700 cursor-not-allowed text-slate-700 dark:text-slate-300'
+                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20'
+                      }`}
                     />
-                    {storeBranch && (
+                    {storeBranch && !gateSession?.entity_name && !gateSession?.store_branch && (
                       <button
                         type="button"
                         onClick={() => setStoreBranch('')}
@@ -3191,7 +3218,9 @@ export default function App() {
                     )}
                   </div>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                    Type your store branch or let Gemini Flash detect it automatically from the attached receipt / invoice.
+                    {gateSession?.stream_type === 'supplier_outbound'
+                      ? 'Authorized supplier organization handling return-to-vendor logistics.'
+                      : 'Type your store branch or let Gemini Flash detect it automatically from the attached receipt / invoice.'}
                   </p>
                 </div>
 
@@ -5863,8 +5892,9 @@ export default function App() {
           if (session?.authorized_email) {
             setReporterContact(session.authorized_email);
           }
-          if (session?.store_branch && !storeBranch) {
-            setStoreBranch(session.store_branch);
+          const entity = session?.entity_name || session?.store_branch;
+          if (entity) {
+            setStoreBranch(entity);
           }
           showToast(`Portal Unlocked: ${session.profileName || session.authorized_email}`, 'success');
         }}

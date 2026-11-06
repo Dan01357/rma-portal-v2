@@ -9,7 +9,9 @@ import {
   Building2,
   Clock,
   Mail,
-  UserCheck
+  UserCheck,
+  Truck,
+  Store
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { inviteService, formatRemainingCountdown } from '../services/inviteService';
@@ -82,15 +84,20 @@ export default function GatekeeperPinModal({
           setIdentityMismatch(null);
           setOauthError(null);
 
+          const resolvedEntity = invite.entity_name || invite.store_branch || '';
+          const resolvedStream = invite.stream_type || 'customer_inbound';
+
           const unlockedSession = {
             type: 'external_customer',
             token: invite.token,
+            stream_type: resolvedStream,
             authorized_email: authorizedEmail,
-            store_branch: invite.store_branch || '',
+            entity_name: resolvedEntity,
+            store_branch: resolvedEntity,
             user_email: userEmail,
             user_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
             expires_at: invite.expires_at,
-            profileName: invite.store_branch || authorizedEmail,
+            profileName: resolvedEntity || authorizedEmail,
             unlockedAt: new Date().toISOString()
           };
 
@@ -266,15 +273,20 @@ export default function GatekeeperPinModal({
   const handleTestModeBypass = () => {
     if (!validationResult?.invite) return;
     const inv = validationResult.invite;
+    const resolvedEntity = inv.entity_name || inv.store_branch || '';
+    const resolvedStream = inv.stream_type || 'customer_inbound';
+
     const bypassSession = {
       type: 'external_customer',
       token: inv.token,
+      stream_type: resolvedStream,
       authorized_email: inv.authorized_email.toLowerCase().trim(),
-      store_branch: inv.store_branch || '',
+      entity_name: resolvedEntity,
+      store_branch: resolvedEntity,
       user_email: inv.authorized_email.toLowerCase().trim(),
-      user_name: inv.store_branch || inv.authorized_email,
+      user_name: resolvedEntity || inv.authorized_email,
       expires_at: inv.expires_at,
-      profileName: inv.store_branch || inv.authorized_email,
+      profileName: resolvedEntity || inv.authorized_email,
       isTestBypass: true,
       unlockedAt: new Date().toISOString()
     };
@@ -288,6 +300,8 @@ export default function GatekeeperPinModal({
   };
 
   if (!isOpen) return null;
+
+  const isSupplier = validationResult?.invite?.stream_type === 'supplier_outbound';
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in">
@@ -330,7 +344,7 @@ export default function GatekeeperPinModal({
                 <strong className="block text-emerald-600 dark:text-emerald-400 font-mono mt-0.5 text-sm">{identityMismatch.authorizedEmail}</strong>
               </p>
               <div className="text-[11px] text-rose-700 dark:text-rose-300 font-bold pt-2 border-t border-rose-200 dark:border-rose-900/40">
-                Forwarding private return links is prohibited under Pingcon Wholesale Governance.
+                Forwarding return links is prohibited under Pingcon Wholesale Governance.
               </div>
             </div>
 
@@ -423,11 +437,11 @@ export default function GatekeeperPinModal({
             <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-2xl text-xs text-left space-y-2 text-slate-700 dark:text-slate-300">
               <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400">
                 {validationResult?.error === 'REVOKED'
-                  ? 'This customer return authorization was revoked by Pingcon Operations.'
+                  ? 'This return authorization was revoked by Pingcon Operations.'
                   : 'This personalized return link has exceeded its validity period and expired.'}
               </p>
               <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400 font-bold">
-                Please contact your Pingcon representative to generate a fresh return authorization link for your store.
+                Please contact your Pingcon representative to generate a fresh return authorization link for your account.
               </p>
             </div>
 
@@ -444,16 +458,34 @@ export default function GatekeeperPinModal({
         ) : (
           /* 5. Valid Token -> 1-Click Google Identity Lock OAuth Screen (Zero Manual Email Typing) */
           <div className="space-y-5 animate-in zoom-in-95">
-            <div className="w-16 h-16 rounded-3xl bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-inner">
-              <ShieldCheck className="w-8 h-8" />
+            <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mx-auto shadow-inner ${
+              isSupplier 
+                ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-600 dark:text-purple-400' 
+                : 'bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400'
+            }`}>
+              {isSupplier ? <Truck className="w-8 h-8" /> : <ShieldCheck className="w-8 h-8" />}
             </div>
 
             <div className="space-y-1">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                Verified Return Authorization
+              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border inline-flex items-center gap-1 ${
+                isSupplier
+                  ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border-purple-300 dark:border-purple-700'
+                  : 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
+              }`}>
+                {isSupplier ? (
+                  <>
+                    <Truck className="w-3 h-3" />
+                    <span>Supplier RTV Authorization</span>
+                  </>
+                ) : (
+                  <>
+                    <Store className="w-3 h-3" />
+                    <span>Customer Return Authorization</span>
+                  </>
+                )}
               </span>
               <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
-                Pingcon RMA Portal
+                {isSupplier ? 'Pingcon Return to Vendor Portal' : 'Pingcon RMA Portal'}
               </h2>
             </div>
 
@@ -462,16 +494,28 @@ export default function GatekeeperPinModal({
               <div className="text-[10px] uppercase font-bold text-slate-400">
                 Private Return Link Issued Exclusively To:
               </div>
-              <div className="font-mono font-black text-blue-600 dark:text-blue-400 text-sm flex items-center gap-1.5 break-all">
-                <Mail className="w-4 h-4 shrink-0 text-blue-600" />
+              <div className={`font-mono font-black text-sm flex items-center gap-1.5 break-all ${
+                isSupplier ? 'text-purple-600 dark:text-purple-400' : 'text-blue-600 dark:text-blue-400'
+              }`}>
+                <Mail className={`w-4 h-4 shrink-0 ${isSupplier ? 'text-purple-600' : 'text-blue-600'}`} />
                 <span>{validationResult.invite.authorized_email}</span>
               </div>
-              {validationResult.invite.store_branch && (
-                <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1 pt-0.5 font-bold">
-                  <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <span>{validationResult.invite.store_branch}</span>
+              
+              {/* Entity Name (Store Branch or Supplier) */}
+              {(validationResult.invite.entity_name || validationResult.invite.store_branch) && (
+                <div className="text-[11px] text-slate-700 dark:text-slate-300 flex items-center gap-1 pt-0.5 font-bold">
+                  {isSupplier ? (
+                    <Truck className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                  ) : (
+                    <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  )}
+                  <span>
+                    {isSupplier ? 'Master Supplier / Vendor: ' : 'Store / Branch: '}
+                    <strong>{validationResult.invite.entity_name || validationResult.invite.store_branch}</strong>
+                  </span>
                 </div>
               )}
+
               {countdownStr && (
                 <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 pt-0.5">
                   <Clock className="w-3 h-3 shrink-0" />
@@ -487,7 +531,7 @@ export default function GatekeeperPinModal({
                 <span>Google Identity Lock</span>
               </div>
               <p className="leading-relaxed">
-                To prevent fraud and unauthorized returns, access is cryptographically locked to the authorized Google account above.
+                To prevent unauthorized submissions, access is cryptographically locked to the authorized Google account above.
               </p>
             </div>
 

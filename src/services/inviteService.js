@@ -105,6 +105,8 @@ export const inviteService = {
       if (!error && Array.isArray(data)) {
         const normalized = data.map(i => ({
           ...i,
+          stream_type: i.stream_type || 'customer_inbound',
+          entity_name: i.entity_name || i.store_branch || '',
           store_branch: i.store_branch || i.entity_name || ''
         }));
         saveLocalInvites(normalized);
@@ -134,10 +136,12 @@ export const inviteService = {
   },
 
   /**
-   * Create a new Customer RMA Invite with customizable duration (minutes, hours, days)
+   * Create a new Customer or Supplier RMA Invite with customizable duration (minutes, hours, days)
    */
   async createInvite({
+    streamType = 'customer_inbound',
     authorizedEmail,
+    entityName = '',
     storeBranch = '',
     durationValue = 24,
     durationUnit = 'hours',
@@ -145,11 +149,14 @@ export const inviteService = {
     createdBy = 'Staff'
   }) {
     if (!authorizedEmail || !authorizedEmail.trim()) {
-      throw new Error('Customer / Reporter Email is required.');
+      throw new Error('Authorized Google Email is required.');
     }
 
+    const cleanStream = streamType === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
     const cleanEmail = authorizedEmail.trim().toLowerCase();
-    const cleanBranch = storeBranch ? storeBranch.trim() : '';
+    const cleanEntity = (entityName || storeBranch || '').trim();
+    const fallbackEntity = cleanStream === 'supplier_outbound' ? 'Master Supplier Partner' : 'Pingcon Wholesale Client';
+    const resolvedEntity = cleanEntity || fallbackEntity;
 
     // Calculate expiration in milliseconds based on user-customized input number and unit
     let durationMs = 24 * 3600 * 1000;
@@ -175,10 +182,10 @@ export const inviteService = {
 
     const insertPayload = {
       token,
-      stream_type: 'customer_inbound',
+      stream_type: cleanStream,
       authorized_email: cleanEmail,
-      entity_name: cleanBranch || 'Pingcon Wholesale Client',
-      store_branch: cleanBranch,
+      entity_name: resolvedEntity,
+      store_branch: cleanEntity,
       duration_value: num,
       duration_unit: unit,
       duration_display: durationDisplay,
@@ -201,7 +208,9 @@ export const inviteService = {
       if (!error && data) {
         createdRecord = {
           ...data,
-          store_branch: data.store_branch || data.entity_name || ''
+          stream_type: data.stream_type || cleanStream,
+          entity_name: data.entity_name || resolvedEntity,
+          store_branch: data.store_branch || data.entity_name || resolvedEntity
         };
       }
     } catch {
@@ -254,6 +263,8 @@ export const inviteService = {
       if (!error && data) {
         invite = {
           ...data,
+          stream_type: data.stream_type || 'customer_inbound',
+          entity_name: data.entity_name || data.store_branch || '',
           store_branch: data.store_branch || data.entity_name || ''
         };
       }
@@ -264,6 +275,14 @@ export const inviteService = {
     if (!invite) {
       const all = await this.getInvites();
       invite = all.find(i => i.token === cleanToken) || null;
+      if (invite) {
+        invite = {
+          ...invite,
+          stream_type: invite.stream_type || 'customer_inbound',
+          entity_name: invite.entity_name || invite.store_branch || '',
+          store_branch: invite.store_branch || invite.entity_name || ''
+        };
+      }
     }
 
     if (!invite) {
@@ -330,40 +349,49 @@ export const inviteService = {
 
     const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://rma-portal-pingconmarketing.vercel.app';
     const inviteUrl = `${baseUrl}/intake?token=${encodeURIComponent(invite.token)}`;
+    const isSupplierRtv = invite.stream_type === 'supplier_outbound';
+    const entityLabel = invite.entity_name || invite.store_branch || (isSupplierRtv ? 'Vendor Partner' : 'Store Partner');
     const expDateStr = new Date(invite.expires_at).toLocaleString();
 
-    const subject = `[Authorized Access] Your Pingcon RMA Return Portal Link (${invite.store_branch || 'Store Partner'})`;
+    const subject = isSupplierRtv
+      ? `[Authorized Supplier RTV Access] Pingcon Return to Vendor Portal Link (${entityLabel})`
+      : `[Authorized Access] Your Pingcon RMA Return Portal Link (${entityLabel})`;
+
     const html = `
       <!DOCTYPE html>
       <html>
       <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; padding: 24px; margin: 0; color: #1e293b;">
         <div style="max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-          <div style="background: linear-gradient(135deg, #1e3a8a, #2563eb); padding: 24px; text-align: center; color: #ffffff;">
-            <h1 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">Pingcon RMA Operations</h1>
-            <p style="margin: 4px 0 0 0; font-size: 12px; opacity: 0.9;">Secure Return Merchandise Authorization Portal</p>
+          <div style="background: ${isSupplierRtv ? 'linear-gradient(135deg, #581c87, #7e22ce)' : 'linear-gradient(135deg, #1e3a8a, #2563eb)'}; padding: 24px; text-align: center; color: #ffffff;">
+            <h1 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">
+              ${isSupplierRtv ? 'Pingcon Supplier RTV Operations' : 'Pingcon RMA Operations'}
+            </h1>
+            <p style="margin: 4px 0 0 0; font-size: 12px; opacity: 0.9;">
+              ${isSupplierRtv ? 'Secure Return to Vendor Authorization Portal' : 'Secure Return Merchandise Authorization Portal'}
+            </p>
           </div>
           <div style="padding: 24px;">
             <p style="font-size: 14px; margin-top: 0;">Hello <strong>${invite.authorized_email}</strong>,</p>
             <p style="font-size: 13px; line-height: 1.6; color: #475569;">
-              You have been granted official authorization to submit returns${invite.store_branch ? ` for <strong>${invite.store_branch}</strong>` : ''}.
+              You have been granted official authorization to ${isSupplierRtv ? 'process return claims / RTV' : 'submit returns'} for <strong>${entityLabel}</strong>.
             </p>
             <div style="background: #f1f5f9; border-radius: 12px; padding: 16px; margin: 20px 0; border: 1px solid #cbd5e1;">
               <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Security Notice</div>
               <div style="font-size: 12px; margin-top: 4px; color: #1e293b; line-height: 1.5;">
-                🔒 This link is locked to your Google Account (<strong>${invite.authorized_email}</strong>). Forwarding is prohibited.
+                🔒 This link is cryptographically locked to your Google Account (<strong>${invite.authorized_email}</strong>). Forwarding is strictly prohibited.
               </div>
               <div style="font-size: 11px; color: #64748b; margin-top: 8px;">
                 ⏱️ Link Validity: <strong>${invite.duration_display || '24 hours'}</strong> (Expires: ${expDateStr})
               </div>
             </div>
             <div style="text-align: center; margin: 28px 0;">
-              <a href="${inviteUrl}" style="background: #2563eb; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 12px; font-weight: 800; font-size: 14px; display: inline-block; box-shadow: 0 4px 12px rgba(37,99,235,0.3);">
-                Access Return Portal &rarr;
+              <a href="${inviteUrl}" style="background: ${isSupplierRtv ? '#7e22ce' : '#2563eb'}; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 12px; font-weight: 800; font-size: 14px; display: inline-block; box-shadow: 0 4px 12px ${isSupplierRtv ? 'rgba(126,34,206,0.3)' : 'rgba(37,99,235,0.3)'};">
+                Access ${isSupplierRtv ? 'Supplier RTV Portal' : 'Return Portal'} &rarr;
               </a>
             </div>
             <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-bottom: 0;">
               Or copy this direct link into your browser:<br>
-              <a href="${inviteUrl}" style="color: #2563eb; word-break: break-all;">${inviteUrl}</a>
+              <a href="${inviteUrl}" style="color: ${isSupplierRtv ? '#7e22ce' : '#2563eb'}; word-break: break-all;">${inviteUrl}</a>
             </p>
           </div>
           <div style="background: #f8fafc; padding: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 11px; color: #94a3b8;">

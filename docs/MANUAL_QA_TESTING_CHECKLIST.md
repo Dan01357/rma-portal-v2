@@ -80,14 +80,24 @@ Each test scenario defines:
     6. Store/Branch is auto-populated if included in the invite.
     7. Clicking `[ Lock Device ]` clears the gate session, calls `supabase.auth.signOut({ scope: 'local' })`, and re-locks the station.
 
-- [ ] **TC-GATE-05 (Admin Customer RMA Invites Generator)**
-  * **Location**: Admin Dashboard -> **"🎫 Customer RMA Invites"** Modal
+- [ ] **TC-GATE-05A (Customer Return vs Supplier RTV Invite Creation)**
+  * **Location**: Admin Dashboard -> **"🎫 Customer & Supplier RMA Invites"** Modal
   * **Action**:
-    1. Input Customer Google Email (`daniloalvaro031717@gmail.com`).
-    2. Input Store / Branch Name (`Savemore Market Taguig`).
-    3. Set Expiration: Choose preset chips (`15m`, `2h`, `12h`, `24h`, `2d`, `7d`) or input custom number + unit (`minutes`, `hours`, `days`).
-    4. Click **"Generate Secure Return Link"**.
-  * **Expected Behavior**: Generates cryptographic token `inv_...`. Saves record to Supabase `rma_invites` table with `rma_settings` fallback. Displays 1-click **"Copy Link"** and **"📧 Send Return Link to Customer Email"** buttons.
+    1. Select stream toggle: `[ 📥 Customer Return Invite ]` vs `[ 📤 Supplier RTV Invite ]`.
+    2. For Customer Return: Enter Customer Google Email and Store / Supermarket Branch Location (`Savemore Taguig`).
+    3. For Supplier RTV: Enter Supplier / Vendor Representative Email and Master Supplier / Vendor Name (`Liwayway Marketing`).
+    4. Set Expiration: Choose preset chips (`15m`, `2h`, `12h`, `24h`, `2d`, `7d`) or input custom number + unit (`minutes`, `hours`, `days`).
+    5. Click **"Generate Customer Return Invite"** or **"Generate Supplier RTV Invite"**.
+  * **Expected Behavior**: Generates cryptographic token `inv_...`. Saves record to Supabase `rma_invites` table (`stream_type: customer_inbound | supplier_outbound`) with `rma_settings` fallback. Displays 1-click **"Copy Private Link"** and **"📧 Send Invite Email"** buttons with stream-tailored email templates.
+
+- [ ] **TC-GATE-05B (Intake Stream Lock & Automatic Field ReadOnly Guard)**
+  * **Location**: Intake Portal (`/intake?token=inv_...`)
+  * **Action**: Authenticate via matching Google account for a Customer Return vs Supplier RTV invite.
+  * **Expected Behavior**:
+    1. For `customer_inbound`: Section 3 is labeled *"3. Store / Branch Location *"*, locked to the invite's branch name, and marked `readOnly` with badge `Locked via Customer Invite`.
+    2. For `supplier_outbound`: Section 3 is labeled *"3. Master Supplier / Vendor Name *"*, locked to the master supplier name, and marked `readOnly` with purple badge `Locked via Supplier RTV Invite`.
+    3. Section 4 (Reporter Contact) is permanently locked to the authenticated Google email as `readOnly` with badge `✓ Verified Google Identity`.
+    4. Submitting the RMA assigns the ticket's `rma_type` to match the invite stream (`customer_inbound` vs `supplier_outbound`).
 
 - [ ] **TC-GATE-06 (QA Sandbox Test Mode Bypass)**
   * **Location**: Gatekeeper Modal when `isTestMode: true`
