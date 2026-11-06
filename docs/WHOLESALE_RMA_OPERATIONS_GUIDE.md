@@ -601,4 +601,27 @@ To satisfy enterprise supply chain compliance (aligned with SAP ERP, Oracle SCM,
   `[ 📥 Customer Return (Inbound) ]` $\longleftrightarrow$ `[ 📤 Supplier Claim (Outbound / RTV) ]`
 - Toggling this switcher executes an optimistic UI update, changes `rma_type` in Supabase via `catalogService.updateRMAType`, and appends an entry to `rma_reports.audit_trail`. The record shifts seamlessly into the appropriate hub table without page reload.
 
+---
+
+## Chapter 11: Customer RMA Invites & Anti-Forwarding Google Identity Lock
+
+To prevent unauthorized public access, link sharing across unauthorized parties, and bot spam, the 6-digit static PIN system has been decommissioned in favor of cryptographic single-store return tokens locked with Google Identity.
+
+### 11.1 Staff-Generated Customer RMA Invites
+Warehouse staff and customer account executives generate personalized return invitations directly from the Admin Hub via the **"🎫 Customer RMA Invites"** module:
+1. **Customer / Reporter Email**: (e.g. `daniloalvaro031717@gmail.com`) — strictly required.
+2. **Store / Branch Name**: (e.g. `Savemore Market Taguig`) — auto-fills into the customer return form.
+3. **Expiry Duration**: Configurable from 2 hours up to 7 days (defaults to 24 hours).
+4. **Token Generation**: Generates a high-entropy cryptographic token (`inv_[timestamp]_[random16]`) stored with `authorized_email`, `store_branch`, `expires_at`, and `status: 'active'`.
+5. **Distribution**: Staff can 1-click **"Copy Link"** or **"Send Link via Email"** (delivering a branded authorization notice via `/api/send-email`).
+
+### 11.2 Google Identity Lock & Anti-Forwarding Protection
+When the customer opens their private link (`/intake?token=inv_...`):
+- The portal displays a security lock screen showing the exact authorized recipient and a live remaining-time countdown.
+- Clicking **"[ 🔵 Continue with Google ]"** authenticates the user via Google OAuth (`supabase.auth.signInWithOAuth`).
+- **Cryptographic Account Verification**:
+  - If the signed-in Google account matches `invite.authorized_email` (case-insensitive), access is granted immediately.
+  - The return intake form auto-populates `Store / Branch` and locks `Reporter Information` with a verified Google Identity badge (`readOnly`).
+  - If the link is forwarded to an unauthorized third party, or if the user signs in with an alternate Google account, the portal permanently blocks access with a 403 Forbidden screen: *"Access Denied — Identity Mismatch. Forwarding is prohibited."*
+
 

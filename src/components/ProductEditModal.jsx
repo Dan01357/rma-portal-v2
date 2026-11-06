@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 import { authService } from '../services/authService';
+import { notificationService } from '../services/notificationService';
 import ImageLightboxModal from './ImageLightboxModal';
 import SupplierInput from './SupplierInput';
 import ProductAutoSuggest from './ProductAutoSuggest';

@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-06T03:04:07.568Z
+Generated At: 2026-11-06T04:10:02.674Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -78,6 +78,7 @@ rma-portal-v2/
 │   │   │   │   ├── CreditMemoModal.jsx
 │   │   │   │   ├── CreditMemosTab.jsx
 │   │   │   │   ├── CreditMemoVoucherModal.jsx
+│   │   │   │   ├── CustomerRMAInvitesModal.jsx
 │   │   │   │   ├── DeleteConfirmationModal.jsx
 │   │   │   │   ├── EmployeeManagementModal.jsx
 │   │   │   │   ├── FinanceCreditMemoTab.jsx
@@ -114,6 +115,7 @@ rma-portal-v2/
 │   │   │   │   ├── authService.js
 │   │   │   │   ├── catalogService.js
 │   │   │   │   ├── creditMemoService.js
+│   │   │   │   ├── inviteService.js
 │   │   │   │   ├── notificationService.js
 │   │   │   │   ├── pinRequestService.js
 │   │   │   │   ├── purchaseOrdersApi.js
@@ -1324,7 +1326,7 @@ When answering prompts about this project in Google AI Studio:
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231d6fce' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 7V5a2 2 0 0 1 2-2h2'/><path d='M17 3h2a2 2 0 0 1 2 2v2'/><path d='M21 17v2a2 2 0 0 1-2 2h-2'/><path d='M7 21H5a2 2 0 0 1-2-2v-2'/><rect width='10' height='8' x='7' y='8' rx='1'/></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#0f172a" />
-    <title>Wholesale RMA Portal | Return Merchandise Authorization</title>
+    <title>Pingcon RMA Portal | Return Merchandise Authorization</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -3177,6 +3179,39 @@ Each test scenario defines:
 
 ---
 
+## Section 14: 1-Click Google Identity Lock & Customer RMA Invites (No-OTP Gatekeeper)
+
+- [ ] **TC-INV-01 (Staff-Generated Invite Link with Google Identity Lock)**
+  * **Location**: Admin Header -> "🎫 Customer RMA Invites" (`CustomerRMAInvitesModal.jsx`) & Gatekeeper (`GatekeeperPinModal.jsx`)
+  * **Action**:
+    1. In Admin view, click "🎫 Customer RMA Invites" in the top header.
+    2. Input Customer Email: `daniloalvaro031717@gmail.com`, Customer Store / Branch: `Savemore Market Taguig`, Expiry: `24 Hours`.
+    3. Click "Generate Invite Link".
+    4. Copy the personalized link (`https://rma-portal-pingconmarketing.vercel.app/intake?token=inv_...`) or click "Send Link via Email".
+    5. Open the link in a fresh incognito browser window.
+  * **Expected Behavior**:
+    1. The invite record is stored in Supabase with token, `authorized_email: daniloalvaro031717@gmail.com`, and `expires_at` timestamp.
+    2. Customer arrives at private portal displaying: *"🔒 Private RMA Portal issued exclusively to daniloalvaro031717@gmail.com"* and live countdown (`23h 59m remaining`).
+    3. Clicking "[ 🔵 Continue with Google ]" authenticates via Supabase Google OAuth.
+    4. When authenticated with `daniloalvaro031717@gmail.com`, the return intake portal unlocks immediately.
+    5. In Section 4 (Reporter Information), Reporter Email is automatically pre-filled and locked as `readOnly` with a green badge: *"Verified Google Identity (daniloalvaro031717@gmail.com)"*.
+    6. Store / Branch is automatically pre-filled with `Savemore Market Taguig`.
+
+- [ ] **TC-INV-02 (Anti-Forwarding Protection & Cross-Account Rejection)**
+  * **Location**: Gatekeeper (`GatekeeperPinModal.jsx`)
+  * **Action**:
+    1. Take the invite link issued to `daniloalvaro031717@gmail.com`.
+    2. Click "[ 🔵 Continue with Google ]" but sign in with a different Google account (e.g. `anotheruser@gmail.com`).
+    3. Test visiting the base portal (`/` or `/intake`) without any token.
+    4. In Admin Invites modal, click "Revoke Link" on an active invite and try accessing that link.
+  * **Expected Behavior**:
+    1. The mismatched Google session is immediately rejected with an unbypassable 403 Forbidden screen: *"Access Denied — Identity Mismatch. This private link was issued exclusively to daniloalvaro031717@gmail.com. You are signed in as anotheruser@gmail.com. Forwarding is prohibited."*
+    2. Visiting `/` or `/intake` directly without token displays: *"Pingcon RMA Portal — Authorization Required. Please contact your assigned Pingcon representative to receive your store's personalized return link."*
+    3. Accessing a revoked or expired token displays: *"Invite Link Revoked"* or *"Invite Link Expired"*, blocking all intake submissions.
+    4. In QA test mode (`isTestMode: true`), clicking "⚡ Test Mode Sandbox Bypass" unlocks the portal for rapid QA testing without OAuth redirection.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -3193,6 +3228,7 @@ Each test scenario defines:
 | **Phase 10: Inbound vs Outbound Logistics Segregation** | Customer RMA & Supplier RTV Hubs | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 11: Multi-Item Manifest & Polling** | Customer Hub & Quick Actions | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 12: SKU & Barcode Decoupling** | Product Engine & RMA Manifests | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 13: 1-Click Google Identity Lock** | Customer RMA Invites & OAuth Gate | `READY FOR TESTING` | *Lead QA Director* |
 
 
 --- END FILE: docs/MANUAL_QA_TESTING_CHECKLIST.md ---
@@ -3800,6 +3836,29 @@ To satisfy enterprise supply chain compliance (aligned with SAP ERP, Oracle SCM,
 - At the top of the modal, the **Logistics Classification Switcher** allows 1-click reclassification:
   `[ 📥 Customer Return (Inbound) ]` $\longleftrightarrow$ `[ 📤 Supplier Claim (Outbound / RTV) ]`
 - Toggling this switcher executes an optimistic UI update, changes `rma_type` in Supabase via `catalogService.updateRMAType`, and appends an entry to `rma_reports.audit_trail`. The record shifts seamlessly into the appropriate hub table without page reload.
+
+---
+
+## Chapter 11: Customer RMA Invites & Anti-Forwarding Google Identity Lock
+
+To prevent unauthorized public access, link sharing across unauthorized parties, and bot spam, the 6-digit static PIN system has been decommissioned in favor of cryptographic single-store return tokens locked with Google Identity.
+
+### 11.1 Staff-Generated Customer RMA Invites
+Warehouse staff and customer account executives generate personalized return invitations directly from the Admin Hub via the **"🎫 Customer RMA Invites"** module:
+1. **Customer / Reporter Email**: (e.g. `daniloalvaro031717@gmail.com`) — strictly required.
+2. **Store / Branch Name**: (e.g. `Savemore Market Taguig`) — auto-fills into the customer return form.
+3. **Expiry Duration**: Configurable from 2 hours up to 7 days (defaults to 24 hours).
+4. **Token Generation**: Generates a high-entropy cryptographic token (`inv_[timestamp]_[random16]`) stored with `authorized_email`, `store_branch`, `expires_at`, and `status: 'active'`.
+5. **Distribution**: Staff can 1-click **"Copy Link"** or **"Send Link via Email"** (delivering a branded authorization notice via `/api/send-email`).
+
+### 11.2 Google Identity Lock & Anti-Forwarding Protection
+When the customer opens their private link (`/intake?token=inv_...`):
+- The portal displays a security lock screen showing the exact authorized recipient and a live remaining-time countdown.
+- Clicking **"[ 🔵 Continue with Google ]"** authenticates the user via Google OAuth (`supabase.auth.signInWithOAuth`).
+- **Cryptographic Account Verification**:
+  - If the signed-in Google account matches `invite.authorized_email` (case-insensitive), access is granted immediately.
+  - The return intake form auto-populates `Store / Branch` and locks `Reporter Information` with a verified Google Identity badge (`readOnly`).
+  - If the link is forwarded to an unauthorized third party, or if the user signs in with an alternate Google account, the portal permanently blocks access with a 403 Forbidden screen: *"Access Denied — Identity Mismatch. Forwarding is prohibited."*
 
 
 
@@ -8949,12 +9008,10 @@ import NotificationBell from './components/NotificationBell';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
 import ReturnQRModal from './components/ReturnQRModal';
 import QuickRMAActionModal from './components/QuickRMAActionModal';
-import PortalAccessQRModal from './components/PortalAccessQRModal';
 import GatekeeperPinModal from './components/GatekeeperPinModal';
-import PortalAccessKeysModal from './components/PortalAccessKeysModal';
-import PinRequestsQueueModal from './components/PinRequestsQueueModal';
+import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
 import { accessKeyService } from './services/accessKeyService';
-import { pinRequestService } from './services/pinRequestService';
+import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
 import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest } from './utils/rmaHelpers';
 
@@ -9123,32 +9180,41 @@ export default function App() {
   const [isQuickRmaModalOpen, setIsQuickRmaModalOpen] = useState(false);
   const [quickRmaNumber, setQuickRmaNumber] = useState(null);
   const [pendingQuickRmaNumber, setPendingQuickRmaNumber] = useState(null);
-  const [isPortalAccessQrOpen, setIsPortalAccessQrOpen] = useState(false);
-  const [isAccessKeysModalOpen, setIsAccessKeysModalOpen] = useState(false);
-  const [isPinRequestsModalOpen, setIsPinRequestsModalOpen] = useState(false);
-  const [pendingPinRequestsCount, setPendingPinRequestsCount] = useState(0);
+  const [isCustomerInvitesModalOpen, setIsCustomerInvitesModalOpen] = useState(false);
 
-  // Role-Based QR Code & 6-Digit PIN Gatekeeper Engine
+  // 1-Click Google Identity Lock Gatekeeper Session
   const [intakeSlug, setIntakeSlug] = useState(() => getIntakeSlugFromUrl());
   const [gateSession, setGateSession] = useState(() => {
+    try {
+      const raw = localStorage.getItem('rma_portal_gate_session');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.expires_at && new Date(parsed.expires_at).getTime() > Date.now()) {
+          return parsed;
+        }
+      }
+    } catch {}
     const slug = getIntakeSlugFromUrl();
     return accessKeyService.getActiveSession(slug);
   });
 
   // Active Real-Time Watchdog for Gatekeeper Session Expiration (Unbypassable live enforcement)
   useEffect(() => {
-    if (!gateSession?.expiresAt) return;
+    const expStr = gateSession?.expires_at || gateSession?.expiresAt;
+    if (!expStr) return;
 
     const checkExpiration = () => {
-      const expTime = new Date(gateSession.expiresAt).getTime();
+      const expTime = new Date(expStr).getTime();
       const now = Date.now();
       if (now >= expTime) {
         // Session reached expiration!
+        try {
+          localStorage.removeItem('rma_portal_gate_session');
+        } catch {}
         const slug = gateSession.slug;
         accessKeyService.clearSession(slug);
         setGateSession(null);
-        setIntakeSlug(slug);
-        showToast('Your return session has expired. Device locked.', 'warning');
+        showToast('Your authorized return session has expired. Device locked.', 'warning');
       }
     };
 
@@ -9157,12 +9223,24 @@ export default function App() {
     return () => clearInterval(interval);
   }, [gateSession]);
 
+  // Synchronize Google Identity authorized email and branch into intake form automatically
+  useEffect(() => {
+    if (gateSession?.authorized_email) {
+      setReporterContact(gateSession.authorized_email);
+    }
+    if (gateSession?.store_branch && !storeBranch) {
+      setStoreBranch(gateSession.store_branch);
+    }
+  }, [gateSession]);
+
   const handleLockStation = () => {
+    try {
+      localStorage.removeItem('rma_portal_gate_session');
+    } catch {}
     const slug = gateSession?.slug || intakeSlug || 'dock';
     accessKeyService.clearSession(slug);
     setGateSession(null);
-    setIntakeSlug(slug);
-    showToast('Device locked. Enter 6-digit PIN to unlock station.', 'info');
+    showToast('Portal locked. Authorization required.', 'info');
   };
 
   const restoreQuickRmaIfPending = () => {
@@ -9469,7 +9547,7 @@ export default function App() {
       {
         id: 'seed-notif-1',
         type: 'rma',
-        title: 'Wholesale RMA Portal Active',
+        title: 'Pingcon RMA Portal Active',
         message: 'Notification center ready. Intake events and return submissions will alert here.',
         subtext: 'System Notification',
         timestamp: new Date().toISOString(),
@@ -9511,14 +9589,7 @@ export default function App() {
     showToast('All notifications cleared.', 'success');
   };
 
-  const notifiedPinRequestIds = useRef(new Set());
-
   const handleSelectNotification = (notif) => {
-    if (notif.type === 'pin_request') {
-      setIsPinRequestsModalOpen(true);
-      handleMarkAsRead(notif.id);
-      return;
-    }
     if (notif.type === 'rma') {
       if (isAdminView) {
         setAdminActiveTab('customer_reports');
@@ -9533,86 +9604,6 @@ export default function App() {
       }
     }
   };
-
-  // Real-time synchronization for PIN requests & Notification Bell alerts
-  useEffect(() => {
-    let isMounted = true;
-
-    // Load initial count and initialize known request IDs
-    pinRequestService.getRequests().then(reqs => {
-      if (!isMounted) return;
-      reqs.forEach(r => notifiedPinRequestIds.current.add(r.id));
-      setPendingPinRequestsCount(reqs.filter(r => r.status === 'pending').length);
-    }).catch(() => {});
-
-    const refreshRequests = async () => {
-      try {
-        const reqs = await pinRequestService.getRequests();
-        if (!isMounted) return;
-        const pendingCount = reqs.filter(r => r.status === 'pending').length;
-        setPendingPinRequestsCount(pendingCount);
-
-        // Check for any new pending requests not yet in notification bell
-        reqs.forEach(r => {
-          if (r.status === 'pending' && !notifiedPinRequestIds.current.has(r.id)) {
-            notifiedPinRequestIds.current.add(r.id);
-            addNotification({
-              id: `pin-req-${r.id}`,
-              type: 'pin_request',
-              title: `New PIN Request: ${r.requester_name}`,
-              message: `${r.organization_name ? r.organization_name + ' • ' : ''}Requested authorization PIN for /${r.access_slug}`,
-              subtext: r.notes ? `Note: ${r.notes}` : 'Return Authorization Request',
-              timestamp: r.created_at || new Date().toISOString(),
-              read: false,
-              requestId: r.id
-            });
-            if (isAdminView) {
-              showToast(`New PIN request: ${r.requester_name} (/${r.access_slug})`, 'info');
-            }
-          }
-        });
-      } catch (e) {}
-    };
-
-    // 1. Supabase Postgres Realtime Subscription on public.pin_requests
-    let pinChannel = null;
-    try {
-      pinChannel = supabase
-        .channel('public:pin_requests_realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'pin_requests' }, () => {
-          refreshRequests();
-        })
-        .subscribe();
-    } catch (e) {}
-
-    // 2. BroadcastChannel for cross-tab instant sync
-    let bc = null;
-    try {
-      if (typeof window !== 'undefined' && window.BroadcastChannel) {
-        bc = new BroadcastChannel('rma_portal_sync_bus');
-        bc.onmessage = (evt) => {
-          if (evt.data?.type === 'pin-requests-changed' || evt.data?.type === 'pin-request-created') {
-            refreshRequests();
-          }
-        };
-      }
-    } catch (e) {}
-
-    // 3. Local window event listener
-    const handleLocalEvent = () => refreshRequests();
-    window.addEventListener('rma-pin-requests-changed', handleLocalEvent);
-
-    // 4. Polling watchdog (every 6 seconds for guaranteed freshness)
-    const pollTimer = setInterval(refreshRequests, 6000);
-
-    return () => {
-      isMounted = false;
-      if (pinChannel) supabase.removeChannel(pinChannel);
-      if (bc) bc.close();
-      window.removeEventListener('rma-pin-requests-changed', handleLocalEvent);
-      clearInterval(pollTimer);
-    };
-  }, [isAdminView]);
 
   // Role Permissions
   const canManageRoles = currentUser?.role === 'super_admin';
@@ -11056,7 +11047,7 @@ export default function App() {
                           const hrs = (remainingMins / 60).toFixed(1).replace('.0', '');
                           return `Session active (~${hrs}h remaining)`;
                         })() : 'Permanent Station Unlock')
-                      : 'Wholesale RMA Return Intake'}
+                      : 'Pingcon RMA Return Intake'}
                   </div>
                 </div>
               </div>
@@ -12155,11 +12146,26 @@ export default function App() {
                       <input
                         type="text"
                         required
-                        value={reporterContact}
-                        onChange={(e) => setReporterContact(e.target.value)}
+                        value={gateSession?.authorized_email || reporterContact}
+                        onChange={(e) => {
+                          if (!gateSession?.authorized_email) {
+                            setReporterContact(e.target.value);
+                          }
+                        }}
+                        readOnly={Boolean(gateSession?.authorized_email)}
                         placeholder="Phone No. or Email *"
-                        className="w-full pl-10 pr-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs"
+                        className={`w-full pl-10 pr-3.5 py-2.5 border rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none shadow-2xs ${
+                          gateSession?.authorized_email
+                            ? 'bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 cursor-not-allowed text-emerald-950 dark:text-emerald-200'
+                            : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 focus:border-blue-600'
+                        }`}
                       />
+                      {gateSession?.authorized_email && (
+                        <div className="mt-1 flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Google Identity Verified ({gateSession.authorized_email})</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -12212,7 +12218,7 @@ export default function App() {
               <div className="space-y-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-                    <span>🏢 Wholesale RMA Operations</span>
+                    <span>🏢 Pingcon RMA Operations</span>
                   </h1>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 shrink-0">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -12249,36 +12255,12 @@ export default function App() {
 
                 <button
                   type="button"
-                  onClick={() => setIsAccessKeysModalOpen(true)}
+                  onClick={() => setIsCustomerInvitesModalOpen(true)}
                   className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
-                  title="Manage Role-Based QR Code & 6-Digit PIN Gatekeepers"
+                  title="Generate & Manage Google Identity Locked Customer RMA Return Links"
                 >
-                  <KeyRound className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span>QR Keys & PINs</span>
-                </button>
-
-                {/* Live Notification Badge for Pending Return Authorization PIN Requests */}
-                <button
-                  type="button"
-                  onClick={() => setIsPinRequestsModalOpen(true)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer ${
-                    pendingPinRequestsCount > 0
-                      ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 ring-2 ring-amber-400/30'
-                      : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-transparent'
-                  }`}
-                  title="Pending 6-Digit PIN Requests Queue"
-                >
-                  <KeyRound className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                  <span>PIN Requests</span>
-                  {pendingPinRequestsCount > 0 ? (
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-amber-600 text-white animate-pulse">
-                      {pendingPinRequestsCount}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-slate-400 font-semibold">
-                      (0)
-                    </span>
-                  )}
+                  <Ticket className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>🎫 Customer RMA Invites</span>
                 </button>
 
                 <button
@@ -14250,7 +14232,7 @@ export default function App() {
               <SettingsTab
                 isTestMode={isTestMode}
                 onToggleTestMode={toggleTestMode}
-                onOpenPortalQr={() => setIsAccessKeysModalOpen(true)}
+                onOpenPortalQr={() => setIsCustomerInvitesModalOpen(true)}
                 currentUser={currentUser}
               />
             )}
@@ -14789,13 +14771,22 @@ export default function App() {
       />
 
 
-      {/* Role-Based QR Code & 6-Digit PIN Gatekeeper Screen (Active at root / or /intake/:slug when device is not unlocked) */}
+      {/* 1-Click Google Identity Lock Gatekeeper Screen */}
       <GatekeeperPinModal
         isOpen={!isAdminView && !currentUser && !gateSession}
         currentSlug={intakeSlug}
         onUnlock={(session) => {
           setGateSession(session);
-          showToast(`Station Unlocked: ${session.profileName || session.slug}`, 'success');
+          try {
+            localStorage.setItem('rma_portal_gate_session', JSON.stringify(session));
+          } catch {}
+          if (session?.authorized_email) {
+            setReporterContact(session.authorized_email);
+          }
+          if (session?.store_branch && !storeBranch) {
+            setStoreBranch(session.store_branch);
+          }
+          showToast(`Portal Unlocked: ${session.profileName || session.authorized_email}`, 'success');
         }}
         onOpenAdminLogin={() => {
           setIsAdminView(true);
@@ -14804,31 +14795,11 @@ export default function App() {
         isTestMode={isTestMode}
       />
 
-      {/* Admin QR Access Keys & 6-Digit PIN Manager Modal */}
-      <PortalAccessKeysModal
-        isOpen={isAccessKeysModalOpen || isPortalAccessQrOpen}
-        onClose={() => {
-          setIsAccessKeysModalOpen(false);
-          setIsPortalAccessQrOpen(false);
-        }}
+      {/* Customer RMA Invites Modal (Google Identity Locked Return Links) */}
+      <CustomerRMAInvitesModal
+        isOpen={isCustomerInvitesModalOpen}
+        onClose={() => setIsCustomerInvitesModalOpen(false)}
         currentUser={currentUser}
-        onOpenPinRequests={() => {
-          setIsAccessKeysModalOpen(false);
-          setIsPortalAccessQrOpen(false);
-          setIsPinRequestsModalOpen(true);
-        }}
-      />
-
-      {/* Return Authorization PIN Requests Queue Modal */}
-      <PinRequestsQueueModal
-        isOpen={isPinRequestsModalOpen}
-        onClose={() => setIsPinRequestsModalOpen(false)}
-        currentUser={currentUser}
-        isTestMode={isTestMode}
-        onQueueUpdated={(reqs) => {
-          const pending = reqs.filter(r => r.status === 'pending').length;
-          setPendingPinRequestsCount(pending);
-        }}
       />
 
 
@@ -18341,6 +18312,479 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
 
 --- END FILE: src/components/CreditMemoVoucherModal.jsx ---
 
+--- START FILE: src/components/CustomerRMAInvitesModal.jsx ---
+import React, { useState, useEffect } from 'react';
+import { 
+  X, 
+  Mail, 
+  Send, 
+  Copy, 
+  Check, 
+  Clock, 
+  Building2, 
+  Trash2, 
+  ShieldCheck, 
+  AlertCircle, 
+  RefreshCw, 
+  ExternalLink,
+  Plus,
+  Ticket
+} from 'lucide-react';
+import { inviteService } from '../services/inviteService';
+import { formatMilitaryDateTime } from '../utils/exportCsv';
+
+export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }) {
+  const [invites, setInvites] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [authorizedEmail, setAuthorizedEmail] = useState('');
+  const [storeBranch, setStoreBranch] = useState('');
+  const [durationHours, setDurationHours] = useState('24');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedInvite, setGeneratedInvite] = useState(null);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [copiedToken, setCopiedToken] = useState(null);
+  const [toastMessage, setToastMessage] = useState(null);
+  const [errorMessage, setErrorMessage] = useState(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      loadInvites();
+      setGeneratedInvite(null);
+      setErrorMessage(null);
+    }
+  }, [isOpen]);
+
+  const loadInvites = async () => {
+    setIsLoading(true);
+    try {
+      const data = await inviteService.getInvites();
+      setInvites(data || []);
+    } catch (err) {
+      console.warn('Error loading invites:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const handleGenerate = async (e) => {
+    e.preventDefault();
+    if (!authorizedEmail.trim()) {
+      setErrorMessage('Please enter the customer / reporter email.');
+      return;
+    }
+
+    setIsGenerating(true);
+    setErrorMessage(null);
+    try {
+      const createdBy = currentUser?.name || 'Pingcon Staff';
+      const newInv = await inviteService.createInvite({
+        authorizedEmail: authorizedEmail.trim(),
+        storeBranch: storeBranch.trim(),
+        durationHours: Number(durationHours),
+        createdBy
+      });
+      setGeneratedInvite(newInv);
+      setAuthorizedEmail('');
+      setStoreBranch('');
+      showToast('Customer RMA Invite generated successfully!');
+      loadInvites();
+    } catch (err) {
+      setErrorMessage(err.message || 'Failed to generate invite.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleCopyLink = (token) => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://rma-portal-pingconmarketing.vercel.app';
+    const link = `${origin}/intake?token=${encodeURIComponent(token)}`;
+    navigator.clipboard.writeText(link);
+    setCopiedToken(token);
+    showToast('Link copied to clipboard!');
+    setTimeout(() => setCopiedToken(null), 2500);
+  };
+
+  const handleSendEmail = async (inv) => {
+    setIsSendingEmail(true);
+    try {
+      await inviteService.sendInviteEmail(inv);
+      showToast(`Invite emailed to ${inv.authorized_email}!`);
+    } catch (err) {
+      alert(`Could not send email: ${err.message}`);
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
+  const handleRevoke = async (token) => {
+    if (!window.confirm('Are you sure you want to revoke this customer return link? Access will be blocked immediately.')) {
+      return;
+    }
+    try {
+      await inviteService.revokeInvite(token);
+      showToast('Invite link revoked.');
+      loadInvites();
+      if (generatedInvite?.token === token) {
+        setGeneratedInvite(null);
+      }
+    } catch (err) {
+      alert(`Failed to revoke invite: ${err.message}`);
+    }
+  };
+
+  const formatCountdown = (expiresAt, status) => {
+    if (status === 'revoked') return { text: 'Revoked', isExpired: true, isRevoked: true };
+    const diff = new Date(expiresAt).getTime() - Date.now();
+    if (diff <= 0) return { text: 'Expired', isExpired: true, isRevoked: false };
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    if (hours > 24) {
+      const days = Math.floor(hours / 24);
+      return { text: `${days}d ${hours % 24}h remaining`, isExpired: false };
+    }
+    return { text: `${hours}h ${mins}m remaining`, isExpired: false };
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
+        
+        {/* Header */}
+        <div className="p-5 sm:p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-white dark:bg-slate-900">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-400 rounded-2xl shadow-inner">
+              <Ticket className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                  Customer RMA Invites
+                </h2>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300">
+                  Google Identity Lock
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Generate private 1-click return links tied strictly to authorized customer Google accounts.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Modal Scroll Body */}
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
+
+          {/* Toast Notification */}
+          {toastMessage && (
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+              <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span>{toastMessage}</span>
+            </div>
+          )}
+
+          {/* Error Message */}
+          {errorMessage && (
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
+          {/* Invite Generator Form Card */}
+          <form onSubmit={handleGenerate} className="p-4 sm:p-5 bg-slate-50/80 dark:bg-slate-800/40 border-2 border-slate-200 dark:border-slate-800 rounded-3xl space-y-4 shadow-xs">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                <Plus className="w-4 h-4 text-blue-600" />
+                <span>Create New Customer Return Invite</span>
+              </span>
+              <span className="text-[10px] text-slate-500 font-bold">
+                Anti-Hacker: Forwarding to unauthorized accounts is strictly blocked
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Customer Email */}
+              <div className="sm:col-span-1 space-y-1">
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                  Customer Google Email *
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="email"
+                    required
+                    value={authorizedEmail}
+                    onChange={(e) => setAuthorizedEmail(e.target.value)}
+                    placeholder="e.g. store.taguig@gmail.com"
+                    className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
+                  />
+                </div>
+              </div>
+
+              {/* Store / Branch Name */}
+              <div className="sm:col-span-1 space-y-1">
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                  Store / Branch Name (Optional)
+                </label>
+                <div className="relative">
+                  <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={storeBranch}
+                    onChange={(e) => setStoreBranch(e.target.value)}
+                    placeholder="e.g. Savemore Market Taguig"
+                    className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
+                  />
+                </div>
+              </div>
+
+              {/* Expiry Duration Dropdown */}
+              <div className="sm:col-span-1 space-y-1">
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                  Link Expiry Duration *
+                </label>
+                <div className="relative">
+                  <Clock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+                  <select
+                    value={durationHours}
+                    onChange={(e) => setDurationHours(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer"
+                  >
+                    <option value="2">2 Hours (Quick Session)</option>
+                    <option value="12">12 Hours (Same-Day Delivery)</option>
+                    <option value="24">24 Hours (1 Day Default)</option>
+                    <option value="48">2 Days (48 Hours)</option>
+                    <option value="168">7 Days (1 Week)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="submit"
+                disabled={isGenerating || !authorizedEmail.trim()}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all cursor-pointer"
+              >
+                {isGenerating ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Generating Invite...</span>
+                  </>
+                ) : (
+                  <>
+                    <Ticket className="w-3.5 h-3.5" />
+                    <span>Generate Customer Invite</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+
+          {/* Generated Invite Link Banner */}
+          {generatedInvite && (
+            <div className="p-4 sm:p-5 bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-300 dark:border-emerald-800 rounded-3xl space-y-3 animate-in fade-in">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  <h3 className="text-xs font-black uppercase tracking-wider text-emerald-950 dark:text-emerald-200">
+                    Ready: Personalized Return Link Generated!
+                  </h3>
+                </div>
+                <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/60 px-2.5 py-0.5 rounded-full">
+                  Expires: {new Date(generatedInvite.expires_at).toLocaleString()}
+                </span>
+              </div>
+
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-2xl border border-emerald-200 dark:border-emerald-800 font-mono text-xs text-slate-800 dark:text-slate-200 break-all select-all flex items-center justify-between gap-2">
+                <span>{typeof window !== 'undefined' ? `${window.location.origin}/intake?token=${generatedInvite.token}` : generatedInvite.token}</span>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => handleCopyLink(generatedInvite.token)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  {copiedToken === generatedInvite.token ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>Copy Link</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSendEmail(generatedInvite)}
+                  disabled={isSendingEmail}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  {isSendingEmail ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Sending Email...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span>Send Invite Email</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Active / Past Invites Management Table */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Authorized Customer Invites ({invites.length})
+              </h3>
+              <button
+                type="button"
+                onClick={loadInvites}
+                className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
+                <span>Refresh</span>
+              </button>
+            </div>
+
+            {invites.length === 0 ? (
+              <div className="p-8 text-center bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 rounded-2xl text-xs text-slate-400 font-semibold">
+                No customer RMA invites generated yet. Use the form above to generate your first secure return link.
+              </div>
+            ) : (
+              <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 border-b border-slate-200 dark:border-slate-800 font-bold uppercase text-[10px]">
+                    <tr>
+                      <th className="p-3">Customer Email</th>
+                      <th className="p-3">Store / Branch</th>
+                      <th className="p-3">Created</th>
+                      <th className="p-3">Expires / Remaining</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {invites.map((inv) => {
+                      const countdown = formatCountdown(inv.expires_at, inv.status);
+                      const isRevoked = inv.status === 'revoked';
+                      const isExpired = countdown.isExpired;
+
+                      return (
+                        <tr key={inv.token || inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">
+                            {inv.authorized_email}
+                          </td>
+                          <td className="p-3 text-slate-700 dark:text-slate-300 font-semibold">
+                            {inv.store_branch || <span className="text-slate-400 italic">Unassigned</span>}
+                          </td>
+                          <td className="p-3 text-slate-500 font-mono text-[11px]">
+                            {formatMilitaryDateTime(inv.created_at)}
+                          </td>
+                          <td className="p-3 font-mono text-[11px]">
+                            <span className={isExpired ? 'text-slate-400' : 'text-blue-600 dark:text-blue-400 font-bold'}>
+                              {countdown.text}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            {isRevoked ? (
+                              <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                                Revoked
+                              </span>
+                            ) : isExpired ? (
+                              <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-slate-700">
+                                Expired
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                                Active
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {!isRevoked && !isExpired && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyLink(inv.token)}
+                                    className="p-1.5 text-blue-600 hover:text-blue-800 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-lg transition-colors cursor-pointer"
+                                    title="Copy Invite Link"
+                                  >
+                                    <Copy className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSendEmail(inv)}
+                                    className="p-1.5 text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 rounded-lg transition-colors cursor-pointer"
+                                    title="Send Link via Email"
+                                  >
+                                    <Send className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRevoke(inv.token)}
+                                    className="p-1.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
+                                    title="Revoke Invite Link"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between text-xs text-slate-500">
+          <span>Pingcon RMA Operations • Customer Return Governance</span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold cursor-pointer transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+--- END FILE: src/components/CustomerRMAInvitesModal.jsx ---
+
 --- START FILE: src/components/DeleteConfirmationModal.jsx ---
 import React from 'react';
 import { Trash2, AlertTriangle, X, RefreshCw } from 'lucide-react';
@@ -19349,48 +19793,22 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
 --- END FILE: src/components/FinanceCreditMemoTab.jsx ---
 
 --- START FILE: src/components/GatekeeperPinModal.jsx ---
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, 
   ShieldAlert, 
   Lock, 
-  Unlock, 
-  QrCode, 
-  Building2, 
-  Package, 
-  Clock, 
-  AlertTriangle, 
-  CheckCircle2, 
   LogIn, 
-  Sparkles,
-  ArrowRight,
-  RefreshCw,
-  HelpCircle,
+  RefreshCw, 
+  AlertTriangle,
+  Building2,
+  Clock,
+  ExternalLink,
   Mail,
-  User,
-  Building,
-  FileText,
-  Send,
-  X,
-  KeyRound,
-  Check
+  UserCheck
 } from 'lucide-react';
-import { accessKeyService } from '../services/accessKeyService';
-import { pinRequestService } from '../services/pinRequestService';
-import { formatCooldownLabel } from './PortalAccessKeysModal';
 import { supabase } from '../supabaseClient';
-
-export function formatSessionBadgeLabel(hours) {
-  const h = Number(hours || 0);
-  if (h <= 0) return 'Permanent Device Unlock';
-  const totalMins = Math.round(h * 60);
-  if (totalMins < 60) return `${totalMins}m Active Session`;
-  if (totalMins % 60 === 0) {
-    const hoursNum = totalMins / 60;
-    return `${hoursNum} Hour${hoursNum === 1 ? '' : 's'} Active Session`;
-  }
-  return `${totalMins}m Active Session`;
-}
+import { inviteService } from '../services/inviteService';
 
 export default function GatekeeperPinModal({
   isOpen,
@@ -19399,908 +19817,413 @@ export default function GatekeeperPinModal({
   onOpenAdminLogin,
   isTestMode = false
 }) {
-  const [profile, setProfile] = useState(null);
-  const [isLoadingProfile, setIsLoadingProfile] = useState(Boolean(currentSlug));
-  const [pinDigits, setPinDigits] = useState(['', '', '', '', '', '']);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [isShake, setIsShake] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
-  const [lockoutSeconds, setLockoutSeconds] = useState(0);
+  const [token, setToken] = useState(null);
+  const [isValidating, setIsValidating] = useState(true);
+  const [validationResult, setValidationResult] = useState(null); // { valid, invite, error }
+  const [googleUser, setGoogleUser] = useState(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [accessDeniedEmail, setAccessDeniedEmail] = useState(null);
+  const [countdownStr, setCountdownStr] = useState('');
 
-  // Anti-Fraud Cooldown State
-  const [cooldownInfo, setCooldownInfo] = useState(null);
-  const [countdownString, setCountdownString] = useState('');
-
-  // Request PIN Modal & Form State
-  const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
-  const [requestForm, setRequestForm] = useState({
-    email: '',
-    name: '',
-    organization: '',
-    notes: ''
-  });
-  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
-  const [requestSuccess, setRequestSuccess] = useState(false);
-  const [requestError, setRequestError] = useState('');
-
-  const inputRefs = [
-    useRef(null),
-    useRef(null),
-    useRef(null),
-    useRef(null),
-    useRef(null),
-    useRef(null)
-  ];
-
-  // 1. Reset state whenever modal opens or closes
+  // 1. Resolve token from URL on mount or change
   useEffect(() => {
-    if (isOpen) {
-      setIsVerifying(false);
-      setIsSuccess(false);
-      setPinDigits(['', '', '', '', '', '']);
-      setErrorMessage('');
-      setLockoutSeconds(0);
-      setCooldownInfo(null);
-      setCountdownString('');
-      setIsRequestModalOpen(false);
-      setRequestSuccess(false);
-      setRequestError('');
+    if (typeof window === 'undefined') return;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    let t = urlParams.get('token');
+
+    if (!t && window.location.hash.includes('token=')) {
+      const match = window.location.hash.match(/token=([^&]+)/);
+      if (match && match[1]) t = decodeURIComponent(match[1]);
     }
+
+    setToken(t || null);
   }, [isOpen]);
 
-  // 2. Fetch profile & check device cooldown when slug changes or modal opens
+  // 2. Validate token when token is present
   useEffect(() => {
     let isMounted = true;
-    if (!isOpen || !currentSlug) {
-      setProfile(null);
-      setIsLoadingProfile(false);
-      setCooldownInfo(null);
+    if (!token) {
+      setIsValidating(false);
+      setValidationResult(null);
       return;
     }
 
-    setIsLoadingProfile(true);
-    setErrorMessage('');
-    setPinDigits(['', '', '', '', '', '']);
-
-    accessKeyService.getProfileBySlug(currentSlug)
-      .then(prof => {
-        if (!isMounted) return;
-        setProfile(prof);
-        setIsLoadingProfile(false);
-
-        // Check if device is in cooldown for this profile
-        if (prof?.type === 'external_customer') {
-          accessKeyService.checkDeviceCooldown(currentSlug, prof).then(cd => {
-            if (!isMounted) return;
-            if (cd && cd.isCooldownActive) {
-              setCooldownInfo(cd);
-            } else {
-              setCooldownInfo(null);
-            }
-          });
-        } else {
-          setCooldownInfo(null);
-        }
-      })
-      .catch(() => {
-        if (!isMounted) return;
-        setProfile(null);
-        setIsLoadingProfile(false);
-      });
+    setIsValidating(true);
+    inviteService.validateInviteToken(token).then(res => {
+      if (isMounted) {
+        setValidationResult(res);
+        setIsValidating(false);
+      }
+    });
 
     return () => { isMounted = false; };
-  }, [isOpen, currentSlug]);
+  }, [token]);
 
-  // Real-time listener for emergency cooldown clear from admin across all devices
+  // 3. Countdown timer for valid invite
   useEffect(() => {
-    if (!isOpen || !currentSlug) return;
-
-    const handleClearEvent = (slug) => {
-      const targetSlug = String(slug || '').trim().toLowerCase();
-      if (!targetSlug || targetSlug === currentSlug.toLowerCase()) {
-        try {
-          localStorage.removeItem(`rma_last_session_${currentSlug.toLowerCase()}`);
-        } catch (e) {}
-        setCooldownInfo(null);
-      }
-    };
-
-    // 1. Supabase Realtime broadcast channel across physical devices
-    const channel = supabase.channel('gatekeeper_cooldown_bus')
-      .on('broadcast', { event: 'cooldown_cleared' }, ({ payload }) => {
-        handleClearEvent(payload?.slug);
-      })
-      .subscribe();
-
-    // 2. BroadcastChannel for same-device cross-tab sync
-    let bc = null;
-    if (typeof window !== 'undefined' && window.BroadcastChannel) {
-      bc = new BroadcastChannel('rma_portal_sync_bus');
-      bc.onmessage = (msg) => {
-        if (msg.data?.type === 'cooldown_cleared') {
-          handleClearEvent(msg.data?.slug);
-        }
-      };
-    }
-
-    return () => {
-      supabase.removeChannel(channel);
-      if (bc) bc.close();
-    };
-  }, [isOpen, currentSlug]);
-
-  // Live ticking countdown for Cooldown Lockout Screen
-  useEffect(() => {
-    if (!cooldownInfo?.unlocksAt) return;
+    if (!validationResult?.invite?.expires_at) return;
 
     const updateTimer = () => {
-      const now = Date.now();
-      const target = new Date(cooldownInfo.unlocksAt).getTime();
-      const diffMs = target - now;
-
-      if (diffMs <= 0) {
-        setCooldownInfo(null);
-        setCountdownString('');
-        return;
+      const diff = new Date(validationResult.invite.expires_at).getTime() - Date.now();
+      if (diff <= 0) {
+        setCountdownStr('Expired');
+        setValidationResult(prev => prev ? { ...prev, valid: false, error: 'EXPIRED' } : null);
+      } else {
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        setCountdownStr(`${hours}h ${mins}m remaining`);
       }
-
-      const totalSec = Math.floor(diffMs / 1000);
-      const hours = Math.floor(totalSec / 3600);
-      const minutes = Math.floor((totalSec % 3600) / 60);
-      const seconds = totalSec % 60;
-
-      const pad = (n) => String(n).padStart(2, '0');
-      setCountdownString(`${pad(hours)}:${pad(minutes)}:${pad(seconds)}`);
     };
 
     updateTimer();
-    const interval = setInterval(updateTimer, 1000);
+    const interval = setInterval(updateTimer, 30000);
     return () => clearInterval(interval);
-  }, [cooldownInfo]);
+  }, [validationResult?.invite?.expires_at]);
 
-  // Auto-focus first PIN box on open
+  // 4. Check for signed-in Google Auth session and verify against authorized email
   useEffect(() => {
-    if (isOpen && !isLoadingProfile && profile?.is_active && inputRefs[0].current) {
-      setTimeout(() => {
-        inputRefs[0].current?.focus();
-      }, 150);
+    let isMounted = true;
+
+    const verifySession = async (session) => {
+      if (!session?.user) {
+        setGoogleUser(null);
+        setAccessDeniedEmail(null);
+        return;
+      }
+
+      const signedInEmail = session.user.email?.toLowerCase().trim();
+      setGoogleUser(session.user);
+
+      if (validationResult?.valid && validationResult?.invite) {
+        const authEmail = validationResult.invite.authorized_email.toLowerCase().trim();
+
+        if (signedInEmail === authEmail) {
+          // Success: Google email matches authorized invite email!
+          setAccessDeniedEmail(null);
+          const unlockedSession = {
+            type: 'external_customer',
+            token: validationResult.invite.token,
+            authorized_email: validationResult.invite.authorized_email,
+            store_branch: validationResult.invite.store_branch || '',
+            user_email: signedInEmail,
+            expires_at: validationResult.invite.expires_at,
+            profileName: validationResult.invite.store_branch || validationResult.invite.authorized_email,
+            unlockedAt: new Date().toISOString()
+          };
+
+          try {
+            localStorage.setItem('rma_portal_gate_session', JSON.stringify(unlockedSession));
+          } catch {}
+
+          if (onUnlock) {
+            onUnlock(unlockedSession);
+          }
+        } else {
+          // Failure: Logged into different Google Account! (Anti-forwarding block)
+          setAccessDeniedEmail(signedInEmail);
+        }
+      }
+    };
+
+    // Check initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (isMounted) verifySession(session);
+    });
+
+    // Listen to OAuth redirect completion
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (isMounted) verifySession(session);
+    });
+
+    return () => {
+      isMounted = false;
+      authListener?.subscription?.unsubscribe();
+    };
+  }, [validationResult, onUnlock]);
+
+  // 5. Google Sign In Action
+  const handleContinueWithGoogle = async () => {
+    setIsSigningIn(true);
+    try {
+      const redirectUrl = typeof window !== 'undefined' ? window.location.href : undefined;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'select_account'
+          }
+        }
+      });
+      if (error) throw error;
+    } catch (err) {
+      console.error('Google Sign In Error:', err);
+      alert(`Google sign in failed: ${err.message}`);
+      setIsSigningIn(false);
     }
-  }, [isOpen, isLoadingProfile, profile]);
+  };
 
-  // Lockout countdown timer
-  useEffect(() => {
-    if (lockoutSeconds <= 0) return;
-    const interval = setInterval(() => {
-      setLockoutSeconds(prev => Math.max(0, prev - 1));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [lockoutSeconds]);
+  // 6. Sign Out to switch account
+  const handleSignOutGoogle = async () => {
+    try {
+      await supabase.auth.signOut();
+      setGoogleUser(null);
+      setAccessDeniedEmail(null);
+    } catch (err) {
+      console.warn('Sign out error:', err);
+    }
+  };
+
+  // 7. QA Sandbox Test Mode Bypass
+  const handleTestModeBypass = () => {
+    if (!validationResult?.invite) return;
+    const inv = validationResult.invite;
+    const bypassSession = {
+      type: 'external_customer',
+      token: inv.token,
+      authorized_email: inv.authorized_email,
+      store_branch: inv.store_branch || '',
+      user_email: inv.authorized_email,
+      expires_at: inv.expires_at,
+      profileName: inv.store_branch || inv.authorized_email,
+      isTestBypass: true,
+      unlockedAt: new Date().toISOString()
+    };
+    try {
+      localStorage.setItem('rma_portal_gate_session', JSON.stringify(bypassSession));
+    } catch {}
+    if (onUnlock) onUnlock(bypassSession);
+  };
 
   if (!isOpen) return null;
 
-  // Handle individual digit input
-  const handleDigitChange = (index, value) => {
-    if (lockoutSeconds > 0 || isVerifying || isSuccess) return;
-
-    // Handle multi-character paste (e.g. pasting "123456")
-    const cleaned = value.replace(/\D/g, '');
-    if (cleaned.length > 1) {
-      const digits = cleaned.slice(0, 6).split('');
-      const newPin = [...pinDigits];
-      digits.forEach((d, i) => {
-        if (i < 6) newPin[i] = d;
-      });
-      setPinDigits(newPin);
-      const nextIndex = Math.min(5, digits.length);
-      inputRefs[nextIndex]?.current?.focus();
-
-      if (digits.length === 6) {
-        verifyPinCode(newPin.join(''));
-      }
-      return;
-    }
-
-    const singleDigit = cleaned.slice(-1);
-    const newPin = [...pinDigits];
-    newPin[index] = singleDigit;
-    setPinDigits(newPin);
-    setErrorMessage('');
-
-    // Auto-advance to next box
-    if (singleDigit && index < 5) {
-      inputRefs[index + 1]?.current?.focus();
-    }
-
-    // Auto-verify when 6th digit entered
-    if (index === 5 && singleDigit) {
-      const completePin = newPin.join('');
-      if (completePin.length === 6) {
-        verifyPinCode(completePin);
-      }
-    }
-  };
-
-  const handleKeyDown = (index, e) => {
-    if (e.key === 'Backspace') {
-      if (!pinDigits[index] && index > 0) {
-        inputRefs[index - 1]?.current?.focus();
-      } else {
-        const newPin = [...pinDigits];
-        newPin[index] = '';
-        setPinDigits(newPin);
-      }
-    } else if (e.key === 'ArrowLeft' && index > 0) {
-      inputRefs[index - 1]?.current?.focus();
-    } else if (e.key === 'ArrowRight' && index < 5) {
-      inputRefs[index + 1]?.current?.focus();
-    }
-  };
-
-  // Perform PIN verification against accessKeyService
-  const verifyPinCode = async (pinString) => {
-    if (!profile) return;
-    setIsVerifying(true);
-    setErrorMessage('');
-
-    try {
-      const res = await accessKeyService.verifyPin(profile.access_slug, pinString);
-
-      if (res && res.success) {
-        setIsSuccess(true);
-        setTimeout(() => {
-          setIsVerifying(false);
-          setIsSuccess(false);
-          onUnlock(res.session);
-        }, 500);
-      } else if (res && res.error === 'COOLDOWN_ACTIVE') {
-        // Anti-Fraud Cooldown Lockout triggered
-        setIsVerifying(false);
-        setCooldownInfo(res);
-      } else {
-        setIsVerifying(false);
-        setIsShake(true);
-        setTimeout(() => setIsShake(false), 500);
-
-        if (res && (res.error === 'LOCKED' || res.isLocked)) {
-          setLockoutSeconds(res.secondsLeft || 30);
-        }
-        setErrorMessage(res?.message || 'Incorrect PIN code. Please retry.');
-        setPinDigits(['', '', '', '', '', '']);
-        setTimeout(() => inputRefs[0]?.current?.focus(), 100);
-      }
-    } catch (err) {
-      console.error('PIN verification error:', err);
-      setIsVerifying(false);
-      setErrorMessage('Verification failed. Please retry.');
-      setPinDigits(['', '', '', '', '', '']);
-      setTimeout(() => inputRefs[0]?.current?.focus(), 100);
-    }
-  };
-
-  // Refresh Cooldown Lockout state
-  const handleRefreshCooldown = async () => {
-    setIsVerifying(true);
-    try {
-      const cd = await accessKeyService.checkDeviceCooldown(profile?.access_slug || currentSlug);
-      if (!cd || !cd.isCooldownActive) {
-        setCooldownInfo(null);
-        setCountdownString('');
-      } else {
-        setCooldownInfo(cd);
-      }
-    } finally {
-      setIsVerifying(false);
-    }
-  };
-
-  // Sandbox Quick Unlock for QA & Development
-  const handleSandboxUnlock = (overrideSlug = null) => {
-    const slugToUse = overrideSlug || profile?.access_slug || 'dock';
-    accessKeyService.getProfileBySlug(slugToUse).then(prof => {
-      const target = prof || {
-        name: 'Sandbox Warehouse Station',
-        type: 'internal_warehouse',
-        access_slug: slugToUse,
-        session_duration_hours: 0
-      };
-      const session = accessKeyService.createSession(target);
-      setIsSuccess(true);
-      setTimeout(() => {
-        setIsVerifying(false);
-        setIsSuccess(false);
-        onUnlock(session);
-      }, 400);
-    });
-  };
-
-  // Submit PIN Authorization Request
-  const handleRequestSubmit = async (e) => {
-    e?.preventDefault();
-    if (!profile) return;
-    if (!requestForm.email || !requestForm.name || !requestForm.organization) {
-      setRequestError('Please fill in your email, full name, and store/company location.');
-      return;
-    }
-    setIsSubmittingRequest(true);
-    setRequestError('');
-    try {
-      await pinRequestService.createPinRequest({
-        accessSlug: profile.access_slug,
-        accessKeyId: profile.id,
-        requesterEmail: requestForm.email,
-        requesterName: requestForm.name,
-        organizationName: requestForm.organization,
-        notes: requestForm.notes,
-        isTestMode: Boolean(isTestMode)
-      });
-      setIsSubmittingRequest(false);
-      setRequestSuccess(true);
-    } catch (err) {
-      console.error('Submit PIN request error:', err);
-      setIsSubmittingRequest(false);
-      setRequestError(err.message || 'Failed to submit PIN request. Please try again.');
-    }
-  };
-
-  // Test mode auto-fill & unlock helper
-  const handleAutoFillTestPin = () => {
-    if (!profile?.pin_code) return;
-    const digits = profile.pin_code.split('');
-    setPinDigits(digits);
-    setIsRequestModalOpen(false);
-    setRequestSuccess(false);
-    verifyPinCode(profile.pin_code);
-  };
-
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 backdrop-blur-md p-4 sm:p-6 md:p-8 flex justify-center py-8 sm:py-12 animate-in fade-in duration-200">
-      <div 
-        className={`relative w-full max-w-md my-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden p-6 sm:p-9 ${
-          isShake ? 'animate-shake' : ''
-        }`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Glow ambient background element */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-24 bg-blue-500/10 blur-3xl rounded-full pointer-events-none" />
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in">
+      <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden p-6 sm:p-8 space-y-6 text-center">
 
-        {/* ================================================================= */}
-        {/* STATE A: ROOT VISIT WITH NO ACTIVE SLUG & NO ACTIVE SESSION       */}
-        {/* ================================================================= */}
-        {!currentSlug ? (
-          <div className="text-center space-y-6">
-            <div className="w-16 h-16 rounded-3xl bg-blue-50 dark:bg-blue-950/70 border border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-lg shadow-blue-500/10">
-              <QrCode className="w-8 h-8" />
+        {/* 1. Loading State */}
+        {isValidating ? (
+          <div className="py-12 space-y-4">
+            <RefreshCw className="w-10 h-10 text-blue-600 animate-spin mx-auto" />
+            <div className="text-sm font-bold text-slate-700 dark:text-slate-300">
+              Validating Pingcon Return Authorization...
+            </div>
+            <p className="text-xs text-slate-400">Verifying secure token integrity</p>
+          </div>
+        ) : accessDeniedEmail && validationResult?.invite ? (
+          /* 2. Anti-Forwarding 403 Forbidden Screen */
+          <div className="space-y-5 animate-in zoom-in-95">
+            <div className="w-16 h-16 rounded-3xl bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto shadow-inner">
+              <ShieldAlert className="w-8 h-8" />
             </div>
 
-            <div className="space-y-2">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                <Lock className="w-3 h-3 text-slate-500" />
-                <span>Station Scan Required</span>
-              </div>
-              <h2 className="text-xl font-black text-slate-900 dark:text-white">
-                Official RMA Gatekeeper
+            <div className="space-y-1">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                403 Forbidden
+              </span>
+              <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                Access Denied
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-xs mx-auto">
-                Please open <strong>Google Lens</strong> or your phone's QR scanner to scan the official code located at the <strong>warehouse dock wall</strong> or on your <strong>product delivery carton</strong>.
+            </div>
+
+            <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl text-xs text-left space-y-2.5 text-slate-800 dark:text-slate-200">
+              <div className="text-[11px] font-bold text-rose-800 dark:text-rose-300">
+                🚨 Security Mismatch Detected:
+              </div>
+              <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
+                You are currently signed in as:
+                <strong className="block text-slate-900 dark:text-white font-mono mt-0.5">{accessDeniedEmail}</strong>
               </p>
-            </div>
-
-            {/* Visual Guide Box */}
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700/80 text-left space-y-2.5 text-xs">
-              <div className="flex items-center gap-2.5 font-bold text-slate-800 dark:text-slate-200">
-                <div className="w-6 h-6 rounded-lg bg-blue-600 text-white flex items-center justify-center text-[11px] font-black shrink-0">1</div>
-                <span>Warehouse Staff: Open Google Lens & scan dock poster</span>
-              </div>
-              <div className="flex items-center gap-2.5 font-bold text-slate-800 dark:text-slate-200">
-                <div className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-[11px] font-black shrink-0">2</div>
-                <span>Customer Repackers: Open Google Lens & scan carton sticker</span>
+              <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
+                This private return portal is strictly authorized for:
+                <strong className="block text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">{validationResult.invite.authorized_email}</strong>
+              </p>
+              <div className="text-[11px] text-slate-500 italic pt-1 border-t border-rose-200 dark:border-rose-900/40">
+                Forwarding personalized return links is strictly prohibited to protect account security.
               </div>
             </div>
 
-            {/* Sandbox QA bypass if Test Mode ON */}
-            {isTestMode && (
-              <div className="p-3 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 rounded-2xl space-y-2 text-xs">
-                <div className="flex items-center justify-between text-[11px] font-bold text-amber-800 dark:text-amber-300">
-                  <span className="flex items-center gap-1"><Sparkles className="w-3.5 h-3.5" /> Test Mode: Sandbox Bypass</span>
-                  <span>QA Helper</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleSandboxUnlock('dock')}
-                    className="py-1.5 px-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[11px] rounded-xl shadow-xs transition-all cursor-pointer"
-                  >
-                    Dock Station (Perm)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSandboxUnlock('returns')}
-                    className="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-white font-extrabold text-[11px] rounded-xl shadow-xs transition-all cursor-pointer"
-                  >
-                    Customer Box (2h)
-                  </button>
-                </div>
-              </div>
-            )}
+            <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={handleSignOutGoogle}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-blue-600/25 transition-all cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Switch to Authorized Account</span>
+              </button>
 
-            {/* Bottom Actions */}
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-4 text-xs font-bold">
               <button
                 type="button"
                 onClick={onOpenAdminLogin}
-                className="text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1.5 cursor-pointer"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
               >
-                <LogIn className="w-3.5 h-3.5" />
                 <span>Admin & Staff Login</span>
               </button>
             </div>
           </div>
-        ) : isLoadingProfile ? (
-          /* Loading Profile State */
-          <div className="text-center py-12 space-y-3">
-            <RefreshCw className="w-8 h-8 animate-spin text-blue-600 mx-auto" />
-            <p className="text-xs font-bold text-slate-500">Verifying QR Station Profile...</p>
-          </div>
-        ) : !profile || !profile.is_active ? (
-          /* Inactive or Missing Profile State */
-          <div className="text-center space-y-5">
-            <div className="w-16 h-16 rounded-3xl bg-rose-50 dark:bg-rose-950/70 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto shadow-lg shadow-rose-500/10">
-              <ShieldAlert className="w-8 h-8" />
+        ) : !token ? (
+          /* 3. Visited Without a Token */
+          <div className="space-y-5 animate-in zoom-in-95">
+            <div className="w-16 h-16 rounded-3xl bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-inner">
+              <Lock className="w-8 h-8" />
             </div>
 
-            <div className="space-y-1.5">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
-                Access Prohibited
+            <div className="space-y-1">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                Protected Portal
               </span>
-              <h2 className="text-lg font-black text-slate-900 dark:text-white">
-                QR Station Inactive or Missing
+              <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                Pingcon RMA Portal
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto">
-                The access code <code>"{currentSlug}"</code> has been deactivated or was not found. Please contact your warehouse supervisor or scan a current active QR poster.
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs text-slate-600 dark:text-slate-300 space-y-2 text-left">
+              <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                <span>Authorization Required</span>
+              </div>
+              <p className="leading-relaxed text-[11px] text-slate-500 dark:text-slate-400">
+                Please contact your assigned Pingcon representative or Account Executive to receive your store's personalized return link.
               </p>
             </div>
 
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  window.location.href = window.location.origin;
-                }}
-                className="w-full py-2.5 bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
-              >
-                Return to Portal Home
-              </button>
+            <div className="pt-2">
               <button
                 type="button"
                 onClick={onOpenAdminLogin}
-                className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline pt-1"
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-blue-600/25 transition-all cursor-pointer"
               >
-                Supervisor Login
+                <LogIn className="w-4 h-4" />
+                <span>Admin & Staff Login</span>
               </button>
             </div>
           </div>
-        ) : cooldownInfo?.unlocksAt ? (
-          /* ================================================================= */
-          /* STATE C: ENTERPRISE COOLDOWN LOCKOUT SCREEN                       */
-          /* ================================================================= */
-          <div className="space-y-6 text-center animate-in fade-in zoom-in-95">
-            {/* Shield Alert Glow Icon */}
-            <div className="relative mx-auto w-16 h-16 rounded-3xl bg-amber-50 dark:bg-amber-950/70 border border-amber-300 dark:border-amber-700/80 text-amber-600 dark:text-amber-400 flex items-center justify-center shadow-lg shadow-amber-500/10">
-              <ShieldAlert className="w-8 h-8 animate-pulse" />
-              <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 border-2 border-white dark:border-slate-900" />
+        ) : !validationResult?.valid ? (
+          /* 4. Token Invalid / Expired / Revoked */
+          <div className="space-y-5 animate-in zoom-in-95">
+            <div className="w-16 h-16 rounded-3xl bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto shadow-inner">
+              <Clock className="w-8 h-8" />
             </div>
 
-            <div className="space-y-2">
-              <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 border border-amber-200 dark:border-amber-800">
-                Security Lockout • Anti-Duplicate Shield
+            <div className="space-y-1">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                {validationResult?.error === 'REVOKED' ? 'Authorization Revoked' : 'Link Expired'}
               </span>
-              <h2 className="text-xl font-black text-slate-900 dark:text-white">
-                Return Window Currently Locked
+              <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                Authorization Unavailable
               </h2>
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed max-w-sm mx-auto">
-                Your previous RMA intake session has concluded. To protect inventory records and prevent duplicate submissions, this portal will unlock again for this device once the cooldown period completes.
+            </div>
+
+            <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-2xl text-xs text-left space-y-2 text-slate-700 dark:text-slate-300">
+              <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400">
+                {validationResult?.error === 'REVOKED'
+                  ? 'This customer return authorization was revoked by Pingcon Operations.'
+                  : 'This personalized return link has exceeded its validity period and expired.'}
+              </p>
+              <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400 font-bold">
+                Please contact your Pingcon representative to generate a fresh return authorization link for your store.
               </p>
             </div>
 
-            {/* Live Ticking Countdown Box */}
-            <div className="p-5 bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-800/80 dark:to-slate-850 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-inner space-y-2">
-              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                Device Unlocks In
-              </div>
-              <div className="text-3xl sm:text-4xl font-mono font-black tracking-widest text-slate-900 dark:text-white">
-                {countdownString || 'Calculating...'}
-              </div>
-              <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200 dark:border-slate-700/80">
-                Unlocks At: {new Date(cooldownInfo.unlocksAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}, {new Date(cooldownInfo.unlocksAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
-              </div>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={onOpenAdminLogin}
+                className="w-full py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
+              >
+                <span>Admin & Staff Login</span>
+              </button>
             </div>
           </div>
         ) : (
-          /* ================================================================= */
-          /* STATE B: VALID PROFILE -> 6-DIGIT PIN ENTRY SCREEN               */
-          /* ================================================================= */
-          <div className="space-y-6 text-center">
-            
-            {/* Header Icon & Badges */}
-            <div className="space-y-3">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center mx-auto shadow-lg shadow-blue-600/30">
-                {isSuccess ? (
-                  <CheckCircle2 className="w-7 h-7 text-white animate-in zoom-in" />
-                ) : profile.type === 'internal_warehouse' ? (
-                  <Building2 className="w-7 h-7 text-white" />
-                ) : (
-                  <Package className="w-7 h-7 text-white" />
-                )}
-              </div>
-
-              <div>
-                <div className="flex items-center justify-center gap-1.5 mb-1.5 flex-wrap">
-                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                    profile.type === 'internal_warehouse'
-                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 dark:border-blue-900'
-                      : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900'
-                  }`}>
-                    {profile.type === 'internal_warehouse' ? 'Internal Warehouse Dock' : 'Customer Delivery Box'}
-                  </span>
-
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                    <Clock className="w-3 h-3" />
-                    {formatSessionBadgeLabel(profile.session_duration_hours)}
-                  </span>
-                </div>
-
-                <h2 className="text-xl font-black text-slate-900 dark:text-white">
-                  {profile.name}
-                </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  Enter official 6-digit gatekeeper PIN to activate this device
-                </p>
-              </div>
+          /* 5. Valid Token -> Google Identity Lock Screen */
+          <div className="space-y-5 animate-in zoom-in-95">
+            <div className="w-16 h-16 rounded-3xl bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-inner">
+              <ShieldCheck className="w-8 h-8" />
             </div>
 
-            {/* 6-Box Numeric PIN Inputs */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-center gap-2 sm:gap-2.5">
-                {pinDigits.map((digit, idx) => (
-                  <input
-                    key={idx}
-                    ref={inputRefs[idx]}
-                    type="password"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={idx === 0 ? 6 : 1}
-                    value={digit}
-                    disabled={lockoutSeconds > 0 || isVerifying || isSuccess}
-                    onChange={(e) => handleDigitChange(idx, e.target.value)}
-                    onKeyDown={(e) => handleKeyDown(idx, e)}
-                    className={`w-11 h-13 sm:w-12 sm:h-14 text-center text-xl sm:text-2xl font-black font-mono rounded-2xl border transition-all duration-150 focus:outline-none ${
-                      isSuccess
-                        ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                        : errorMessage
-                        ? 'bg-rose-50 border-rose-400 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300'
-                        : digit
-                        ? 'bg-blue-50/50 border-blue-500 text-blue-900 dark:bg-blue-950/50 dark:text-blue-100'
-                        : 'bg-slate-50 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20'
-                    }`}
-                  />
-                ))}
-              </div>
+            <div className="space-y-1">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                Verified Authorization
+              </span>
+              <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                Pingcon RMA Portal
+              </h2>
+            </div>
 
-              {/* Status / Error Messages */}
-              {isVerifying ? (
-                <div className="flex items-center justify-center gap-2 text-xs font-bold text-blue-600 dark:text-blue-400 animate-pulse">
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Verifying PIN code...</span>
-                </div>
-              ) : isSuccess ? (
-                <div className="flex items-center justify-center gap-1.5 text-xs font-black text-emerald-600 dark:text-emerald-400 animate-in zoom-in">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>PIN Verified! Unlocking Scanner...</span>
-                </div>
-              ) : errorMessage ? (
-                <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-rose-600 dark:text-rose-400 animate-in fade-in">
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>{errorMessage}</span>
-                </div>
-              ) : (
-                <div className="text-[11px] text-slate-400">
-                  Numeric digits 0–9 • Auto-verifies on 6th digit
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs text-left space-y-2 text-slate-800 dark:text-slate-200">
+              <div className="text-[10px] uppercase font-bold text-slate-400">
+                Private Return Authorization Issued Exclusively To:
+              </div>
+              <div className="font-mono font-black text-blue-600 dark:text-blue-400 text-sm flex items-center gap-1.5 break-all">
+                <Mail className="w-4 h-4 shrink-0 text-blue-600" />
+                <span>{validationResult.invite.authorized_email}</span>
+              </div>
+              {validationResult.invite.store_branch && (
+                <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1 pt-1 font-bold">
+                  <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>{validationResult.invite.store_branch}</span>
                 </div>
               )}
-
-              {/* Option: Request Authorization PIN */}
-              <div className="pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRequestSuccess(false);
-                    setRequestError('');
-                    setIsRequestModalOpen(true);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50/80 hover:bg-blue-100 dark:bg-blue-950/50 dark:hover:bg-blue-900/60 border border-blue-200/80 dark:border-blue-800/80 transition-all cursor-pointer shadow-xs active:scale-95"
-                >
-                  <KeyRound className="w-3.5 h-3.5" />
-                  <span>Don't have the 6-digit PIN? Request Access Here</span>
-                </button>
-              </div>
+              {countdownStr && (
+                <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 pt-1">
+                  <Clock className="w-3 h-3 shrink-0" />
+                  <span>Valid for: {countdownStr}</span>
+                </div>
+              )}
             </div>
 
-            {/* Test Mode Quick Bypass (QA Helper) */}
-            {isTestMode && (
-              <div className="p-2.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 rounded-2xl flex items-center justify-between text-xs">
-                <span className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                  Test Mode PIN: <code>{profile.pin_code}</code>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => handleSandboxUnlock(profile.access_slug)}
-                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[11px] rounded-xl shadow-xs transition-all cursor-pointer"
-                >
-                  Quick Unlock
-                </button>
-              </div>
-            )}
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+              To verify your identity and prevent fraudulent claims, click below to confirm with your authorized Google Account.
+            </p>
 
-            {/* Footer Navigation */}
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs font-bold text-slate-500">
+            <div className="space-y-2 pt-1">
               <button
                 type="button"
-                onClick={() => {
-                  window.location.href = window.location.origin;
-                }}
-                className="hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+                onClick={handleContinueWithGoogle}
+                disabled={isSigningIn}
+                className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-blue-600/25 transition-all active:scale-[0.99] cursor-pointer"
               >
-                Cancel
+                {isSigningIn ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Connecting to Google...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" viewBox="0 0 24 24">
+                      <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                      <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                      <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                      <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                    </svg>
+                    <span>Continue with Google</span>
+                  </>
+                )}
               </button>
+
+              {/* QA Sandbox Test Mode Quick Bypass */}
+              {isTestMode && (
+                <button
+                  type="button"
+                  onClick={handleTestModeBypass}
+                  className="w-full py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <UserCheck className="w-3 h-3 text-amber-600" />
+                  <span>🧪 Test Mode Sandbox Bypass (QA Only)</span>
+                </button>
+              )}
 
               <button
                 type="button"
                 onClick={onOpenAdminLogin}
-                className="text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                className="w-full py-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-xs transition-colors cursor-pointer"
               >
-                <span>Admin Login</span>
-                <ArrowRight className="w-3 h-3" />
+                <span>Admin & Staff Login</span>
               </button>
-            </div>
-
-          </div>
-        )}
-
-        {/* ================================================================= */}
-        {/* SUB-MODAL: REQUEST 6-DIGIT RETURN AUTHORIZATION PIN               */}
-        {/* ================================================================= */}
-        {isRequestModalOpen && (
-          <div className="absolute inset-0 bg-white dark:bg-slate-900 z-30 p-6 sm:p-7 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-bottom duration-200">
-            <div>
-              {/* Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-                    <KeyRound className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-black text-slate-900 dark:text-white leading-tight">
-                      Request Authorization PIN
-                    </h3>
-                    <p className="text-[11px] text-slate-400">
-                      Station: {profile?.name || currentSlug}
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setIsRequestModalOpen(false)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                  title="Close"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {!requestSuccess ? (
-                <>
-                  {/* Step-by-Step Guidance Banner */}
-                  <div className="mt-4 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 space-y-2 text-xs">
-                    <div className="text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1">
-                      📋 How It Works:
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-600 dark:text-slate-300">
-                      <div className="flex items-start gap-1.5">
-                        <span className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">1</span>
-                        <span>Submit your store &amp; contact details</span>
-                      </div>
-                      <div className="flex items-start gap-1.5">
-                        <span className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">2</span>
-                        <span>Admin reviews &amp; approves request</span>
-                      </div>
-                      <div className="flex items-start gap-1.5">
-                        <span className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">3</span>
-                        <span>Receive 6-digit PIN directly via email</span>
-                      </div>
-                      <div className="flex items-start gap-1.5">
-                        <span className="w-4 h-4 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">4</span>
-                        <span>Reuse PIN anytime for future returns!</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Submission Form */}
-                  <form onSubmit={handleRequestSubmit} className="mt-4 space-y-3">
-                    {/* Email */}
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        Your Email Address <span className="text-rose-500">*</span>
-                      </label>
-                      <div className="relative">
-                        <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="email"
-                          required
-                          value={requestForm.email}
-                          onChange={(e) => setRequestForm({ ...requestForm, email: e.target.value })}
-                          placeholder="reporter@supermarket.com"
-                          className="w-full pl-9 pr-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Full Name */}
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        Your Full Name <span className="text-rose-500">*</span>
-                      </label>
-                      <div className="relative">
-                        <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="text"
-                          required
-                          value={requestForm.name}
-                          onChange={(e) => setRequestForm({ ...requestForm, name: e.target.value })}
-                          placeholder="Juan Dela Cruz"
-                          className="w-full pl-9 pr-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Organization / Location */}
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        Company / Supermarket / Location <span className="text-rose-500">*</span>
-                      </label>
-                      <div className="relative">
-                        <Building className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="text"
-                          required
-                          value={requestForm.organization}
-                          onChange={(e) => setRequestForm({ ...requestForm, organization: e.target.value })}
-                          placeholder="e.g. Savemore Market Branch 5"
-                          className="w-full pl-9 pr-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Optional Reason / Notes */}
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        Brief Reason / Delivery Reference <span className="text-slate-400 text-[10px]">(Optional)</span>
-                      </label>
-                      <div className="relative">
-                        <FileText className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                        <textarea
-                          rows="2"
-                          value={requestForm.notes}
-                          onChange={(e) => setRequestForm({ ...requestForm, notes: e.target.value })}
-                          placeholder="e.g. Received damaged box of canned goods from delivery #104"
-                          className="w-full pl-9 pr-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Error Notice */}
-                    {requestError && (
-                      <div className="p-2.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 rounded-xl flex items-center gap-2 text-xs font-bold text-rose-700 dark:text-rose-300">
-                        <AlertTriangle className="w-4 h-4 shrink-0" />
-                        <span>{requestError}</span>
-                      </div>
-                    )}
-
-                    {/* Actions */}
-                    <div className="pt-2 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setIsRequestModalOpen(false)}
-                        className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                      >
-                        Back
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={isSubmittingRequest}
-                        className="w-2/3 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        {isSubmittingRequest ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Submitting Request...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Send className="w-3.5 h-3.5" />
-                            <span>Submit PIN Request</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </form>
-                </>
-              ) : (
-                /* Confirmation State */
-                <div className="mt-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
-                  <div className="w-16 h-16 rounded-3xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/10">
-                    <CheckCircle2 className="w-8 h-8" />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <h4 className="text-lg font-black text-slate-900 dark:text-white">
-                      Request Submitted!
-                    </h4>
-                    <p className="text-xs text-slate-600 dark:text-slate-300 max-w-sm mx-auto leading-relaxed">
-                      Our administrative team has been notified. Please check your inbox (and spam folder) at <strong className="text-blue-600 dark:text-blue-400">{requestForm.email}</strong> for the 6-digit access PIN.
-                    </p>
-                  </div>
-
-                  {/* Test Mode Sandbox Bypass (QA Requirement 5) */}
-                  {isTestMode && profile?.pin_code && (
-                    <div className="p-3.5 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-2xl text-left space-y-2">
-                      <div className="flex items-center justify-between text-xs font-extrabold text-amber-800 dark:text-amber-300">
-                        <span className="flex items-center gap-1">
-                          <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                          Test Mode Sandbox Active
-                        </span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-200/80 dark:bg-amber-900 text-amber-900 dark:text-amber-200 font-mono">
-                          QA Bypass
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-amber-900/90 dark:text-amber-200 leading-snug">
-                        Developers and testers do not need to wait for email delivery. The active PIN for this profile is:
-                      </p>
-                      <div className="p-2 bg-amber-100/70 dark:bg-amber-900/40 rounded-xl text-center font-mono font-black text-xl tracking-widest text-amber-950 dark:text-amber-100">
-                        {profile.pin_code}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleAutoFillTestPin}
-                        className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>Auto-Fill PIN &amp; Unlock Now</span>
-                      </button>
-                    </div>
-                  )}
-
-                  <div className="pt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsRequestModalOpen(false);
-                        setRequestSuccess(false);
-                        setTimeout(() => inputRefs[0]?.current?.focus(), 150);
-                      }}
-                      className="w-full py-2.5 bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
-                    >
-                      Return to 6-Digit PIN Screen
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="pt-4 text-center border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400">
-              Keysys &amp; Pingcon Automated Return Authorization Gatekeeper
             </div>
           </div>
         )}
@@ -20309,7 +20232,6 @@ export default function GatekeeperPinModal({
     </div>
   );
 }
-
 
 --- END FILE: src/components/GatekeeperPinModal.jsx ---
 
@@ -20357,7 +20279,7 @@ export default function HowItWorksModal({ isOpen, onClose }) {
             </div>
             <div>
               <h2 className="font-bold text-slate-900 dark:text-white text-base sm:text-lg">System Workflow & User Guide</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Step-by-step operating standard for Wholesale RMA processing</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Step-by-step operating standard for Pingcon RMA processing</p>
             </div>
           </div>
 
@@ -24775,6 +24697,7 @@ import {
 } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 import { authService } from '../services/authService';
+import { notificationService } from '../services/notificationService';
 import ImageLightboxModal from './ImageLightboxModal';
 import SupplierInput from './SupplierInput';
 import ProductAutoSuggest from './ProductAutoSuggest';
@@ -29342,7 +29265,7 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
             <div className="flex items-center justify-between border-b-2 border-slate-900 pb-2">
               <div>
                 <span className="text-[9px] sm:text-[10px] uppercase font-black tracking-widest text-slate-500 block">
-                  Wholesale RMA Operations
+                  Pingcon RMA Operations
                 </span>
                 <span className="text-[11px] sm:text-xs font-black tracking-wider text-slate-900 uppercase">
                   Return Verification Label
@@ -33897,11 +33820,18 @@ export default function SupplierClaimsTab({
     });
 
     reportsList.forEach(r => {
-      // Must be supplier outbound OR have an RTV disposition
-      const isSupplierCandidate = (r.rma_type === 'supplier_outbound') ||
-        (r.disposition && (r.disposition.toLowerCase().includes('return to vendor') || r.disposition.toLowerCase().includes('rtv')));
+      // Strictly enforce RTV disposition filtering:
+      // Exclude items triaged to Restock to Inventory, Scrap / Dispose, Quarantine, Buffer Exchange, or Pending Triage
+      const disp = String(r.disposition || '').toLowerCase();
+      if (disp.includes('restock') || disp.includes('scrap') || disp.includes('quarantine') || disp.includes('buffer') || disp.includes('pending triage')) {
+        return;
+      }
 
-      if (!isSupplierCandidate) return;
+      // Must strictly have an RTV disposition (or be an untriaged supplier outbound claim)
+      const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv');
+      if (!isRtvDisposition && r.rma_type !== 'supplier_outbound') {
+        return;
+      }
 
       const isParentManifest = Boolean(
         r.is_parent ||
@@ -40394,12 +40324,16 @@ export const catalogService = {
       }
 
       // 2. Query Supabase for full record before deletion to guarantee all assets (photos, paperwork, gdrive folders) are retrieved
+      // Strictly guard ID against Postgres bigint syntax errors.
+      // Synthetic or unpacked line-item IDs (e.g. "228_item_1414314") must NOT be passed to .eq('id', id)
+      const isNumericId = id !== undefined && id !== null && /^\d+$/.test(String(id));
+
       try {
         let findQ = supabase
           .from('rma_reports')
           .select('id, rma_number, barcode, name, photos, proof_photos, photo_url, paperwork_photos, google_drive_folder_id, google_drive_folder_url')
           .limit(1);
-        if (id) findQ = findQ.eq('id', id);
+        if (isNumericId) findQ = findQ.eq('id', id);
         else findQ = findQ.eq('rma_number', rmaNumber);
         const { data: found } = await findQ;
         if (found && found.length > 0) {
@@ -40433,7 +40367,7 @@ export const catalogService = {
       }
 
       let query = supabase.from('rma_reports').delete();
-      if (id) {
+      if (isNumericId) {
         query = query.eq('id', id);
       } else {
         query = query.eq('rma_number', rmaNumber);
@@ -40446,7 +40380,7 @@ export const catalogService = {
         let softQuery = supabase.from('rma_reports').update({
           status: 'deleted'
         });
-        if (id) softQuery = softQuery.eq('id', id);
+        if (isNumericId) softQuery = softQuery.eq('id', id);
         else softQuery = softQuery.eq('rma_number', rmaNumber);
         const { error: softErr } = await softQuery;
         if (softErr) {
@@ -40491,7 +40425,9 @@ export const catalogService = {
   async deleteMultipleReports(reportsList) {
     if (!Array.isArray(reportsList) || reportsList.length === 0) return { success: true, count: 0 };
     
-    const ids = reportsList.map(r => r.id).filter(id => id !== undefined && id !== null);
+    const rawIds = reportsList.map(r => r.id).filter(id => id !== undefined && id !== null);
+    // Strictly filter numeric IDs to prevent Postgres bigint errors on synthetic composite IDs
+    const numericIds = rawIds.filter(id => /^\d+$/.test(String(id)));
     const rmaNumbers = reportsList.map(r => r.rma_number).filter(Boolean);
 
     // Extract all photos and folders across reports to delete from Google Drive / Supabase Storage
@@ -40530,11 +40466,11 @@ export const catalogService = {
 
     // Also query Supabase to ensure full paperwork_photos and google_drive_folder_id are harvested for all selected rows
     try {
-      if (ids.length > 0) {
+      if (numericIds.length > 0) {
         const { data: dbRecords } = await supabase
           .from('rma_reports')
           .select('id, rma_number, barcode, name, photos, paperwork_photos, proof_photos, photo_url, google_drive_folder_id, google_drive_folder_url')
-          .in('id', ids);
+          .in('id', numericIds);
         if (dbRecords && Array.isArray(dbRecords)) {
           dbRecords.forEach(harvestReportAssets);
         }
@@ -40545,8 +40481,8 @@ export const catalogService = {
 
     try {
       let deleteError = null;
-      if (ids.length > 0) {
-        const { error } = await supabase.from('rma_reports').delete().in('id', ids);
+      if (numericIds.length > 0) {
+        const { error } = await supabase.from('rma_reports').delete().in('id', numericIds);
         if (error) deleteError = error;
       }
       if (rmaNumbers.length > 0) {
@@ -40557,8 +40493,11 @@ export const catalogService = {
       // Soft delete fallback if hard delete blocked by RLS
       if (deleteError) {
         console.warn('Hard delete blocked or failed, executing soft-delete fallback in bulk:', deleteError.message);
-        if (ids.length > 0) {
-          await supabase.from('rma_reports').update({ status: 'deleted' }).in('id', ids);
+        if (numericIds.length > 0) {
+          await supabase.from('rma_reports').update({ status: 'deleted' }).in('id', numericIds);
+        }
+        if (rmaNumbers.length > 0) {
+          await supabase.from('rma_reports').update({ status: 'deleted' }).in('rma_number', rmaNumbers);
         }
       }
 
@@ -41078,6 +41017,292 @@ export const creditMemoService = {
 
 
 --- END FILE: src/services/creditMemoService.js ---
+
+--- START FILE: src/services/inviteService.js ---
+import { supabase } from '../supabaseClient';
+
+const SETTINGS_KEY = 'customer_rma_invites_store';
+const LOCAL_STORAGE_KEY = 'rma_customer_invites_v1';
+
+function getLocalInvites() {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalInvites(invites) {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(invites));
+  } catch (e) {
+    console.warn('Failed to save invites to localStorage:', e);
+  }
+}
+
+export function generateInviteToken() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let rand = '';
+  for (let i = 0; i < 16; i++) {
+    rand += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `inv_${Date.now().toString(36)}_${rand}`;
+}
+
+export const inviteService = {
+  /**
+   * Fetch all invites from Supabase (table or fallback settings)
+   */
+  async getInvites() {
+    // 1. Try public.rma_invites table
+    try {
+      const { data, error } = await supabase
+        .from('rma_invites')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        saveLocalInvites(data);
+        return data;
+      }
+    } catch {
+      // Table may not exist yet, fallback to rma_settings
+    }
+
+    // 2. Try public.rma_settings fallback
+    try {
+      const { data, error } = await supabase
+        .from('rma_settings')
+        .select('value')
+        .eq('key', SETTINGS_KEY)
+        .maybeSingle();
+
+      if (!error && data?.value && Array.isArray(data.value)) {
+        saveLocalInvites(data.value);
+        return data.value;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch invites from rma_settings:', e);
+    }
+
+    return getLocalInvites();
+  },
+
+  /**
+   * Create a new Customer RMA Invite
+   */
+  async createInvite({ authorizedEmail, storeBranch = '', durationHours = 24, createdBy = 'Staff' }) {
+    if (!authorizedEmail || !authorizedEmail.trim()) {
+      throw new Error('Customer / Reporter Email is required.');
+    }
+
+    const cleanEmail = authorizedEmail.trim().toLowerCase();
+    const cleanBranch = storeBranch ? storeBranch.trim() : '';
+    const hours = Number(durationHours) || 24;
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + hours * 3600 * 1000).toISOString();
+    const token = generateInviteToken();
+
+    const newInvite = {
+      id: `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      token,
+      authorized_email: cleanEmail,
+      store_branch: cleanBranch,
+      expires_at: expiresAt,
+      created_by: createdBy,
+      status: 'active',
+      created_at: now.toISOString()
+    };
+
+    // 1. Try insert into rma_invites table
+    try {
+      await supabase
+        .from('rma_invites')
+        .insert([newInvite]);
+    } catch {
+      // Ignore if table does not exist
+    }
+
+    // 2. Always persist to rma_settings for universal sync across all admin sessions
+    try {
+      const current = await this.getInvites();
+      const updated = [newInvite, ...current.filter(i => i.token !== token)];
+      await supabase
+        .from('rma_settings')
+        .upsert({
+          key: SETTINGS_KEY,
+          value: updated,
+          updated_at: new Date().toISOString()
+        });
+      saveLocalInvites(updated);
+    } catch (e) {
+      console.warn('Failed to persist invite to rma_settings:', e);
+      const local = [newInvite, ...getLocalInvites().filter(i => i.token !== token)];
+      saveLocalInvites(local);
+    }
+
+    return newInvite;
+  },
+
+  /**
+   * Validate token from URL parameter
+   */
+  async validateInviteToken(token) {
+    if (!token) return { valid: false, error: 'NO_TOKEN' };
+
+    const cleanToken = String(token).trim();
+    let invite = null;
+
+    // 1. Check database
+    try {
+      const { data, error } = await supabase
+        .from('rma_invites')
+        .select('*')
+        .eq('token', cleanToken)
+        .maybeSingle();
+
+      if (!error && data) {
+        invite = data;
+      }
+    } catch {
+      // Fallback
+    }
+
+    if (!invite) {
+      const all = await this.getInvites();
+      invite = all.find(i => i.token === cleanToken) || null;
+    }
+
+    if (!invite) {
+      return { valid: false, error: 'NOT_FOUND' };
+    }
+
+    if (invite.status === 'revoked') {
+      return { valid: false, invite, error: 'REVOKED' };
+    }
+
+    const expTime = new Date(invite.expires_at).getTime();
+    if (Date.now() > expTime) {
+      return { valid: false, invite, error: 'EXPIRED' };
+    }
+
+    return { valid: true, invite };
+  },
+
+  /**
+   * Revoke an invite link
+   */
+  async revokeInvite(tokenOrId) {
+    if (!tokenOrId) return false;
+
+    // 1. Update in table
+    try {
+      await supabase
+        .from('rma_invites')
+        .update({ status: 'revoked' })
+        .or(`token.eq.${tokenOrId},id.eq.${tokenOrId}`);
+    } catch {}
+
+    // 2. Update in rma_settings
+    try {
+      const current = await this.getInvites();
+      const updated = current.map(inv => {
+        if (inv.token === tokenOrId || inv.id === tokenOrId) {
+          return { ...inv, status: 'revoked' };
+        }
+        return inv;
+      });
+      await supabase
+        .from('rma_settings')
+        .upsert({
+          key: SETTINGS_KEY,
+          value: updated,
+          updated_at: new Date().toISOString()
+        });
+      saveLocalInvites(updated);
+    } catch (e) {
+      console.warn('Failed to update revoked invite in rma_settings:', e);
+    }
+
+    return true;
+  },
+
+  /**
+   * Send invite email via /api/send-email
+   */
+  async sendInviteEmail(invite) {
+    if (!invite?.authorized_email || !invite?.token) {
+      throw new Error('Valid invite with customer email and token is required.');
+    }
+
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://rma-portal-pingconmarketing.vercel.app';
+    const inviteUrl = `${baseUrl}/intake?token=${encodeURIComponent(invite.token)}`;
+    const expDateStr = new Date(invite.expires_at).toLocaleString();
+
+    const subject = `[Authorized Access] Your Pingcon RMA Return Portal Link (${invite.store_branch || 'Store Partner'})`;
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; padding: 24px; margin: 0; color: #1e293b;">
+        <div style="max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+          <div style="background: linear-gradient(135deg, #1e3a8a, #2563eb); padding: 24px; text-align: center; color: #ffffff;">
+            <h1 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">Pingcon RMA Operations</h1>
+            <p style="margin: 4px 0 0 0; font-size: 12px; opacity: 0.9;">Secure Return Merchandise Authorization Portal</p>
+          </div>
+          <div style="padding: 24px;">
+            <p style="font-size: 14px; margin-top: 0;">Hello <strong>${invite.authorized_email}</strong>,</p>
+            <p style="font-size: 13px; line-height: 1.6; color: #475569;">
+              You have been granted official authorization to submit returns${invite.store_branch ? ` for <strong>${invite.store_branch}</strong>` : ''}.
+            </p>
+            <div style="background: #f1f5f9; border-radius: 12px; padding: 16px; margin: 20px 0; border: 1px solid #cbd5e1;">
+              <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Security Notice</div>
+              <div style="font-size: 12px; margin-top: 4px; color: #1e293b; line-height: 1.5;">
+                🔒 This link is locked to your Google Account (<strong>${invite.authorized_email}</strong>). Forwarding is prohibited.
+              </div>
+              <div style="font-size: 11px; color: #64748b; margin-top: 8px;">
+                ⏱️ Link Expires: <strong>${expDateStr}</strong>
+              </div>
+            </div>
+            <div style="text-align: center; margin: 28px 0;">
+              <a href="${inviteUrl}" style="background: #2563eb; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 12px; font-weight: 800; font-size: 14px; display: inline-block; box-shadow: 0 4px 12px rgba(37,99,235,0.3);">
+                Access Return Portal &rarr;
+              </a>
+            </div>
+            <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-bottom: 0;">
+              Or copy this direct link into your browser:<br>
+              <a href="${inviteUrl}" style="color: #2563eb; word-break: break-all;">${inviteUrl}</a>
+            </p>
+          </div>
+          <div style="background: #f8fafc; padding: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 11px; color: #94a3b8;">
+            Pingcon Marketing Operations • Automated Identity Gatekeeper
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const res = await fetch('/api/send-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: invite.authorized_email,
+        subject,
+        html,
+        text: `Pingcon RMA Portal Link: ${inviteUrl}\n\nAuthorized for: ${invite.authorized_email}\nExpires: ${expDateStr}\n\nThis link is locked to your Google account. Forwarding is prohibited.`
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Failed to send invite email (${res.status}): ${errText}`);
+    }
+
+    return true;
+  }
+};
+
+--- END FILE: src/services/inviteService.js ---
 
 --- START FILE: src/services/notificationService.js ---
 /**
@@ -43465,10 +43690,43 @@ export async function getDeviceFingerprint() {
  * Formats financial records with clean headers and UTF-8 BOM for Microsoft Excel & Google Sheets.
  */
 
+/**
+ * Format any date or timestamp strictly to 24-hour military time without colons:
+ * YYYY-MM-DD HHMM (e.g. 2026-11-06 0845)
+ */
+export function formatMilitaryDateTime(val) {
+  if (!val) return '';
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return String(val);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}${min}`;
+}
+
 function escapeCsvCell(val) {
   if (val === null || val === undefined) return '""';
   const str = String(val).replace(/"/g, '""');
   return `"${str}"`;
+}
+
+function extractPhotoLink(r) {
+  if (!r) return 'N/A';
+  if (r.google_drive_folder_url && r.google_drive_folder_url.startsWith('http')) {
+    return r.google_drive_folder_url;
+  }
+  if (Array.isArray(r.photos) && r.photos.length > 0 && typeof r.photos[0] === 'string') {
+    return r.photos[0];
+  }
+  if (typeof r.photos === 'string' && r.photos.startsWith('http')) {
+    return r.photos;
+  }
+  if (r.photo_url && typeof r.photo_url === 'string' && r.photo_url.startsWith('http')) {
+    return r.photo_url;
+  }
+  return 'N/A';
 }
 
 function downloadCsvBlob(csvContent, filename) {
@@ -43498,7 +43756,7 @@ export function exportRMAReportsToCSV(reports, filename = null) {
   const headers = [
     'SN',
     'RMA Number',
-    'Date Logged',
+    'Date Logged (YYYY-MM-DD HHMM)',
     'Store / Branch',
     'Invoice / DR #',
     'Batch / Lot #',
@@ -43520,6 +43778,7 @@ export function exportRMAReportsToCSV(reports, filename = null) {
     'Reported By',
     'Inspected By',
     'Defect Reason',
+    'Google Drive Photo Link',
     'Google Drive Folder',
     'Notes'
   ];
@@ -43528,7 +43787,8 @@ export function exportRMAReportsToCSV(reports, filename = null) {
     const qty = Number(r.quantity || 1);
     const unitPrice = Number(r.price_with_vat || r.price || 0);
     const totalVal = (qty * unitPrice).toFixed(2);
-    const dateStr = r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '';
+    const dateStr = formatMilitaryDateTime(r.created_at);
+    const photoLink = extractPhotoLink(r);
 
     return [
       escapeCsvCell(index + 1),
@@ -43555,13 +43815,14 @@ export function exportRMAReportsToCSV(reports, filename = null) {
       escapeCsvCell(r.reported_by || ''),
       escapeCsvCell(r.inspected_by || ''),
       escapeCsvCell(r.reason || ''),
+      escapeCsvCell(photoLink),
       escapeCsvCell(r.google_drive_folder_url || ''),
       escapeCsvCell(r.notes || '')
     ].join(',');
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `RMA_Reports_Export_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = filename || `Pingcon_RMA_Reports_${new Date().toISOString().slice(0, 10)}.csv`;
   downloadCsvBlob(csv, actualFilename);
 }
 
@@ -43577,7 +43838,7 @@ export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
   const headers = [
     'SN',
     'RMA Number',
-    'Date Logged',
+    'Date Logged (YYYY-MM-DD HHMM)',
     'Customer Store / Branch',
     'Reporter Name',
     'Reporter Contact',
@@ -43598,6 +43859,7 @@ export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
     'Condition Grade',
     'Defect Reason',
     'Credit Memo #',
+    'Google Drive Photo Link',
     'Google Drive Folder',
     'Customer Notes'
   ];
@@ -43606,7 +43868,8 @@ export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
     const qty = Number(r.quantity || 1);
     const unitPrice = Number(r.price_with_vat || r.price || 0);
     const totalVal = (qty * unitPrice).toFixed(2);
-    const dateStr = r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '';
+    const dateStr = formatMilitaryDateTime(r.created_at);
+    const photoLink = extractPhotoLink(r);
 
     return [
       escapeCsvCell(index + 1),
@@ -43632,13 +43895,14 @@ export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
       escapeCsvCell(r.condition_grade || 'Unassessed'),
       escapeCsvCell(r.reason || ''),
       escapeCsvCell(r.credit_memo_no || r.credit_memo_number || ''),
+      escapeCsvCell(photoLink),
       escapeCsvCell(r.google_drive_folder_url || ''),
       escapeCsvCell(r.notes || '')
     ].join(',');
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Customer_Inbound_RMAs_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = filename || `Pingcon_Customer_Inbound_RMAs_${new Date().toISOString().slice(0, 10)}.csv`;
   downloadCsvBlob(csv, actualFilename);
 }
 
@@ -43654,7 +43918,7 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
   const headers = [
     'SN',
     'RMA Number',
-    'Date Logged',
+    'Date Logged (YYYY-MM-DD HHMM)',
     'Master Supplier / Vendor',
     'Warehouse Bin / Location',
     'Batch / Lot #',
@@ -43672,6 +43936,7 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
     'Inspected By',
     'Defect Reason / Diagnosis',
     'Supplier PO #',
+    'Google Drive Photo Link',
     'Google Drive Folder',
     'Warehouse Notes'
   ];
@@ -43680,7 +43945,8 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
     const qty = Number(r.quantity || 1);
     const unitPrice = Number(r.price || r.price_with_vat || 0);
     const totalVal = (qty * unitPrice).toFixed(2);
-    const dateStr = r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '';
+    const dateStr = formatMilitaryDateTime(r.created_at);
+    const photoLink = extractPhotoLink(r);
 
     return [
       escapeCsvCell(index + 1),
@@ -43703,13 +43969,14 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
       escapeCsvCell(r.inspected_by || ''),
       escapeCsvCell(r.reason || r.explanation || ''),
       escapeCsvCell(r.po_number || r.supplier_po_no || ''),
+      escapeCsvCell(photoLink),
       escapeCsvCell(r.google_drive_folder_url || ''),
       escapeCsvCell(r.notes || '')
     ].join(',');
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Supplier_Outbound_Claims_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = filename || `Pingcon_Supplier_Outbound_Claims_${new Date().toISOString().slice(0, 10)}.csv`;
   downloadCsvBlob(csv, actualFilename);
 }
 
@@ -43728,7 +43995,7 @@ export function exportCreditMemosToCSV(memos, filename = null) {
     'RMA Number',
     'Pull-Out Slip Ref',
     'Pull-Out Date',
-    'Issued Date',
+    'Date Issued (YYYY-MM-DD HHMM)',
     'Supplier / Vendor',
     'Product Description',
     'SKU',
@@ -43752,7 +44019,7 @@ export function exportCreditMemosToCSV(memos, filename = null) {
       escapeCsvCell(cm.rma_number),
       escapeCsvCell(cm.pull_out_ref),
       escapeCsvCell(cm.pull_out_date || ''),
-      escapeCsvCell(cm.created_at ? new Date(cm.created_at).toISOString().slice(0, 10) : ''),
+      escapeCsvCell(formatMilitaryDateTime(cm.created_at)),
       escapeCsvCell(cm.supplier_name || 'Savemore'),
       escapeCsvCell(cm.product_name),
       escapeCsvCell(cm.sku || ''),
@@ -43771,7 +44038,7 @@ export function exportCreditMemosToCSV(memos, filename = null) {
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Credit_Memos_Export_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = filename || `Pingcon_Credit_Memos_Export_${new Date().toISOString().slice(0, 10)}.csv`;
   downloadCsvBlob(csv, actualFilename);
 }
 

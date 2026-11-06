@@ -3,10 +3,43 @@
  * Formats financial records with clean headers and UTF-8 BOM for Microsoft Excel & Google Sheets.
  */
 
+/**
+ * Format any date or timestamp strictly to 24-hour military time without colons:
+ * YYYY-MM-DD HHMM (e.g. 2026-11-06 0845)
+ */
+export function formatMilitaryDateTime(val) {
+  if (!val) return '';
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return String(val);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}${min}`;
+}
+
 function escapeCsvCell(val) {
   if (val === null || val === undefined) return '""';
   const str = String(val).replace(/"/g, '""');
   return `"${str}"`;
+}
+
+function extractPhotoLink(r) {
+  if (!r) return 'N/A';
+  if (r.google_drive_folder_url && r.google_drive_folder_url.startsWith('http')) {
+    return r.google_drive_folder_url;
+  }
+  if (Array.isArray(r.photos) && r.photos.length > 0 && typeof r.photos[0] === 'string') {
+    return r.photos[0];
+  }
+  if (typeof r.photos === 'string' && r.photos.startsWith('http')) {
+    return r.photos;
+  }
+  if (r.photo_url && typeof r.photo_url === 'string' && r.photo_url.startsWith('http')) {
+    return r.photo_url;
+  }
+  return 'N/A';
 }
 
 function downloadCsvBlob(csvContent, filename) {
@@ -36,7 +69,7 @@ export function exportRMAReportsToCSV(reports, filename = null) {
   const headers = [
     'SN',
     'RMA Number',
-    'Date Logged',
+    'Date Logged (YYYY-MM-DD HHMM)',
     'Store / Branch',
     'Invoice / DR #',
     'Batch / Lot #',
@@ -58,6 +91,7 @@ export function exportRMAReportsToCSV(reports, filename = null) {
     'Reported By',
     'Inspected By',
     'Defect Reason',
+    'Google Drive Photo Link',
     'Google Drive Folder',
     'Notes'
   ];
@@ -66,7 +100,8 @@ export function exportRMAReportsToCSV(reports, filename = null) {
     const qty = Number(r.quantity || 1);
     const unitPrice = Number(r.price_with_vat || r.price || 0);
     const totalVal = (qty * unitPrice).toFixed(2);
-    const dateStr = r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '';
+    const dateStr = formatMilitaryDateTime(r.created_at);
+    const photoLink = extractPhotoLink(r);
 
     return [
       escapeCsvCell(index + 1),
@@ -93,13 +128,14 @@ export function exportRMAReportsToCSV(reports, filename = null) {
       escapeCsvCell(r.reported_by || ''),
       escapeCsvCell(r.inspected_by || ''),
       escapeCsvCell(r.reason || ''),
+      escapeCsvCell(photoLink),
       escapeCsvCell(r.google_drive_folder_url || ''),
       escapeCsvCell(r.notes || '')
     ].join(',');
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `RMA_Reports_Export_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = filename || `Pingcon_RMA_Reports_${new Date().toISOString().slice(0, 10)}.csv`;
   downloadCsvBlob(csv, actualFilename);
 }
 
@@ -115,7 +151,7 @@ export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
   const headers = [
     'SN',
     'RMA Number',
-    'Date Logged',
+    'Date Logged (YYYY-MM-DD HHMM)',
     'Customer Store / Branch',
     'Reporter Name',
     'Reporter Contact',
@@ -136,6 +172,7 @@ export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
     'Condition Grade',
     'Defect Reason',
     'Credit Memo #',
+    'Google Drive Photo Link',
     'Google Drive Folder',
     'Customer Notes'
   ];
@@ -144,7 +181,8 @@ export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
     const qty = Number(r.quantity || 1);
     const unitPrice = Number(r.price_with_vat || r.price || 0);
     const totalVal = (qty * unitPrice).toFixed(2);
-    const dateStr = r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '';
+    const dateStr = formatMilitaryDateTime(r.created_at);
+    const photoLink = extractPhotoLink(r);
 
     return [
       escapeCsvCell(index + 1),
@@ -170,13 +208,14 @@ export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
       escapeCsvCell(r.condition_grade || 'Unassessed'),
       escapeCsvCell(r.reason || ''),
       escapeCsvCell(r.credit_memo_no || r.credit_memo_number || ''),
+      escapeCsvCell(photoLink),
       escapeCsvCell(r.google_drive_folder_url || ''),
       escapeCsvCell(r.notes || '')
     ].join(',');
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Customer_Inbound_RMAs_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = filename || `Pingcon_Customer_Inbound_RMAs_${new Date().toISOString().slice(0, 10)}.csv`;
   downloadCsvBlob(csv, actualFilename);
 }
 
@@ -192,7 +231,7 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
   const headers = [
     'SN',
     'RMA Number',
-    'Date Logged',
+    'Date Logged (YYYY-MM-DD HHMM)',
     'Master Supplier / Vendor',
     'Warehouse Bin / Location',
     'Batch / Lot #',
@@ -210,6 +249,7 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
     'Inspected By',
     'Defect Reason / Diagnosis',
     'Supplier PO #',
+    'Google Drive Photo Link',
     'Google Drive Folder',
     'Warehouse Notes'
   ];
@@ -218,7 +258,8 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
     const qty = Number(r.quantity || 1);
     const unitPrice = Number(r.price || r.price_with_vat || 0);
     const totalVal = (qty * unitPrice).toFixed(2);
-    const dateStr = r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '';
+    const dateStr = formatMilitaryDateTime(r.created_at);
+    const photoLink = extractPhotoLink(r);
 
     return [
       escapeCsvCell(index + 1),
@@ -241,13 +282,14 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
       escapeCsvCell(r.inspected_by || ''),
       escapeCsvCell(r.reason || r.explanation || ''),
       escapeCsvCell(r.po_number || r.supplier_po_no || ''),
+      escapeCsvCell(photoLink),
       escapeCsvCell(r.google_drive_folder_url || ''),
       escapeCsvCell(r.notes || '')
     ].join(',');
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Supplier_Outbound_Claims_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = filename || `Pingcon_Supplier_Outbound_Claims_${new Date().toISOString().slice(0, 10)}.csv`;
   downloadCsvBlob(csv, actualFilename);
 }
 
@@ -266,7 +308,7 @@ export function exportCreditMemosToCSV(memos, filename = null) {
     'RMA Number',
     'Pull-Out Slip Ref',
     'Pull-Out Date',
-    'Issued Date',
+    'Date Issued (YYYY-MM-DD HHMM)',
     'Supplier / Vendor',
     'Product Description',
     'SKU',
@@ -290,7 +332,7 @@ export function exportCreditMemosToCSV(memos, filename = null) {
       escapeCsvCell(cm.rma_number),
       escapeCsvCell(cm.pull_out_ref),
       escapeCsvCell(cm.pull_out_date || ''),
-      escapeCsvCell(cm.created_at ? new Date(cm.created_at).toISOString().slice(0, 10) : ''),
+      escapeCsvCell(formatMilitaryDateTime(cm.created_at)),
       escapeCsvCell(cm.supplier_name || 'Savemore'),
       escapeCsvCell(cm.product_name),
       escapeCsvCell(cm.sku || ''),
@@ -309,6 +351,6 @@ export function exportCreditMemosToCSV(memos, filename = null) {
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Credit_Memos_Export_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = filename || `Pingcon_Credit_Memos_Export_${new Date().toISOString().slice(0, 10)}.csv`;
   downloadCsvBlob(csv, actualFilename);
 }

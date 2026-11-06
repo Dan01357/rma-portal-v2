@@ -83,12 +83,10 @@ import NotificationBell from './components/NotificationBell';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
 import ReturnQRModal from './components/ReturnQRModal';
 import QuickRMAActionModal from './components/QuickRMAActionModal';
-import PortalAccessQRModal from './components/PortalAccessQRModal';
 import GatekeeperPinModal from './components/GatekeeperPinModal';
-import PortalAccessKeysModal from './components/PortalAccessKeysModal';
-import PinRequestsQueueModal from './components/PinRequestsQueueModal';
+import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
 import { accessKeyService } from './services/accessKeyService';
-import { pinRequestService } from './services/pinRequestService';
+import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
 import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest } from './utils/rmaHelpers';
 
@@ -257,32 +255,41 @@ export default function App() {
   const [isQuickRmaModalOpen, setIsQuickRmaModalOpen] = useState(false);
   const [quickRmaNumber, setQuickRmaNumber] = useState(null);
   const [pendingQuickRmaNumber, setPendingQuickRmaNumber] = useState(null);
-  const [isPortalAccessQrOpen, setIsPortalAccessQrOpen] = useState(false);
-  const [isAccessKeysModalOpen, setIsAccessKeysModalOpen] = useState(false);
-  const [isPinRequestsModalOpen, setIsPinRequestsModalOpen] = useState(false);
-  const [pendingPinRequestsCount, setPendingPinRequestsCount] = useState(0);
+  const [isCustomerInvitesModalOpen, setIsCustomerInvitesModalOpen] = useState(false);
 
-  // Role-Based QR Code & 6-Digit PIN Gatekeeper Engine
+  // 1-Click Google Identity Lock Gatekeeper Session
   const [intakeSlug, setIntakeSlug] = useState(() => getIntakeSlugFromUrl());
   const [gateSession, setGateSession] = useState(() => {
+    try {
+      const raw = localStorage.getItem('rma_portal_gate_session');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.expires_at && new Date(parsed.expires_at).getTime() > Date.now()) {
+          return parsed;
+        }
+      }
+    } catch {}
     const slug = getIntakeSlugFromUrl();
     return accessKeyService.getActiveSession(slug);
   });
 
   // Active Real-Time Watchdog for Gatekeeper Session Expiration (Unbypassable live enforcement)
   useEffect(() => {
-    if (!gateSession?.expiresAt) return;
+    const expStr = gateSession?.expires_at || gateSession?.expiresAt;
+    if (!expStr) return;
 
     const checkExpiration = () => {
-      const expTime = new Date(gateSession.expiresAt).getTime();
+      const expTime = new Date(expStr).getTime();
       const now = Date.now();
       if (now >= expTime) {
         // Session reached expiration!
+        try {
+          localStorage.removeItem('rma_portal_gate_session');
+        } catch {}
         const slug = gateSession.slug;
         accessKeyService.clearSession(slug);
         setGateSession(null);
-        setIntakeSlug(slug);
-        showToast('Your return session has expired. Device locked.', 'warning');
+        showToast('Your authorized return session has expired. Device locked.', 'warning');
       }
     };
 
@@ -291,12 +298,24 @@ export default function App() {
     return () => clearInterval(interval);
   }, [gateSession]);
 
+  // Synchronize Google Identity authorized email and branch into intake form automatically
+  useEffect(() => {
+    if (gateSession?.authorized_email) {
+      setReporterContact(gateSession.authorized_email);
+    }
+    if (gateSession?.store_branch && !storeBranch) {
+      setStoreBranch(gateSession.store_branch);
+    }
+  }, [gateSession]);
+
   const handleLockStation = () => {
+    try {
+      localStorage.removeItem('rma_portal_gate_session');
+    } catch {}
     const slug = gateSession?.slug || intakeSlug || 'dock';
     accessKeyService.clearSession(slug);
     setGateSession(null);
-    setIntakeSlug(slug);
-    showToast('Device locked. Enter 6-digit PIN to unlock station.', 'info');
+    showToast('Portal locked. Authorization required.', 'info');
   };
 
   const restoreQuickRmaIfPending = () => {
@@ -603,7 +622,7 @@ export default function App() {
       {
         id: 'seed-notif-1',
         type: 'rma',
-        title: 'Wholesale RMA Portal Active',
+        title: 'Pingcon RMA Portal Active',
         message: 'Notification center ready. Intake events and return submissions will alert here.',
         subtext: 'System Notification',
         timestamp: new Date().toISOString(),
@@ -645,14 +664,7 @@ export default function App() {
     showToast('All notifications cleared.', 'success');
   };
 
-  const notifiedPinRequestIds = useRef(new Set());
-
   const handleSelectNotification = (notif) => {
-    if (notif.type === 'pin_request') {
-      setIsPinRequestsModalOpen(true);
-      handleMarkAsRead(notif.id);
-      return;
-    }
     if (notif.type === 'rma') {
       if (isAdminView) {
         setAdminActiveTab('customer_reports');
@@ -667,86 +679,6 @@ export default function App() {
       }
     }
   };
-
-  // Real-time synchronization for PIN requests & Notification Bell alerts
-  useEffect(() => {
-    let isMounted = true;
-
-    // Load initial count and initialize known request IDs
-    pinRequestService.getRequests().then(reqs => {
-      if (!isMounted) return;
-      reqs.forEach(r => notifiedPinRequestIds.current.add(r.id));
-      setPendingPinRequestsCount(reqs.filter(r => r.status === 'pending').length);
-    }).catch(() => {});
-
-    const refreshRequests = async () => {
-      try {
-        const reqs = await pinRequestService.getRequests();
-        if (!isMounted) return;
-        const pendingCount = reqs.filter(r => r.status === 'pending').length;
-        setPendingPinRequestsCount(pendingCount);
-
-        // Check for any new pending requests not yet in notification bell
-        reqs.forEach(r => {
-          if (r.status === 'pending' && !notifiedPinRequestIds.current.has(r.id)) {
-            notifiedPinRequestIds.current.add(r.id);
-            addNotification({
-              id: `pin-req-${r.id}`,
-              type: 'pin_request',
-              title: `New PIN Request: ${r.requester_name}`,
-              message: `${r.organization_name ? r.organization_name + ' • ' : ''}Requested authorization PIN for /${r.access_slug}`,
-              subtext: r.notes ? `Note: ${r.notes}` : 'Return Authorization Request',
-              timestamp: r.created_at || new Date().toISOString(),
-              read: false,
-              requestId: r.id
-            });
-            if (isAdminView) {
-              showToast(`New PIN request: ${r.requester_name} (/${r.access_slug})`, 'info');
-            }
-          }
-        });
-      } catch (e) {}
-    };
-
-    // 1. Supabase Postgres Realtime Subscription on public.pin_requests
-    let pinChannel = null;
-    try {
-      pinChannel = supabase
-        .channel('public:pin_requests_realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'pin_requests' }, () => {
-          refreshRequests();
-        })
-        .subscribe();
-    } catch (e) {}
-
-    // 2. BroadcastChannel for cross-tab instant sync
-    let bc = null;
-    try {
-      if (typeof window !== 'undefined' && window.BroadcastChannel) {
-        bc = new BroadcastChannel('rma_portal_sync_bus');
-        bc.onmessage = (evt) => {
-          if (evt.data?.type === 'pin-requests-changed' || evt.data?.type === 'pin-request-created') {
-            refreshRequests();
-          }
-        };
-      }
-    } catch (e) {}
-
-    // 3. Local window event listener
-    const handleLocalEvent = () => refreshRequests();
-    window.addEventListener('rma-pin-requests-changed', handleLocalEvent);
-
-    // 4. Polling watchdog (every 6 seconds for guaranteed freshness)
-    const pollTimer = setInterval(refreshRequests, 6000);
-
-    return () => {
-      isMounted = false;
-      if (pinChannel) supabase.removeChannel(pinChannel);
-      if (bc) bc.close();
-      window.removeEventListener('rma-pin-requests-changed', handleLocalEvent);
-      clearInterval(pollTimer);
-    };
-  }, [isAdminView]);
 
   // Role Permissions
   const canManageRoles = currentUser?.role === 'super_admin';
@@ -2190,7 +2122,7 @@ export default function App() {
                           const hrs = (remainingMins / 60).toFixed(1).replace('.0', '');
                           return `Session active (~${hrs}h remaining)`;
                         })() : 'Permanent Station Unlock')
-                      : 'Wholesale RMA Return Intake'}
+                      : 'Pingcon RMA Return Intake'}
                   </div>
                 </div>
               </div>
@@ -3289,11 +3221,26 @@ export default function App() {
                       <input
                         type="text"
                         required
-                        value={reporterContact}
-                        onChange={(e) => setReporterContact(e.target.value)}
+                        value={gateSession?.authorized_email || reporterContact}
+                        onChange={(e) => {
+                          if (!gateSession?.authorized_email) {
+                            setReporterContact(e.target.value);
+                          }
+                        }}
+                        readOnly={Boolean(gateSession?.authorized_email)}
                         placeholder="Phone No. or Email *"
-                        className="w-full pl-10 pr-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs"
+                        className={`w-full pl-10 pr-3.5 py-2.5 border rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none shadow-2xs ${
+                          gateSession?.authorized_email
+                            ? 'bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 cursor-not-allowed text-emerald-950 dark:text-emerald-200'
+                            : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 focus:border-blue-600'
+                        }`}
                       />
+                      {gateSession?.authorized_email && (
+                        <div className="mt-1 flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Google Identity Verified ({gateSession.authorized_email})</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3346,7 +3293,7 @@ export default function App() {
               <div className="space-y-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-                    <span>🏢 Wholesale RMA Operations</span>
+                    <span>🏢 Pingcon RMA Operations</span>
                   </h1>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 shrink-0">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -3383,36 +3330,12 @@ export default function App() {
 
                 <button
                   type="button"
-                  onClick={() => setIsAccessKeysModalOpen(true)}
+                  onClick={() => setIsCustomerInvitesModalOpen(true)}
                   className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
-                  title="Manage Role-Based QR Code & 6-Digit PIN Gatekeepers"
+                  title="Generate & Manage Google Identity Locked Customer RMA Return Links"
                 >
-                  <KeyRound className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span>QR Keys & PINs</span>
-                </button>
-
-                {/* Live Notification Badge for Pending Return Authorization PIN Requests */}
-                <button
-                  type="button"
-                  onClick={() => setIsPinRequestsModalOpen(true)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer ${
-                    pendingPinRequestsCount > 0
-                      ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 ring-2 ring-amber-400/30'
-                      : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-transparent'
-                  }`}
-                  title="Pending 6-Digit PIN Requests Queue"
-                >
-                  <KeyRound className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                  <span>PIN Requests</span>
-                  {pendingPinRequestsCount > 0 ? (
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-amber-600 text-white animate-pulse">
-                      {pendingPinRequestsCount}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-slate-400 font-semibold">
-                      (0)
-                    </span>
-                  )}
+                  <Ticket className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>🎫 Customer RMA Invites</span>
                 </button>
 
                 <button
@@ -5384,7 +5307,7 @@ export default function App() {
               <SettingsTab
                 isTestMode={isTestMode}
                 onToggleTestMode={toggleTestMode}
-                onOpenPortalQr={() => setIsAccessKeysModalOpen(true)}
+                onOpenPortalQr={() => setIsCustomerInvitesModalOpen(true)}
                 currentUser={currentUser}
               />
             )}
@@ -5923,13 +5846,22 @@ export default function App() {
       />
 
 
-      {/* Role-Based QR Code & 6-Digit PIN Gatekeeper Screen (Active at root / or /intake/:slug when device is not unlocked) */}
+      {/* 1-Click Google Identity Lock Gatekeeper Screen */}
       <GatekeeperPinModal
         isOpen={!isAdminView && !currentUser && !gateSession}
         currentSlug={intakeSlug}
         onUnlock={(session) => {
           setGateSession(session);
-          showToast(`Station Unlocked: ${session.profileName || session.slug}`, 'success');
+          try {
+            localStorage.setItem('rma_portal_gate_session', JSON.stringify(session));
+          } catch {}
+          if (session?.authorized_email) {
+            setReporterContact(session.authorized_email);
+          }
+          if (session?.store_branch && !storeBranch) {
+            setStoreBranch(session.store_branch);
+          }
+          showToast(`Portal Unlocked: ${session.profileName || session.authorized_email}`, 'success');
         }}
         onOpenAdminLogin={() => {
           setIsAdminView(true);
@@ -5938,31 +5870,11 @@ export default function App() {
         isTestMode={isTestMode}
       />
 
-      {/* Admin QR Access Keys & 6-Digit PIN Manager Modal */}
-      <PortalAccessKeysModal
-        isOpen={isAccessKeysModalOpen || isPortalAccessQrOpen}
-        onClose={() => {
-          setIsAccessKeysModalOpen(false);
-          setIsPortalAccessQrOpen(false);
-        }}
+      {/* Customer RMA Invites Modal (Google Identity Locked Return Links) */}
+      <CustomerRMAInvitesModal
+        isOpen={isCustomerInvitesModalOpen}
+        onClose={() => setIsCustomerInvitesModalOpen(false)}
         currentUser={currentUser}
-        onOpenPinRequests={() => {
-          setIsAccessKeysModalOpen(false);
-          setIsPortalAccessQrOpen(false);
-          setIsPinRequestsModalOpen(true);
-        }}
-      />
-
-      {/* Return Authorization PIN Requests Queue Modal */}
-      <PinRequestsQueueModal
-        isOpen={isPinRequestsModalOpen}
-        onClose={() => setIsPinRequestsModalOpen(false)}
-        currentUser={currentUser}
-        isTestMode={isTestMode}
-        onQueueUpdated={(reqs) => {
-          const pending = reqs.filter(r => r.status === 'pending').length;
-          setPendingPinRequestsCount(pending);
-        }}
       />
 
 

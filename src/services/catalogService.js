@@ -1712,12 +1712,16 @@ export const catalogService = {
       }
 
       // 2. Query Supabase for full record before deletion to guarantee all assets (photos, paperwork, gdrive folders) are retrieved
+      // Strictly guard ID against Postgres bigint syntax errors.
+      // Synthetic or unpacked line-item IDs (e.g. "228_item_1414314") must NOT be passed to .eq('id', id)
+      const isNumericId = id !== undefined && id !== null && /^\d+$/.test(String(id));
+
       try {
         let findQ = supabase
           .from('rma_reports')
           .select('id, rma_number, barcode, name, photos, proof_photos, photo_url, paperwork_photos, google_drive_folder_id, google_drive_folder_url')
           .limit(1);
-        if (id) findQ = findQ.eq('id', id);
+        if (isNumericId) findQ = findQ.eq('id', id);
         else findQ = findQ.eq('rma_number', rmaNumber);
         const { data: found } = await findQ;
         if (found && found.length > 0) {
@@ -1751,7 +1755,7 @@ export const catalogService = {
       }
 
       let query = supabase.from('rma_reports').delete();
-      if (id) {
+      if (isNumericId) {
         query = query.eq('id', id);
       } else {
         query = query.eq('rma_number', rmaNumber);
@@ -1764,7 +1768,7 @@ export const catalogService = {
         let softQuery = supabase.from('rma_reports').update({
           status: 'deleted'
         });
-        if (id) softQuery = softQuery.eq('id', id);
+        if (isNumericId) softQuery = softQuery.eq('id', id);
         else softQuery = softQuery.eq('rma_number', rmaNumber);
         const { error: softErr } = await softQuery;
         if (softErr) {
@@ -1809,7 +1813,9 @@ export const catalogService = {
   async deleteMultipleReports(reportsList) {
     if (!Array.isArray(reportsList) || reportsList.length === 0) return { success: true, count: 0 };
     
-    const ids = reportsList.map(r => r.id).filter(id => id !== undefined && id !== null);
+    const rawIds = reportsList.map(r => r.id).filter(id => id !== undefined && id !== null);
+    // Strictly filter numeric IDs to prevent Postgres bigint errors on synthetic composite IDs
+    const numericIds = rawIds.filter(id => /^\d+$/.test(String(id)));
     const rmaNumbers = reportsList.map(r => r.rma_number).filter(Boolean);
 
     // Extract all photos and folders across reports to delete from Google Drive / Supabase Storage
@@ -1848,11 +1854,11 @@ export const catalogService = {
 
     // Also query Supabase to ensure full paperwork_photos and google_drive_folder_id are harvested for all selected rows
     try {
-      if (ids.length > 0) {
+      if (numericIds.length > 0) {
         const { data: dbRecords } = await supabase
           .from('rma_reports')
           .select('id, rma_number, barcode, name, photos, paperwork_photos, proof_photos, photo_url, google_drive_folder_id, google_drive_folder_url')
-          .in('id', ids);
+          .in('id', numericIds);
         if (dbRecords && Array.isArray(dbRecords)) {
           dbRecords.forEach(harvestReportAssets);
         }
@@ -1863,8 +1869,8 @@ export const catalogService = {
 
     try {
       let deleteError = null;
-      if (ids.length > 0) {
-        const { error } = await supabase.from('rma_reports').delete().in('id', ids);
+      if (numericIds.length > 0) {
+        const { error } = await supabase.from('rma_reports').delete().in('id', numericIds);
         if (error) deleteError = error;
       }
       if (rmaNumbers.length > 0) {
@@ -1875,8 +1881,11 @@ export const catalogService = {
       // Soft delete fallback if hard delete blocked by RLS
       if (deleteError) {
         console.warn('Hard delete blocked or failed, executing soft-delete fallback in bulk:', deleteError.message);
-        if (ids.length > 0) {
-          await supabase.from('rma_reports').update({ status: 'deleted' }).in('id', ids);
+        if (numericIds.length > 0) {
+          await supabase.from('rma_reports').update({ status: 'deleted' }).in('id', numericIds);
+        }
+        if (rmaNumbers.length > 0) {
+          await supabase.from('rma_reports').update({ status: 'deleted' }).in('rma_number', rmaNumbers);
         }
       }
 

@@ -190,7 +190,7 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
             <div className="flex items-center justify-between border-b-2 border-slate-900 pb-2">
               <div>
                 <span className="text-[9px] sm:text-[10px] uppercase font-black tracking-widest text-slate-500 block">
-                  Wholesale RMA Operations
+                  Pingcon RMA Operations
                 </span>
                 <span className="text-[11px] sm:text-xs font-black tracking-wider text-slate-900 uppercase">
                   Return Verification Label

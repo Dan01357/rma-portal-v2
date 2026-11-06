@@ -1063,6 +1063,39 @@ Each test scenario defines:
 
 ---
 
+## Section 14: 1-Click Google Identity Lock & Customer RMA Invites (No-OTP Gatekeeper)
+
+- [ ] **TC-INV-01 (Staff-Generated Invite Link with Google Identity Lock)**
+  * **Location**: Admin Header -> "🎫 Customer RMA Invites" (`CustomerRMAInvitesModal.jsx`) & Gatekeeper (`GatekeeperPinModal.jsx`)
+  * **Action**:
+    1. In Admin view, click "🎫 Customer RMA Invites" in the top header.
+    2. Input Customer Email: `daniloalvaro031717@gmail.com`, Customer Store / Branch: `Savemore Market Taguig`, Expiry: `24 Hours`.
+    3. Click "Generate Invite Link".
+    4. Copy the personalized link (`https://rma-portal-pingconmarketing.vercel.app/intake?token=inv_...`) or click "Send Link via Email".
+    5. Open the link in a fresh incognito browser window.
+  * **Expected Behavior**:
+    1. The invite record is stored in Supabase with token, `authorized_email: daniloalvaro031717@gmail.com`, and `expires_at` timestamp.
+    2. Customer arrives at private portal displaying: *"🔒 Private RMA Portal issued exclusively to daniloalvaro031717@gmail.com"* and live countdown (`23h 59m remaining`).
+    3. Clicking "[ 🔵 Continue with Google ]" authenticates via Supabase Google OAuth.
+    4. When authenticated with `daniloalvaro031717@gmail.com`, the return intake portal unlocks immediately.
+    5. In Section 4 (Reporter Information), Reporter Email is automatically pre-filled and locked as `readOnly` with a green badge: *"Verified Google Identity (daniloalvaro031717@gmail.com)"*.
+    6. Store / Branch is automatically pre-filled with `Savemore Market Taguig`.
+
+- [ ] **TC-INV-02 (Anti-Forwarding Protection & Cross-Account Rejection)**
+  * **Location**: Gatekeeper (`GatekeeperPinModal.jsx`)
+  * **Action**:
+    1. Take the invite link issued to `daniloalvaro031717@gmail.com`.
+    2. Click "[ 🔵 Continue with Google ]" but sign in with a different Google account (e.g. `anotheruser@gmail.com`).
+    3. Test visiting the base portal (`/` or `/intake`) without any token.
+    4. In Admin Invites modal, click "Revoke Link" on an active invite and try accessing that link.
+  * **Expected Behavior**:
+    1. The mismatched Google session is immediately rejected with an unbypassable 403 Forbidden screen: *"Access Denied — Identity Mismatch. This private link was issued exclusively to daniloalvaro031717@gmail.com. You are signed in as anotheruser@gmail.com. Forwarding is prohibited."*
+    2. Visiting `/` or `/intake` directly without token displays: *"Pingcon RMA Portal — Authorization Required. Please contact your assigned Pingcon representative to receive your store's personalized return link."*
+    3. Accessing a revoked or expired token displays: *"Invite Link Revoked"* or *"Invite Link Expired"*, blocking all intake submissions.
+    4. In QA test mode (`isTestMode: true`), clicking "⚡ Test Mode Sandbox Bypass" unlocks the portal for rapid QA testing without OAuth redirection.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -1079,4 +1112,5 @@ Each test scenario defines:
 | **Phase 10: Inbound vs Outbound Logistics Segregation** | Customer RMA & Supplier RTV Hubs | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 11: Multi-Item Manifest & Polling** | Customer Hub & Quick Actions | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 12: SKU & Barcode Decoupling** | Product Engine & RMA Manifests | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 13: 1-Click Google Identity Lock** | Customer RMA Invites & OAuth Gate | `READY FOR TESTING` | *Lead QA Director* |
 

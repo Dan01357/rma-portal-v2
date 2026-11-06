@@ -165,11 +165,18 @@ export default function SupplierClaimsTab({
     });
 
     reportsList.forEach(r => {
-      // Must be supplier outbound OR have an RTV disposition
-      const isSupplierCandidate = (r.rma_type === 'supplier_outbound') ||
-        (r.disposition && (r.disposition.toLowerCase().includes('return to vendor') || r.disposition.toLowerCase().includes('rtv')));
+      // Strictly enforce RTV disposition filtering:
+      // Exclude items triaged to Restock to Inventory, Scrap / Dispose, Quarantine, Buffer Exchange, or Pending Triage
+      const disp = String(r.disposition || '').toLowerCase();
+      if (disp.includes('restock') || disp.includes('scrap') || disp.includes('quarantine') || disp.includes('buffer') || disp.includes('pending triage')) {
+        return;
+      }
 
-      if (!isSupplierCandidate) return;
+      // Must strictly have an RTV disposition (or be an untriaged supplier outbound claim)
+      const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv');
+      if (!isRtvDisposition && r.rma_type !== 'supplier_outbound') {
+        return;
+      }
 
       const isParentManifest = Boolean(
         r.is_parent ||

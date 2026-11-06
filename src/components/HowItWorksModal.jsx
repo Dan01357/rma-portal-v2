@@ -41,7 +41,7 @@ export default function HowItWorksModal({ isOpen, onClose }) {
             </div>
             <div>
               <h2 className="font-bold text-slate-900 dark:text-white text-base sm:text-lg">System Workflow & User Guide</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Step-by-step operating standard for Wholesale RMA processing</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Step-by-step operating standard for Pingcon RMA processing</p>
             </div>
           </div>
 
