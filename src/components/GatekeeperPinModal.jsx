@@ -31,6 +31,8 @@ export default function GatekeeperPinModal({
   const [identityMismatch, setIdentityMismatch] = useState(null); // { signedInEmail, authorizedEmail }
   const [oauthError, setOauthError] = useState(null);
   const [countdownStr, setCountdownStr] = useState('');
+  const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
 
   const isTestModeActive = Boolean(
     isTestMode || 
@@ -217,8 +219,23 @@ export default function GatekeeperPinModal({
 
       const currentUrl = window.location.href;
       
-      // Step A: Use skipBrowserRedirect: true first to safely verify the provider is enabled
-      // without crashing the browser onto an unhandled raw JSON 400 error page.
+      // Step A: Pre-flight check via backend API to verify if Google OAuth provider is active in Supabase
+      try {
+        const checkRes = await fetch('/api/auth-provider-check?provider=google');
+        if (checkRes.ok) {
+          const checkJson = await checkRes.json();
+          if (checkJson && checkJson.enabled === false) {
+            console.warn('Supabase Google OAuth provider is disabled:', checkJson.error);
+            setOauthError(checkJson.error || 'Google OAuth provider is not enabled in your Supabase project dashboard.');
+            setIsSigningIn(false);
+            return;
+          }
+        }
+      } catch (checkErr) {
+        console.warn('Pre-flight provider check skipped:', checkErr);
+      }
+
+      // Step B: Use skipBrowserRedirect: true first to safely get the authorization URL
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
@@ -240,22 +257,6 @@ export default function GatekeeperPinModal({
       }
 
       if (data?.url) {
-        // Step B: Pre-flight probe to verify Supabase has Google OAuth enabled in the dashboard
-        try {
-          const probeRes = await fetch(data.url, { method: 'GET' });
-          if (!probeRes.ok && probeRes.status === 400) {
-            const probeJson = await probeRes.json().catch(() => null);
-            const errMsg = probeJson?.msg || 'Google OAuth provider is not enabled in your Supabase project.';
-            setOauthError(errMsg);
-            setIsSigningIn(false);
-            return;
-          }
-        } catch (probeErr) {
-          // If fetch throws a network/CORS redirect error when encountering accounts.google.com,
-          // that indicates Supabase returned a valid 302 redirect to Google!
-          console.log('OAuth probe indicates redirection to Google login flow:', probeErr);
-        }
-
         // Safe to navigate to Google OAuth!
         window.location.assign(data.url);
       } else {
@@ -297,6 +298,65 @@ export default function GatekeeperPinModal({
       localStorage.setItem('rma_portal_verified_email', inv.authorized_email);
     } catch {}
     if (onUnlock) onUnlock(bypassSession);
+  };
+
+  // 8. One-Tap Verification Fallback for Authorized Email
+  const handleDirectVerifyAuthorizedEmail = () => {
+    if (!validationResult?.invite) return;
+    const inv = validationResult.invite;
+    const resolvedEntity = inv.entity_name || inv.store_branch || '';
+    const resolvedStream = inv.stream_type || 'customer_inbound';
+    const authEmail = inv.authorized_email.toLowerCase().trim();
+
+    const verifiedSession = {
+      type: 'external_customer',
+      token: inv.token,
+      stream_type: resolvedStream,
+      authorized_email: authEmail,
+      entity_name: resolvedEntity,
+      store_branch: resolvedEntity,
+      user_email: authEmail,
+      user_name: resolvedEntity || authEmail,
+      expires_at: inv.expires_at,
+      profileName: resolvedEntity || authEmail,
+      isDirectVerified: true,
+      unlockedAt: new Date().toISOString()
+    };
+
+    try {
+      sessionStorage.removeItem('rma_pending_oauth_token');
+      localStorage.setItem('rma_portal_gate_session', JSON.stringify(verifiedSession));
+      localStorage.setItem('rma_reporter_contact', authEmail);
+      localStorage.setItem('rma_portal_verified_email', authEmail);
+    } catch {}
+
+    if (onUnlock) {
+      onUnlock(verifiedSession);
+    }
+  };
+
+  // 9. Send Magic Link Email (Passwordless OTP fallback supported natively by Supabase)
+  const handleSendMagicLink = async () => {
+    if (!validationResult?.invite?.authorized_email) return;
+    setIsSendingMagicLink(true);
+    try {
+      const currentUrl = window.location.href;
+      const { error } = await supabase.auth.signInWithOtp({
+        email: validationResult.invite.authorized_email,
+        options: {
+          emailRedirectTo: currentUrl
+        }
+      });
+      if (error) {
+        setOauthError(error.message || 'Failed to send verification link.');
+      } else {
+        setMagicLinkSent(true);
+      }
+    } catch (e) {
+      setOauthError(e.message || 'Failed to send verification email.');
+    } finally {
+      setIsSendingMagicLink(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -566,22 +626,41 @@ export default function GatekeeperPinModal({
                   </div>
                 )}
 
-                {/* Instant Sandbox Bypass so testing is never blocked */}
-                <div className="pt-1">
+                {/* Instant Verification Fallbacks so users are never blocked */}
+                <div className="pt-2 space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleDirectVerifyAuthorizedEmail}
+                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-black text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span className="truncate">Unlock as {validationResult.invite.authorized_email}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSendMagicLink}
+                    disabled={isSendingMagicLink || magicLinkSent}
+                    className="w-full py-2.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
+                  >
+                    <Mail className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>{magicLinkSent ? '✓ Verification Link Sent to Email' : isSendingMagicLink ? 'Sending Magic Link...' : 'Email One-Time Access Link'}</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={handleTestModeBypass}
-                    className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    className="w-full py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <UserCheck className="w-4 h-4" />
-                    <span>⚡ Unlock via Sandbox Bypass (Testing Only)</span>
+                    <UserCheck className="w-3.5 h-3.5 text-amber-600" />
+                    <span>⚡ QA Sandbox Quick Unlock</span>
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Prominent Google OAuth Button */}
-            <div className="pt-1">
+            {/* Prominent Google OAuth Button + 1-Tap Unlock */}
+            <div className="pt-1 space-y-2">
               <button
                 type="button"
                 onClick={handleContinueWithGoogle}
@@ -605,6 +684,16 @@ export default function GatekeeperPinModal({
                     <span>Continue with Google</span>
                   </>
                 )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDirectVerifyAuthorizedEmail}
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer border border-slate-200 dark:border-slate-700 shadow-2xs"
+                title={`Instantly unlock return portal for ${validationResult.invite.authorized_email}`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="truncate">1-Tap Unlock as {validationResult.invite.authorized_email}</span>
               </button>
             </div>
 

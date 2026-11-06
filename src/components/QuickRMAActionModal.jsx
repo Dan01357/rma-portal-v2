@@ -93,6 +93,8 @@ export default function QuickRMAActionModal({
   const [rmaStatus, setRmaStatus] = useState('received_at_dock');
   const [isSavingTriage, setIsSavingTriage] = useState(false);
   const [triageSavedSuccess, setTriageSavedSuccess] = useState(false);
+  const [triageSaveError, setTriageSaveError] = useState(null);
+  const isSupplierStream = report?.rma_type === 'supplier_outbound';
   const [isThermalLabelOpen, setIsThermalLabelOpen] = useState(false);
   const [isBufferSlipOpen, setIsBufferSlipOpen] = useState(false);
   const [isUpdatingType, setIsUpdatingType] = useState(false);
@@ -242,6 +244,7 @@ export default function QuickRMAActionModal({
   const handleSaveTriage = async () => {
     if (!report) return;
     setIsSavingTriage(true);
+    setTriageSaveError(null);
     try {
       const inspectorName = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
       const existingAudit = Array.isArray(report.audit_trail) ? [...report.audit_trail] : [];
@@ -273,18 +276,32 @@ export default function QuickRMAActionModal({
       const { data, error } = await targetQuery.select('*');
 
       if (error) {
-        alert(`Failed to save warehouse triage: ${error.message}`);
+        console.error('Failed to save warehouse triage:', error);
+        setTriageSaveError(error.message || 'Failed to save warehouse triage');
       } else {
-        const rows = Array.isArray(data) ? data : (data ? [data] : []);
-        const primaryReport = rows.find(r => !r.parent_rma_id) || rows[0] || { ...report, ...updates };
-        setReport(primaryReport);
+        const rows = Array.isArray(data) ? data : (data && typeof data === 'object' ? [data] : []);
+        const primaryReport = rows.find(r => r && !r.parent_rma_id) || rows[0] || { ...report, ...updates };
+        const cleanReport = { ...report, ...updates, ...(primaryReport || {}) };
+        setReport(cleanReport);
         setTriageSavedSuccess(true);
+        setTriageSaveError(null);
         setTimeout(() => setTriageSavedSuccess(false), 3000);
-        if (onRefresh) onRefresh(primaryReport);
-        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'triage-updated', reportId: primaryReport.id, rmaNumber: primaryReport.rma_number, report: primaryReport } }));
+        if (onRefresh) {
+          try {
+            onRefresh(cleanReport);
+          } catch (refErr) {
+            console.warn('onRefresh error caught safely:', refErr);
+          }
+        }
+        try {
+          window.dispatchEvent(new CustomEvent('rma-data-changed', {
+            detail: { type: 'triage-updated', reportId: cleanReport.id, rmaNumber: cleanReport.rma_number, report: cleanReport }
+          }));
+        } catch {}
       }
     } catch (err) {
-      alert(`Error updating triage: ${err.message}`);
+      console.error('Error updating triage:', err);
+      setTriageSaveError(err.message || 'Error updating physical triage');
     } finally {
       setIsSavingTriage(false);
     }
@@ -2180,6 +2197,13 @@ export default function QuickRMAActionModal({
                   </div>
                 )}
 
+                {triageSaveError && (
+                  <div className="p-2.5 bg-rose-50 dark:bg-rose-950/70 border border-rose-300 dark:border-rose-800 rounded-xl text-xs font-bold text-rose-800 dark:text-rose-200 flex items-center gap-2 animate-in fade-in">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>Failed to save triage: {triageSaveError}</span>
+                  </div>
+                )}
+
                 {manifestItems.length > 1 ? (
                   /* MULTI-ITEM MANIFEST LINE-ITEM LEVEL TRIAGE */
                   <div className="space-y-3">
@@ -2346,33 +2370,59 @@ export default function QuickRMAActionModal({
                         </select>
                       </div>
 
-                      {/* Disposition */}
+                      {/* Disposition - Scoped by Stream Type */}
                       <div>
                         <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
                           Warehouse Disposition
                         </label>
-                        <select
-                          value={normalizeDispositionOption(disposition)}
-                          onChange={(e) => {
-                            const newDisp = e.target.value;
-                            setDisposition(newDisp);
-                            if (newDisp === '2- Restock to Inventory') {
-                              setRmaStatus('restocked');
-                            } else if (newDisp === '5- Scrap / Dispose') {
-                              setRmaStatus('scrapped');
-                            } else if (newDisp === '6- Buffer Stock Exchange') {
-                              setRmaStatus('buffer_replacement_dispatched');
-                            }
-                          }}
-                          className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
-                        >
-                          <option value="1- Pending Triage">1- Pending Triage</option>
-                          <option value="2- Restock to Inventory">2- Restock to Inventory</option>
-                          <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
-                          <option value="4- Quarantine">4- Quarantine</option>
-                          <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
-                          <option value="6- Buffer Stock Exchange">6- Buffer Stock Exchange</option>
-                        </select>
+                        {isSupplierStream ? (
+                          <select
+                            value={disposition || '1 - Pending Vendor Pickup'}
+                            onChange={(e) => {
+                              const newDisp = e.target.value;
+                              setDisposition(newDisp);
+                              if (newDisp === '2 - Vendor Accepted Replacement') {
+                                setRmaStatus('restocked');
+                              } else if (newDisp === '3 - Vendor Credit / AP Deduction') {
+                                setRmaStatus('credit_memo_issued');
+                              } else if (newDisp === '4 - Local Destruction Authorized by Vendor') {
+                                setRmaStatus('scrapped');
+                              } else if (newDisp === '5 - Claim Rejected by Vendor') {
+                                setRmaStatus('rejected');
+                              }
+                            }}
+                            className="w-full px-2.5 py-2 bg-purple-50/50 dark:bg-purple-950/30 border border-purple-300 dark:border-purple-800 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-purple-600 shadow-2xs"
+                          >
+                            <option value="1 - Pending Vendor Pickup">1 - Pending Vendor Pickup</option>
+                            <option value="2 - Vendor Accepted Replacement">2 - Vendor Accepted Replacement</option>
+                            <option value="3 - Vendor Credit / AP Deduction">3 - Vendor Credit / AP Deduction</option>
+                            <option value="4 - Local Destruction Authorized by Vendor">4 - Local Destruction Authorized by Vendor</option>
+                            <option value="5 - Claim Rejected by Vendor">5 - Claim Rejected by Vendor</option>
+                          </select>
+                        ) : (
+                          <select
+                            value={normalizeDispositionOption(disposition)}
+                            onChange={(e) => {
+                              const newDisp = e.target.value;
+                              setDisposition(newDisp);
+                              if (newDisp === '2- Restock to Inventory') {
+                                setRmaStatus('restocked');
+                              } else if (newDisp === '5- Scrap / Dispose') {
+                                setRmaStatus('scrapped');
+                              } else if (newDisp === '6- Buffer Stock Exchange') {
+                                setRmaStatus('buffer_replacement_dispatched');
+                              }
+                            }}
+                            className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600 shadow-2xs"
+                          >
+                            <option value="1- Pending Triage">1- Pending Triage</option>
+                            <option value="2- Restock to Inventory">2- Restock to Inventory</option>
+                            <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
+                            <option value="4- Quarantine">4- Quarantine</option>
+                            <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
+                            <option value="6- Buffer Stock Exchange">6- Buffer Stock Exchange</option>
+                          </select>
+                        )}
                       </div>
 
                       {/* Warehouse Location (Bin / Rack) */}
@@ -2403,6 +2453,7 @@ export default function QuickRMAActionModal({
                           className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
                         >
                           <option value="pending_admin_details">Awaiting SKU</option>
+                          <option value="logged">Logged / SKU Assigned</option>
                           <option value="draft">1- Draft / Intake</option>
                           <option value="received_at_dock">2- Received at Dock</option>
                           <option value="under_inspection">3- Under Inspection</option>
@@ -2452,119 +2503,224 @@ export default function QuickRMAActionModal({
                 )}
               </div>
 
-              {/* ENTERPRISE ACTION 2: FINANCE CREDIT MEMO WITH FINANCIAL SAFEGUARD */}
-              <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-2.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className={`p-2 rounded-xl ${existingMemo ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400'}`}>
-                      <Receipt className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-black text-slate-900 dark:text-white">
-                        {existingMemo ? `Credit Memo: ${existingMemo.credit_memo_number}` : 'Finance Credit Memorandum'}
-                      </h5>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {existingMemo
-                          ? `₱${Number(existingMemo.credit_amount || existingMemo.amount || 0).toFixed(2)} credited by ${existingMemo.credit_issued_by || 'Finance'}`
-                          : `Total Claim: ₱${totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${itemQty} unit${itemQty > 1 ? 's' : ''})`}
-                      </p>
-                    </div>
-                  </div>
-
-                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0 ${
-                    existingMemo
-                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
-                      : isHighValueClaim
-                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
-                        : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                  }`}>
-                    {existingMemo ? 'Issued' : isHighValueClaim ? 'High-Value Claim' : 'Standard Claim'}
-                  </span>
-                </div>
-
-                {/* Financial Safety Rule Notice (> ₱10,000) */}
-                {isHighValueClaim && !existingMemo && (
-                  <div className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
-                    isSuperAdmin 
-                      ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
-                      : 'bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200'
-                  }`}>
-                    {isSuperAdmin ? (
-                      <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                    ) : (
-                      <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    )}
-                    <div className="space-y-0.5">
-                      <div className="font-black">
-                        {isSuperAdmin 
-                          ? `👑 Super Admin Approved (> ₱10,000 Claim)`
-                          : `🔒 Financial Safety Lock (Claim > ₱10,000)`}
+              {/* ENTERPRISE ACTION 2: FINANCE CREDIT MEMO vs SUPPLIER DEBIT CLAIM */}
+              {isSupplierStream ? (
+                <div className="p-4 bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/60 rounded-2xl shadow-xs space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 rounded-xl bg-purple-100 text-purple-700 dark:bg-purple-950/70 dark:text-purple-300">
+                        <Truck className="w-4 h-4" />
                       </div>
-                      <p className="text-[11px] opacity-90">
-                        {isSuperAdmin
-                          ? `Authorized by ${verifiedAdmin?.name || currentUser?.name} (Super Admin). Credit Memo issuance enabled.`
-                          : `Total claim is ₱${totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}, exceeding the ₱10,000 threshold. Only a Super Admin can issue this credit memo.`}
-                      </p>
+                      <div>
+                        <h5 className="text-xs font-black text-slate-900 dark:text-white">
+                          Supplier Debit Claim / AP Deduction
+                        </h5>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Total Vendor Claim: ₱{totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({itemQty} unit{itemQty > 1 ? 's' : ''})
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                )}
 
-                {isMultiItemManifest ? (
-                  <div className="p-3 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 rounded-xl flex items-center gap-2.5 text-xs text-blue-900 dark:text-blue-200 shadow-2xs">
-                    <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                    <span className="font-semibold text-[11px]">
-                      ℹ️ Multi-Item Manifest: Finance Credit Memos are issued individually per line item in the Customer RMA Hub drawer table.
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0 bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                      Outbound RTV Claim
                     </span>
                   </div>
-                ) : !existingMemo ? (
-                  <button
-                    type="button"
-                    disabled={!canIssueCreditMemo}
-                    onClick={() => {
-                      if (canIssueCreditMemo && onOpenCreditMemo && report) {
-                        onOpenCreditMemo(report);
-                      }
-                    }}
-                    className={`w-full py-2.5 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all ${
-                      canIssueCreditMemo
-                        ? 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white cursor-pointer'
-                        : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
-                    }`}
-                  >
-                    {canIssueCreditMemo ? (
-                      <>
-                        <Receipt className="w-4 h-4" />
-                        <span>+ Issue Credit Memo</span>
-                      </>
-                    ) : (
-                      <>
-                        <Lock className="w-4 h-4 text-amber-500" />
-                        <span>Locked: Super Admin Approval Required</span>
-                      </>
-                    )}
-                  </button>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2 pt-1">
+
+                  <div className="p-3 bg-white/80 dark:bg-slate-900/80 rounded-xl border border-purple-100 dark:border-purple-900/40 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                      <span>Vendor / Master Supplier:</span>
+                      <strong className="text-slate-900 dark:text-white font-mono">{report?.supplier || report?.vendor || 'Master Supplier'}</strong>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                      <span>RTV Outbound Reference:</span>
+                      <strong className="text-purple-600 dark:text-purple-400 font-mono">{report?.rma_number}</strong>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                      <span>Triage Disposition:</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{disposition || 'Pending Vendor Pickup'}</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-0.5">
                     <button
                       type="button"
-                      onClick={() => onViewCreditMemoVoucher && onViewCreditMemoVoucher(existingMemo)}
-                      className="py-2 px-3 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      onClick={() => {
+                        if (onPrintThermalLabel) onPrintThermalLabel(report);
+                        else setIsThermalLabelOpen(true);
+                      }}
+                      className="py-2.5 px-3 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
                     >
                       <Printer className="w-3.5 h-3.5" />
-                      <span>Print CM Voucher</span>
+                      <span>Print RTV Label</span>
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => onOpenCreditMemo && onOpenCreditMemo(report, existingMemo)}
-                      className="py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      onClick={() => {
+                        const win = window.open('', '_blank');
+                        if (win) {
+                          win.document.write(`
+                            <html>
+                              <head>
+                                <title>Supplier Debit Claim - ${report?.rma_number}</title>
+                                <style>
+                                  body { font-family: monospace; padding: 24px; color: #111; }
+                                  h2 { margin: 0 0 8px 0; }
+                                  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+                                  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+                                  .header { border-bottom: 2px solid #333; padding-bottom: 12px; margin-bottom: 16px; }
+                                </style>
+                              </head>
+                              <body>
+                                <div class="header">
+                                  <h2>PINGCON MARKETING - SUPPLIER DEBIT MEMORANDUM</h2>
+                                  <div>RTV Reference: <strong>${report?.rma_number}</strong></div>
+                                  <div>Supplier: <strong>${report?.supplier || 'Master Vendor'}</strong></div>
+                                  <div>Date: <strong>${new Date().toLocaleDateString()}</strong></div>
+                                </div>
+                                <p>This document authorizes Accounts Payable deduction / supplier debit for return to vendor claim.</p>
+                                <table>
+                                  <tr><th>Item</th><th>Barcode / SKU</th><th>Qty</th><th>Unit Price</th><th>Total Deduction</th></tr>
+                                  <tr>
+                                    <td>${report?.name || 'Product'}</td>
+                                    <td>${report?.code || report?.sku || report?.barcode || 'N/A'}</td>
+                                    <td>${itemQty}</td>
+                                    <td>₱${Number(report?.price || 0).toFixed(2)}</td>
+                                    <td><strong>₱${totalClaimValue.toFixed(2)}</strong></td>
+                                  </tr>
+                                </table>
+                                <div style="margin-top: 30px; display: flex; justify-content: space-between;">
+                                  <div>Authorized by: _______________________</div>
+                                  <div>Vendor Received by: _______________________</div>
+                                </div>
+                                <script>window.print();</script>
+                              </body>
+                            </html>
+                          `);
+                          win.document.close();
+                        }
+                      }}
+                      className="py-2.5 px-3 bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 dark:hover:bg-purple-900/70 text-purple-900 dark:text-purple-200 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                     >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>Edit CM</span>
+                      <Receipt className="w-3.5 h-3.5 text-purple-700 dark:text-purple-300" />
+                      <span>Print Debit Voucher</span>
                     </button>
                   </div>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className={`p-2 rounded-xl ${existingMemo ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400'}`}>
+                        <Receipt className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h5 className="text-xs font-black text-slate-900 dark:text-white">
+                          {existingMemo ? `Credit Memo: ${existingMemo.credit_memo_number}` : 'Finance Credit Memorandum'}
+                        </h5>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {existingMemo
+                            ? `₱${Number(existingMemo.credit_amount || existingMemo.amount || 0).toFixed(2)} credited by ${existingMemo.credit_issued_by || 'Finance'}`
+                            : `Total Claim: ₱${totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${itemQty} unit${itemQty > 1 ? 's' : ''})`}
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0 ${
+                      existingMemo
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
+                        : isHighValueClaim
+                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                          : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                    }`}>
+                      {existingMemo ? 'Issued' : isHighValueClaim ? 'High-Value Claim' : 'Standard Claim'}
+                    </span>
+                  </div>
+
+                  {/* Financial Safety Rule Notice (> ₱10,000) */}
+                  {isHighValueClaim && !existingMemo && (
+                    <div className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+                      isSuperAdmin 
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+                        : 'bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200'
+                    }`}>
+                      {isSuperAdmin ? (
+                        <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      ) : (
+                        <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      )}
+                      <div className="space-y-0.5">
+                        <div className="font-black">
+                          {isSuperAdmin 
+                            ? `👑 Super Admin Approved (> ₱10,000 Claim)`
+                            : `🔒 Financial Safety Lock (Claim > ₱10,000)`}
+                        </div>
+                        <p className="text-[11px] opacity-90">
+                          {isSuperAdmin
+                            ? `Authorized by ${verifiedAdmin?.name || currentUser?.name} (Super Admin). Credit Memo issuance enabled.`
+                            : `Total claim is ₱${totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}, exceeding the ₱10,000 threshold. Only a Super Admin can issue this credit memo.`}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {isMultiItemManifest ? (
+                    <div className="p-3 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 rounded-xl flex items-center gap-2.5 text-xs text-blue-900 dark:text-blue-200 shadow-2xs">
+                      <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                      <span className="font-semibold text-[11px]">
+                        ℹ️ Multi-Item Manifest: Finance Credit Memos are issued individually per line item in the Customer RMA Hub drawer table.
+                      </span>
+                    </div>
+                  ) : !existingMemo ? (
+                    <button
+                      type="button"
+                      disabled={!canIssueCreditMemo}
+                      onClick={() => {
+                        if (canIssueCreditMemo && onOpenCreditMemo && report) {
+                          onOpenCreditMemo(report);
+                        }
+                      }}
+                      className={`w-full py-2.5 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all ${
+                        canIssueCreditMemo
+                          ? 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white cursor-pointer'
+                          : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
+                      }`}
+                    >
+                      {canIssueCreditMemo ? (
+                        <>
+                          <Receipt className="w-4 h-4" />
+                          <span>+ Issue Credit Memo</span>
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="w-4 h-4 text-amber-500" />
+                          <span>Locked: Super Admin Approval Required</span>
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => onViewCreditMemoVoucher && onViewCreditMemoVoucher(existingMemo)}
+                        className="py-2 px-3 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Print CM Voucher</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => onOpenCreditMemo && onOpenCreditMemo(report, existingMemo)}
+                        className="py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Edit CM</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* ENTERPRISE AUDIT TRAIL & LIFECYCLE TIMELINE */}
               <div className="pt-3 border-t border-slate-200 dark:border-slate-800">

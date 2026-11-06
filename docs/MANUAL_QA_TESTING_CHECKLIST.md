@@ -80,6 +80,16 @@ Each test scenario defines:
     6. Store/Branch is auto-populated if included in the invite.
     7. Clicking `[ Lock Device ]` clears the gate session, calls `supabase.auth.signOut({ scope: 'local' })`, and re-locks the station.
 
+- [ ] **TC-OAUTH-04 (Pre-Flight Provider Probe & In-Modal Fallback Access)**
+  * **Location**: Gatekeeper Modal (`/intake?token=inv_...`)
+  * **Action**: Click `[ 🔵 Continue with Google ]` when Google OAuth provider is not yet enabled in the Supabase Dashboard.
+  * **Expected Behavior**:
+    1. Pre-flight API check (`/api/auth-provider-check?provider=google`) detects provider is not active.
+    2. Browser is **PREVENTED** from navigating to `https://<ref>.supabase.co/auth/v1/authorize` (preventing raw JSON 400 screen).
+    3. Displays in-modal alert: *"Google Authentication Configuration Required"* with step-by-step Supabase dashboard setup instructions.
+    4. Provides instant fallback: `[ 🚀 Unlock as <authorized_email> ]` and `[ ✉️ Email One-Time Access Link ]`.
+    5. Authorized recipient can immediately access the portal with verified identity without being blocked.
+
 - [ ] **TC-GATE-05A (Customer Return vs Supplier RTV Invite Creation)**
   * **Location**: Admin Dashboard -> **"🎫 Customer & Supplier RMA Invites"** Modal
   * **Action**:

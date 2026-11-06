@@ -106,8 +106,23 @@ const DEFECT_REASONS = [
  * Split tickets (e.g. -B, -C) have their own distinct RMA number and are standalone tickets.
  */
 function isManifestSubItem(item, allReports) {
-  if (!item || !item.parent_rma_id || !Array.isArray(allReports)) return false;
-  return allReports.some(p => p.id === item.parent_rma_id && p.rma_number === item.rma_number);
+  if (!item) return false;
+  // 1. Any item that has parent_rma_id populated is strictly a child item of a manifest
+  if (item.parent_rma_id !== null && item.parent_rma_id !== undefined && String(item.parent_rma_id).trim() !== '') {
+    return true;
+  }
+  // 2. If an item shares rma_number with a parent batch manifest, but is NOT the parent container itself
+  if (Array.isArray(allReports) && item.rma_number) {
+    const parent = allReports.find(p => (
+      p &&
+      p.rma_number === item.rma_number &&
+      (p.is_parent === true || (Array.isArray(p.items) && p.items.length > 0) || String(p.name || '').toLowerCase().startsWith('batch return manifest'))
+    ));
+    if (parent && String(parent.id) !== String(item.id)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -5831,20 +5846,18 @@ export default function App() {
             });
           } else if (updated && (updated.id || updated.rma_number)) {
             setRecentReportsList(prev => prev.map(r => {
-              if (r.id === updated.id) {
+              if (r && r.id && updated.id && String(r.id) === String(updated.id)) {
                 return { ...r, ...updated };
               }
-              if (r.rma_number && r.rma_number === updated.rma_number) {
+              if (r && r.rma_number && updated.rma_number && r.rma_number === updated.rma_number && !r.parent_rma_id) {
                 return {
                   ...r,
-                  ...updated,
                   status: updated.status !== undefined ? updated.status : r.status,
                   disposition: updated.disposition !== undefined ? updated.disposition : r.disposition,
                   condition_grade: updated.condition_grade !== undefined ? updated.condition_grade : r.condition_grade,
                   warehouse_location: updated.warehouse_location !== undefined ? updated.warehouse_location : r.warehouse_location,
                   inspected_by: updated.inspected_by !== undefined ? updated.inspected_by : r.inspected_by,
-                  inspected_at: updated.inspected_at !== undefined ? updated.inspected_at : r.inspected_at,
-                  notes: updated.notes !== undefined ? updated.notes : r.notes
+                  inspected_at: updated.inspected_at !== undefined ? updated.inspected_at : r.inspected_at
                 };
               }
               return r;
