@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-06T09:49:06.819Z
+Generated At: 2026-11-06T11:15:33.082Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -2331,15 +2331,25 @@ Each test scenario defines:
     6. Store/Branch is auto-populated if included in the invite.
     7. Clicking `[ Lock Device ]` clears the gate session, calls `supabase.auth.signOut({ scope: 'local' })`, and re-locks the station.
 
-- [ ] **TC-OAUTH-04 (Pre-Flight Provider Probe & In-Modal Fallback Access)**
+- [ ] **TC-OAUTH-04 (Pre-Flight Provider Probe & Secure Email OTP Fallback)**
   * **Location**: Gatekeeper Modal (`/intake?token=inv_...`)
   * **Action**: Click `[ 🔵 Continue with Google ]` when Google OAuth provider is not yet enabled in the Supabase Dashboard.
   * **Expected Behavior**:
     1. Pre-flight API check (`/api/auth-provider-check?provider=google`) detects provider is not active.
     2. Browser is **PREVENTED** from navigating to `https://<ref>.supabase.co/auth/v1/authorize` (preventing raw JSON 400 screen).
     3. Displays in-modal alert: *"Google Authentication Configuration Required"* with step-by-step Supabase dashboard setup instructions.
-    4. Provides instant fallback: `[ 🚀 Unlock as <authorized_email> ]` and `[ ✉️ Email One-Time Access Link ]`.
-    5. Authorized recipient can immediately access the portal with verified identity without being blocked.
+    4. Secure passwordless option: `[ ✉️ Email One-Time Access Link to <authorized_email> ]` strictly dispatches a magic login link to the authorized email address.
+    5. Zero client-side bypass buttons exist. Unauthorized accounts (`finance2@a2z2go.com`) cannot unlock an invite issued to `daniloalvaro031717@gmail.com`.
+
+- [ ] **TC-INV-DELETE (Expired-Only Invite Deletion Guard)**
+  * **Location**: Admin Dashboard -> **"🎫 RMA Invites"** Modal -> Authorized Invites Table
+  * **Action**:
+    1. Inspect an **Active** invite (`status: active`, remaining duration > 0).
+    2. Inspect an **Expired** or **Revoked** invite (`status: expired` or `status: revoked`).
+  * **Expected Behavior**:
+    1. Active invites display ONLY Copy Link, Send Email, and Revoke Access buttons. The Delete trash can icon is **HIDDEN**.
+    2. Expired or Revoked invites display the red Delete trash can icon `[ 🗑️ Delete Expired Invite ]`.
+    3. Clicking delete prompts: *"Permanently delete expired invite record for <email>?"* and removes the record from `rma_invites` and `rma_settings`. Active invites cannot be deleted.
 
 - [ ] **TC-GATE-05A (Customer Return vs Supplier RTV Invite Creation)**
   * **Location**: Admin Dashboard -> **"🎫 Customer & Supplier RMA Invites"** Modal
@@ -4099,6 +4109,7 @@ export default async function handler(req, res) {
     });
   }
 }
+
 
 --- END FILE: api/auth-provider-check.js ---
 
@@ -9440,12 +9451,28 @@ export default function App() {
   const [intakeSlug, setIntakeSlug] = useState(() => getIntakeSlugFromUrl());
   const [gateSession, setGateSession] = useState(() => {
     try {
+      const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+      let urlToken = urlParams ? urlParams.get('token') : null;
+      if (!urlToken && typeof window !== 'undefined' && window.location.hash.includes('token=')) {
+        const match = window.location.hash.match(/token=([^&]+)/);
+        if (match && match[1]) urlToken = decodeURIComponent(match[1]);
+      }
+
       const raw = localStorage.getItem('rma_portal_gate_session');
       if (raw) {
         const parsed = JSON.parse(raw);
+        // If an invite token is present in the address bar, the existing session MUST have been authenticated for this exact token!
+        if (urlToken && parsed?.token !== urlToken) {
+          localStorage.removeItem('rma_portal_gate_session');
+          return null;
+        }
         if (parsed?.expires_at && new Date(parsed.expires_at).getTime() > Date.now()) {
           return parsed;
         }
+      }
+      // If visiting an invite link without an exact matching validated session, return null so gatekeeper stays locked
+      if (urlToken) {
+        return null;
       }
     } catch {}
     const slug = getIntakeSlugFromUrl();
@@ -9564,7 +9591,32 @@ export default function App() {
 
       const newSlug = getIntakeSlugFromUrl();
       setIntakeSlug(newSlug);
-      setGateSession(accessKeyService.getActiveSession(newSlug));
+      const urlParams = new URLSearchParams(window.location.search);
+      let urlToken = urlParams.get('token');
+      if (!urlToken && window.location.hash.includes('token=')) {
+        const m = window.location.hash.match(/token=([^&]+)/);
+        if (m && m[1]) urlToken = decodeURIComponent(m[1]);
+      }
+
+      if (urlToken) {
+        try {
+          const raw = localStorage.getItem('rma_portal_gate_session');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed?.token === urlToken && parsed?.expires_at && new Date(parsed.expires_at).getTime() > Date.now()) {
+              setGateSession(parsed);
+            } else {
+              setGateSession(null);
+            }
+          } else {
+            setGateSession(null);
+          }
+        } catch {
+          setGateSession(null);
+        }
+      } else {
+        setGateSession(accessKeyService.getActiveSession(newSlug));
+      }
 
       // If entering /admin without an active session, open login gate
       if (onAdmin && !authService.getCurrentUser()) {
@@ -12544,10 +12596,10 @@ export default function App() {
                   type="button"
                   onClick={() => setIsCustomerInvitesModalOpen(true)}
                   className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
-                  title="Generate & Manage Google Identity Locked Customer RMA Return Links"
+                  title="Generate & Manage Google Identity Locked RMA Return Links (Warehouse or Customer)"
                 >
                   <Ticket className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span>🎫 Customer RMA Invites</span>
+                  <span>🎫 RMA Invites</span>
                 </button>
 
                 <button
@@ -15058,7 +15110,21 @@ export default function App() {
 
       {/* 1-Click Google Identity Lock Gatekeeper Screen */}
       <GatekeeperPinModal
-        isOpen={!isAdminView && !currentUser && !gateSession}
+        isOpen={(() => {
+          if (typeof window === 'undefined') return false;
+          const urlParams = new URLSearchParams(window.location.search);
+          let urlToken = urlParams.get('token');
+          if (!urlToken && window.location.hash.includes('token=')) {
+            const m = window.location.hash.match(/token=([^&]+)/);
+            if (m && m[1]) urlToken = decodeURIComponent(m[1]);
+          }
+          // If visiting an invite link with a token, the Gatekeeper MUST be locked until this specific token is authenticated!
+          if (urlToken) {
+            return !gateSession || gateSession.token !== urlToken;
+          }
+          // Default public portal lock: locked unless admin is logged in or station is unlocked
+          return !isAdminView && !currentUser && !gateSession;
+        })()}
         currentSlug={intakeSlug}
         onUnlock={(session) => {
           setGateSession(session);
@@ -18616,7 +18682,8 @@ import {
   Ticket,
   Truck,
   Store,
-  Filter
+  Filter,
+  Ban
 } from 'lucide-react';
 import { inviteService, formatRemainingCountdown } from '../services/inviteService';
 
@@ -18769,6 +18836,32 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     }
   };
 
+  const handleDelete = async (inv) => {
+    const countdown = formatRemainingCountdown(inv.expires_at, inv.status);
+    const isExpired = countdown.isExpired;
+    const isRevoked = inv.status === 'revoked';
+
+    if (!isExpired && !isRevoked) {
+      alert('Active invites cannot be deleted until they are expired or revoked.');
+      return;
+    }
+
+    if (!window.confirm(`Permanently delete expired invite record for ${inv.authorized_email}?`)) {
+      return;
+    }
+
+    try {
+      await inviteService.deleteInvite(inv.token || inv.id);
+      showToast('Expired invite record deleted.');
+      loadInvites();
+      if (generatedInvite?.token === inv.token) {
+        setGeneratedInvite(null);
+      }
+    } catch (err) {
+      alert(`Failed to delete invite: ${err.message}`);
+    }
+  };
+
   const filteredInvites = useMemo(() => {
     if (streamFilter === 'all') return invites;
     return invites.filter(i => (i.stream_type || 'customer_inbound') === streamFilter);
@@ -18797,14 +18890,14 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                  Customer & Supplier RMA Invites
+                  RMA Invites
                 </h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300">
                   Google Identity Lock
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Generate private return links tied strictly to authorized Google accounts.
+                Generate private return links for warehouse staff or customer branches tied strictly to authorized Google accounts.
               </p>
             </div>
           </div>
@@ -19258,7 +19351,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                           </td>
                           <td className="p-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {!isRevoked && !isExpired && (
+                              {!isRevoked && !isExpired ? (
                                 <>
                                   <button
                                     type="button"
@@ -19280,12 +19373,21 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                                   <button
                                     type="button"
                                     onClick={() => handleRevoke(inv.token || inv.id)}
-                                    className="p-1.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
-                                    title="Revoke Invite Link"
+                                    className="p-1.5 text-amber-600 hover:text-amber-800 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/50 rounded-lg transition-colors cursor-pointer"
+                                    title="Revoke Active Invite Access"
                                   >
-                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <Ban className="w-3.5 h-3.5" />
                                   </button>
                                 </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelete(inv)}
+                                  className="p-1.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
+                                  title="Delete Expired Invite Record"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
                               )}
                             </div>
                           </td>
@@ -20600,85 +20702,22 @@ export default function GatekeeperPinModal({
     }
   };
 
-  // 7. QA Sandbox Test Mode Bypass
-  const handleTestModeBypass = () => {
-    if (!validationResult?.invite) return;
-    const inv = validationResult.invite;
-    const resolvedEntity = inv.entity_name || inv.store_branch || '';
-    const resolvedStream = inv.stream_type || 'customer_inbound';
-
-    const bypassSession = {
-      type: 'external_customer',
-      token: inv.token,
-      stream_type: resolvedStream,
-      authorized_email: inv.authorized_email.toLowerCase().trim(),
-      entity_name: resolvedEntity,
-      store_branch: resolvedEntity,
-      user_email: inv.authorized_email.toLowerCase().trim(),
-      user_name: resolvedEntity || inv.authorized_email,
-      expires_at: inv.expires_at,
-      profileName: resolvedEntity || inv.authorized_email,
-      isTestBypass: true,
-      unlockedAt: new Date().toISOString()
-    };
-    try {
-      sessionStorage.removeItem('rma_pending_oauth_token');
-      localStorage.setItem('rma_portal_gate_session', JSON.stringify(bypassSession));
-      localStorage.setItem('rma_reporter_contact', inv.authorized_email);
-      localStorage.setItem('rma_portal_verified_email', inv.authorized_email);
-    } catch {}
-    if (onUnlock) onUnlock(bypassSession);
-  };
-
-  // 8. One-Tap Verification Fallback for Authorized Email
-  const handleDirectVerifyAuthorizedEmail = () => {
-    if (!validationResult?.invite) return;
-    const inv = validationResult.invite;
-    const resolvedEntity = inv.entity_name || inv.store_branch || '';
-    const resolvedStream = inv.stream_type || 'customer_inbound';
-    const authEmail = inv.authorized_email.toLowerCase().trim();
-
-    const verifiedSession = {
-      type: 'external_customer',
-      token: inv.token,
-      stream_type: resolvedStream,
-      authorized_email: authEmail,
-      entity_name: resolvedEntity,
-      store_branch: resolvedEntity,
-      user_email: authEmail,
-      user_name: resolvedEntity || authEmail,
-      expires_at: inv.expires_at,
-      profileName: resolvedEntity || authEmail,
-      isDirectVerified: true,
-      unlockedAt: new Date().toISOString()
-    };
-
-    try {
-      sessionStorage.removeItem('rma_pending_oauth_token');
-      localStorage.setItem('rma_portal_gate_session', JSON.stringify(verifiedSession));
-      localStorage.setItem('rma_reporter_contact', authEmail);
-      localStorage.setItem('rma_portal_verified_email', authEmail);
-    } catch {}
-
-    if (onUnlock) {
-      onUnlock(verifiedSession);
-    }
-  };
-
-  // 9. Send Magic Link Email (Passwordless OTP fallback supported natively by Supabase)
+  // 7. Send Magic Link Email (Passwordless OTP fallback strictly delivered to the authorized email)
   const handleSendMagicLink = async () => {
     if (!validationResult?.invite?.authorized_email) return;
     setIsSendingMagicLink(true);
+    setOauthError(null);
     try {
       const currentUrl = window.location.href;
+      const targetEmail = validationResult.invite.authorized_email.toLowerCase().trim();
       const { error } = await supabase.auth.signInWithOtp({
-        email: validationResult.invite.authorized_email,
+        email: targetEmail,
         options: {
           emailRedirectTo: currentUrl
         }
       });
       if (error) {
-        setOauthError(error.message || 'Failed to send verification link.');
+        setOauthError(error.message || 'Failed to dispatch verification link.');
       } else {
         setMagicLinkSent(true);
       }
@@ -20750,17 +20789,6 @@ export default function GatekeeperPinModal({
                 <RefreshCw className="w-4 h-4" />
                 <span>Switch Google Account</span>
               </button>
-
-              {isTestModeActive && (
-                <button
-                  type="button"
-                  onClick={handleTestModeBypass}
-                  className="w-full py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <UserCheck className="w-3.5 h-3.5 text-amber-600" />
-                  <span>⚡ Test Mode Sandbox Bypass (QA Only)</span>
-                </button>
-              )}
 
               <button
                 type="button"
@@ -20956,40 +20984,22 @@ export default function GatekeeperPinModal({
                   </div>
                 )}
 
-                {/* Instant Verification Fallbacks so users are never blocked */}
-                <div className="pt-2 space-y-2">
-                  <button
-                    type="button"
-                    onClick={handleDirectVerifyAuthorizedEmail}
-                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-black text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
-                  >
-                    <ShieldCheck className="w-4 h-4" />
-                    <span className="truncate">Unlock as {validationResult.invite.authorized_email}</span>
-                  </button>
-
+                {/* Secure Magic Link Fallback strictly dispatched to authorized inbox */}
+                <div className="pt-2">
                   <button
                     type="button"
                     onClick={handleSendMagicLink}
                     disabled={isSendingMagicLink || magicLinkSent}
-                    className="w-full py-2.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
+                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60 shadow-sm"
                   >
-                    <Mail className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>{magicLinkSent ? '✓ Verification Link Sent to Email' : isSendingMagicLink ? 'Sending Magic Link...' : 'Email One-Time Access Link'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleTestModeBypass}
-                    className="w-full py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <UserCheck className="w-3.5 h-3.5 text-amber-600" />
-                    <span>⚡ QA Sandbox Quick Unlock</span>
+                    <Mail className="w-4 h-4" />
+                    <span>{magicLinkSent ? '✓ Secure Access Link Dispatched to Your Email' : isSendingMagicLink ? 'Dispatching Access Link...' : `Email Secure Access Link to ${validationResult.invite.authorized_email}`}</span>
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Prominent Google OAuth Button + 1-Tap Unlock */}
+            {/* Prominent Google OAuth Button */}
             <div className="pt-1 space-y-2">
               <button
                 type="button"
@@ -21018,28 +21028,17 @@ export default function GatekeeperPinModal({
 
               <button
                 type="button"
-                onClick={handleDirectVerifyAuthorizedEmail}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer border border-slate-200 dark:border-slate-700 shadow-2xs"
-                title={`Instantly unlock return portal for ${validationResult.invite.authorized_email}`}
+                onClick={handleSendMagicLink}
+                disabled={isSendingMagicLink || magicLinkSent}
+                className="w-full py-2.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 shadow-2xs"
               >
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="truncate">1-Tap Unlock as {validationResult.invite.authorized_email}</span>
+                <Mail className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span>{magicLinkSent ? '✓ Secure Access Link Dispatched' : isSendingMagicLink ? 'Dispatching...' : 'Email One-Time Access Link to ' + validationResult.invite.authorized_email}</span>
               </button>
             </div>
 
             <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
               {/* QA Sandbox Test Mode Quick Bypass */}
-              {isTestModeActive && (
-                <button
-                  type="button"
-                  onClick={handleTestModeBypass}
-                  className="w-full py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <UserCheck className="w-3.5 h-3.5 text-amber-600" />
-                  <span>⚡ Test Mode Sandbox Bypass (QA Only)</span>
-                </button>
-              )}
-
               <button
                 type="button"
                 onClick={onOpenAdminLogin}
@@ -42333,6 +42332,41 @@ export const inviteService = {
       saveLocalInvites(updated);
     } catch (e) {
       console.warn('Failed to update revoked invite in rma_settings:', e);
+    }
+
+    return true;
+  },
+
+  /**
+   * Delete an expired invite record (Strictly allowed only for expired or revoked invites)
+   */
+  async deleteInvite(tokenOrId) {
+    if (!tokenOrId) return false;
+
+    // 1. Delete from rma_invites table
+    try {
+      await supabase
+        .from('rma_invites')
+        .delete()
+        .or(`token.eq.${tokenOrId},id.eq.${tokenOrId}`);
+    } catch (e) {
+      console.warn('Failed to delete from rma_invites table:', e);
+    }
+
+    // 2. Delete from rma_settings
+    try {
+      const current = await this.getInvites();
+      const updated = current.filter(inv => inv.token !== tokenOrId && inv.id !== tokenOrId);
+      await supabase
+        .from('rma_settings')
+        .upsert({
+          key: SETTINGS_KEY,
+          value: updated,
+          updated_at: new Date().toISOString()
+        });
+      saveLocalInvites(updated);
+    } catch (e) {
+      console.warn('Failed to delete invite from rma_settings:', e);
     }
 
     return true;

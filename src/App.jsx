@@ -277,12 +277,28 @@ export default function App() {
   const [intakeSlug, setIntakeSlug] = useState(() => getIntakeSlugFromUrl());
   const [gateSession, setGateSession] = useState(() => {
     try {
+      const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+      let urlToken = urlParams ? urlParams.get('token') : null;
+      if (!urlToken && typeof window !== 'undefined' && window.location.hash.includes('token=')) {
+        const match = window.location.hash.match(/token=([^&]+)/);
+        if (match && match[1]) urlToken = decodeURIComponent(match[1]);
+      }
+
       const raw = localStorage.getItem('rma_portal_gate_session');
       if (raw) {
         const parsed = JSON.parse(raw);
+        // If an invite token is present in the address bar, the existing session MUST have been authenticated for this exact token!
+        if (urlToken && parsed?.token !== urlToken) {
+          localStorage.removeItem('rma_portal_gate_session');
+          return null;
+        }
         if (parsed?.expires_at && new Date(parsed.expires_at).getTime() > Date.now()) {
           return parsed;
         }
+      }
+      // If visiting an invite link without an exact matching validated session, return null so gatekeeper stays locked
+      if (urlToken) {
+        return null;
       }
     } catch {}
     const slug = getIntakeSlugFromUrl();
@@ -401,7 +417,32 @@ export default function App() {
 
       const newSlug = getIntakeSlugFromUrl();
       setIntakeSlug(newSlug);
-      setGateSession(accessKeyService.getActiveSession(newSlug));
+      const urlParams = new URLSearchParams(window.location.search);
+      let urlToken = urlParams.get('token');
+      if (!urlToken && window.location.hash.includes('token=')) {
+        const m = window.location.hash.match(/token=([^&]+)/);
+        if (m && m[1]) urlToken = decodeURIComponent(m[1]);
+      }
+
+      if (urlToken) {
+        try {
+          const raw = localStorage.getItem('rma_portal_gate_session');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed?.token === urlToken && parsed?.expires_at && new Date(parsed.expires_at).getTime() > Date.now()) {
+              setGateSession(parsed);
+            } else {
+              setGateSession(null);
+            }
+          } else {
+            setGateSession(null);
+          }
+        } catch {
+          setGateSession(null);
+        }
+      } else {
+        setGateSession(accessKeyService.getActiveSession(newSlug));
+      }
 
       // If entering /admin without an active session, open login gate
       if (onAdmin && !authService.getCurrentUser()) {
@@ -3381,10 +3422,10 @@ export default function App() {
                   type="button"
                   onClick={() => setIsCustomerInvitesModalOpen(true)}
                   className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
-                  title="Generate & Manage Google Identity Locked Customer RMA Return Links"
+                  title="Generate & Manage Google Identity Locked RMA Return Links (Warehouse or Customer)"
                 >
                   <Ticket className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span>🎫 Customer RMA Invites</span>
+                  <span>🎫 RMA Invites</span>
                 </button>
 
                 <button
@@ -5895,7 +5936,21 @@ export default function App() {
 
       {/* 1-Click Google Identity Lock Gatekeeper Screen */}
       <GatekeeperPinModal
-        isOpen={!isAdminView && !currentUser && !gateSession}
+        isOpen={(() => {
+          if (typeof window === 'undefined') return false;
+          const urlParams = new URLSearchParams(window.location.search);
+          let urlToken = urlParams.get('token');
+          if (!urlToken && window.location.hash.includes('token=')) {
+            const m = window.location.hash.match(/token=([^&]+)/);
+            if (m && m[1]) urlToken = decodeURIComponent(m[1]);
+          }
+          // If visiting an invite link with a token, the Gatekeeper MUST be locked until this specific token is authenticated!
+          if (urlToken) {
+            return !gateSession || gateSession.token !== urlToken;
+          }
+          // Default public portal lock: locked unless admin is logged in or station is unlocked
+          return !isAdminView && !currentUser && !gateSession;
+        })()}
         currentSlug={intakeSlug}
         onUnlock={(session) => {
           setGateSession(session);

@@ -270,85 +270,22 @@ export default function GatekeeperPinModal({
     }
   };
 
-  // 7. QA Sandbox Test Mode Bypass
-  const handleTestModeBypass = () => {
-    if (!validationResult?.invite) return;
-    const inv = validationResult.invite;
-    const resolvedEntity = inv.entity_name || inv.store_branch || '';
-    const resolvedStream = inv.stream_type || 'customer_inbound';
-
-    const bypassSession = {
-      type: 'external_customer',
-      token: inv.token,
-      stream_type: resolvedStream,
-      authorized_email: inv.authorized_email.toLowerCase().trim(),
-      entity_name: resolvedEntity,
-      store_branch: resolvedEntity,
-      user_email: inv.authorized_email.toLowerCase().trim(),
-      user_name: resolvedEntity || inv.authorized_email,
-      expires_at: inv.expires_at,
-      profileName: resolvedEntity || inv.authorized_email,
-      isTestBypass: true,
-      unlockedAt: new Date().toISOString()
-    };
-    try {
-      sessionStorage.removeItem('rma_pending_oauth_token');
-      localStorage.setItem('rma_portal_gate_session', JSON.stringify(bypassSession));
-      localStorage.setItem('rma_reporter_contact', inv.authorized_email);
-      localStorage.setItem('rma_portal_verified_email', inv.authorized_email);
-    } catch {}
-    if (onUnlock) onUnlock(bypassSession);
-  };
-
-  // 8. One-Tap Verification Fallback for Authorized Email
-  const handleDirectVerifyAuthorizedEmail = () => {
-    if (!validationResult?.invite) return;
-    const inv = validationResult.invite;
-    const resolvedEntity = inv.entity_name || inv.store_branch || '';
-    const resolvedStream = inv.stream_type || 'customer_inbound';
-    const authEmail = inv.authorized_email.toLowerCase().trim();
-
-    const verifiedSession = {
-      type: 'external_customer',
-      token: inv.token,
-      stream_type: resolvedStream,
-      authorized_email: authEmail,
-      entity_name: resolvedEntity,
-      store_branch: resolvedEntity,
-      user_email: authEmail,
-      user_name: resolvedEntity || authEmail,
-      expires_at: inv.expires_at,
-      profileName: resolvedEntity || authEmail,
-      isDirectVerified: true,
-      unlockedAt: new Date().toISOString()
-    };
-
-    try {
-      sessionStorage.removeItem('rma_pending_oauth_token');
-      localStorage.setItem('rma_portal_gate_session', JSON.stringify(verifiedSession));
-      localStorage.setItem('rma_reporter_contact', authEmail);
-      localStorage.setItem('rma_portal_verified_email', authEmail);
-    } catch {}
-
-    if (onUnlock) {
-      onUnlock(verifiedSession);
-    }
-  };
-
-  // 9. Send Magic Link Email (Passwordless OTP fallback supported natively by Supabase)
+  // 7. Send Magic Link Email (Passwordless OTP fallback strictly delivered to the authorized email)
   const handleSendMagicLink = async () => {
     if (!validationResult?.invite?.authorized_email) return;
     setIsSendingMagicLink(true);
+    setOauthError(null);
     try {
       const currentUrl = window.location.href;
+      const targetEmail = validationResult.invite.authorized_email.toLowerCase().trim();
       const { error } = await supabase.auth.signInWithOtp({
-        email: validationResult.invite.authorized_email,
+        email: targetEmail,
         options: {
           emailRedirectTo: currentUrl
         }
       });
       if (error) {
-        setOauthError(error.message || 'Failed to send verification link.');
+        setOauthError(error.message || 'Failed to dispatch verification link.');
       } else {
         setMagicLinkSent(true);
       }
@@ -420,17 +357,6 @@ export default function GatekeeperPinModal({
                 <RefreshCw className="w-4 h-4" />
                 <span>Switch Google Account</span>
               </button>
-
-              {isTestModeActive && (
-                <button
-                  type="button"
-                  onClick={handleTestModeBypass}
-                  className="w-full py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <UserCheck className="w-3.5 h-3.5 text-amber-600" />
-                  <span>⚡ Test Mode Sandbox Bypass (QA Only)</span>
-                </button>
-              )}
 
               <button
                 type="button"
@@ -626,40 +552,22 @@ export default function GatekeeperPinModal({
                   </div>
                 )}
 
-                {/* Instant Verification Fallbacks so users are never blocked */}
-                <div className="pt-2 space-y-2">
-                  <button
-                    type="button"
-                    onClick={handleDirectVerifyAuthorizedEmail}
-                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-black text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
-                  >
-                    <ShieldCheck className="w-4 h-4" />
-                    <span className="truncate">Unlock as {validationResult.invite.authorized_email}</span>
-                  </button>
-
+                {/* Secure Magic Link Fallback strictly dispatched to authorized inbox */}
+                <div className="pt-2">
                   <button
                     type="button"
                     onClick={handleSendMagicLink}
                     disabled={isSendingMagicLink || magicLinkSent}
-                    className="w-full py-2.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
+                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60 shadow-sm"
                   >
-                    <Mail className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>{magicLinkSent ? '✓ Verification Link Sent to Email' : isSendingMagicLink ? 'Sending Magic Link...' : 'Email One-Time Access Link'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleTestModeBypass}
-                    className="w-full py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <UserCheck className="w-3.5 h-3.5 text-amber-600" />
-                    <span>⚡ QA Sandbox Quick Unlock</span>
+                    <Mail className="w-4 h-4" />
+                    <span>{magicLinkSent ? '✓ Secure Access Link Dispatched to Your Email' : isSendingMagicLink ? 'Dispatching Access Link...' : `Email Secure Access Link to ${validationResult.invite.authorized_email}`}</span>
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Prominent Google OAuth Button + 1-Tap Unlock */}
+            {/* Prominent Google OAuth Button */}
             <div className="pt-1 space-y-2">
               <button
                 type="button"
@@ -688,28 +596,17 @@ export default function GatekeeperPinModal({
 
               <button
                 type="button"
-                onClick={handleDirectVerifyAuthorizedEmail}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer border border-slate-200 dark:border-slate-700 shadow-2xs"
-                title={`Instantly unlock return portal for ${validationResult.invite.authorized_email}`}
+                onClick={handleSendMagicLink}
+                disabled={isSendingMagicLink || magicLinkSent}
+                className="w-full py-2.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 shadow-2xs"
               >
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="truncate">1-Tap Unlock as {validationResult.invite.authorized_email}</span>
+                <Mail className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span>{magicLinkSent ? '✓ Secure Access Link Dispatched' : isSendingMagicLink ? 'Dispatching...' : 'Email One-Time Access Link to ' + validationResult.invite.authorized_email}</span>
               </button>
             </div>
 
             <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
               {/* QA Sandbox Test Mode Quick Bypass */}
-              {isTestModeActive && (
-                <button
-                  type="button"
-                  onClick={handleTestModeBypass}
-                  className="w-full py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <UserCheck className="w-3.5 h-3.5 text-amber-600" />
-                  <span>⚡ Test Mode Sandbox Bypass (QA Only)</span>
-                </button>
-              )}
-
               <button
                 type="button"
                 onClick={onOpenAdminLogin}

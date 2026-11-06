@@ -80,15 +80,25 @@ Each test scenario defines:
     6. Store/Branch is auto-populated if included in the invite.
     7. Clicking `[ Lock Device ]` clears the gate session, calls `supabase.auth.signOut({ scope: 'local' })`, and re-locks the station.
 
-- [ ] **TC-OAUTH-04 (Pre-Flight Provider Probe & In-Modal Fallback Access)**
+- [ ] **TC-OAUTH-04 (Pre-Flight Provider Probe & Secure Email OTP Fallback)**
   * **Location**: Gatekeeper Modal (`/intake?token=inv_...`)
   * **Action**: Click `[ 🔵 Continue with Google ]` when Google OAuth provider is not yet enabled in the Supabase Dashboard.
   * **Expected Behavior**:
     1. Pre-flight API check (`/api/auth-provider-check?provider=google`) detects provider is not active.
     2. Browser is **PREVENTED** from navigating to `https://<ref>.supabase.co/auth/v1/authorize` (preventing raw JSON 400 screen).
     3. Displays in-modal alert: *"Google Authentication Configuration Required"* with step-by-step Supabase dashboard setup instructions.
-    4. Provides instant fallback: `[ 🚀 Unlock as <authorized_email> ]` and `[ ✉️ Email One-Time Access Link ]`.
-    5. Authorized recipient can immediately access the portal with verified identity without being blocked.
+    4. Secure passwordless option: `[ ✉️ Email One-Time Access Link to <authorized_email> ]` strictly dispatches a magic login link to the authorized email address.
+    5. Zero client-side bypass buttons exist. Unauthorized accounts (`finance2@a2z2go.com`) cannot unlock an invite issued to `daniloalvaro031717@gmail.com`.
+
+- [ ] **TC-INV-DELETE (Expired-Only Invite Deletion Guard)**
+  * **Location**: Admin Dashboard -> **"🎫 RMA Invites"** Modal -> Authorized Invites Table
+  * **Action**:
+    1. Inspect an **Active** invite (`status: active`, remaining duration > 0).
+    2. Inspect an **Expired** or **Revoked** invite (`status: expired` or `status: revoked`).
+  * **Expected Behavior**:
+    1. Active invites display ONLY Copy Link, Send Email, and Revoke Access buttons. The Delete trash can icon is **HIDDEN**.
+    2. Expired or Revoked invites display the red Delete trash can icon `[ 🗑️ Delete Expired Invite ]`.
+    3. Clicking delete prompts: *"Permanently delete expired invite record for <email>?"* and removes the record from `rma_invites` and `rma_settings`. Active invites cannot be deleted.
 
 - [ ] **TC-GATE-05A (Customer Return vs Supplier RTV Invite Creation)**
   * **Location**: Admin Dashboard -> **"🎫 Customer & Supplier RMA Invites"** Modal

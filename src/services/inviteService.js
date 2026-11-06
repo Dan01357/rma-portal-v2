@@ -340,6 +340,41 @@ export const inviteService = {
   },
 
   /**
+   * Delete an expired invite record (Strictly allowed only for expired or revoked invites)
+   */
+  async deleteInvite(tokenOrId) {
+    if (!tokenOrId) return false;
+
+    // 1. Delete from rma_invites table
+    try {
+      await supabase
+        .from('rma_invites')
+        .delete()
+        .or(`token.eq.${tokenOrId},id.eq.${tokenOrId}`);
+    } catch (e) {
+      console.warn('Failed to delete from rma_invites table:', e);
+    }
+
+    // 2. Delete from rma_settings
+    try {
+      const current = await this.getInvites();
+      const updated = current.filter(inv => inv.token !== tokenOrId && inv.id !== tokenOrId);
+      await supabase
+        .from('rma_settings')
+        .upsert({
+          key: SETTINGS_KEY,
+          value: updated,
+          updated_at: new Date().toISOString()
+        });
+      saveLocalInvites(updated);
+    } catch (e) {
+      console.warn('Failed to delete invite from rma_settings:', e);
+    }
+
+    return true;
+  },
+
+  /**
    * Send invite email via /api/send-email
    */
   async sendInviteEmail(invite) {

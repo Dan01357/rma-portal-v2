@@ -15,7 +15,8 @@ import {
   Ticket,
   Truck,
   Store,
-  Filter
+  Filter,
+  Ban
 } from 'lucide-react';
 import { inviteService, formatRemainingCountdown } from '../services/inviteService';
 
@@ -168,6 +169,32 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     }
   };
 
+  const handleDelete = async (inv) => {
+    const countdown = formatRemainingCountdown(inv.expires_at, inv.status);
+    const isExpired = countdown.isExpired;
+    const isRevoked = inv.status === 'revoked';
+
+    if (!isExpired && !isRevoked) {
+      alert('Active invites cannot be deleted until they are expired or revoked.');
+      return;
+    }
+
+    if (!window.confirm(`Permanently delete expired invite record for ${inv.authorized_email}?`)) {
+      return;
+    }
+
+    try {
+      await inviteService.deleteInvite(inv.token || inv.id);
+      showToast('Expired invite record deleted.');
+      loadInvites();
+      if (generatedInvite?.token === inv.token) {
+        setGeneratedInvite(null);
+      }
+    } catch (err) {
+      alert(`Failed to delete invite: ${err.message}`);
+    }
+  };
+
   const filteredInvites = useMemo(() => {
     if (streamFilter === 'all') return invites;
     return invites.filter(i => (i.stream_type || 'customer_inbound') === streamFilter);
@@ -196,14 +223,14 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                  Customer & Supplier RMA Invites
+                  RMA Invites
                 </h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300">
                   Google Identity Lock
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Generate private return links tied strictly to authorized Google accounts.
+                Generate private return links for warehouse staff or customer branches tied strictly to authorized Google accounts.
               </p>
             </div>
           </div>
@@ -657,7 +684,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                           </td>
                           <td className="p-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {!isRevoked && !isExpired && (
+                              {!isRevoked && !isExpired ? (
                                 <>
                                   <button
                                     type="button"
@@ -679,12 +706,21 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                                   <button
                                     type="button"
                                     onClick={() => handleRevoke(inv.token || inv.id)}
-                                    className="p-1.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
-                                    title="Revoke Invite Link"
+                                    className="p-1.5 text-amber-600 hover:text-amber-800 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/50 rounded-lg transition-colors cursor-pointer"
+                                    title="Revoke Active Invite Access"
                                   >
-                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <Ban className="w-3.5 h-3.5" />
                                   </button>
                                 </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelete(inv)}
+                                  className="p-1.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
+                                  title="Delete Expired Invite Record"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
                               )}
                             </div>
                           </td>
