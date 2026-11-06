@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, 
   Mail, 
@@ -15,15 +15,31 @@ import {
   Plus,
   Ticket
 } from 'lucide-react';
-import { inviteService } from '../services/inviteService';
+import { inviteService, formatRemainingCountdown } from '../services/inviteService';
 import { formatMilitaryDateTime } from '../utils/exportCsv';
+
+const PRESET_EXPIRIES = [
+  { label: '15 Mins', num: 15, unit: 'minutes' },
+  { label: '30 Mins', num: 30, unit: 'minutes' },
+  { label: '1 Hour', num: 1, unit: 'hours' },
+  { label: '2 Hours', num: 2, unit: 'hours' },
+  { label: '6 Hours', num: 6, unit: 'hours' },
+  { label: '12 Hours', num: 12, unit: 'hours' },
+  { label: '24 Hours (1 Day)', num: 24, unit: 'hours' },
+  { label: '2 Days', num: 2, unit: 'days' },
+  { label: '7 Days (1 Week)', num: 7, unit: 'days' }
+];
 
 export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }) {
   const [invites, setInvites] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [authorizedEmail, setAuthorizedEmail] = useState('');
   const [storeBranch, setStoreBranch] = useState('');
-  const [durationHours, setDurationHours] = useState('24');
+  
+  // Customizable expiration limit (input number + unit: minutes, hours, days)
+  const [expiryNumber, setExpiryNumber] = useState(24);
+  const [expiryUnit, setExpiryUnit] = useState('hours');
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedInvite, setGeneratedInvite] = useState(null);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
@@ -56,6 +72,18 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  // Live computed expiration preview
+  const computedExpiryPreview = useMemo(() => {
+    const num = Math.max(1, parseInt(expiryNumber, 10) || 1);
+    const unit = String(expiryUnit || 'hours').toLowerCase();
+    let ms = num * 3600 * 1000;
+    if (unit.startsWith('min')) ms = num * 60 * 1000;
+    else if (unit.startsWith('day')) ms = num * 24 * 3600 * 1000;
+
+    const expDate = new Date(Date.now() + ms);
+    return `Expires: ${expDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}, ${expDate.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
+  }, [expiryNumber, expiryUnit]);
+
   const handleGenerate = async (e) => {
     e.preventDefault();
     if (!authorizedEmail.trim()) {
@@ -70,7 +98,8 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       const newInv = await inviteService.createInvite({
         authorizedEmail: authorizedEmail.trim(),
         storeBranch: storeBranch.trim(),
-        durationHours: Number(durationHours),
+        durationValue: expiryNumber,
+        durationUnit: expiryUnit,
         createdBy
       });
       setGeneratedInvite(newInv);
@@ -122,19 +151,6 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     }
   };
 
-  const formatCountdown = (expiresAt, status) => {
-    if (status === 'revoked') return { text: 'Revoked', isExpired: true, isRevoked: true };
-    const diff = new Date(expiresAt).getTime() - Date.now();
-    if (diff <= 0) return { text: 'Expired', isExpired: true, isRevoked: false };
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    if (hours > 24) {
-      const days = Math.floor(hours / 24);
-      return { text: `${days}d ${hours % 24}h remaining`, isExpired: false };
-    }
-    return { text: `${hours}h ${mins}m remaining`, isExpired: false };
-  };
-
   if (!isOpen) return null;
 
   return (
@@ -157,7 +173,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Generate private 1-click return links tied strictly to authorized customer Google accounts.
+                Generate private return links tied strictly to authorized customer Google accounts.
               </p>
             </div>
           </div>
@@ -214,7 +230,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                     required
                     value={authorizedEmail}
                     onChange={(e) => setAuthorizedEmail(e.target.value)}
-                    placeholder="e.g. store.taguig@gmail.com"
+                    placeholder="e.g. daniloalvaro031717@gmail.com"
                     className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
                   />
                 </div>
@@ -237,26 +253,70 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 </div>
               </div>
 
-              {/* Expiry Duration Dropdown */}
+              {/* Customizable Expiry Duration (Input Number + Unit Selector) */}
               <div className="sm:col-span-1 space-y-1">
-                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                  Link Expiry Duration *
-                </label>
-                <div className="relative">
-                  <Clock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
-                  <select
-                    value={durationHours}
-                    onChange={(e) => setDurationHours(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer"
-                  >
-                    <option value="2">2 Hours (Quick Session)</option>
-                    <option value="12">12 Hours (Same-Day Delivery)</option>
-                    <option value="24">24 Hours (1 Day Default)</option>
-                    <option value="48">2 Days (48 Hours)</option>
-                    <option value="168">7 Days (1 Week)</option>
-                  </select>
+                <div className="flex items-center justify-between">
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                    Expiry Duration *
+                  </label>
+                  <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold truncate">
+                    {computedExpiryPreview}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="relative w-20 shrink-0">
+                    <input
+                      type="number"
+                      min="1"
+                      max="365"
+                      required
+                      value={expiryNumber}
+                      onChange={(e) => setExpiryNumber(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      className="w-full px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-black font-mono text-center text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs"
+                      placeholder="24"
+                    />
+                  </div>
+                  <div className="relative flex-1">
+                    <select
+                      value={expiryUnit}
+                      onChange={(e) => setExpiryUnit(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs"
+                    >
+                      <option value="minutes">Minutes</option>
+                      <option value="hours">Hours</option>
+                      <option value="days">Days</option>
+                    </select>
+                  </div>
                 </div>
               </div>
+            </div>
+
+            {/* Quick Expiry Preset Chips */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5 border-t border-slate-200/60 dark:border-slate-700/60">
+              <span className="text-[10px] text-slate-400 font-bold mr-1 flex items-center gap-1">
+                <Clock className="w-3 h-3 text-slate-400" />
+                Quick Presets:
+              </span>
+              {PRESET_EXPIRIES.map((preset) => {
+                const isSelected = expiryNumber === preset.num && expiryUnit === preset.unit;
+                return (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      setExpiryNumber(preset.num);
+                      setExpiryUnit(preset.unit);
+                    }}
+                    className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-blue-400'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
             </div>
 
             <div className="flex justify-end pt-1">
@@ -291,7 +351,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                   </h3>
                 </div>
                 <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/60 px-2.5 py-0.5 rounded-full">
-                  Expires: {new Date(generatedInvite.expires_at).toLocaleString()}
+                  Validity: {generatedInvite.duration_display || 'Custom'} • Expires: {new Date(generatedInvite.expires_at).toLocaleString()}
                 </span>
               </div>
 
@@ -363,19 +423,19 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
             ) : (
               <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 border-b border-slate-200 dark:border-slate-800 font-bold uppercase text-[10px]">
+                  <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
                     <tr>
                       <th className="p-3">Customer Email</th>
                       <th className="p-3">Store / Branch</th>
-                      <th className="p-3">Created</th>
-                      <th className="p-3">Expires / Remaining</th>
+                      <th className="p-3">Duration</th>
+                      <th className="p-3">Remaining</th>
                       <th className="p-3">Status</th>
                       <th className="p-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {invites.map((inv) => {
-                      const countdown = formatCountdown(inv.expires_at, inv.status);
+                      const countdown = formatRemainingCountdown(inv.expires_at, inv.status);
                       const isRevoked = inv.status === 'revoked';
                       const isExpired = countdown.isExpired;
 
@@ -387,8 +447,8 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                           <td className="p-3 text-slate-700 dark:text-slate-300 font-semibold">
                             {inv.store_branch || <span className="text-slate-400 italic">Unassigned</span>}
                           </td>
-                          <td className="p-3 text-slate-500 font-mono text-[11px]">
-                            {formatMilitaryDateTime(inv.created_at)}
+                          <td className="p-3 text-slate-600 dark:text-slate-400 font-mono text-[11px]">
+                            {inv.duration_display || '24 hour(s)'}
                           </td>
                           <td className="p-3 font-mono text-[11px]">
                             <span className={isExpired ? 'text-slate-400' : 'text-blue-600 dark:text-blue-400 font-bold'}>
@@ -425,6 +485,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                                   <button
                                     type="button"
                                     onClick={() => handleSendEmail(inv)}
+                                    disabled={isSendingEmail}
                                     className="p-1.5 text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 rounded-lg transition-colors cursor-pointer"
                                     title="Send Link via Email"
                                   >
@@ -432,7 +493,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => handleRevoke(inv.token)}
+                                    onClick={() => handleRevoke(inv.token || inv.id)}
                                     className="p-1.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
                                     title="Revoke Invite Link"
                                   >
@@ -450,21 +511,24 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
               </div>
             )}
           </div>
+
         </div>
 
-        {/* Footer */}
-        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between text-xs text-slate-500">
-          <span>Pingcon RMA Operations • Customer Return Governance</span>
+        {/* Modal Footer */}
+        <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/60 dark:bg-slate-900">
+          <span className="text-[11px] text-slate-400">
+            Pingcon RMA Operations • Customer Return Governance
+          </span>
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold cursor-pointer transition-colors"
+            className="px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
           >
             Close
           </button>
         </div>
+
       </div>
     </div>
   );
 }
-

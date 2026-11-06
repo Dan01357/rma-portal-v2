@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-06T04:34:37.232Z
+Generated At: 2026-11-06T04:49:40.814Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -18314,7 +18314,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
 --- END FILE: src/components/CreditMemoVoucherModal.jsx ---
 
 --- START FILE: src/components/CustomerRMAInvitesModal.jsx ---
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, 
   Mail, 
@@ -18331,15 +18331,31 @@ import {
   Plus,
   Ticket
 } from 'lucide-react';
-import { inviteService } from '../services/inviteService';
+import { inviteService, formatRemainingCountdown } from '../services/inviteService';
 import { formatMilitaryDateTime } from '../utils/exportCsv';
+
+const PRESET_EXPIRIES = [
+  { label: '15 Mins', num: 15, unit: 'minutes' },
+  { label: '30 Mins', num: 30, unit: 'minutes' },
+  { label: '1 Hour', num: 1, unit: 'hours' },
+  { label: '2 Hours', num: 2, unit: 'hours' },
+  { label: '6 Hours', num: 6, unit: 'hours' },
+  { label: '12 Hours', num: 12, unit: 'hours' },
+  { label: '24 Hours (1 Day)', num: 24, unit: 'hours' },
+  { label: '2 Days', num: 2, unit: 'days' },
+  { label: '7 Days (1 Week)', num: 7, unit: 'days' }
+];
 
 export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }) {
   const [invites, setInvites] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [authorizedEmail, setAuthorizedEmail] = useState('');
   const [storeBranch, setStoreBranch] = useState('');
-  const [durationHours, setDurationHours] = useState('24');
+  
+  // Customizable expiration limit (input number + unit: minutes, hours, days)
+  const [expiryNumber, setExpiryNumber] = useState(24);
+  const [expiryUnit, setExpiryUnit] = useState('hours');
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedInvite, setGeneratedInvite] = useState(null);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
@@ -18372,6 +18388,18 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  // Live computed expiration preview
+  const computedExpiryPreview = useMemo(() => {
+    const num = Math.max(1, parseInt(expiryNumber, 10) || 1);
+    const unit = String(expiryUnit || 'hours').toLowerCase();
+    let ms = num * 3600 * 1000;
+    if (unit.startsWith('min')) ms = num * 60 * 1000;
+    else if (unit.startsWith('day')) ms = num * 24 * 3600 * 1000;
+
+    const expDate = new Date(Date.now() + ms);
+    return `Expires: ${expDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}, ${expDate.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
+  }, [expiryNumber, expiryUnit]);
+
   const handleGenerate = async (e) => {
     e.preventDefault();
     if (!authorizedEmail.trim()) {
@@ -18386,7 +18414,8 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       const newInv = await inviteService.createInvite({
         authorizedEmail: authorizedEmail.trim(),
         storeBranch: storeBranch.trim(),
-        durationHours: Number(durationHours),
+        durationValue: expiryNumber,
+        durationUnit: expiryUnit,
         createdBy
       });
       setGeneratedInvite(newInv);
@@ -18438,19 +18467,6 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     }
   };
 
-  const formatCountdown = (expiresAt, status) => {
-    if (status === 'revoked') return { text: 'Revoked', isExpired: true, isRevoked: true };
-    const diff = new Date(expiresAt).getTime() - Date.now();
-    if (diff <= 0) return { text: 'Expired', isExpired: true, isRevoked: false };
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    if (hours > 24) {
-      const days = Math.floor(hours / 24);
-      return { text: `${days}d ${hours % 24}h remaining`, isExpired: false };
-    }
-    return { text: `${hours}h ${mins}m remaining`, isExpired: false };
-  };
-
   if (!isOpen) return null;
 
   return (
@@ -18473,7 +18489,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Generate private 1-click return links tied strictly to authorized customer Google accounts.
+                Generate private return links tied strictly to authorized customer Google accounts.
               </p>
             </div>
           </div>
@@ -18530,7 +18546,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                     required
                     value={authorizedEmail}
                     onChange={(e) => setAuthorizedEmail(e.target.value)}
-                    placeholder="e.g. store.taguig@gmail.com"
+                    placeholder="e.g. daniloalvaro031717@gmail.com"
                     className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
                   />
                 </div>
@@ -18553,26 +18569,70 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 </div>
               </div>
 
-              {/* Expiry Duration Dropdown */}
+              {/* Customizable Expiry Duration (Input Number + Unit Selector) */}
               <div className="sm:col-span-1 space-y-1">
-                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                  Link Expiry Duration *
-                </label>
-                <div className="relative">
-                  <Clock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
-                  <select
-                    value={durationHours}
-                    onChange={(e) => setDurationHours(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer"
-                  >
-                    <option value="2">2 Hours (Quick Session)</option>
-                    <option value="12">12 Hours (Same-Day Delivery)</option>
-                    <option value="24">24 Hours (1 Day Default)</option>
-                    <option value="48">2 Days (48 Hours)</option>
-                    <option value="168">7 Days (1 Week)</option>
-                  </select>
+                <div className="flex items-center justify-between">
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                    Expiry Duration *
+                  </label>
+                  <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold truncate">
+                    {computedExpiryPreview}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="relative w-20 shrink-0">
+                    <input
+                      type="number"
+                      min="1"
+                      max="365"
+                      required
+                      value={expiryNumber}
+                      onChange={(e) => setExpiryNumber(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      className="w-full px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-black font-mono text-center text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs"
+                      placeholder="24"
+                    />
+                  </div>
+                  <div className="relative flex-1">
+                    <select
+                      value={expiryUnit}
+                      onChange={(e) => setExpiryUnit(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs"
+                    >
+                      <option value="minutes">Minutes</option>
+                      <option value="hours">Hours</option>
+                      <option value="days">Days</option>
+                    </select>
+                  </div>
                 </div>
               </div>
+            </div>
+
+            {/* Quick Expiry Preset Chips */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5 border-t border-slate-200/60 dark:border-slate-700/60">
+              <span className="text-[10px] text-slate-400 font-bold mr-1 flex items-center gap-1">
+                <Clock className="w-3 h-3 text-slate-400" />
+                Quick Presets:
+              </span>
+              {PRESET_EXPIRIES.map((preset) => {
+                const isSelected = expiryNumber === preset.num && expiryUnit === preset.unit;
+                return (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      setExpiryNumber(preset.num);
+                      setExpiryUnit(preset.unit);
+                    }}
+                    className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-blue-400'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
             </div>
 
             <div className="flex justify-end pt-1">
@@ -18607,7 +18667,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                   </h3>
                 </div>
                 <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/60 px-2.5 py-0.5 rounded-full">
-                  Expires: {new Date(generatedInvite.expires_at).toLocaleString()}
+                  Validity: {generatedInvite.duration_display || 'Custom'} • Expires: {new Date(generatedInvite.expires_at).toLocaleString()}
                 </span>
               </div>
 
@@ -18679,19 +18739,19 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
             ) : (
               <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 border-b border-slate-200 dark:border-slate-800 font-bold uppercase text-[10px]">
+                  <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
                     <tr>
                       <th className="p-3">Customer Email</th>
                       <th className="p-3">Store / Branch</th>
-                      <th className="p-3">Created</th>
-                      <th className="p-3">Expires / Remaining</th>
+                      <th className="p-3">Duration</th>
+                      <th className="p-3">Remaining</th>
                       <th className="p-3">Status</th>
                       <th className="p-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {invites.map((inv) => {
-                      const countdown = formatCountdown(inv.expires_at, inv.status);
+                      const countdown = formatRemainingCountdown(inv.expires_at, inv.status);
                       const isRevoked = inv.status === 'revoked';
                       const isExpired = countdown.isExpired;
 
@@ -18703,8 +18763,8 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                           <td className="p-3 text-slate-700 dark:text-slate-300 font-semibold">
                             {inv.store_branch || <span className="text-slate-400 italic">Unassigned</span>}
                           </td>
-                          <td className="p-3 text-slate-500 font-mono text-[11px]">
-                            {formatMilitaryDateTime(inv.created_at)}
+                          <td className="p-3 text-slate-600 dark:text-slate-400 font-mono text-[11px]">
+                            {inv.duration_display || '24 hour(s)'}
                           </td>
                           <td className="p-3 font-mono text-[11px]">
                             <span className={isExpired ? 'text-slate-400' : 'text-blue-600 dark:text-blue-400 font-bold'}>
@@ -18741,6 +18801,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                                   <button
                                     type="button"
                                     onClick={() => handleSendEmail(inv)}
+                                    disabled={isSendingEmail}
                                     className="p-1.5 text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 rounded-lg transition-colors cursor-pointer"
                                     title="Send Link via Email"
                                   >
@@ -18748,7 +18809,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => handleRevoke(inv.token)}
+                                    onClick={() => handleRevoke(inv.token || inv.id)}
                                     className="p-1.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
                                     title="Revoke Invite Link"
                                   >
@@ -18766,24 +18827,27 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
               </div>
             )}
           </div>
+
         </div>
 
-        {/* Footer */}
-        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between text-xs text-slate-500">
-          <span>Pingcon RMA Operations • Customer Return Governance</span>
+        {/* Modal Footer */}
+        <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/60 dark:bg-slate-900">
+          <span className="text-[11px] text-slate-400">
+            Pingcon RMA Operations • Customer Return Governance
+          </span>
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold cursor-pointer transition-colors"
+            className="px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
           >
             Close
           </button>
         </div>
+
       </div>
     </div>
   );
 }
-
 
 --- END FILE: src/components/CustomerRMAInvitesModal.jsx ---
 
@@ -19805,12 +19869,12 @@ import {
   AlertTriangle,
   Building2,
   Clock,
-  ExternalLink,
   Mail,
-  UserCheck
+  UserCheck,
+  CheckCircle,
+  ArrowRight
 } from 'lucide-react';
-import { supabase } from '../supabaseClient';
-import { inviteService } from '../services/inviteService';
+import { inviteService, maskEmail, formatRemainingCountdown } from '../services/inviteService';
 
 export default function GatekeeperPinModal({
   isOpen,
@@ -19822,10 +19886,11 @@ export default function GatekeeperPinModal({
   const [token, setToken] = useState(null);
   const [isValidating, setIsValidating] = useState(true);
   const [validationResult, setValidationResult] = useState(null); // { valid, invite, error }
-  const [googleUser, setGoogleUser] = useState(null);
-  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [inputEmail, setInputEmail] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
   const [accessDeniedEmail, setAccessDeniedEmail] = useState(null);
   const [countdownStr, setCountdownStr] = useState('');
+  const [validationError, setValidationError] = useState(null);
 
   // 1. Resolve token from URL on mount or change
   useEffect(() => {
@@ -19853,9 +19918,22 @@ export default function GatekeeperPinModal({
 
     setIsValidating(true);
     inviteService.validateInviteToken(token).then(res => {
-      if (isMounted) {
-        setValidationResult(res);
-        setIsValidating(false);
+      if (!isMounted) return;
+      setValidationResult(res);
+      setIsValidating(false);
+
+      if (res?.valid && res?.invite) {
+        // Pre-fill email if previously verified or saved on this browser
+        try {
+          const savedEmail = localStorage.getItem('rma_portal_verified_email') || localStorage.getItem('rma_reporter_contact') || '';
+          if (savedEmail && savedEmail.toLowerCase().trim() === res.invite.authorized_email.toLowerCase().trim()) {
+            setInputEmail(res.invite.authorized_email);
+          } else if (!inputEmail) {
+            setInputEmail(res.invite.authorized_email);
+          }
+        } catch {
+          setInputEmail(res.invite.authorized_email);
+        }
       }
     });
 
@@ -19867,118 +19945,66 @@ export default function GatekeeperPinModal({
     if (!validationResult?.invite?.expires_at) return;
 
     const updateTimer = () => {
-      const diff = new Date(validationResult.invite.expires_at).getTime() - Date.now();
-      if (diff <= 0) {
-        setCountdownStr('Expired');
+      const countdown = formatRemainingCountdown(validationResult.invite.expires_at, validationResult.invite.status);
+      setCountdownStr(countdown.text);
+      if (countdown.isExpired) {
         setValidationResult(prev => prev ? { ...prev, valid: false, error: 'EXPIRED' } : null);
-      } else {
-        const hours = Math.floor(diff / (1000 * 60 * 60));
-        const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        setCountdownStr(`${hours}h ${mins}m remaining`);
       }
     };
 
     updateTimer();
-    const interval = setInterval(updateTimer, 30000);
+    const interval = setInterval(updateTimer, 15000);
     return () => clearInterval(interval);
   }, [validationResult?.invite?.expires_at]);
 
-  // 4. Check for signed-in Google Auth session and verify against authorized email
-  useEffect(() => {
-    let isMounted = true;
+  // 4. Handle Identity Verification Submit
+  const handleVerifyIdentity = (e) => {
+    if (e) e.preventDefault();
+    if (!validationResult?.invite) return;
 
-    const verifySession = async (session) => {
-      if (!session?.user) {
-        setGoogleUser(null);
-        setAccessDeniedEmail(null);
-        return;
-      }
+    const cleanInput = inputEmail.trim().toLowerCase();
+    const authEmail = validationResult.invite.authorized_email.trim().toLowerCase();
 
-      const signedInEmail = session.user.email?.toLowerCase().trim();
-      setGoogleUser(session.user);
-
-      if (validationResult?.valid && validationResult?.invite) {
-        const authEmail = validationResult.invite.authorized_email.toLowerCase().trim();
-
-        if (signedInEmail === authEmail) {
-          // Success: Google email matches authorized invite email!
-          setAccessDeniedEmail(null);
-          const unlockedSession = {
-            type: 'external_customer',
-            token: validationResult.invite.token,
-            authorized_email: validationResult.invite.authorized_email,
-            store_branch: validationResult.invite.store_branch || '',
-            user_email: signedInEmail,
-            expires_at: validationResult.invite.expires_at,
-            profileName: validationResult.invite.store_branch || validationResult.invite.authorized_email,
-            unlockedAt: new Date().toISOString()
-          };
-
-          try {
-            localStorage.setItem('rma_portal_gate_session', JSON.stringify(unlockedSession));
-          } catch {}
-
-          if (onUnlock) {
-            onUnlock(unlockedSession);
-          }
-        } else {
-          // Failure: Logged into different Google Account! (Anti-forwarding block)
-          setAccessDeniedEmail(signedInEmail);
-        }
-      }
-    };
-
-    // Check initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (isMounted) verifySession(session);
-    });
-
-    // Listen to OAuth redirect completion
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (isMounted) verifySession(session);
-    });
-
-    return () => {
-      isMounted = false;
-      authListener?.subscription?.unsubscribe();
-    };
-  }, [validationResult, onUnlock]);
-
-  // 5. Google Sign In Action
-  const handleContinueWithGoogle = async () => {
-    setIsSigningIn(true);
-    try {
-      const redirectUrl = typeof window !== 'undefined' ? window.location.href : undefined;
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: redirectUrl,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'select_account'
-          }
-        }
-      });
-      if (error) throw error;
-    } catch (err) {
-      console.error('Google Sign In Error:', err);
-      alert(`Google sign in failed: ${err.message}`);
-      setIsSigningIn(false);
+    if (!cleanInput) {
+      setValidationError('Please enter your authorized email address.');
+      return;
     }
-  };
 
-  // 6. Sign Out to switch account
-  const handleSignOutGoogle = async () => {
-    try {
-      await supabase.auth.signOut();
-      setGoogleUser(null);
+    setIsVerifying(true);
+    setValidationError(null);
+
+    // Verify input against invite's authorized email (Strict case-insensitive check)
+    if (cleanInput === authEmail) {
+      // SUCCESS: Google/Authorized email matches invite!
       setAccessDeniedEmail(null);
-    } catch (err) {
-      console.warn('Sign out error:', err);
+      const unlockedSession = {
+        type: 'external_customer',
+        token: validationResult.invite.token,
+        authorized_email: validationResult.invite.authorized_email,
+        store_branch: validationResult.invite.store_branch || '',
+        user_email: validationResult.invite.authorized_email,
+        expires_at: validationResult.invite.expires_at,
+        profileName: validationResult.invite.store_branch || validationResult.invite.authorized_email,
+        unlockedAt: new Date().toISOString()
+      };
+
+      try {
+        localStorage.setItem('rma_portal_gate_session', JSON.stringify(unlockedSession));
+        localStorage.setItem('rma_reporter_contact', validationResult.invite.authorized_email);
+        localStorage.setItem('rma_portal_verified_email', validationResult.invite.authorized_email);
+      } catch {}
+
+      if (onUnlock) {
+        onUnlock(unlockedSession);
+      }
+    } else {
+      // MISMATCH: User entered a different email address (Anti-forwarding block)
+      setAccessDeniedEmail(cleanInput);
     }
+    setIsVerifying(false);
   };
 
-  // 7. QA Sandbox Test Mode Bypass
+  // 5. QA Sandbox Test Mode Bypass
   const handleTestModeBypass = () => {
     if (!validationResult?.invite) return;
     const inv = validationResult.invite;
@@ -19995,6 +20021,8 @@ export default function GatekeeperPinModal({
     };
     try {
       localStorage.setItem('rma_portal_gate_session', JSON.stringify(bypassSession));
+      localStorage.setItem('rma_reporter_contact', inv.authorized_email);
+      localStorage.setItem('rma_portal_verified_email', inv.authorized_email);
     } catch {}
     if (onUnlock) onUnlock(bypassSession);
   };
@@ -20032,10 +20060,10 @@ export default function GatekeeperPinModal({
 
             <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl text-xs text-left space-y-2.5 text-slate-800 dark:text-slate-200">
               <div className="text-[11px] font-bold text-rose-800 dark:text-rose-300">
-                🚨 Security Mismatch Detected:
+                🚨 Identity Mismatch Detected:
               </div>
               <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                You are currently signed in as:
+                You entered:
                 <strong className="block text-slate-900 dark:text-white font-mono mt-0.5">{accessDeniedEmail}</strong>
               </p>
               <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
@@ -20043,18 +20071,21 @@ export default function GatekeeperPinModal({
                 <strong className="block text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">{validationResult.invite.authorized_email}</strong>
               </p>
               <div className="text-[11px] text-slate-500 italic pt-1 border-t border-rose-200 dark:border-rose-900/40">
-                Forwarding personalized return links is strictly prohibited to protect account security.
+                Forwarding personalized return links is strictly prohibited to protect account and credit memo integrity.
               </div>
             </div>
 
             <div className="space-y-2 pt-2">
               <button
                 type="button"
-                onClick={handleSignOutGoogle}
+                onClick={() => {
+                  setAccessDeniedEmail(null);
+                  setInputEmail('');
+                }}
                 className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-blue-600/25 transition-all cursor-pointer"
               >
                 <RefreshCw className="w-4 h-4" />
-                <span>Switch to Authorized Account</span>
+                <span>Try Again with Authorized Email</span>
               </button>
 
               <button
@@ -20088,7 +20119,7 @@ export default function GatekeeperPinModal({
                 <span>Authorization Required</span>
               </div>
               <p className="leading-relaxed text-[11px] text-slate-500 dark:text-slate-400">
-                Please contact your assigned Pingcon representative or Account Executive to receive your store's personalized return link.
+                Please contact your assigned Pingcon representative or Account Executive to receive your store's personalized return authorization link.
               </p>
             </div>
 
@@ -20141,7 +20172,7 @@ export default function GatekeeperPinModal({
             </div>
           </div>
         ) : (
-          /* 5. Valid Token -> Google Identity Lock Screen */
+          /* 5. Valid Token -> Email Identity Lock Verification Screen */
           <div className="space-y-5 animate-in zoom-in-95">
             <div className="w-16 h-16 rounded-3xl bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-inner">
               <ShieldCheck className="w-8 h-8" />
@@ -20149,64 +20180,84 @@ export default function GatekeeperPinModal({
 
             <div className="space-y-1">
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                Verified Authorization
+                Verified Return Authorization
               </span>
               <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
                 Pingcon RMA Portal
               </h2>
             </div>
 
+            {/* Recipient Card */}
             <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs text-left space-y-2 text-slate-800 dark:text-slate-200">
               <div className="text-[10px] uppercase font-bold text-slate-400">
-                Private Return Authorization Issued Exclusively To:
+                Private Return Link Issued Exclusively To:
               </div>
               <div className="font-mono font-black text-blue-600 dark:text-blue-400 text-sm flex items-center gap-1.5 break-all">
                 <Mail className="w-4 h-4 shrink-0 text-blue-600" />
                 <span>{validationResult.invite.authorized_email}</span>
               </div>
               {validationResult.invite.store_branch && (
-                <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1 pt-1 font-bold">
+                <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1 pt-0.5 font-bold">
                   <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   <span>{validationResult.invite.store_branch}</span>
                 </div>
               )}
               {countdownStr && (
-                <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 pt-1">
+                <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 pt-0.5">
                   <Clock className="w-3 h-3 shrink-0" />
                   <span>Valid for: {countdownStr}</span>
                 </div>
               )}
             </div>
 
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-              To verify your identity and prevent fraudulent claims, click below to confirm with your authorized Google Account.
-            </p>
+            {/* Identity Verification Form */}
+            <form onSubmit={handleVerifyIdentity} className="space-y-3 text-left">
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Confirm Authorized Email Address *
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                  <input
+                    type="email"
+                    required
+                    value={inputEmail}
+                    onChange={(e) => {
+                      setInputEmail(e.target.value);
+                      setValidationError(null);
+                    }}
+                    placeholder="Enter authorized customer email..."
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs"
+                  />
+                </div>
+                {validationError && (
+                  <p className="text-[11px] font-bold text-rose-600 dark:text-rose-400 mt-1">
+                    {validationError}
+                  </p>
+                )}
+              </div>
 
-            <div className="space-y-2 pt-1">
               <button
-                type="button"
-                onClick={handleContinueWithGoogle}
-                disabled={isSigningIn}
-                className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-blue-600/25 transition-all active:scale-[0.99] cursor-pointer"
+                type="submit"
+                disabled={isVerifying || !inputEmail.trim()}
+                className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-blue-600/25 transition-all active:scale-[0.99] cursor-pointer"
               >
-                {isSigningIn ? (
+                {isVerifying ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Connecting to Google...</span>
+                    <span>Verifying Identity...</span>
                   </>
                 ) : (
                   <>
-                    <svg className="w-4 h-4" viewBox="0 0 24 24">
-                      <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                      <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                      <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                      <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                    </svg>
-                    <span>Continue with Google</span>
+                    <Lock className="w-4 h-4" />
+                    <span>Unlock & Access Return Portal</span>
+                    <ArrowRight className="w-4 h-4" />
                   </>
                 )}
               </button>
+            </form>
 
+            <div className="space-y-2 pt-1 border-t border-slate-100 dark:border-slate-800">
               {/* QA Sandbox Test Mode Quick Bypass */}
               {isTestMode && (
                 <button
@@ -41052,6 +41103,36 @@ export function generateInviteToken() {
   return `inv_${Date.now().toString(36)}_${rand}`;
 }
 
+export function maskEmail(email) {
+  if (!email || !email.includes('@')) return email || '';
+  const [local, domain] = email.split('@');
+  if (local.length <= 3) {
+    return `${local[0]}***@${domain}`;
+  }
+  const prefix = local.substring(0, 3);
+  const suffix = local.substring(local.length - 2);
+  return `${prefix}***${suffix}@${domain}`;
+}
+
+export function formatRemainingCountdown(expiresAt, status = 'active') {
+  if (status === 'revoked') return { text: 'Revoked', isExpired: true, isRevoked: true };
+  if (!expiresAt) return { text: 'Expired', isExpired: true, isRevoked: false };
+  const diff = new Date(expiresAt).getTime() - Date.now();
+  if (diff <= 0) return { text: 'Expired', isExpired: true, isRevoked: false };
+  const totalMins = Math.floor(diff / (1000 * 60));
+  if (totalMins < 60) {
+    return { text: `${Math.max(1, totalMins)}m remaining`, isExpired: false };
+  }
+  const hours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  if (hours < 24) {
+    return { text: `${hours}h ${mins}m remaining`, isExpired: false };
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return { text: `${days}d ${remHours}h remaining`, isExpired: false };
+}
+
 export const inviteService = {
   /**
    * Fetch all invites from Supabase (table or fallback settings)
@@ -41092,25 +41173,53 @@ export const inviteService = {
   },
 
   /**
-   * Create a new Customer RMA Invite
+   * Create a new Customer RMA Invite with customizable duration (minutes, hours, days)
    */
-  async createInvite({ authorizedEmail, storeBranch = '', durationHours = 24, createdBy = 'Staff' }) {
+  async createInvite({
+    authorizedEmail,
+    storeBranch = '',
+    durationValue = 24,
+    durationUnit = 'hours',
+    durationHours = null,
+    createdBy = 'Staff'
+  }) {
     if (!authorizedEmail || !authorizedEmail.trim()) {
       throw new Error('Customer / Reporter Email is required.');
     }
 
     const cleanEmail = authorizedEmail.trim().toLowerCase();
     const cleanBranch = storeBranch ? storeBranch.trim() : '';
-    const hours = Number(durationHours) || 24;
+
+    // Calculate expiration in milliseconds based on user-customized input number and unit
+    let durationMs = 24 * 3600 * 1000;
+    const num = Math.max(1, parseInt(durationValue, 10) || 1);
+    const unit = String(durationUnit || 'hours').toLowerCase();
+
+    if (durationHours !== null && durationHours !== undefined) {
+      durationMs = Number(durationHours) * 3600 * 1000;
+    } else if (unit.startsWith('min')) {
+      durationMs = num * 60 * 1000;
+    } else if (unit.startsWith('day')) {
+      durationMs = num * 24 * 3600 * 1000;
+    } else {
+      durationMs = num * 3600 * 1000;
+    }
+
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + hours * 3600 * 1000).toISOString();
+    const expiresAt = new Date(now.getTime() + durationMs).toISOString();
     const token = generateInviteToken();
+
+    const displayUnit = unit.startsWith('min') ? 'min(s)' : unit.startsWith('day') ? 'day(s)' : 'hour(s)';
+    const durationDisplay = `${num} ${displayUnit}`;
 
     const newInvite = {
       id: `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       token,
       authorized_email: cleanEmail,
       store_branch: cleanBranch,
+      duration_value: num,
+      duration_unit: unit,
+      duration_display: durationDisplay,
       expires_at: expiresAt,
       created_by: createdBy,
       status: 'active',
@@ -41263,7 +41372,7 @@ export const inviteService = {
                 🔒 This link is locked to your Google Account (<strong>${invite.authorized_email}</strong>). Forwarding is prohibited.
               </div>
               <div style="font-size: 11px; color: #64748b; margin-top: 8px;">
-                ⏱️ Link Expires: <strong>${expDateStr}</strong>
+                ⏱️ Link Validity: <strong>${invite.duration_display || '24 hours'}</strong> (Expires: ${expDateStr})
               </div>
             </div>
             <div style="text-align: center; margin: 28px 0;">

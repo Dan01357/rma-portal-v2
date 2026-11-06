@@ -29,6 +29,36 @@ export function generateInviteToken() {
   return `inv_${Date.now().toString(36)}_${rand}`;
 }
 
+export function maskEmail(email) {
+  if (!email || !email.includes('@')) return email || '';
+  const [local, domain] = email.split('@');
+  if (local.length <= 3) {
+    return `${local[0]}***@${domain}`;
+  }
+  const prefix = local.substring(0, 3);
+  const suffix = local.substring(local.length - 2);
+  return `${prefix}***${suffix}@${domain}`;
+}
+
+export function formatRemainingCountdown(expiresAt, status = 'active') {
+  if (status === 'revoked') return { text: 'Revoked', isExpired: true, isRevoked: true };
+  if (!expiresAt) return { text: 'Expired', isExpired: true, isRevoked: false };
+  const diff = new Date(expiresAt).getTime() - Date.now();
+  if (diff <= 0) return { text: 'Expired', isExpired: true, isRevoked: false };
+  const totalMins = Math.floor(diff / (1000 * 60));
+  if (totalMins < 60) {
+    return { text: `${Math.max(1, totalMins)}m remaining`, isExpired: false };
+  }
+  const hours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  if (hours < 24) {
+    return { text: `${hours}h ${mins}m remaining`, isExpired: false };
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return { text: `${days}d ${remHours}h remaining`, isExpired: false };
+}
+
 export const inviteService = {
   /**
    * Fetch all invites from Supabase (table or fallback settings)
@@ -69,25 +99,53 @@ export const inviteService = {
   },
 
   /**
-   * Create a new Customer RMA Invite
+   * Create a new Customer RMA Invite with customizable duration (minutes, hours, days)
    */
-  async createInvite({ authorizedEmail, storeBranch = '', durationHours = 24, createdBy = 'Staff' }) {
+  async createInvite({
+    authorizedEmail,
+    storeBranch = '',
+    durationValue = 24,
+    durationUnit = 'hours',
+    durationHours = null,
+    createdBy = 'Staff'
+  }) {
     if (!authorizedEmail || !authorizedEmail.trim()) {
       throw new Error('Customer / Reporter Email is required.');
     }
 
     const cleanEmail = authorizedEmail.trim().toLowerCase();
     const cleanBranch = storeBranch ? storeBranch.trim() : '';
-    const hours = Number(durationHours) || 24;
+
+    // Calculate expiration in milliseconds based on user-customized input number and unit
+    let durationMs = 24 * 3600 * 1000;
+    const num = Math.max(1, parseInt(durationValue, 10) || 1);
+    const unit = String(durationUnit || 'hours').toLowerCase();
+
+    if (durationHours !== null && durationHours !== undefined) {
+      durationMs = Number(durationHours) * 3600 * 1000;
+    } else if (unit.startsWith('min')) {
+      durationMs = num * 60 * 1000;
+    } else if (unit.startsWith('day')) {
+      durationMs = num * 24 * 3600 * 1000;
+    } else {
+      durationMs = num * 3600 * 1000;
+    }
+
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + hours * 3600 * 1000).toISOString();
+    const expiresAt = new Date(now.getTime() + durationMs).toISOString();
     const token = generateInviteToken();
+
+    const displayUnit = unit.startsWith('min') ? 'min(s)' : unit.startsWith('day') ? 'day(s)' : 'hour(s)';
+    const durationDisplay = `${num} ${displayUnit}`;
 
     const newInvite = {
       id: `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       token,
       authorized_email: cleanEmail,
       store_branch: cleanBranch,
+      duration_value: num,
+      duration_unit: unit,
+      duration_display: durationDisplay,
       expires_at: expiresAt,
       created_by: createdBy,
       status: 'active',
@@ -240,7 +298,7 @@ export const inviteService = {
                 🔒 This link is locked to your Google Account (<strong>${invite.authorized_email}</strong>). Forwarding is prohibited.
               </div>
               <div style="font-size: 11px; color: #64748b; margin-top: 8px;">
-                ⏱️ Link Expires: <strong>${expDateStr}</strong>
+                ⏱️ Link Validity: <strong>${invite.duration_display || '24 hours'}</strong> (Expires: ${expDateStr})
               </div>
             </div>
             <div style="text-align: center; margin: 28px 0;">

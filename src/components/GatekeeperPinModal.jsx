@@ -8,12 +8,12 @@ import {
   AlertTriangle,
   Building2,
   Clock,
-  ExternalLink,
   Mail,
-  UserCheck
+  UserCheck,
+  CheckCircle,
+  ArrowRight
 } from 'lucide-react';
-import { supabase } from '../supabaseClient';
-import { inviteService } from '../services/inviteService';
+import { inviteService, maskEmail, formatRemainingCountdown } from '../services/inviteService';
 
 export default function GatekeeperPinModal({
   isOpen,
@@ -25,10 +25,11 @@ export default function GatekeeperPinModal({
   const [token, setToken] = useState(null);
   const [isValidating, setIsValidating] = useState(true);
   const [validationResult, setValidationResult] = useState(null); // { valid, invite, error }
-  const [googleUser, setGoogleUser] = useState(null);
-  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [inputEmail, setInputEmail] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
   const [accessDeniedEmail, setAccessDeniedEmail] = useState(null);
   const [countdownStr, setCountdownStr] = useState('');
+  const [validationError, setValidationError] = useState(null);
 
   // 1. Resolve token from URL on mount or change
   useEffect(() => {
@@ -56,9 +57,22 @@ export default function GatekeeperPinModal({
 
     setIsValidating(true);
     inviteService.validateInviteToken(token).then(res => {
-      if (isMounted) {
-        setValidationResult(res);
-        setIsValidating(false);
+      if (!isMounted) return;
+      setValidationResult(res);
+      setIsValidating(false);
+
+      if (res?.valid && res?.invite) {
+        // Pre-fill email if previously verified or saved on this browser
+        try {
+          const savedEmail = localStorage.getItem('rma_portal_verified_email') || localStorage.getItem('rma_reporter_contact') || '';
+          if (savedEmail && savedEmail.toLowerCase().trim() === res.invite.authorized_email.toLowerCase().trim()) {
+            setInputEmail(res.invite.authorized_email);
+          } else if (!inputEmail) {
+            setInputEmail(res.invite.authorized_email);
+          }
+        } catch {
+          setInputEmail(res.invite.authorized_email);
+        }
       }
     });
 
@@ -70,118 +84,66 @@ export default function GatekeeperPinModal({
     if (!validationResult?.invite?.expires_at) return;
 
     const updateTimer = () => {
-      const diff = new Date(validationResult.invite.expires_at).getTime() - Date.now();
-      if (diff <= 0) {
-        setCountdownStr('Expired');
+      const countdown = formatRemainingCountdown(validationResult.invite.expires_at, validationResult.invite.status);
+      setCountdownStr(countdown.text);
+      if (countdown.isExpired) {
         setValidationResult(prev => prev ? { ...prev, valid: false, error: 'EXPIRED' } : null);
-      } else {
-        const hours = Math.floor(diff / (1000 * 60 * 60));
-        const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        setCountdownStr(`${hours}h ${mins}m remaining`);
       }
     };
 
     updateTimer();
-    const interval = setInterval(updateTimer, 30000);
+    const interval = setInterval(updateTimer, 15000);
     return () => clearInterval(interval);
   }, [validationResult?.invite?.expires_at]);
 
-  // 4. Check for signed-in Google Auth session and verify against authorized email
-  useEffect(() => {
-    let isMounted = true;
+  // 4. Handle Identity Verification Submit
+  const handleVerifyIdentity = (e) => {
+    if (e) e.preventDefault();
+    if (!validationResult?.invite) return;
 
-    const verifySession = async (session) => {
-      if (!session?.user) {
-        setGoogleUser(null);
-        setAccessDeniedEmail(null);
-        return;
-      }
+    const cleanInput = inputEmail.trim().toLowerCase();
+    const authEmail = validationResult.invite.authorized_email.trim().toLowerCase();
 
-      const signedInEmail = session.user.email?.toLowerCase().trim();
-      setGoogleUser(session.user);
-
-      if (validationResult?.valid && validationResult?.invite) {
-        const authEmail = validationResult.invite.authorized_email.toLowerCase().trim();
-
-        if (signedInEmail === authEmail) {
-          // Success: Google email matches authorized invite email!
-          setAccessDeniedEmail(null);
-          const unlockedSession = {
-            type: 'external_customer',
-            token: validationResult.invite.token,
-            authorized_email: validationResult.invite.authorized_email,
-            store_branch: validationResult.invite.store_branch || '',
-            user_email: signedInEmail,
-            expires_at: validationResult.invite.expires_at,
-            profileName: validationResult.invite.store_branch || validationResult.invite.authorized_email,
-            unlockedAt: new Date().toISOString()
-          };
-
-          try {
-            localStorage.setItem('rma_portal_gate_session', JSON.stringify(unlockedSession));
-          } catch {}
-
-          if (onUnlock) {
-            onUnlock(unlockedSession);
-          }
-        } else {
-          // Failure: Logged into different Google Account! (Anti-forwarding block)
-          setAccessDeniedEmail(signedInEmail);
-        }
-      }
-    };
-
-    // Check initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (isMounted) verifySession(session);
-    });
-
-    // Listen to OAuth redirect completion
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (isMounted) verifySession(session);
-    });
-
-    return () => {
-      isMounted = false;
-      authListener?.subscription?.unsubscribe();
-    };
-  }, [validationResult, onUnlock]);
-
-  // 5. Google Sign In Action
-  const handleContinueWithGoogle = async () => {
-    setIsSigningIn(true);
-    try {
-      const redirectUrl = typeof window !== 'undefined' ? window.location.href : undefined;
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: redirectUrl,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'select_account'
-          }
-        }
-      });
-      if (error) throw error;
-    } catch (err) {
-      console.error('Google Sign In Error:', err);
-      alert(`Google sign in failed: ${err.message}`);
-      setIsSigningIn(false);
+    if (!cleanInput) {
+      setValidationError('Please enter your authorized email address.');
+      return;
     }
-  };
 
-  // 6. Sign Out to switch account
-  const handleSignOutGoogle = async () => {
-    try {
-      await supabase.auth.signOut();
-      setGoogleUser(null);
+    setIsVerifying(true);
+    setValidationError(null);
+
+    // Verify input against invite's authorized email (Strict case-insensitive check)
+    if (cleanInput === authEmail) {
+      // SUCCESS: Google/Authorized email matches invite!
       setAccessDeniedEmail(null);
-    } catch (err) {
-      console.warn('Sign out error:', err);
+      const unlockedSession = {
+        type: 'external_customer',
+        token: validationResult.invite.token,
+        authorized_email: validationResult.invite.authorized_email,
+        store_branch: validationResult.invite.store_branch || '',
+        user_email: validationResult.invite.authorized_email,
+        expires_at: validationResult.invite.expires_at,
+        profileName: validationResult.invite.store_branch || validationResult.invite.authorized_email,
+        unlockedAt: new Date().toISOString()
+      };
+
+      try {
+        localStorage.setItem('rma_portal_gate_session', JSON.stringify(unlockedSession));
+        localStorage.setItem('rma_reporter_contact', validationResult.invite.authorized_email);
+        localStorage.setItem('rma_portal_verified_email', validationResult.invite.authorized_email);
+      } catch {}
+
+      if (onUnlock) {
+        onUnlock(unlockedSession);
+      }
+    } else {
+      // MISMATCH: User entered a different email address (Anti-forwarding block)
+      setAccessDeniedEmail(cleanInput);
     }
+    setIsVerifying(false);
   };
 
-  // 7. QA Sandbox Test Mode Bypass
+  // 5. QA Sandbox Test Mode Bypass
   const handleTestModeBypass = () => {
     if (!validationResult?.invite) return;
     const inv = validationResult.invite;
@@ -198,6 +160,8 @@ export default function GatekeeperPinModal({
     };
     try {
       localStorage.setItem('rma_portal_gate_session', JSON.stringify(bypassSession));
+      localStorage.setItem('rma_reporter_contact', inv.authorized_email);
+      localStorage.setItem('rma_portal_verified_email', inv.authorized_email);
     } catch {}
     if (onUnlock) onUnlock(bypassSession);
   };
@@ -235,10 +199,10 @@ export default function GatekeeperPinModal({
 
             <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl text-xs text-left space-y-2.5 text-slate-800 dark:text-slate-200">
               <div className="text-[11px] font-bold text-rose-800 dark:text-rose-300">
-                🚨 Security Mismatch Detected:
+                🚨 Identity Mismatch Detected:
               </div>
               <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                You are currently signed in as:
+                You entered:
                 <strong className="block text-slate-900 dark:text-white font-mono mt-0.5">{accessDeniedEmail}</strong>
               </p>
               <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
@@ -246,18 +210,21 @@ export default function GatekeeperPinModal({
                 <strong className="block text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">{validationResult.invite.authorized_email}</strong>
               </p>
               <div className="text-[11px] text-slate-500 italic pt-1 border-t border-rose-200 dark:border-rose-900/40">
-                Forwarding personalized return links is strictly prohibited to protect account security.
+                Forwarding personalized return links is strictly prohibited to protect account and credit memo integrity.
               </div>
             </div>
 
             <div className="space-y-2 pt-2">
               <button
                 type="button"
-                onClick={handleSignOutGoogle}
+                onClick={() => {
+                  setAccessDeniedEmail(null);
+                  setInputEmail('');
+                }}
                 className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-blue-600/25 transition-all cursor-pointer"
               >
                 <RefreshCw className="w-4 h-4" />
-                <span>Switch to Authorized Account</span>
+                <span>Try Again with Authorized Email</span>
               </button>
 
               <button
@@ -291,7 +258,7 @@ export default function GatekeeperPinModal({
                 <span>Authorization Required</span>
               </div>
               <p className="leading-relaxed text-[11px] text-slate-500 dark:text-slate-400">
-                Please contact your assigned Pingcon representative or Account Executive to receive your store's personalized return link.
+                Please contact your assigned Pingcon representative or Account Executive to receive your store's personalized return authorization link.
               </p>
             </div>
 
@@ -344,7 +311,7 @@ export default function GatekeeperPinModal({
             </div>
           </div>
         ) : (
-          /* 5. Valid Token -> Google Identity Lock Screen */
+          /* 5. Valid Token -> Email Identity Lock Verification Screen */
           <div className="space-y-5 animate-in zoom-in-95">
             <div className="w-16 h-16 rounded-3xl bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-inner">
               <ShieldCheck className="w-8 h-8" />
@@ -352,64 +319,84 @@ export default function GatekeeperPinModal({
 
             <div className="space-y-1">
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                Verified Authorization
+                Verified Return Authorization
               </span>
               <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
                 Pingcon RMA Portal
               </h2>
             </div>
 
+            {/* Recipient Card */}
             <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs text-left space-y-2 text-slate-800 dark:text-slate-200">
               <div className="text-[10px] uppercase font-bold text-slate-400">
-                Private Return Authorization Issued Exclusively To:
+                Private Return Link Issued Exclusively To:
               </div>
               <div className="font-mono font-black text-blue-600 dark:text-blue-400 text-sm flex items-center gap-1.5 break-all">
                 <Mail className="w-4 h-4 shrink-0 text-blue-600" />
                 <span>{validationResult.invite.authorized_email}</span>
               </div>
               {validationResult.invite.store_branch && (
-                <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1 pt-1 font-bold">
+                <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1 pt-0.5 font-bold">
                   <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   <span>{validationResult.invite.store_branch}</span>
                 </div>
               )}
               {countdownStr && (
-                <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 pt-1">
+                <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 pt-0.5">
                   <Clock className="w-3 h-3 shrink-0" />
                   <span>Valid for: {countdownStr}</span>
                 </div>
               )}
             </div>
 
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-              To verify your identity and prevent fraudulent claims, click below to confirm with your authorized Google Account.
-            </p>
+            {/* Identity Verification Form */}
+            <form onSubmit={handleVerifyIdentity} className="space-y-3 text-left">
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Confirm Authorized Email Address *
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                  <input
+                    type="email"
+                    required
+                    value={inputEmail}
+                    onChange={(e) => {
+                      setInputEmail(e.target.value);
+                      setValidationError(null);
+                    }}
+                    placeholder="Enter authorized customer email..."
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs"
+                  />
+                </div>
+                {validationError && (
+                  <p className="text-[11px] font-bold text-rose-600 dark:text-rose-400 mt-1">
+                    {validationError}
+                  </p>
+                )}
+              </div>
 
-            <div className="space-y-2 pt-1">
               <button
-                type="button"
-                onClick={handleContinueWithGoogle}
-                disabled={isSigningIn}
-                className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-blue-600/25 transition-all active:scale-[0.99] cursor-pointer"
+                type="submit"
+                disabled={isVerifying || !inputEmail.trim()}
+                className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-blue-600/25 transition-all active:scale-[0.99] cursor-pointer"
               >
-                {isSigningIn ? (
+                {isVerifying ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Connecting to Google...</span>
+                    <span>Verifying Identity...</span>
                   </>
                 ) : (
                   <>
-                    <svg className="w-4 h-4" viewBox="0 0 24 24">
-                      <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                      <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                      <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                      <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                    </svg>
-                    <span>Continue with Google</span>
+                    <Lock className="w-4 h-4" />
+                    <span>Unlock & Access Return Portal</span>
+                    <ArrowRight className="w-4 h-4" />
                   </>
                 )}
               </button>
+            </form>
 
+            <div className="space-y-2 pt-1 border-t border-slate-100 dark:border-slate-800">
               {/* QA Sandbox Test Mode Quick Bypass */}
               {isTestMode && (
                 <button
