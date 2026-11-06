@@ -103,8 +103,12 @@ export const inviteService = {
         .order('created_at', { ascending: false });
 
       if (!error && Array.isArray(data)) {
-        saveLocalInvites(data);
-        return data;
+        const normalized = data.map(i => ({
+          ...i,
+          store_branch: i.store_branch || i.entity_name || ''
+        }));
+        saveLocalInvites(normalized);
+        return normalized;
       }
     } catch {
       // Table may not exist yet, fallback to rma_settings
@@ -169,10 +173,11 @@ export const inviteService = {
     const displayUnit = unit.startsWith('min') ? 'min(s)' : unit.startsWith('day') ? 'day(s)' : 'hour(s)';
     const durationDisplay = `${num} ${displayUnit}`;
 
-    const newInvite = {
-      id: `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    const insertPayload = {
       token,
+      stream_type: 'customer_inbound',
       authorized_email: cleanEmail,
+      entity_name: cleanBranch || 'Pingcon Wholesale Client',
       store_branch: cleanBranch,
       duration_value: num,
       duration_unit: unit,
@@ -180,17 +185,33 @@ export const inviteService = {
       expires_at: expiresAt,
       created_by: createdBy,
       status: 'active',
-      created_at: now.toISOString()
+      created_at: now.toISOString(),
+      updated_at: now.toISOString()
     };
 
     // 1. Try insert into rma_invites table
+    let createdRecord = null;
     try {
-      await supabase
+      const { data, error } = await supabase
         .from('rma_invites')
-        .insert([newInvite]);
+        .insert([insertPayload])
+        .select()
+        .maybeSingle();
+
+      if (!error && data) {
+        createdRecord = {
+          ...data,
+          store_branch: data.store_branch || data.entity_name || ''
+        };
+      }
     } catch {
-      // Ignore if table does not exist
+      // Ignore if table does not exist yet
     }
+
+    const newInvite = createdRecord || {
+      id: `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      ...insertPayload
+    };
 
     // 2. Always persist to rma_settings for universal sync across all admin sessions
     try {
@@ -231,7 +252,10 @@ export const inviteService = {
         .maybeSingle();
 
       if (!error && data) {
-        invite = data;
+        invite = {
+          ...data,
+          store_branch: data.store_branch || data.entity_name || ''
+        };
       }
     } catch {
       // Fallback
