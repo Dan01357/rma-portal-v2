@@ -129,32 +129,50 @@ export function registerRMARoutes(registry) {
     method: 'get',
     path: '/api/v1/rma',
     summary: 'List RMA Return Reports (Restock & Re-order Queues)',
-    description: `Fetch paginated return reports with optional filtering by warehouse disposition, lifecycle status, product barcode, or search query.
+    description: `Fetch paginated return reports with dedicated support for ERP inventory queues.
+Individual line items are automatically returned and generic parent manifest containers are filtered out, completely eliminating double-counting.
 
 ### 📦 Queue 1: Inventory Restock Queue
 To fetch all goods approved by warehouse triage for inventory restocking:
 \`\`\`bash
-curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?disposition=Restock%20to%20Inventory&status=pending" \\
+curl -X GET "https://rma-portal-v2.vercel.app/api/v1/rma?queue=restock" \\
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
-Reads: \`barcode\`, \`code\` (SKU), \`name\`, \`quantity\`, \`unit_name\`, and \`warehouse_location\`.
+*(Or query \`disposition=Restock to Inventory&status=pending\`)*.
+Returns active pre-restock items (\`pending\`, \`received_at_dock\`, \`logged\`, \`credit_memo_issued\`, \`under_inspection\`, \`pending_finance_approval\`) approved for restock.
+After restocking into ERP, confirm via PATCH:
+\`\`\`bash
+curl -X PATCH "https://rma-portal-v2.vercel.app/api/v1/rma/{id}" \\
+  -H "x-api-key: sk_live_rma_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"status": "restocked", "warehouse_location": "RACK-03-BIN-A"}'
+\`\`\`
 
-### 🗑️ Queue 2: Scrapped / Supplier Re-order Queue
+### 🗑️ Queue 2: Scrapped / Supplier Re-Order Queue
 To fetch all goods deemed total loss / scrapped so your ERP can re-order replacement stock from suppliers:
 \`\`\`bash
-curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?disposition=Scrap%20%2F%20Dispose&status=pending" \\
+curl -X GET "https://rma-portal-v2.vercel.app/api/v1/rma?queue=scrap" \\
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
-Reads: \`barcode\`, \`code\` (SKU), \`name\`, \`quantity\`, \`supplier_name\`, and \`reason\`.`,
+*(Or query \`disposition=Scrap / Dispose&status=pending\`)*.
+After re-ordering from suppliers, confirm via PATCH:
+\`\`\`bash
+curl -X PATCH "https://rma-portal-v2.vercel.app/api/v1/rma/{id}" \\
+  -H "x-api-key: sk_live_rma_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"status": "scrapped"}'
+\`\`\``,
     tags: ['RMA Reports'],
     request: {
       query: PaginationQuerySchema.extend({
         rma_type: z.enum(['customer_inbound', 'supplier_outbound']).optional().openapi({ description: 'Filter by logistics type: customer_inbound or supplier_outbound', example: 'customer_inbound' }),
-        status: z.string().optional().openapi({ description: 'Filter by status (pending, resolved, etc.)', example: 'pending' }),
+        queue: z.enum(['restock', 'scrap']).optional().openapi({ description: 'Filter by inventory operation queue: "restock" (items approved for inventory restocking) or "scrap" (items marked for scrap/disposal to re-order from suppliers)', example: 'restock' }),
+        status: z.string().optional().openapi({ description: 'Filter by status (pending, open, restocked, scrapped). "pending" and "open" return all pre-finalized active returns.', example: 'pending' }),
         barcode: z.string().optional().openapi({ description: 'Filter by exact product barcode', example: '4800016644833' }),
         disposition: z.string().optional().openapi({ description: 'Filter by warehouse triage disposition (e.g. "Restock to Inventory", "Return to Vendor (RTV)", "Scrap / Dispose")', example: 'Restock to Inventory' }),
         condition_grade: z.string().optional().openapi({ description: 'Filter by item grade condition', example: 'A - Like New / Resellable' }),
         warehouse_location: z.string().optional().openapi({ description: 'Filter by bin or rack storage location', example: 'RACK-03-BIN-A' }),
+        is_parent: z.string().optional().openapi({ description: 'Filter by parent manifest container (true) or individual items (false, default)', example: 'false' }),
         search: z.string().optional().openapi({ description: 'Search term across RMA #, name, SKU, or reporter', example: 'Oishi' })
       })
     },

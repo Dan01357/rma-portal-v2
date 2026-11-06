@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-06T00:16:38.785Z
+Generated At: 2026-11-06T01:26:47.361Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -3598,7 +3598,59 @@ All API routes are served under `https://rma-portal-v2.vercel.app`:
 | `PATCH` | `/api/v1/api-keys/:id` | Super Admin | Toggle key status, update rate limit |
 | `DELETE`| `/api/v1/api-keys/:id` | Super Admin | Revoke partner API key |
 
-### 6.4 Rate Limiting & Security Governance
+### 6.4 ERP Integration Queues: Restock & Supplier Re-Order (Zero Double-Counting)
+
+The REST API provides two dedicated operational queues for coworker ERP systems:
+
+#### 1. Inventory Restock Queue (`queue=restock`)
+Returns all merchandise triaged by warehouse staff with disposition **"Restock to Inventory"** that is awaiting ERP inventory entry.
+- **Request**:
+```http
+GET /api/v1/rma?queue=restock HTTP/1.1
+Host: rma-portal-v2.vercel.app
+X-API-Key: rma_live_demo_hash_vault_key_2026
+```
+*(Or query `GET /api/v1/rma?disposition=Restock%20to%20Inventory&status=pending`)*.
+- **Active Pre-Restock Statuses Included**: `pending`, `received_at_dock`, `logged`, `credit_memo_issued`, `under_inspection`, `pending_finance_approval`.
+- **Finalized Statuses Excluded**: `restocked`, `scrapped`, `closed`, `resolved`, `deleted`, `rejected`.
+- **Zero Double-Counting**: Generic parent manifest containers (`Batch Return Manifest...`) are automatically filtered out. Coworkers receive individual line items with actual SKUs, product names, quantities, and bin locations (`warehouse_location`).
+- **Confirmation Action**: Once the items are recorded back into stock in the ERP, the client sends:
+```http
+PATCH /api/v1/rma/{id} HTTP/1.1
+Host: rma-portal-v2.vercel.app
+X-API-Key: rma_live_demo_hash_vault_key_2026
+Content-Type: application/json
+
+{
+  "status": "restocked",
+  "warehouse_location": "RACK-03-BIN-A"
+}
+```
+- Automatically updates the child record in `rma_reports`, updates the child entry in the parent manifest's `items` array, and appends an audit log: `"ERP Restock confirmed via API by [client.name]"`.
+
+#### 2. Scrapped / Supplier Re-Order Queue (`queue=scrap`)
+Returns all merchandise triaged with disposition **"Scrap / Dispose"** that is total loss, allowing purchasing systems to re-order fresh replacement stock from suppliers.
+- **Request**:
+```http
+GET /api/v1/rma?queue=scrap HTTP/1.1
+Host: rma-portal-v2.vercel.app
+X-API-Key: rma_live_demo_hash_vault_key_2026
+```
+*(Or query `GET /api/v1/rma?disposition=Scrap%20%2F%20Dispose&status=pending`)*.
+- **Confirmation Action**: Once replacement orders are placed with the supplier, the client sends:
+```http
+PATCH /api/v1/rma/{id} HTTP/1.1
+Host: rma-portal-v2.vercel.app
+X-API-Key: rma_live_demo_hash_vault_key_2026
+Content-Type: application/json
+
+{
+  "status": "scrapped"
+}
+```
+- Appends an audit log: `"ERP Scrap confirmed via API by [client.name]"`.
+
+### 6.5 Rate Limiting & Security Governance
 * Default rate limit is **60 requests per minute** per key (configurable up to 300 req/min).
 * Rate limits are tracked in-memory with automatic `429 Too Many Requests` status codes and `Retry-After: 60` headers.
 * Key usage timestamps (`last_used_at`) update automatically on valid invocations.
@@ -5812,7 +5864,7 @@ export default async function handler(req, res) {
   // 2. GET: List RMA Reports with query filters
   if (req.method === 'GET') {
     try {
-      const { rma_type, status, barcode, search, disposition, condition_grade, warehouse_location, limit = '50', offset = '0' } = req.query;
+      const { rma_type, status, barcode, search, disposition, condition_grade, warehouse_location, queue, is_parent, limit = '50', offset = '0' } = req.query;
 
       const numLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
       const numOffset = Math.max(parseInt(offset, 10) || 0, 0);
@@ -5821,28 +5873,67 @@ export default async function handler(req, res) {
         .from('rma_reports')
         .select('*', { count: 'exact' });
 
+      // 1. Eliminate Double-Counting on Multi-Item Manifests:
+      // Filter out generic parent manifest containers (Batch Return Manifest...) so coworkers only receive
+      // individual line items with distinct SKUs, barcodes, quantities, and bin locations without double-counting.
+      // If a caller explicitly queries is_parent=true, return the parent manifest rows.
+      if (is_parent === 'true') {
+        query = query.eq('is_parent', true);
+      } else {
+        query = query
+          .or('is_parent.is.null,is_parent.eq.false')
+          .not('name', 'ilike', 'Batch Return Manifest%');
+      }
+
       if (rma_type) {
         query = query.eq('rma_type', rma_type);
       }
+
+      // 2. Explicit Inventory Queues (queue=restock | queue=scrap)
+      if (queue) {
+        const cleanQueue = String(queue).trim().toLowerCase();
+        if (cleanQueue === 'restock') {
+          query = query.ilike('disposition', '%Restock%');
+          query = query.not('status', 'in', '("restocked","scrapped","disposed","closed","resolved","rejected","deleted")');
+        } else if (cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
+          query = query.or('disposition.ilike.%Scrap%,disposition.ilike.%Dispose%');
+          query = query.not('status', 'in', '("scrapped","disposed","restocked","closed","resolved","rejected","deleted")');
+        }
+      }
+
+      // 3. Status Filtering with Comprehensive Active Pending Support
       if (status) {
         const cleanStatus = status.trim().toLowerCase();
-        if (cleanStatus === 'pending' || cleanStatus === 'received_at_dock') {
-          query = query.in('status', ['pending', 'received_at_dock']);
+        if (cleanStatus === 'pending' || cleanStatus === 'open') {
+          // Include all active pre-restock/pre-scrap statuses and exclude finalized
+          query = query
+            .in('status', ['pending', 'received_at_dock', 'logged', 'credit_memo_issued', 'under_inspection', 'pending_finance_approval'])
+            .not('status', 'in', '("restocked","scrapped","disposed","closed","resolved","rejected","deleted")');
         } else if (cleanStatus === 'restocked') {
           query = query.in('status', ['restocked', 'closed', 'resolved']);
         } else if (cleanStatus === 'scrapped' || cleanStatus === 'disposed') {
           query = query.in('status', ['scrapped', 'disposed']);
-        } else if (cleanStatus === 'open') {
-          query = query.not('status', 'in', '("closed","resolved","rejected","deleted","restocked","scrapped","disposed")');
         } else {
           query = query.eq('status', status.trim());
         }
       }
-      if (barcode) {
-        query = query.eq('barcode', barcode.trim());
-      }
+
+      // 4. Disposition Filtering
       if (disposition) {
-        query = query.ilike('disposition', `%${disposition.trim()}%`);
+        const cleanDisp = disposition.trim();
+        if (/restock/i.test(cleanDisp)) {
+          query = query.ilike('disposition', '%Restock%');
+          if (!status && !queue) {
+            query = query.not('status', 'in', '("restocked","scrapped","disposed","closed","resolved","rejected","deleted")');
+          }
+        } else if (/scrap|dispose/i.test(cleanDisp)) {
+          query = query.or('disposition.ilike.%Scrap%,disposition.ilike.%Dispose%');
+          if (!status && !queue) {
+            query = query.not('status', 'in', '("scrapped","disposed","restocked","closed","resolved","rejected","deleted")');
+          }
+        } else {
+          query = query.ilike('disposition', `%${cleanDisp}%`);
+        }
       }
       if (condition_grade) {
         query = query.ilike('condition_grade', `%${condition_grade.trim()}%`);
@@ -6142,24 +6233,141 @@ export default async function handler(req, res) {
         }
       }
 
-      const { data, error } = await matchRma(
-        supabase.from('rma_reports').update(updateData).select('*')
+      // First, retrieve the matching record(s) so we can update audit trails & parent manifest items
+      const { data: existingRows, error: findError } = await matchRma(
+        supabase.from('rma_reports').select('*')
       );
 
-      if (error) {
-        return sendJson(res, 500, { success: false, error: 'UPDATE_ERROR', message: error.message });
+      if (findError) {
+        return sendJson(res, 500, { success: false, error: 'DATABASE_ERROR', message: findError.message });
       }
 
-      if (!data || data.length === 0) {
+      if (!existingRows || existingRows.length === 0) {
         return sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: `RMA report ${cleanId} not found.` });
       }
 
-      const result = data.length === 1 ? data[0] : data;
-      const rmaNum = Array.isArray(data) ? data[0]?.rma_number : data?.rma_number;
+      // Standardized Audit Trail Note
+      let auditNote = `RMA status updated to ${updateData.status || 'updated'} via API by ${client.name}`;
+      if (updateData.status === 'restocked') {
+        auditNote = `ERP Restock confirmed via API by ${client.name}`;
+      } else if (updateData.status === 'scrapped') {
+        auditNote = `ERP Scrap confirmed via API by ${client.name}`;
+      }
+
+      const auditEntry = {
+        timestamp: new Date().toISOString(),
+        stage: updateData.status === 'restocked' ? 'ERP_RESTOCK' : (updateData.status === 'scrapped' ? 'ERP_SCRAP' : 'API_PATCH'),
+        actor: `${client.name} (API)`,
+        status: updateData.status,
+        warehouse_location: updateData.warehouse_location || undefined,
+        note: auditNote
+      };
+
+      const updatedRows = [];
+
+      for (const row of existingRows) {
+        const currentAudit = Array.isArray(row.audit_trail) ? [...row.audit_trail] : [];
+        currentAudit.push(auditEntry);
+
+        const rowPayload = {
+          ...updateData,
+          audit_trail: currentAudit
+        };
+
+        const { data: updatedRow, error: updateErr } = await supabase
+          .from('rma_reports')
+          .update(rowPayload)
+          .eq('id', row.id)
+          .select('*')
+          .single();
+
+        if (updateErr) {
+          console.error(`[API v1 RMA PATCH] Error updating row ${row.id}:`, updateErr);
+        } else if (updatedRow) {
+          updatedRows.push(updatedRow);
+        }
+
+        // If this row is a child item inside a parent manifest (has parent_rma_id):
+        if (row.parent_rma_id) {
+          try {
+            const { data: parentRecord } = await supabase
+              .from('rma_reports')
+              .select('id, items, audit_trail')
+              .eq('id', row.parent_rma_id)
+              .maybeSingle();
+
+            if (parentRecord) {
+              let parentItems = Array.isArray(parentRecord.items)
+                ? parentRecord.items
+                : (typeof parentRecord.items === 'string' ? JSON.parse(parentRecord.items || '[]') : []);
+
+              let itemModified = false;
+              parentItems = parentItems.map(it => {
+                const matchBarcode = it.barcode && String(it.barcode).trim() === String(row.barcode).trim();
+                const matchId = it.id && (String(it.id) === String(row.id) || String(it.id) === String(row.barcode));
+                const matchName = it.name && it.name === row.name;
+
+                if (matchBarcode || matchId || matchName) {
+                  itemModified = true;
+                  return {
+                    ...it,
+                    status: updateData.status !== undefined ? updateData.status : it.status,
+                    warehouse_location: updateData.warehouse_location !== undefined ? updateData.warehouse_location : it.warehouse_location,
+                    disposition: updateData.disposition !== undefined ? updateData.disposition : it.disposition,
+                    condition_grade: updateData.condition_grade !== undefined ? updateData.condition_grade : it.condition_grade
+                  };
+                }
+                return it;
+              });
+
+              if (itemModified) {
+                const parentAudit = Array.isArray(parentRecord.audit_trail) ? [...parentRecord.audit_trail] : [];
+                parentAudit.push({
+                  timestamp: new Date().toISOString(),
+                  stage: 'CHILD_ERP_SYNC',
+                  actor: `${client.name} (API)`,
+                  note: `${auditNote} for item "${row.name}"`
+                });
+
+                await supabase
+                  .from('rma_reports')
+                  .update({
+                    items: parentItems,
+                    audit_trail: parentAudit
+                  })
+                  .eq('id', parentRecord.id);
+              }
+            }
+          } catch (parentErr) {
+            console.warn('[API v1 RMA PATCH] Notice syncing parent manifest items:', parentErr.message);
+          }
+
+          // Also synchronize child row in rma_items if present
+          try {
+            await supabase
+              .from('rma_items')
+              .update({
+                status: updateData.status,
+                warehouse_location: updateData.warehouse_location,
+                disposition: updateData.disposition
+              })
+              .or(`id.eq.${row.id},barcode.eq.${row.barcode}`);
+          } catch (childErr) {
+            // non-blocking
+          }
+        }
+      }
+
+      if (updatedRows.length === 0) {
+        return sendJson(res, 500, { success: false, error: 'UPDATE_FAILED', message: `Failed to update RMA record ${cleanId}.` });
+      }
+
+      const result = updatedRows.length === 1 ? updatedRows[0] : updatedRows;
+      const rmaNum = updatedRows[0]?.rma_number;
 
       return sendJson(res, 200, {
         success: true,
-        message: `RMA report ${rmaNum || cleanId} updated by ${client.name} (${data.length} item${data.length > 1 ? 's' : ''} updated).`,
+        message: `RMA report ${rmaNum || cleanId} updated by ${client.name} (${updatedRows.length} item${updatedRows.length > 1 ? 's' : ''} updated).`,
         data: result
       });
     } catch (err) {
@@ -7938,32 +8146,50 @@ export function registerRMARoutes(registry) {
     method: 'get',
     path: '/api/v1/rma',
     summary: 'List RMA Return Reports (Restock & Re-order Queues)',
-    description: `Fetch paginated return reports with optional filtering by warehouse disposition, lifecycle status, product barcode, or search query.
+    description: `Fetch paginated return reports with dedicated support for ERP inventory queues.
+Individual line items are automatically returned and generic parent manifest containers are filtered out, completely eliminating double-counting.
 
 ### 📦 Queue 1: Inventory Restock Queue
 To fetch all goods approved by warehouse triage for inventory restocking:
 \`\`\`bash
-curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?disposition=Restock%20to%20Inventory&status=pending" \\
+curl -X GET "https://rma-portal-v2.vercel.app/api/v1/rma?queue=restock" \\
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
-Reads: \`barcode\`, \`code\` (SKU), \`name\`, \`quantity\`, \`unit_name\`, and \`warehouse_location\`.
+*(Or query \`disposition=Restock to Inventory&status=pending\`)*.
+Returns active pre-restock items (\`pending\`, \`received_at_dock\`, \`logged\`, \`credit_memo_issued\`, \`under_inspection\`, \`pending_finance_approval\`) approved for restock.
+After restocking into ERP, confirm via PATCH:
+\`\`\`bash
+curl -X PATCH "https://rma-portal-v2.vercel.app/api/v1/rma/{id}" \\
+  -H "x-api-key: sk_live_rma_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"status": "restocked", "warehouse_location": "RACK-03-BIN-A"}'
+\`\`\`
 
-### 🗑️ Queue 2: Scrapped / Supplier Re-order Queue
+### 🗑️ Queue 2: Scrapped / Supplier Re-Order Queue
 To fetch all goods deemed total loss / scrapped so your ERP can re-order replacement stock from suppliers:
 \`\`\`bash
-curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?disposition=Scrap%20%2F%20Dispose&status=pending" \\
+curl -X GET "https://rma-portal-v2.vercel.app/api/v1/rma?queue=scrap" \\
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
-Reads: \`barcode\`, \`code\` (SKU), \`name\`, \`quantity\`, \`supplier_name\`, and \`reason\`.`,
+*(Or query \`disposition=Scrap / Dispose&status=pending\`)*.
+After re-ordering from suppliers, confirm via PATCH:
+\`\`\`bash
+curl -X PATCH "https://rma-portal-v2.vercel.app/api/v1/rma/{id}" \\
+  -H "x-api-key: sk_live_rma_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"status": "scrapped"}'
+\`\`\``,
     tags: ['RMA Reports'],
     request: {
       query: PaginationQuerySchema.extend({
         rma_type: z.enum(['customer_inbound', 'supplier_outbound']).optional().openapi({ description: 'Filter by logistics type: customer_inbound or supplier_outbound', example: 'customer_inbound' }),
-        status: z.string().optional().openapi({ description: 'Filter by status (pending, resolved, etc.)', example: 'pending' }),
+        queue: z.enum(['restock', 'scrap']).optional().openapi({ description: 'Filter by inventory operation queue: "restock" (items approved for inventory restocking) or "scrap" (items marked for scrap/disposal to re-order from suppliers)', example: 'restock' }),
+        status: z.string().optional().openapi({ description: 'Filter by status (pending, open, restocked, scrapped). "pending" and "open" return all pre-finalized active returns.', example: 'pending' }),
         barcode: z.string().optional().openapi({ description: 'Filter by exact product barcode', example: '4800016644833' }),
         disposition: z.string().optional().openapi({ description: 'Filter by warehouse triage disposition (e.g. "Restock to Inventory", "Return to Vendor (RTV)", "Scrap / Dispose")', example: 'Restock to Inventory' }),
         condition_grade: z.string().optional().openapi({ description: 'Filter by item grade condition', example: 'A - Like New / Resellable' }),
         warehouse_location: z.string().optional().openapi({ description: 'Filter by bin or rack storage location', example: 'RACK-03-BIN-A' }),
+        is_parent: z.string().optional().openapi({ description: 'Filter by parent manifest container (true) or individual items (false, default)', example: 'false' }),
         search: z.string().optional().openapi({ description: 'Search term across RMA #, name, SKU, or reporter', example: 'Oishi' })
       })
     },
@@ -9829,8 +10055,12 @@ export default function App() {
 
       if (reportsStatusFilter !== 'all') {
         const s = String(item.status || 'received_at_dock').toLowerCase();
-        if (reportsStatusFilter === 'received_at_dock') {
+        if (reportsStatusFilter === 'pending_admin_details') {
+          if (s !== 'pending_admin_details') return false;
+        } else if (reportsStatusFilter === 'received_at_dock') {
           if (s !== 'pending' && s !== 'received_at_dock') return false;
+        } else if (reportsStatusFilter === 'draft') {
+          if (s !== 'draft') return false;
         } else if (reportsStatusFilter === 'restocked') {
           if (s !== 'restocked' && s !== 'closed' && s !== 'resolved') return false;
         } else if (reportsStatusFilter === 'scrapped') {
@@ -12405,6 +12635,7 @@ export default function App() {
                       className="w-full min-w-0 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer truncate box-border"
                     >
                       <option value="all">All Status &amp; Stages</option>
+                      <option value="pending_admin_details">Awaiting SKU</option>
                       <option value="draft">1- Draft / Intake</option>
                       <option value="received_at_dock">2- Received at Dock</option>
                       <option value="under_inspection">3- Under Inspection</option>
@@ -27568,7 +27799,7 @@ export default function QuickRMAActionModal({
               )}
 
               {/* Manifest Items List if Batch Manifest */}
-              {Array.isArray(report.items) && report.items.length > 0 && (
+              {Boolean(report?.is_parent || (Array.isArray(report.items) && report.items.length > 1)) && (
                 <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2 text-xs">
                   <div className="flex items-center justify-between font-bold">
                     <span className="flex items-center gap-1.5 text-slate-800 dark:text-slate-200 uppercase tracking-wide text-[10px]">
@@ -28661,6 +28892,7 @@ export default function QuickRMAActionModal({
                           onChange={(e) => setRmaStatus(e.target.value)}
                           className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
                         >
+                          <option value="pending_admin_details">Awaiting SKU</option>
                           <option value="draft">1- Draft / Intake</option>
                           <option value="received_at_dock">2- Received at Dock</option>
                           <option value="under_inspection">3- Under Inspection</option>
@@ -29489,8 +29721,12 @@ export default function RMAReportsModal({
 
       if (statusFilter !== 'all') {
         const s = String(item.status || 'received_at_dock').toLowerCase();
-        if (statusFilter === 'received_at_dock') {
+        if (statusFilter === 'pending_admin_details') {
+          if (s !== 'pending_admin_details') return false;
+        } else if (statusFilter === 'received_at_dock') {
           if (s !== 'pending' && s !== 'received_at_dock') return false;
+        } else if (statusFilter === 'draft') {
+          if (s !== 'draft') return false;
         } else if (statusFilter === 'restocked') {
           if (s !== 'restocked' && s !== 'closed' && s !== 'resolved') return false;
         } else if (statusFilter === 'scrapped') {
@@ -29751,6 +29987,7 @@ export default function RMAReportsModal({
                 className="px-2.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-500 shadow-xs cursor-pointer"
               >
                 <option value="all">All Status & Stages</option>
+                <option value="pending_admin_details">Awaiting SKU</option>
                 <option value="draft">Draft / Intake</option>
                 <option value="received_at_dock">Received at Dock</option>
                 <option value="under_inspection">Under Inspection</option>

@@ -1228,8 +1228,12 @@ export default function App() {
 
       if (reportsStatusFilter !== 'all') {
         const s = String(item.status || 'received_at_dock').toLowerCase();
-        if (reportsStatusFilter === 'received_at_dock') {
+        if (reportsStatusFilter === 'pending_admin_details') {
+          if (s !== 'pending_admin_details') return false;
+        } else if (reportsStatusFilter === 'received_at_dock') {
           if (s !== 'pending' && s !== 'received_at_dock') return false;
+        } else if (reportsStatusFilter === 'draft') {
+          if (s !== 'draft') return false;
         } else if (reportsStatusFilter === 'restocked') {
           if (s !== 'restocked' && s !== 'closed' && s !== 'resolved') return false;
         } else if (reportsStatusFilter === 'scrapped') {
@@ -3804,6 +3808,7 @@ export default function App() {
                       className="w-full min-w-0 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer truncate box-border"
                     >
                       <option value="all">All Status &amp; Stages</option>
+                      <option value="pending_admin_details">Awaiting SKU</option>
                       <option value="draft">1- Draft / Intake</option>
                       <option value="received_at_dock">2- Received at Dock</option>
                       <option value="under_inspection">3- Under Inspection</option>

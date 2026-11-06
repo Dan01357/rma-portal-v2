@@ -425,7 +425,59 @@ All API routes are served under `https://rma-portal-v2.vercel.app`:
 | `PATCH` | `/api/v1/api-keys/:id` | Super Admin | Toggle key status, update rate limit |
 | `DELETE`| `/api/v1/api-keys/:id` | Super Admin | Revoke partner API key |
 
-### 6.4 Rate Limiting & Security Governance
+### 6.4 ERP Integration Queues: Restock & Supplier Re-Order (Zero Double-Counting)
+
+The REST API provides two dedicated operational queues for coworker ERP systems:
+
+#### 1. Inventory Restock Queue (`queue=restock`)
+Returns all merchandise triaged by warehouse staff with disposition **"Restock to Inventory"** that is awaiting ERP inventory entry.
+- **Request**:
+```http
+GET /api/v1/rma?queue=restock HTTP/1.1
+Host: rma-portal-v2.vercel.app
+X-API-Key: rma_live_demo_hash_vault_key_2026
+```
+*(Or query `GET /api/v1/rma?disposition=Restock%20to%20Inventory&status=pending`)*.
+- **Active Pre-Restock Statuses Included**: `pending`, `received_at_dock`, `logged`, `credit_memo_issued`, `under_inspection`, `pending_finance_approval`.
+- **Finalized Statuses Excluded**: `restocked`, `scrapped`, `closed`, `resolved`, `deleted`, `rejected`.
+- **Zero Double-Counting**: Generic parent manifest containers (`Batch Return Manifest...`) are automatically filtered out. Coworkers receive individual line items with actual SKUs, product names, quantities, and bin locations (`warehouse_location`).
+- **Confirmation Action**: Once the items are recorded back into stock in the ERP, the client sends:
+```http
+PATCH /api/v1/rma/{id} HTTP/1.1
+Host: rma-portal-v2.vercel.app
+X-API-Key: rma_live_demo_hash_vault_key_2026
+Content-Type: application/json
+
+{
+  "status": "restocked",
+  "warehouse_location": "RACK-03-BIN-A"
+}
+```
+- Automatically updates the child record in `rma_reports`, updates the child entry in the parent manifest's `items` array, and appends an audit log: `"ERP Restock confirmed via API by [client.name]"`.
+
+#### 2. Scrapped / Supplier Re-Order Queue (`queue=scrap`)
+Returns all merchandise triaged with disposition **"Scrap / Dispose"** that is total loss, allowing purchasing systems to re-order fresh replacement stock from suppliers.
+- **Request**:
+```http
+GET /api/v1/rma?queue=scrap HTTP/1.1
+Host: rma-portal-v2.vercel.app
+X-API-Key: rma_live_demo_hash_vault_key_2026
+```
+*(Or query `GET /api/v1/rma?disposition=Scrap%20%2F%20Dispose&status=pending`)*.
+- **Confirmation Action**: Once replacement orders are placed with the supplier, the client sends:
+```http
+PATCH /api/v1/rma/{id} HTTP/1.1
+Host: rma-portal-v2.vercel.app
+X-API-Key: rma_live_demo_hash_vault_key_2026
+Content-Type: application/json
+
+{
+  "status": "scrapped"
+}
+```
+- Appends an audit log: `"ERP Scrap confirmed via API by [client.name]"`.
+
+### 6.5 Rate Limiting & Security Governance
 * Default rate limit is **60 requests per minute** per key (configurable up to 300 req/min).
 * Rate limits are tracked in-memory with automatic `429 Too Many Requests` status codes and `Retry-After: 60` headers.
 * Key usage timestamps (`last_used_at`) update automatically on valid invocations.

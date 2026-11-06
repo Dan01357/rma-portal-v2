@@ -1309,7 +1309,7 @@ export default function QuickRMAActionModal({
               )}
 
               {/* Manifest Items List if Batch Manifest */}
-              {Array.isArray(report.items) && report.items.length > 0 && (
+              {Boolean(report?.is_parent || (Array.isArray(report.items) && report.items.length > 1)) && (
                 <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2 text-xs">
                   <div className="flex items-center justify-between font-bold">
                     <span className="flex items-center gap-1.5 text-slate-800 dark:text-slate-200 uppercase tracking-wide text-[10px]">
@@ -2402,6 +2402,7 @@ export default function QuickRMAActionModal({
                           onChange={(e) => setRmaStatus(e.target.value)}
                           className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
                         >
+                          <option value="pending_admin_details">Awaiting SKU</option>
                           <option value="draft">1- Draft / Intake</option>
                           <option value="received_at_dock">2- Received at Dock</option>
                           <option value="under_inspection">3- Under Inspection</option>

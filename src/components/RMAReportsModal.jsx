@@ -174,8 +174,12 @@ export default function RMAReportsModal({
 
       if (statusFilter !== 'all') {
         const s = String(item.status || 'received_at_dock').toLowerCase();
-        if (statusFilter === 'received_at_dock') {
+        if (statusFilter === 'pending_admin_details') {
+          if (s !== 'pending_admin_details') return false;
+        } else if (statusFilter === 'received_at_dock') {
           if (s !== 'pending' && s !== 'received_at_dock') return false;
+        } else if (statusFilter === 'draft') {
+          if (s !== 'draft') return false;
         } else if (statusFilter === 'restocked') {
           if (s !== 'restocked' && s !== 'closed' && s !== 'resolved') return false;
         } else if (statusFilter === 'scrapped') {
@@ -436,6 +440,7 @@ export default function RMAReportsModal({
                 className="px-2.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-500 shadow-xs cursor-pointer"
               >
                 <option value="all">All Status & Stages</option>
+                <option value="pending_admin_details">Awaiting SKU</option>
                 <option value="draft">Draft / Intake</option>
                 <option value="received_at_dock">Received at Dock</option>
                 <option value="under_inspection">Under Inspection</option>

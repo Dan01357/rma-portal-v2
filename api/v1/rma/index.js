@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   // 2. GET: List RMA Reports with query filters
   if (req.method === 'GET') {
     try {
-      const { rma_type, status, barcode, search, disposition, condition_grade, warehouse_location, limit = '50', offset = '0' } = req.query;
+      const { rma_type, status, barcode, search, disposition, condition_grade, warehouse_location, queue, is_parent, limit = '50', offset = '0' } = req.query;
 
       const numLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
       const numOffset = Math.max(parseInt(offset, 10) || 0, 0);
@@ -24,28 +24,67 @@ export default async function handler(req, res) {
         .from('rma_reports')
         .select('*', { count: 'exact' });
 
+      // 1. Eliminate Double-Counting on Multi-Item Manifests:
+      // Filter out generic parent manifest containers (Batch Return Manifest...) so coworkers only receive
+      // individual line items with distinct SKUs, barcodes, quantities, and bin locations without double-counting.
+      // If a caller explicitly queries is_parent=true, return the parent manifest rows.
+      if (is_parent === 'true') {
+        query = query.eq('is_parent', true);
+      } else {
+        query = query
+          .or('is_parent.is.null,is_parent.eq.false')
+          .not('name', 'ilike', 'Batch Return Manifest%');
+      }
+
       if (rma_type) {
         query = query.eq('rma_type', rma_type);
       }
+
+      // 2. Explicit Inventory Queues (queue=restock | queue=scrap)
+      if (queue) {
+        const cleanQueue = String(queue).trim().toLowerCase();
+        if (cleanQueue === 'restock') {
+          query = query.ilike('disposition', '%Restock%');
+          query = query.not('status', 'in', '("restocked","scrapped","disposed","closed","resolved","rejected","deleted")');
+        } else if (cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
+          query = query.or('disposition.ilike.%Scrap%,disposition.ilike.%Dispose%');
+          query = query.not('status', 'in', '("scrapped","disposed","restocked","closed","resolved","rejected","deleted")');
+        }
+      }
+
+      // 3. Status Filtering with Comprehensive Active Pending Support
       if (status) {
         const cleanStatus = status.trim().toLowerCase();
-        if (cleanStatus === 'pending' || cleanStatus === 'received_at_dock') {
-          query = query.in('status', ['pending', 'received_at_dock']);
+        if (cleanStatus === 'pending' || cleanStatus === 'open') {
+          // Include all active pre-restock/pre-scrap statuses and exclude finalized
+          query = query
+            .in('status', ['pending', 'received_at_dock', 'logged', 'credit_memo_issued', 'under_inspection', 'pending_finance_approval'])
+            .not('status', 'in', '("restocked","scrapped","disposed","closed","resolved","rejected","deleted")');
         } else if (cleanStatus === 'restocked') {
           query = query.in('status', ['restocked', 'closed', 'resolved']);
         } else if (cleanStatus === 'scrapped' || cleanStatus === 'disposed') {
           query = query.in('status', ['scrapped', 'disposed']);
-        } else if (cleanStatus === 'open') {
-          query = query.not('status', 'in', '("closed","resolved","rejected","deleted","restocked","scrapped","disposed")');
         } else {
           query = query.eq('status', status.trim());
         }
       }
-      if (barcode) {
-        query = query.eq('barcode', barcode.trim());
-      }
+
+      // 4. Disposition Filtering
       if (disposition) {
-        query = query.ilike('disposition', `%${disposition.trim()}%`);
+        const cleanDisp = disposition.trim();
+        if (/restock/i.test(cleanDisp)) {
+          query = query.ilike('disposition', '%Restock%');
+          if (!status && !queue) {
+            query = query.not('status', 'in', '("restocked","scrapped","disposed","closed","resolved","rejected","deleted")');
+          }
+        } else if (/scrap|dispose/i.test(cleanDisp)) {
+          query = query.or('disposition.ilike.%Scrap%,disposition.ilike.%Dispose%');
+          if (!status && !queue) {
+            query = query.not('status', 'in', '("scrapped","disposed","restocked","closed","resolved","rejected","deleted")');
+          }
+        } else {
+          query = query.ilike('disposition', `%${cleanDisp}%`);
+        }
       }
       if (condition_grade) {
         query = query.ilike('condition_grade', `%${condition_grade.trim()}%`);

@@ -105,24 +105,141 @@ export default async function handler(req, res) {
         }
       }
 
-      const { data, error } = await matchRma(
-        supabase.from('rma_reports').update(updateData).select('*')
+      // First, retrieve the matching record(s) so we can update audit trails & parent manifest items
+      const { data: existingRows, error: findError } = await matchRma(
+        supabase.from('rma_reports').select('*')
       );
 
-      if (error) {
-        return sendJson(res, 500, { success: false, error: 'UPDATE_ERROR', message: error.message });
+      if (findError) {
+        return sendJson(res, 500, { success: false, error: 'DATABASE_ERROR', message: findError.message });
       }
 
-      if (!data || data.length === 0) {
+      if (!existingRows || existingRows.length === 0) {
         return sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: `RMA report ${cleanId} not found.` });
       }
 
-      const result = data.length === 1 ? data[0] : data;
-      const rmaNum = Array.isArray(data) ? data[0]?.rma_number : data?.rma_number;
+      // Standardized Audit Trail Note
+      let auditNote = `RMA status updated to ${updateData.status || 'updated'} via API by ${client.name}`;
+      if (updateData.status === 'restocked') {
+        auditNote = `ERP Restock confirmed via API by ${client.name}`;
+      } else if (updateData.status === 'scrapped') {
+        auditNote = `ERP Scrap confirmed via API by ${client.name}`;
+      }
+
+      const auditEntry = {
+        timestamp: new Date().toISOString(),
+        stage: updateData.status === 'restocked' ? 'ERP_RESTOCK' : (updateData.status === 'scrapped' ? 'ERP_SCRAP' : 'API_PATCH'),
+        actor: `${client.name} (API)`,
+        status: updateData.status,
+        warehouse_location: updateData.warehouse_location || undefined,
+        note: auditNote
+      };
+
+      const updatedRows = [];
+
+      for (const row of existingRows) {
+        const currentAudit = Array.isArray(row.audit_trail) ? [...row.audit_trail] : [];
+        currentAudit.push(auditEntry);
+
+        const rowPayload = {
+          ...updateData,
+          audit_trail: currentAudit
+        };
+
+        const { data: updatedRow, error: updateErr } = await supabase
+          .from('rma_reports')
+          .update(rowPayload)
+          .eq('id', row.id)
+          .select('*')
+          .single();
+
+        if (updateErr) {
+          console.error(`[API v1 RMA PATCH] Error updating row ${row.id}:`, updateErr);
+        } else if (updatedRow) {
+          updatedRows.push(updatedRow);
+        }
+
+        // If this row is a child item inside a parent manifest (has parent_rma_id):
+        if (row.parent_rma_id) {
+          try {
+            const { data: parentRecord } = await supabase
+              .from('rma_reports')
+              .select('id, items, audit_trail')
+              .eq('id', row.parent_rma_id)
+              .maybeSingle();
+
+            if (parentRecord) {
+              let parentItems = Array.isArray(parentRecord.items)
+                ? parentRecord.items
+                : (typeof parentRecord.items === 'string' ? JSON.parse(parentRecord.items || '[]') : []);
+
+              let itemModified = false;
+              parentItems = parentItems.map(it => {
+                const matchBarcode = it.barcode && String(it.barcode).trim() === String(row.barcode).trim();
+                const matchId = it.id && (String(it.id) === String(row.id) || String(it.id) === String(row.barcode));
+                const matchName = it.name && it.name === row.name;
+
+                if (matchBarcode || matchId || matchName) {
+                  itemModified = true;
+                  return {
+                    ...it,
+                    status: updateData.status !== undefined ? updateData.status : it.status,
+                    warehouse_location: updateData.warehouse_location !== undefined ? updateData.warehouse_location : it.warehouse_location,
+                    disposition: updateData.disposition !== undefined ? updateData.disposition : it.disposition,
+                    condition_grade: updateData.condition_grade !== undefined ? updateData.condition_grade : it.condition_grade
+                  };
+                }
+                return it;
+              });
+
+              if (itemModified) {
+                const parentAudit = Array.isArray(parentRecord.audit_trail) ? [...parentRecord.audit_trail] : [];
+                parentAudit.push({
+                  timestamp: new Date().toISOString(),
+                  stage: 'CHILD_ERP_SYNC',
+                  actor: `${client.name} (API)`,
+                  note: `${auditNote} for item "${row.name}"`
+                });
+
+                await supabase
+                  .from('rma_reports')
+                  .update({
+                    items: parentItems,
+                    audit_trail: parentAudit
+                  })
+                  .eq('id', parentRecord.id);
+              }
+            }
+          } catch (parentErr) {
+            console.warn('[API v1 RMA PATCH] Notice syncing parent manifest items:', parentErr.message);
+          }
+
+          // Also synchronize child row in rma_items if present
+          try {
+            await supabase
+              .from('rma_items')
+              .update({
+                status: updateData.status,
+                warehouse_location: updateData.warehouse_location,
+                disposition: updateData.disposition
+              })
+              .or(`id.eq.${row.id},barcode.eq.${row.barcode}`);
+          } catch (childErr) {
+            // non-blocking
+          }
+        }
+      }
+
+      if (updatedRows.length === 0) {
+        return sendJson(res, 500, { success: false, error: 'UPDATE_FAILED', message: `Failed to update RMA record ${cleanId}.` });
+      }
+
+      const result = updatedRows.length === 1 ? updatedRows[0] : updatedRows;
+      const rmaNum = updatedRows[0]?.rma_number;
 
       return sendJson(res, 200, {
         success: true,
-        message: `RMA report ${rmaNum || cleanId} updated by ${client.name} (${data.length} item${data.length > 1 ? 's' : ''} updated).`,
+        message: `RMA report ${rmaNum || cleanId} updated by ${client.name} (${updatedRows.length} item${updatedRows.length > 1 ? 's' : ''} updated).`,
         data: result
       });
     } catch (err) {
