@@ -467,3 +467,4 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     </div>
   );
 }
+

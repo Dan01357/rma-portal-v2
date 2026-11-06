@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-06T04:10:02.674Z
+Generated At: 2026-11-06T04:34:37.232Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -8981,7 +8981,8 @@ import {
   Sparkles,
   Calendar,
   Building,
-  Truck
+  Truck,
+  Ticket
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
@@ -18782,6 +18783,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     </div>
   );
 }
+
 
 --- END FILE: src/components/CustomerRMAInvitesModal.jsx ---
 
@@ -41301,6 +41303,7 @@ export const inviteService = {
     return true;
   }
 };
+
 
 --- END FILE: src/services/inviteService.js ---
 

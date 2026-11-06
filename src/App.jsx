@@ -56,7 +56,8 @@ import {
   Sparkles,
   Calendar,
   Building,
-  Truck
+  Truck,
+  Ticket
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
