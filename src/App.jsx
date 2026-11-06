@@ -312,7 +312,10 @@ export default function App() {
   const handleLockStation = () => {
     try {
       localStorage.removeItem('rma_portal_gate_session');
+      localStorage.removeItem('rma_reporter_contact');
+      localStorage.removeItem('rma_portal_verified_email');
     } catch {}
+    supabase.auth.signOut({ scope: 'local' }).catch(() => {});
     const slug = gateSession?.slug || intakeSlug || 'dock';
     accessKeyService.clearSession(slug);
     setGateSession(null);
@@ -3240,7 +3243,7 @@ export default function App() {
                       {gateSession?.authorized_email && (
                         <div className="mt-1 flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
                           <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>Google Identity Verified ({gateSession.authorized_email})</span>
+                          <span>✓ Verified Google Identity ({gateSession.authorized_email})</span>
                         </div>
                       )}
                     </div>

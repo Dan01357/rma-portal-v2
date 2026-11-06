@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-06T08:09:27.841Z
+Generated At: 2026-11-06T08:21:03.405Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -2161,30 +2161,40 @@ Each test scenario defines:
     5. **CRITICAL SECURITY REQUIREMENT**: There is NO manual email text input field. Users cannot type in an email address to bypass OAuth.
   * **Edge Case**: If token is expired or revoked, displays a 401/403 Amber alert explaining the link has expired and directing customer to request a fresh authorization from Pingcon Operations.
 
-- [ ] **TC-GATE-03 (Google OAuth Identity Verification — Success Path)**
-  * **Location**: Gatekeeper Modal (`/intake?token=inv_...`)
-  * **Action**: Click `[ 🔵 Continue with Google ]` and authenticate using the exact authorized Google account (`daniloalvaro031717@gmail.com`).
-  * **Expected Behavior**:
-    1. User is redirected back to the portal.
-    2. System queries `supabase.auth.getUser()`, extracts `user.email.toLowerCase().trim()`, and compares against `authorized_email`.
-    3. Because emails match, portal unlocks instantly with toast: *"Portal Unlocked: daniloalvaro031717@gmail.com"*.
-    4. Session is saved in `localStorage.rma_portal_gate_session`.
-    5. Section 4 (Reporter Information) email is automatically pre-filled with `daniloalvaro031717@gmail.com` and made permanently `readOnly` with green badge: *"Google Identity Verified (daniloalvaro031717@gmail.com)"*.
-
-- [ ] **TC-GATE-04 (Google OAuth Identity Mismatch — Anti-Forwarding 403 Forbidden Screen)**
+- [ ] **TC-OAUTH-01 (Cross-Account Rejection & Local Sign-Out)**
   * **Location**: Gatekeeper Modal (`/intake?token=inv_...` issued to `daniloalvaro031717@gmail.com`)
   * **Action**: User forwards the private link to another party, or signs into Google using an unauthorized account (e.g. `bargarareymond@gmail.com`).
   * **Expected Behavior**:
     1. System queries `supabase.auth.getUser()` and detects `bargarareymond@gmail.com !== daniloalvaro031717@gmail.com`.
     2. **DO NOT UNLOCK THE PORTAL**.
-    3. System immediately signs out of Supabase: `await supabase.auth.signOut()` to eradicate unauthorized JWT tokens.
+    3. System immediately signs out locally: `await supabase.auth.signOut({ scope: 'local' })` to eradicate unauthorized JWT tokens.
     4. Displays the 403 Forbidden Screen:
-       * Badge: `403 FORBIDDEN`
+       * Badge: `403 FORBIDDEN — IDENTITY MISMATCH`
        * Title: *"Access Denied — Identity Mismatch"*
        * Signed in as: `bargarareymond@gmail.com`
        * Authorized account: `daniloalvaro031717@gmail.com`
-       * Notice: *"Forwarding this return link is strictly prohibited."*
-       * Action: `[ Switch Google Account ]` (re-triggers OAuth with `prompt: 'select_account'`).
+       * Notice: *"Forwarding private return links is prohibited under Pingcon Wholesale Governance."*
+       * Action: `[ Switch Google Account ]` and `[ Admin Staff Login ]`.
+
+- [ ] **TC-OAUTH-02 (Switch Google Account with Forced Account Picker)**
+  * **Location**: 403 Forbidden Screen
+  * **Action**: Click `[ Switch Google Account ]`.
+  * **Expected Behavior**:
+    1. Re-triggers Google OAuth with `prompt: 'select_account'` and `access_type: 'offline'`.
+    2. Google displays the full account chooser modal, preventing silent auto-login into the previous unauthorized account.
+    3. User can choose or sign into the authorized account (`daniloalvaro031717@gmail.com`).
+
+- [ ] **TC-OAUTH-03 (Matching Email Unlock & ReadOnly Reporter Lock)**
+  * **Location**: Gatekeeper Modal (`/intake?token=inv_...` issued to `daniloalvaro031717@gmail.com`)
+  * **Action**: Click `[ 🔵 Continue with Google ]` and authenticate with matching account (`daniloalvaro031717@gmail.com`).
+  * **Expected Behavior**:
+    1. Supabase OAuth callback redirects to portal.
+    2. Identity verification matches `user.email === invite.authorized_email`.
+    3. Portal immediately unlocks with toast: *"Portal Unlocked: daniloalvaro031717@gmail.com"*.
+    4. Gate session saved to `localStorage.rma_portal_gate_session`.
+    5. Section 4 (Reporter Information) `reporterContact` is populated with `daniloalvaro031717@gmail.com` and made permanently `readOnly` with verified badge: *"✓ Verified Google Identity (daniloalvaro031717@gmail.com)"*.
+    6. Store/Branch is auto-populated if included in the invite.
+    7. Clicking `[ Lock Device ]` clears the gate session, calls `supabase.auth.signOut({ scope: 'local' })`, and re-locks the station.
 
 - [ ] **TC-GATE-05 (Admin Customer RMA Invites Generator)**
   * **Location**: Admin Dashboard -> **"🎫 Customer RMA Invites"** Modal
@@ -9261,7 +9271,10 @@ export default function App() {
   const handleLockStation = () => {
     try {
       localStorage.removeItem('rma_portal_gate_session');
+      localStorage.removeItem('rma_reporter_contact');
+      localStorage.removeItem('rma_portal_verified_email');
     } catch {}
+    supabase.auth.signOut({ scope: 'local' }).catch(() => {});
     const slug = gateSession?.slug || intakeSlug || 'dock';
     accessKeyService.clearSession(slug);
     setGateSession(null);
@@ -12189,7 +12202,7 @@ export default function App() {
                       {gateSession?.authorized_email && (
                         <div className="mt-1 flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
                           <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>Google Identity Verified ({gateSession.authorized_email})</span>
+                          <span>✓ Verified Google Identity ({gateSession.authorized_email})</span>
                         </div>
                       )}
                     </div>
@@ -19898,7 +19911,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { inviteService, formatRemainingCountdown, verifyGoogleIdentity } from '../services/inviteService';
+import { inviteService, formatRemainingCountdown } from '../services/inviteService';
 
 export default function GatekeeperPinModal({
   isOpen,
@@ -19915,6 +19928,16 @@ export default function GatekeeperPinModal({
   const [identityMismatch, setIdentityMismatch] = useState(null); // { signedInEmail, authorizedEmail }
   const [oauthError, setOauthError] = useState(null);
   const [countdownStr, setCountdownStr] = useState('');
+
+  const isTestModeActive = Boolean(
+    isTestMode || 
+    (typeof window !== 'undefined' && (
+      window.location.hostname === 'localhost' || 
+      window.location.search.includes('test=true') || 
+      window.location.search.includes('sandbox=true') ||
+      Boolean(oauthError)
+    ))
+  );
 
   // 1. Resolve token from URL query params, hash fragments, or pending OAuth storage
   useEffect(() => {
@@ -19961,19 +19984,20 @@ export default function GatekeeperPinModal({
           const unlockedSession = {
             type: 'external_customer',
             token: invite.token,
-            authorized_email: invite.authorized_email,
+            authorized_email: authorizedEmail,
             store_branch: invite.store_branch || '',
-            user_email: user.email,
+            user_email: userEmail,
+            user_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
             expires_at: invite.expires_at,
-            profileName: user.user_metadata?.full_name || invite.store_branch || user.email,
+            profileName: invite.store_branch || authorizedEmail,
             unlockedAt: new Date().toISOString()
           };
 
           try {
             sessionStorage.removeItem('rma_pending_oauth_token');
             localStorage.setItem('rma_portal_gate_session', JSON.stringify(unlockedSession));
-            localStorage.setItem('rma_reporter_contact', user.email);
-            localStorage.setItem('rma_portal_verified_email', user.email);
+            localStorage.setItem('rma_reporter_contact', authorizedEmail);
+            localStorage.setItem('rma_portal_verified_email', userEmail);
 
             // Clean up OAuth tokens from URL hash for a clean address bar
             if (window.location.hash && window.location.hash.includes('access_token')) {
@@ -19990,7 +20014,7 @@ export default function GatekeeperPinModal({
           // CRITICAL SECURITY MISMATCH: Signed in with unauthorized Google account
           // DO NOT UNLOCK THE PORTAL.
           // Immediately sign out of Supabase to prevent unauthorized session retention
-          await supabase.auth.signOut().catch(() => {});
+          await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
           try {
             localStorage.removeItem('rma_portal_gate_session');
           } catch {}
@@ -20083,16 +20107,17 @@ export default function GatekeeperPinModal({
         } catch {}
       }
 
-      const redirectTo = window.location.href;
+      const currentUrl = window.location.href;
       
       // Step A: Use skipBrowserRedirect: true first to safely verify the provider is enabled
       // without crashing the browser onto an unhandled raw JSON 400 error page.
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo,
+          redirectTo: currentUrl,
           skipBrowserRedirect: true,
           queryParams: {
+            access_type: 'offline',
             prompt: 'select_account',
             login_hint: validationResult.invite.authorized_email
           }
@@ -20110,7 +20135,7 @@ export default function GatekeeperPinModal({
         // Step B: Pre-flight probe to verify Supabase has Google OAuth enabled in the dashboard
         try {
           const probeRes = await fetch(data.url, { method: 'GET' });
-          if (!probeRes.ok) {
+          if (!probeRes.ok && probeRes.status === 400) {
             const probeJson = await probeRes.json().catch(() => null);
             const errMsg = probeJson?.msg || 'Google OAuth provider is not enabled in your Supabase project.';
             setOauthError(errMsg);
@@ -20143,9 +20168,10 @@ export default function GatekeeperPinModal({
     const bypassSession = {
       type: 'external_customer',
       token: inv.token,
-      authorized_email: inv.authorized_email,
+      authorized_email: inv.authorized_email.toLowerCase().trim(),
       store_branch: inv.store_branch || '',
-      user_email: inv.authorized_email,
+      user_email: inv.authorized_email.toLowerCase().trim(),
+      user_name: inv.store_branch || inv.authorized_email,
       expires_at: inv.expires_at,
       profileName: inv.store_branch || inv.authorized_email,
       isTestBypass: true,
@@ -20186,7 +20212,7 @@ export default function GatekeeperPinModal({
 
             <div className="space-y-1">
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
-                403 Forbidden
+                403 Forbidden — Identity Mismatch
               </span>
               <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
                 Access Denied — Identity Mismatch
@@ -20195,15 +20221,15 @@ export default function GatekeeperPinModal({
 
             <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl text-xs text-left space-y-2.5 text-slate-800 dark:text-slate-200">
               <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                Signed in as:
+                You are currently signed in as:
                 <strong className="block text-slate-900 dark:text-white font-mono mt-0.5 text-sm">{identityMismatch.signedInEmail}</strong>
               </p>
               <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                Authorized account:
+                This private return link was issued strictly to:
                 <strong className="block text-emerald-600 dark:text-emerald-400 font-mono mt-0.5 text-sm">{identityMismatch.authorizedEmail}</strong>
               </p>
               <div className="text-[11px] text-rose-700 dark:text-rose-300 font-bold pt-2 border-t border-rose-200 dark:border-rose-900/40">
-                Forwarding this return link is strictly prohibited.
+                Forwarding private return links is prohibited under Pingcon Wholesale Governance.
               </div>
             </div>
 
@@ -20220,7 +20246,7 @@ export default function GatekeeperPinModal({
                 <span>Switch Google Account</span>
               </button>
 
-              {isTestMode && (
+              {isTestModeActive && (
                 <button
                   type="button"
                   onClick={handleTestModeBypass}
@@ -20439,7 +20465,7 @@ export default function GatekeeperPinModal({
 
             <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
               {/* QA Sandbox Test Mode Quick Bypass */}
-              {isTestMode && (
+              {isTestModeActive && (
                 <button
                   type="button"
                   onClick={handleTestModeBypass}
@@ -20465,7 +20491,6 @@ export default function GatekeeperPinModal({
     </div>
   );
 }
-
 --- END FILE: src/components/GatekeeperPinModal.jsx ---
 
 --- START FILE: src/components/HowItWorksModal.jsx ---

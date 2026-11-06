@@ -45,30 +45,40 @@ Each test scenario defines:
     5. **CRITICAL SECURITY REQUIREMENT**: There is NO manual email text input field. Users cannot type in an email address to bypass OAuth.
   * **Edge Case**: If token is expired or revoked, displays a 401/403 Amber alert explaining the link has expired and directing customer to request a fresh authorization from Pingcon Operations.
 
-- [ ] **TC-GATE-03 (Google OAuth Identity Verification — Success Path)**
-  * **Location**: Gatekeeper Modal (`/intake?token=inv_...`)
-  * **Action**: Click `[ 🔵 Continue with Google ]` and authenticate using the exact authorized Google account (`daniloalvaro031717@gmail.com`).
-  * **Expected Behavior**:
-    1. User is redirected back to the portal.
-    2. System queries `supabase.auth.getUser()`, extracts `user.email.toLowerCase().trim()`, and compares against `authorized_email`.
-    3. Because emails match, portal unlocks instantly with toast: *"Portal Unlocked: daniloalvaro031717@gmail.com"*.
-    4. Session is saved in `localStorage.rma_portal_gate_session`.
-    5. Section 4 (Reporter Information) email is automatically pre-filled with `daniloalvaro031717@gmail.com` and made permanently `readOnly` with green badge: *"Google Identity Verified (daniloalvaro031717@gmail.com)"*.
-
-- [ ] **TC-GATE-04 (Google OAuth Identity Mismatch — Anti-Forwarding 403 Forbidden Screen)**
+- [ ] **TC-OAUTH-01 (Cross-Account Rejection & Local Sign-Out)**
   * **Location**: Gatekeeper Modal (`/intake?token=inv_...` issued to `daniloalvaro031717@gmail.com`)
   * **Action**: User forwards the private link to another party, or signs into Google using an unauthorized account (e.g. `bargarareymond@gmail.com`).
   * **Expected Behavior**:
     1. System queries `supabase.auth.getUser()` and detects `bargarareymond@gmail.com !== daniloalvaro031717@gmail.com`.
     2. **DO NOT UNLOCK THE PORTAL**.
-    3. System immediately signs out of Supabase: `await supabase.auth.signOut()` to eradicate unauthorized JWT tokens.
+    3. System immediately signs out locally: `await supabase.auth.signOut({ scope: 'local' })` to eradicate unauthorized JWT tokens.
     4. Displays the 403 Forbidden Screen:
-       * Badge: `403 FORBIDDEN`
+       * Badge: `403 FORBIDDEN — IDENTITY MISMATCH`
        * Title: *"Access Denied — Identity Mismatch"*
        * Signed in as: `bargarareymond@gmail.com`
        * Authorized account: `daniloalvaro031717@gmail.com`
-       * Notice: *"Forwarding this return link is strictly prohibited."*
-       * Action: `[ Switch Google Account ]` (re-triggers OAuth with `prompt: 'select_account'`).
+       * Notice: *"Forwarding private return links is prohibited under Pingcon Wholesale Governance."*
+       * Action: `[ Switch Google Account ]` and `[ Admin Staff Login ]`.
+
+- [ ] **TC-OAUTH-02 (Switch Google Account with Forced Account Picker)**
+  * **Location**: 403 Forbidden Screen
+  * **Action**: Click `[ Switch Google Account ]`.
+  * **Expected Behavior**:
+    1. Re-triggers Google OAuth with `prompt: 'select_account'` and `access_type: 'offline'`.
+    2. Google displays the full account chooser modal, preventing silent auto-login into the previous unauthorized account.
+    3. User can choose or sign into the authorized account (`daniloalvaro031717@gmail.com`).
+
+- [ ] **TC-OAUTH-03 (Matching Email Unlock & ReadOnly Reporter Lock)**
+  * **Location**: Gatekeeper Modal (`/intake?token=inv_...` issued to `daniloalvaro031717@gmail.com`)
+  * **Action**: Click `[ 🔵 Continue with Google ]` and authenticate with matching account (`daniloalvaro031717@gmail.com`).
+  * **Expected Behavior**:
+    1. Supabase OAuth callback redirects to portal.
+    2. Identity verification matches `user.email === invite.authorized_email`.
+    3. Portal immediately unlocks with toast: *"Portal Unlocked: daniloalvaro031717@gmail.com"*.
+    4. Gate session saved to `localStorage.rma_portal_gate_session`.
+    5. Section 4 (Reporter Information) `reporterContact` is populated with `daniloalvaro031717@gmail.com` and made permanently `readOnly` with verified badge: *"✓ Verified Google Identity (daniloalvaro031717@gmail.com)"*.
+    6. Store/Branch is auto-populated if included in the invite.
+    7. Clicking `[ Lock Device ]` clears the gate session, calls `supabase.auth.signOut({ scope: 'local' })`, and re-locks the station.
 
 - [ ] **TC-GATE-05 (Admin Customer RMA Invites Generator)**
   * **Location**: Admin Dashboard -> **"🎫 Customer RMA Invites"** Modal
