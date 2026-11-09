@@ -300,7 +300,7 @@ export default function CreditMemosTab({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `Finance_Credit_Memos_${formatFilenameDateTime()}.csv`);
+    link.setAttribute('download', `Finance_Credit_Memos ${formatFilenameDateTime()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

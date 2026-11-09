@@ -1241,7 +1241,7 @@ export const catalogService = {
       inspected_at: null,
       audit_trail: [],
       // Multi-Item Manifest Fields
-      is_parent: hasItems ? true : Boolean(is_parent),
+      is_parent: isBatch ? true : Boolean(is_parent),
       parent_rma_id: parent_rma_id || null,
       items: hasItems ? items : [],
       total_items: calculatedTotalItems,

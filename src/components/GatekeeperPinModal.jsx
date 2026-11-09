@@ -383,17 +383,6 @@ export default function GatekeeperPinModal({
                 Please contact your assigned Pingcon representative or Account Executive to receive your store's personalized return authorization link.
               </p>
             </div>
-
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={onOpenAdminLogin}
-                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-blue-600/25 transition-all cursor-pointer"
-              >
-                <LogIn className="w-4 h-4" />
-                <span>Admin & Staff Login</span>
-              </button>
-            </div>
           </div>
         ) : !validationResult?.valid ? (
           /* 4. Token Invalid / Expired / Revoked */

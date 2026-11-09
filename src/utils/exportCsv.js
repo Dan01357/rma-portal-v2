@@ -23,11 +23,9 @@ export function formatFilenameDateTime(date = new Date()) {
 
 export function resolveFilenameWithTimestamp(defaultPrefix, customFilename) {
   const ts = formatFilenameDateTime();
-  if (!customFilename) return `${defaultPrefix}_${ts}.csv`;
-  if (customFilename.toLowerCase().endsWith('.csv')) {
-    return customFilename.replace(/\.csv$/i, `_${ts}.csv`);
-  }
-  return `${customFilename}_${ts}.csv`;
+  if (!customFilename) return `${defaultPrefix} ${ts}.csv`;
+  const cleanName = customFilename.replace(/\.csv$/i, '');
+  return `${cleanName} ${ts}.csv`;
 }
 
 /**
