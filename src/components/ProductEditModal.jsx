@@ -35,6 +35,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   const [price, setPrice] = useState('');
   const [priceWithVat, setPriceWithVat] = useState('');
   const [unitName, setUnitName] = useState('pc');
+  const [piecesPerCase, setPiecesPerCase] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
@@ -94,6 +95,11 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         setPrice(product.price !== undefined ? String(product.price) : '0');
         setPriceWithVat(product.price_with_vat !== undefined ? String(product.price_with_vat) : String(product.priceWithVat || '0'));
         setUnitName(product.unit_name || product.unitName || 'pc');
+        setPiecesPerCase(
+          product.pieces_per_case !== undefined && product.pieces_per_case !== null
+            ? String(product.pieces_per_case)
+            : (product.piecesPerCase !== undefined && product.piecesPerCase !== null ? String(product.piecesPerCase) : '')
+        );
 
         // Only preload image if it is an existing verified catalog product with an official image.
         // For unassigned barcodes or new SKU assignments, strictly start with empty state placeholder.
@@ -124,6 +130,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         setPrice('');
         setPriceWithVat('');
         setUnitName('pc');
+        setPiecesPerCase('');
         setImageUrl('');
         setPhotoPreview(null);
         setSelectedAe(null);
@@ -176,6 +183,12 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
       setUnitName(item.unitName || item.unit_name);
     } else {
       setUnitName('pc');
+    }
+
+    if (item.pieces_per_case || item.piecesPerCase) {
+      setPiecesPerCase(String(item.pieces_per_case || item.piecesPerCase));
+    } else {
+      setPiecesPerCase('');
     }
 
     // Do NOT auto generate fake image. Only set if real image exists from catalog
@@ -266,6 +279,9 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         });
       }
 
+      const isCaseUnit = (unitName || '').toLowerCase() === 'case';
+      const cleanPiecesPerCase = isCaseUnit ? (parseInt(piecesPerCase, 10) || null) : null;
+
       const payload = {
         barcode: barcode.trim(),
         code: code.trim() || null,
@@ -274,6 +290,8 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         price: Number((parseFloat(price) || 0).toFixed(2)),
         priceWithVat: Number((parseFloat(priceWithVat) || parseFloat(price) || 0).toFixed(2)),
         unitName: unitName.trim() || 'pc',
+        pieces_per_case: cleanPiecesPerCase,
+        piecesPerCase: cleanPiecesPerCase,
         imageUrl: finalImageUrl || null,
         aeName: selectedAe.name,
         aeEmail: selectedAe.email,
@@ -640,6 +658,26 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                 </select>
               </div>
             </div>
+
+            {/* Pieces Per Case (Pack Size) - when Unit is 'case' */}
+            {unitName === 'case' && (
+              <div className="p-3 bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 rounded-2xl space-y-1 animate-in fade-in">
+                <label className="block text-xs font-bold text-amber-900 dark:text-amber-200">
+                  Pieces per Case (Pack Size) *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={piecesPerCase}
+                  onChange={(e) => setPiecesPerCase(e.target.value)}
+                  placeholder="e.g. 24"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-600 shadow-2xs"
+                />
+                <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                  Specifies how many individual pieces are inside 1 case (e.g. 6 cases × 24 pcs/cs = 144 pcs total).
+                </p>
+              </div>
+            )}
 
             {/* Supplier */}
             <div>

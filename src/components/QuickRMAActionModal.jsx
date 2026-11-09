@@ -47,12 +47,26 @@ import RMATimelineAudit from './RMATimelineAudit';
 
 const QUICK_AUTH_STORAGE_KEY = 'rma_quick_auth_admin';
 
-const DISPOSITION_OPTIONS = [
+const CUSTOMER_DISPOSITION_OPTIONS = [
   '1- Pending Triage',
   '2- Restock to Inventory',
   '3- Return to Vendor (RTV)',
   '4- Quarantine',
-  '5- Scrap / Dispose'
+  '5- Scrap / Dispose',
+  '6- Buffer Stock Exchange'
+];
+
+const SUPPLIER_DISPOSITION_OPTIONS = [
+  '1 - Pending Vendor Pickup',
+  '2 - In Transit to Vendor',
+  '3 - Vendor Credit / AP Deduction Settled',
+  '4 - Vendor Replacement Stock Received',
+  '5 - Claim Rejected by Vendor'
+];
+
+const DISPOSITION_OPTIONS = [
+  ...CUSTOMER_DISPOSITION_OPTIONS,
+  ...SUPPLIER_DISPOSITION_OPTIONS
 ];
 
 function normalizeDispositionOption(disp) {
@@ -62,6 +76,40 @@ function normalizeDispositionOption(disp) {
     opt.replace(/^\d+-\s*/, '').toLowerCase() === disp.replace(/^\d+-\s*/, '').toLowerCase()
   );
   return found || disp;
+}
+
+/**
+ * Enterprise Automatic Lifecycle Status Calculator
+ * Lifecycle status is 100% computed automatically from triage disposition and financial records.
+ */
+export function computeAutomaticLifecycleStatus(disposition, hasCreditMemo = false, currentStatus = null) {
+  if (hasCreditMemo) return 'credit_memo_issued';
+  const disp = String(disposition || '').toLowerCase().trim();
+
+  if (
+    disp.includes('restock') || 
+    disp.includes('accepted replacement') || 
+    disp.includes('replacement stock received')
+  ) {
+    return 'restocked';
+  }
+  if (
+    disp.includes('scrap') || 
+    disp.includes('dispose') || 
+    disp.includes('local destruction')
+  ) {
+    return 'scrapped';
+  }
+  if (disp.includes('buffer stock') || disp.includes('buffer replacement')) {
+    return 'buffer_replacement_dispatched';
+  }
+  if (disp.includes('rejected') || disp.includes('invalid claim')) {
+    return 'rejected';
+  }
+  if (disp.includes('deduction') || disp.includes('ap deduction') || disp.includes('vendor credit') || disp.includes('credit memo')) {
+    return 'credit_memo_issued';
+  }
+  return 'under_inspection';
 }
 
 export default function QuickRMAActionModal({
@@ -143,10 +191,12 @@ export default function QuickRMAActionModal({
         currentDisp === '1- Pending Triage' ||
         currentDisp === '1 - Pending Triage';
 
-      // Automatically update disposition to 'Return to Vendor (RTV)' if toggling to supplier_outbound from pending triage
+      // Automatically update disposition when switching streams
       const targetDisposition = (newType === 'supplier_outbound' && isPendingTriage)
-        ? '3- Return to Vendor (RTV)'
-        : (report.disposition || '1- Pending Triage');
+        ? 'Return to Vendor (RTV)'
+        : (newType === 'customer_inbound' && (currentDisp.includes('Pending Vendor Pickup') || currentDisp.includes('Return to Vendor'))
+            ? '1- Pending Triage'
+            : (report.disposition || '1- Pending Triage'));
 
       // Optimistic update
       const updatedReport = { 
@@ -291,11 +341,14 @@ export default function QuickRMAActionModal({
         note: `Physical triage completed by ${inspectorName}`
       };
 
+      const autoStatus = computeAutomaticLifecycleStatus(disposition, hasLinkedCreditMemo, report.status);
+      setRmaStatus(autoStatus);
+
       const updates = {
         condition_grade: conditionGrade,
         disposition: disposition,
         warehouse_location: warehouseLocation.trim().toUpperCase() || null,
-        status: rmaStatus,
+        status: autoStatus,
         inspected_by: inspectorName,
         inspected_at: new Date().toISOString(),
         audit_trail: [...existingAudit, newAuditEvent]
@@ -411,6 +464,7 @@ export default function QuickRMAActionModal({
               condition_grade: item.condition_grade,
               warehouse_location: (item.warehouse_location || '').trim().toUpperCase(),
               disposition: item.disposition,
+              status: computeAutomaticLifecycleStatus(item.disposition, false, null),
               inspected_by: inspectorName,
               inspected_at: new Date().toISOString()
             })
@@ -1812,15 +1866,17 @@ export default function QuickRMAActionModal({
                       );
                     })()}
 
-                    <button
-                      type="button"
-                      onClick={() => setIsBufferSlipOpen(true)}
-                      className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
-                      title="Print Buffer Stock Replacement Dispatch Slip / Gate Pass"
-                    >
-                      <Truck className="w-3.5 h-3.5 text-indigo-200" />
-                      <span>Buffer Slip</span>
-                    </button>
+                    {!isSupplierStream && (
+                      <button
+                        type="button"
+                        onClick={() => setIsBufferSlipOpen(true)}
+                        className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
+                        title="Print Buffer Stock Replacement Dispatch Slip / Gate Pass"
+                      >
+                        <Truck className="w-3.5 h-3.5 text-indigo-200" />
+                        <span>Buffer Slip</span>
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -2343,16 +2399,28 @@ export default function QuickRMAActionModal({
                                 Disposition
                               </label>
                               <select
-                                value={it.disposition || '1- Pending Triage'}
+                                value={it.disposition || (isSupplierStream ? '1 - Pending Vendor Pickup' : '1- Pending Triage')}
                                 onChange={(e) => updateManifestItemField(idx, 'disposition', e.target.value)}
                                 className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
                               >
-                                <option value="1- Pending Triage">1- Pending Triage</option>
-                                <option value="2- Restock to Inventory">2- Restock to Inventory</option>
-                                <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
-                                <option value="4- Quarantine">4- Quarantine</option>
-                                <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
-                                <option value="6- Buffer Stock Exchange">6- Buffer Stock Exchange</option>
+                                {isSupplierStream ? (
+                                  <>
+                                    <option value="1 - Pending Vendor Pickup">1 - Pending Vendor Pickup</option>
+                                    <option value="2 - In Transit to Vendor">2 - In Transit to Vendor</option>
+                                    <option value="3 - Vendor Credit / AP Deduction Settled">3 - Vendor Credit / AP Deduction Settled</option>
+                                    <option value="4 - Vendor Replacement Stock Received">4 - Vendor Replacement Stock Received</option>
+                                    <option value="5 - Claim Rejected by Vendor">5 - Claim Rejected by Vendor</option>
+                                  </>
+                                ) : (
+                                  <>
+                                    <option value="1- Pending Triage">1- Pending Triage</option>
+                                    <option value="2- Restock to Inventory">2- Restock to Inventory</option>
+                                    <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
+                                    <option value="4- Quarantine">4- Quarantine</option>
+                                    <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
+                                    <option value="6- Buffer Stock Exchange">6- Buffer Stock Exchange</option>
+                                  </>
+                                )}
                               </select>
                             </div>
                           </div>
@@ -2444,22 +2512,14 @@ export default function QuickRMAActionModal({
                             onChange={(e) => {
                               const newDisp = e.target.value;
                               setDisposition(newDisp);
-                              if (newDisp === '2 - Vendor Accepted Replacement') {
-                                setRmaStatus('restocked');
-                              } else if (newDisp === '3 - Vendor Credit / AP Deduction') {
-                                setRmaStatus('credit_memo_issued');
-                              } else if (newDisp === '4 - Local Destruction Authorized by Vendor') {
-                                setRmaStatus('scrapped');
-                              } else if (newDisp === '5 - Claim Rejected by Vendor') {
-                                setRmaStatus('rejected');
-                              }
+                              setRmaStatus(computeAutomaticLifecycleStatus(newDisp, hasLinkedCreditMemo, rmaStatus));
                             }}
-                            className="w-full px-2.5 py-2 bg-purple-50/50 dark:bg-purple-950/30 border border-purple-300 dark:border-purple-800 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-purple-600 shadow-2xs"
+                            className="w-full px-2.5 py-2 bg-purple-50/50 dark:bg-purple-950/30 border border-purple-300 dark:border-purple-800 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-purple-600 shadow-2xs cursor-pointer"
                           >
                             <option value="1 - Pending Vendor Pickup">1 - Pending Vendor Pickup</option>
-                            <option value="2 - Vendor Accepted Replacement">2 - Vendor Accepted Replacement</option>
-                            <option value="3 - Vendor Credit / AP Deduction">3 - Vendor Credit / AP Deduction</option>
-                            <option value="4 - Local Destruction Authorized by Vendor">4 - Local Destruction Authorized by Vendor</option>
+                            <option value="2 - In Transit to Vendor">2 - In Transit to Vendor</option>
+                            <option value="3 - Vendor Credit / AP Deduction Settled">3 - Vendor Credit / AP Deduction Settled</option>
+                            <option value="4 - Vendor Replacement Stock Received">4 - Vendor Replacement Stock Received</option>
                             <option value="5 - Claim Rejected by Vendor">5 - Claim Rejected by Vendor</option>
                           </select>
                         ) : (
@@ -2468,15 +2528,9 @@ export default function QuickRMAActionModal({
                             onChange={(e) => {
                               const newDisp = e.target.value;
                               setDisposition(newDisp);
-                              if (newDisp === '2- Restock to Inventory') {
-                                setRmaStatus('restocked');
-                              } else if (newDisp === '5- Scrap / Dispose') {
-                                setRmaStatus('scrapped');
-                              } else if (newDisp === '6- Buffer Stock Exchange') {
-                                setRmaStatus('buffer_replacement_dispatched');
-                              }
+                              setRmaStatus(computeAutomaticLifecycleStatus(newDisp, hasLinkedCreditMemo, rmaStatus));
                             }}
-                            className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600 shadow-2xs"
+                            className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600 shadow-2xs cursor-pointer"
                           >
                             <option value="1- Pending Triage">1- Pending Triage</option>
                             <option value="2- Restock to Inventory">2- Restock to Inventory</option>
@@ -2505,28 +2559,17 @@ export default function QuickRMAActionModal({
                         </div>
                       </div>
 
-                      {/* RMA Lifecycle Status */}
+                      {/* Automated RMA Lifecycle Status (Zero Manual Select) */}
                       <div>
                         <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                          Lifecycle Stage
+                          Automated Lifecycle Stage
                         </label>
-                        <select
-                          value={rmaStatus === 'closed' || rmaStatus === 'resolved' ? 'restocked' : rmaStatus}
-                          onChange={(e) => setRmaStatus(e.target.value)}
-                          className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
-                        >
-                          <option value="pending_admin_details">Awaiting SKU</option>
-                          <option value="logged">Logged / SKU Assigned</option>
-                          <option value="draft">1- Draft / Intake</option>
-                          <option value="received_at_dock">2- Received at Dock</option>
-                          <option value="under_inspection">3- Under Inspection</option>
-                          <option value="pending_finance_approval">4- Pending Finance Approval</option>
-                          <option value="credit_memo_issued">5- Credit Memo Issued</option>
-                          <option value="restocked">6- Restocked</option>
-                          <option value="scrapped">7- Scrapped / Disposed</option>
-                          <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
-                          <option value="rejected">8- Rejected / Invalid Claim</option>
-                        </select>
+                        <div className="w-full px-2.5 py-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-700 dark:text-slate-300 text-xs flex items-center gap-1.5 shadow-2xs">
+                          <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0 animate-pulse" />
+                          <span className="capitalize">
+                            {computeAutomaticLifecycleStatus(disposition, hasLinkedCreditMemo, rmaStatus).replace(/_/g, ' ')}
+                          </span>
+                        </div>
                       </div>
                     </div>
 

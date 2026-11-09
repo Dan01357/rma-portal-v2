@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-09T04:47:58.894Z
+Generated At: 2026-11-09T07:21:37.345Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -9212,7 +9212,7 @@ import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest } from './utils/rmaHelpers';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest, formatQuantityWithPackSize } from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
   '1- Damaged Box / Crushed Packaging',
@@ -13439,10 +13439,7 @@ export default function App() {
                                   {/* Quantity & Unit Column */}
                                   <td className="py-3 px-3 text-center whitespace-nowrap">
                                     <span className="font-mono font-black text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs inline-flex items-center gap-1">
-                                      <span>{item.quantity || 1}</span>
-                                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-extrabold uppercase">
-                                        {item.unit_name || 'pc'}
-                                      </span>
+                                      <span>{formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}</span>
                                     </span>
                                   </td>
 
@@ -13498,7 +13495,19 @@ export default function App() {
 
                                   {/* 8. Lifecycle Stage */}
                                   <td className="py-3 px-3 text-center whitespace-nowrap">
-                                    {(() => {
+                                    {isManifest ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleManifestExpand(manifestKey);
+                                        }}
+                                        className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1 hover:bg-purple-200 cursor-pointer shadow-2xs"
+                                        title="Click to view child line items in drawer"
+                                      >
+                                        <span>📦 Multi-Item Status (See Drawer)</span>
+                                      </button>
+                                    ) : (() => {
                                       const stageInfo = formatLifecycleStage(item.status);
                                       return (
                                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-block shadow-2xs ${stageInfo.color}`}>
@@ -13510,7 +13519,19 @@ export default function App() {
 
                                   {/* 10. Disposition (Full text without truncation) */}
                                   <td className="py-3 px-3.5 text-center whitespace-nowrap">
-                                    {(() => {
+                                    {isManifest ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleManifestExpand(manifestKey);
+                                        }}
+                                        className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1 hover:bg-purple-200 cursor-pointer shadow-2xs"
+                                        title="Click to view child line items in drawer"
+                                      >
+                                        <span>📦 Multi-Item Status (See Drawer)</span>
+                                      </button>
+                                    ) : (() => {
                                       const disp = item.disposition || 'Pending Triage';
                                       let color = 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
                                       if (disp === 'Restock to Inventory') color = 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800';
@@ -13838,8 +13859,8 @@ export default function App() {
                                                       {/* Qty & Unit: 80px */}
                                                       <td className="py-2 px-3 text-center font-mono w-[80px]">
                                                         <div className="flex flex-col items-center gap-0.5">
-                                                          <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded-md text-[11px] truncate">
-                                                            {childQty} {childUnit}
+                                                          <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded-md text-[11px] truncate" title={formatQuantityWithPackSize(childQty, childUnit, child.pieces_per_case || matchedChild?.pieces_per_case)}>
+                                                            {formatQuantityWithPackSize(childQty, childUnit, child.pieces_per_case || matchedChild?.pieces_per_case)}
                                                           </span>
                                                           {childLocation && (
                                                             <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold truncate max-w-[75px]" title={childLocation}>
@@ -14039,7 +14060,7 @@ export default function App() {
                                     📥 Inbound
                                   </span>
                                   <span className="font-mono font-black text-xs text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-0.5 rounded-md shadow-2xs">
-                                    Qty: <strong className="text-blue-600 dark:text-blue-400 font-black">{item.quantity || 1} {item.unit_name || 'pc'}</strong>
+                                    Qty: <strong className="text-blue-600 dark:text-blue-400 font-black">{formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}</strong>
                                   </span>
                                   <button
                                     type="button"
@@ -14085,7 +14106,7 @@ export default function App() {
                                   {resolvedName}
                                 </h4>
                                 <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                                  Qty: <strong className="text-slate-900 dark:text-white font-bold">{item.quantity || 1} {item.unit_name || 'pc'}</strong> • Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
+                                  Qty: <strong className="text-slate-900 dark:text-white font-bold">{formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}</strong> • Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
                                   {(item.code || matchedProduct?.code) && <span> • SKU: {item.code || matchedProduct?.code}</span>}
                                 </div>
                               </div>
@@ -15057,6 +15078,7 @@ export default function App() {
       <GatekeeperPinModal
         isOpen={(() => {
           if (typeof window === 'undefined') return false;
+          if (isAdminView) return false;
           // Only users already authenticated as currentUser?.role === 'super_admin' can view "/" for testing
           if (currentUser?.role === 'super_admin') return false;
 
@@ -20418,18 +20440,16 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
 --- END FILE: src/components/FinanceCreditMemoTab.jsx ---
 
 --- START FILE: src/components/GatekeeperPinModal.jsx ---
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   ShieldCheck, 
   ShieldAlert, 
   Lock, 
-  LogIn, 
   RefreshCw, 
   AlertTriangle,
   Building2,
   Clock,
   Mail,
-  UserCheck,
   Truck,
   Store
 } from 'lucide-react';
@@ -20453,6 +20473,9 @@ export default function GatekeeperPinModal({
   const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
 
+  const hasValidatedRef = useRef(false);
+  const validatedTokenRef = useRef(null);
+
   // 1. Resolve token from URL query params, hash fragments, or pending OAuth storage
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -20467,7 +20490,14 @@ export default function GatekeeperPinModal({
 
     if (!t) {
       try {
-        t = sessionStorage.getItem('rma_pending_oauth_token');
+        t = sessionStorage.getItem('rma_active_invite_token') || sessionStorage.getItem('rma_pending_oauth_token');
+      } catch {}
+    }
+
+    if (t) {
+      try {
+        sessionStorage.setItem('rma_active_invite_token', t);
+        sessionStorage.setItem('rma_pending_oauth_token', t);
       } catch {}
     }
 
@@ -20518,7 +20548,7 @@ export default function GatekeeperPinModal({
             localStorage.setItem('rma_reporter_contact', authorizedEmail);
             localStorage.setItem('rma_portal_verified_email', userEmail);
 
-            // Clean up OAuth tokens from URL hash for a clean address bar
+            // Clean up OAuth tokens from URL hash for a clean address bar while strictly preserving search params
             if (window.location.hash && window.location.hash.includes('access_token')) {
               window.history.replaceState(null, '', window.location.pathname + window.location.search);
             }
@@ -20531,8 +20561,7 @@ export default function GatekeeperPinModal({
           return;
         } else {
           // CRITICAL SECURITY MISMATCH: Signed in with unauthorized Google account
-          // DO NOT UNLOCK THE PORTAL.
-          // Immediately sign out of Supabase to prevent unauthorized session retention
+          // Immediately sign out locally to prevent unauthorized session retention
           await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
           try {
             localStorage.removeItem('rma_portal_gate_session');
@@ -20543,6 +20572,7 @@ export default function GatekeeperPinModal({
             authorizedEmail: invite.authorized_email
           });
           setIsCheckingAuth(false);
+          setIsValidatingToken(false);
           return;
         }
       }
@@ -20553,7 +20583,7 @@ export default function GatekeeperPinModal({
     }
   }, [onUnlock]);
 
-  // 3. Validate token from URL / database
+  // 3. Validate token from URL / database with ref guard to prevent loop
   useEffect(() => {
     let isMounted = true;
     if (!token) {
@@ -20562,20 +20592,31 @@ export default function GatekeeperPinModal({
       return;
     }
 
+    // Ref guard: only validate once per unique token to eliminate loading flicker loop
+    if (hasValidatedRef.current && validatedTokenRef.current === token) {
+      setIsValidatingToken(false);
+      return;
+    }
+
     setIsValidatingToken(true);
     inviteService.validateInviteToken(token).then(async (res) => {
       if (!isMounted) return;
+      hasValidatedRef.current = true;
+      validatedTokenRef.current = token;
       setValidationResult(res);
       setIsValidatingToken(false);
 
       if (res?.valid && res?.invite) {
         try {
+          sessionStorage.setItem('rma_active_invite_token', token);
           sessionStorage.setItem('rma_pending_oauth_token', token);
         } catch {}
 
         // Check if user is already authenticated via Supabase Google OAuth
         await verifyIdentityWithSupabase(res.invite);
       }
+    }).catch(() => {
+      if (isMounted) setIsValidatingToken(false);
     });
 
     return () => { isMounted = false; };
@@ -20584,6 +20625,7 @@ export default function GatekeeperPinModal({
   // 4. Subscribe to Supabase Auth state changes (triggers on OAuth redirect return)
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (identityMismatch) return;
       if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && session?.user) {
         if (validationResult?.valid && validationResult?.invite) {
           await verifyIdentityWithSupabase(validationResult.invite, session.user);
@@ -20594,7 +20636,7 @@ export default function GatekeeperPinModal({
     return () => {
       subscription?.unsubscribe();
     };
-  }, [validationResult, verifyIdentityWithSupabase]);
+  }, [validationResult, verifyIdentityWithSupabase, identityMismatch]);
 
   // 5. Countdown timer for valid invite
   useEffect(() => {
@@ -20622,6 +20664,7 @@ export default function GatekeeperPinModal({
     try {
       if (token) {
         try {
+          sessionStorage.setItem('rma_active_invite_token', token);
           sessionStorage.setItem('rma_pending_oauth_token', token);
         } catch {}
       }
@@ -20711,7 +20754,7 @@ export default function GatekeeperPinModal({
             </p>
           </div>
         ) : identityMismatch ? (
-          /* 2. 403 Forbidden Screen — Identity Mismatch (Cryptographic Google OAuth Block) */
+          /* 2. 403 Forbidden Screen — Identity Mismatch (Strict Google OAuth Block) */
           <div className="space-y-5 animate-in zoom-in-95">
             <div className="w-16 h-16 rounded-3xl bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto shadow-inner">
               <ShieldAlert className="w-8 h-8" />
@@ -20740,7 +20783,7 @@ export default function GatekeeperPinModal({
               </div>
             </div>
 
-            <div className="space-y-2 pt-2">
+            <div className="pt-2">
               <button
                 type="button"
                 onClick={() => {
@@ -20752,18 +20795,10 @@ export default function GatekeeperPinModal({
                 <RefreshCw className="w-4 h-4" />
                 <span>Switch Google Account</span>
               </button>
-
-              <button
-                type="button"
-                onClick={onOpenAdminLogin}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
-              >
-                <span>Admin & Staff Login</span>
-              </button>
             </div>
           </div>
         ) : !token ? (
-          /* 3. Visited Without a Token */
+          /* 3. Visited Without a Token (Public Root / Lock Screen - Zero Admin Buttons) */
           <div className="space-y-5 animate-in zoom-in-95">
             <div className="w-16 h-16 rounded-3xl bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-inner">
               <Lock className="w-8 h-8" />
@@ -20789,7 +20824,7 @@ export default function GatekeeperPinModal({
             </div>
           </div>
         ) : !validationResult?.valid ? (
-          /* 4. Token Invalid / Expired / Revoked */
+          /* 4. Token Invalid / Expired / Revoked (Zero Admin Buttons) */
           <div className="space-y-5 animate-in zoom-in-95">
             <div className="w-16 h-16 rounded-3xl bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto shadow-inner">
               <Clock className="w-8 h-8" />
@@ -20814,19 +20849,9 @@ export default function GatekeeperPinModal({
                 Please contact your Pingcon representative to generate a fresh return authorization link for your account.
               </p>
             </div>
-
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={onOpenAdminLogin}
-                className="w-full py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
-              >
-                <span>Admin & Staff Login</span>
-              </button>
-            </div>
           </div>
         ) : (
-          /* 5. Valid Token -> 1-Click Google Identity Lock OAuth Screen (Zero Manual Email Typing) */
+          /* 5. Valid Token -> 1-Click Google Identity Lock OAuth Screen (Zero Admin Buttons) */
           <div className="space-y-5 animate-in zoom-in-95">
             <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mx-auto shadow-inner ${
               isSupplier 
@@ -20979,16 +21004,6 @@ export default function GatekeeperPinModal({
               >
                 <Mail className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                 <span>{magicLinkSent ? '✓ One-Time Link Dispatched to Your Inbox' : isSendingMagicLink ? 'Dispatching Access Link...' : 'Email One-Time Access Link to ' + validationResult.invite.authorized_email}</span>
-              </button>
-            </div>
-
-            <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={onOpenAdminLogin}
-                className="w-full py-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-xs transition-colors cursor-pointer"
-              >
-                <span>Admin & Staff Login</span>
               </button>
             </div>
           </div>
@@ -25484,6 +25499,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   const [price, setPrice] = useState('');
   const [priceWithVat, setPriceWithVat] = useState('');
   const [unitName, setUnitName] = useState('pc');
+  const [piecesPerCase, setPiecesPerCase] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
@@ -25543,6 +25559,11 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         setPrice(product.price !== undefined ? String(product.price) : '0');
         setPriceWithVat(product.price_with_vat !== undefined ? String(product.price_with_vat) : String(product.priceWithVat || '0'));
         setUnitName(product.unit_name || product.unitName || 'pc');
+        setPiecesPerCase(
+          product.pieces_per_case !== undefined && product.pieces_per_case !== null
+            ? String(product.pieces_per_case)
+            : (product.piecesPerCase !== undefined && product.piecesPerCase !== null ? String(product.piecesPerCase) : '')
+        );
 
         // Only preload image if it is an existing verified catalog product with an official image.
         // For unassigned barcodes or new SKU assignments, strictly start with empty state placeholder.
@@ -25573,6 +25594,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         setPrice('');
         setPriceWithVat('');
         setUnitName('pc');
+        setPiecesPerCase('');
         setImageUrl('');
         setPhotoPreview(null);
         setSelectedAe(null);
@@ -25625,6 +25647,12 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
       setUnitName(item.unitName || item.unit_name);
     } else {
       setUnitName('pc');
+    }
+
+    if (item.pieces_per_case || item.piecesPerCase) {
+      setPiecesPerCase(String(item.pieces_per_case || item.piecesPerCase));
+    } else {
+      setPiecesPerCase('');
     }
 
     // Do NOT auto generate fake image. Only set if real image exists from catalog
@@ -25715,6 +25743,9 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         });
       }
 
+      const isCaseUnit = (unitName || '').toLowerCase() === 'case';
+      const cleanPiecesPerCase = isCaseUnit ? (parseInt(piecesPerCase, 10) || null) : null;
+
       const payload = {
         barcode: barcode.trim(),
         code: code.trim() || null,
@@ -25723,6 +25754,8 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         price: Number((parseFloat(price) || 0).toFixed(2)),
         priceWithVat: Number((parseFloat(priceWithVat) || parseFloat(price) || 0).toFixed(2)),
         unitName: unitName.trim() || 'pc',
+        pieces_per_case: cleanPiecesPerCase,
+        piecesPerCase: cleanPiecesPerCase,
         imageUrl: finalImageUrl || null,
         aeName: selectedAe.name,
         aeEmail: selectedAe.email,
@@ -26089,6 +26122,26 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                 </select>
               </div>
             </div>
+
+            {/* Pieces Per Case (Pack Size) - when Unit is 'case' */}
+            {unitName === 'case' && (
+              <div className="p-3 bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 rounded-2xl space-y-1 animate-in fade-in">
+                <label className="block text-xs font-bold text-amber-900 dark:text-amber-200">
+                  Pieces per Case (Pack Size) *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={piecesPerCase}
+                  onChange={(e) => setPiecesPerCase(e.target.value)}
+                  placeholder="e.g. 24"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-600 shadow-2xs"
+                />
+                <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                  Specifies how many individual pieces are inside 1 case (e.g. 6 cases × 24 pcs/cs = 144 pcs total).
+                </p>
+              </div>
+            )}
 
             {/* Supplier */}
             <div>
@@ -27266,12 +27319,26 @@ import RMATimelineAudit from './RMATimelineAudit';
 
 const QUICK_AUTH_STORAGE_KEY = 'rma_quick_auth_admin';
 
-const DISPOSITION_OPTIONS = [
+const CUSTOMER_DISPOSITION_OPTIONS = [
   '1- Pending Triage',
   '2- Restock to Inventory',
   '3- Return to Vendor (RTV)',
   '4- Quarantine',
-  '5- Scrap / Dispose'
+  '5- Scrap / Dispose',
+  '6- Buffer Stock Exchange'
+];
+
+const SUPPLIER_DISPOSITION_OPTIONS = [
+  '1 - Pending Vendor Pickup',
+  '2 - In Transit to Vendor',
+  '3 - Vendor Credit / AP Deduction Settled',
+  '4 - Vendor Replacement Stock Received',
+  '5 - Claim Rejected by Vendor'
+];
+
+const DISPOSITION_OPTIONS = [
+  ...CUSTOMER_DISPOSITION_OPTIONS,
+  ...SUPPLIER_DISPOSITION_OPTIONS
 ];
 
 function normalizeDispositionOption(disp) {
@@ -27281,6 +27348,40 @@ function normalizeDispositionOption(disp) {
     opt.replace(/^\d+-\s*/, '').toLowerCase() === disp.replace(/^\d+-\s*/, '').toLowerCase()
   );
   return found || disp;
+}
+
+/**
+ * Enterprise Automatic Lifecycle Status Calculator
+ * Lifecycle status is 100% computed automatically from triage disposition and financial records.
+ */
+export function computeAutomaticLifecycleStatus(disposition, hasCreditMemo = false, currentStatus = null) {
+  if (hasCreditMemo) return 'credit_memo_issued';
+  const disp = String(disposition || '').toLowerCase().trim();
+
+  if (
+    disp.includes('restock') || 
+    disp.includes('accepted replacement') || 
+    disp.includes('replacement stock received')
+  ) {
+    return 'restocked';
+  }
+  if (
+    disp.includes('scrap') || 
+    disp.includes('dispose') || 
+    disp.includes('local destruction')
+  ) {
+    return 'scrapped';
+  }
+  if (disp.includes('buffer stock') || disp.includes('buffer replacement')) {
+    return 'buffer_replacement_dispatched';
+  }
+  if (disp.includes('rejected') || disp.includes('invalid claim')) {
+    return 'rejected';
+  }
+  if (disp.includes('deduction') || disp.includes('ap deduction') || disp.includes('vendor credit') || disp.includes('credit memo')) {
+    return 'credit_memo_issued';
+  }
+  return 'under_inspection';
 }
 
 export default function QuickRMAActionModal({
@@ -27362,10 +27463,12 @@ export default function QuickRMAActionModal({
         currentDisp === '1- Pending Triage' ||
         currentDisp === '1 - Pending Triage';
 
-      // Automatically update disposition to 'Return to Vendor (RTV)' if toggling to supplier_outbound from pending triage
+      // Automatically update disposition when switching streams
       const targetDisposition = (newType === 'supplier_outbound' && isPendingTriage)
-        ? '3- Return to Vendor (RTV)'
-        : (report.disposition || '1- Pending Triage');
+        ? 'Return to Vendor (RTV)'
+        : (newType === 'customer_inbound' && (currentDisp.includes('Pending Vendor Pickup') || currentDisp.includes('Return to Vendor'))
+            ? '1- Pending Triage'
+            : (report.disposition || '1- Pending Triage'));
 
       // Optimistic update
       const updatedReport = { 
@@ -27510,11 +27613,14 @@ export default function QuickRMAActionModal({
         note: `Physical triage completed by ${inspectorName}`
       };
 
+      const autoStatus = computeAutomaticLifecycleStatus(disposition, hasLinkedCreditMemo, report.status);
+      setRmaStatus(autoStatus);
+
       const updates = {
         condition_grade: conditionGrade,
         disposition: disposition,
         warehouse_location: warehouseLocation.trim().toUpperCase() || null,
-        status: rmaStatus,
+        status: autoStatus,
         inspected_by: inspectorName,
         inspected_at: new Date().toISOString(),
         audit_trail: [...existingAudit, newAuditEvent]
@@ -27630,6 +27736,7 @@ export default function QuickRMAActionModal({
               condition_grade: item.condition_grade,
               warehouse_location: (item.warehouse_location || '').trim().toUpperCase(),
               disposition: item.disposition,
+              status: computeAutomaticLifecycleStatus(item.disposition, false, null),
               inspected_by: inspectorName,
               inspected_at: new Date().toISOString()
             })
@@ -29031,15 +29138,17 @@ export default function QuickRMAActionModal({
                       );
                     })()}
 
-                    <button
-                      type="button"
-                      onClick={() => setIsBufferSlipOpen(true)}
-                      className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
-                      title="Print Buffer Stock Replacement Dispatch Slip / Gate Pass"
-                    >
-                      <Truck className="w-3.5 h-3.5 text-indigo-200" />
-                      <span>Buffer Slip</span>
-                    </button>
+                    {!isSupplierStream && (
+                      <button
+                        type="button"
+                        onClick={() => setIsBufferSlipOpen(true)}
+                        className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
+                        title="Print Buffer Stock Replacement Dispatch Slip / Gate Pass"
+                      >
+                        <Truck className="w-3.5 h-3.5 text-indigo-200" />
+                        <span>Buffer Slip</span>
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -29562,16 +29671,28 @@ export default function QuickRMAActionModal({
                                 Disposition
                               </label>
                               <select
-                                value={it.disposition || '1- Pending Triage'}
+                                value={it.disposition || (isSupplierStream ? '1 - Pending Vendor Pickup' : '1- Pending Triage')}
                                 onChange={(e) => updateManifestItemField(idx, 'disposition', e.target.value)}
                                 className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
                               >
-                                <option value="1- Pending Triage">1- Pending Triage</option>
-                                <option value="2- Restock to Inventory">2- Restock to Inventory</option>
-                                <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
-                                <option value="4- Quarantine">4- Quarantine</option>
-                                <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
-                                <option value="6- Buffer Stock Exchange">6- Buffer Stock Exchange</option>
+                                {isSupplierStream ? (
+                                  <>
+                                    <option value="1 - Pending Vendor Pickup">1 - Pending Vendor Pickup</option>
+                                    <option value="2 - In Transit to Vendor">2 - In Transit to Vendor</option>
+                                    <option value="3 - Vendor Credit / AP Deduction Settled">3 - Vendor Credit / AP Deduction Settled</option>
+                                    <option value="4 - Vendor Replacement Stock Received">4 - Vendor Replacement Stock Received</option>
+                                    <option value="5 - Claim Rejected by Vendor">5 - Claim Rejected by Vendor</option>
+                                  </>
+                                ) : (
+                                  <>
+                                    <option value="1- Pending Triage">1- Pending Triage</option>
+                                    <option value="2- Restock to Inventory">2- Restock to Inventory</option>
+                                    <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
+                                    <option value="4- Quarantine">4- Quarantine</option>
+                                    <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
+                                    <option value="6- Buffer Stock Exchange">6- Buffer Stock Exchange</option>
+                                  </>
+                                )}
                               </select>
                             </div>
                           </div>
@@ -29663,22 +29784,14 @@ export default function QuickRMAActionModal({
                             onChange={(e) => {
                               const newDisp = e.target.value;
                               setDisposition(newDisp);
-                              if (newDisp === '2 - Vendor Accepted Replacement') {
-                                setRmaStatus('restocked');
-                              } else if (newDisp === '3 - Vendor Credit / AP Deduction') {
-                                setRmaStatus('credit_memo_issued');
-                              } else if (newDisp === '4 - Local Destruction Authorized by Vendor') {
-                                setRmaStatus('scrapped');
-                              } else if (newDisp === '5 - Claim Rejected by Vendor') {
-                                setRmaStatus('rejected');
-                              }
+                              setRmaStatus(computeAutomaticLifecycleStatus(newDisp, hasLinkedCreditMemo, rmaStatus));
                             }}
-                            className="w-full px-2.5 py-2 bg-purple-50/50 dark:bg-purple-950/30 border border-purple-300 dark:border-purple-800 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-purple-600 shadow-2xs"
+                            className="w-full px-2.5 py-2 bg-purple-50/50 dark:bg-purple-950/30 border border-purple-300 dark:border-purple-800 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-purple-600 shadow-2xs cursor-pointer"
                           >
                             <option value="1 - Pending Vendor Pickup">1 - Pending Vendor Pickup</option>
-                            <option value="2 - Vendor Accepted Replacement">2 - Vendor Accepted Replacement</option>
-                            <option value="3 - Vendor Credit / AP Deduction">3 - Vendor Credit / AP Deduction</option>
-                            <option value="4 - Local Destruction Authorized by Vendor">4 - Local Destruction Authorized by Vendor</option>
+                            <option value="2 - In Transit to Vendor">2 - In Transit to Vendor</option>
+                            <option value="3 - Vendor Credit / AP Deduction Settled">3 - Vendor Credit / AP Deduction Settled</option>
+                            <option value="4 - Vendor Replacement Stock Received">4 - Vendor Replacement Stock Received</option>
                             <option value="5 - Claim Rejected by Vendor">5 - Claim Rejected by Vendor</option>
                           </select>
                         ) : (
@@ -29687,15 +29800,9 @@ export default function QuickRMAActionModal({
                             onChange={(e) => {
                               const newDisp = e.target.value;
                               setDisposition(newDisp);
-                              if (newDisp === '2- Restock to Inventory') {
-                                setRmaStatus('restocked');
-                              } else if (newDisp === '5- Scrap / Dispose') {
-                                setRmaStatus('scrapped');
-                              } else if (newDisp === '6- Buffer Stock Exchange') {
-                                setRmaStatus('buffer_replacement_dispatched');
-                              }
+                              setRmaStatus(computeAutomaticLifecycleStatus(newDisp, hasLinkedCreditMemo, rmaStatus));
                             }}
-                            className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600 shadow-2xs"
+                            className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600 shadow-2xs cursor-pointer"
                           >
                             <option value="1- Pending Triage">1- Pending Triage</option>
                             <option value="2- Restock to Inventory">2- Restock to Inventory</option>
@@ -29724,28 +29831,17 @@ export default function QuickRMAActionModal({
                         </div>
                       </div>
 
-                      {/* RMA Lifecycle Status */}
+                      {/* Automated RMA Lifecycle Status (Zero Manual Select) */}
                       <div>
                         <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                          Lifecycle Stage
+                          Automated Lifecycle Stage
                         </label>
-                        <select
-                          value={rmaStatus === 'closed' || rmaStatus === 'resolved' ? 'restocked' : rmaStatus}
-                          onChange={(e) => setRmaStatus(e.target.value)}
-                          className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600"
-                        >
-                          <option value="pending_admin_details">Awaiting SKU</option>
-                          <option value="logged">Logged / SKU Assigned</option>
-                          <option value="draft">1- Draft / Intake</option>
-                          <option value="received_at_dock">2- Received at Dock</option>
-                          <option value="under_inspection">3- Under Inspection</option>
-                          <option value="pending_finance_approval">4- Pending Finance Approval</option>
-                          <option value="credit_memo_issued">5- Credit Memo Issued</option>
-                          <option value="restocked">6- Restocked</option>
-                          <option value="scrapped">7- Scrapped / Disposed</option>
-                          <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
-                          <option value="rejected">8- Rejected / Invalid Claim</option>
-                        </select>
+                        <div className="w-full px-2.5 py-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-700 dark:text-slate-300 text-xs flex items-center gap-1.5 shadow-2xs">
+                          <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0 animate-pulse" />
+                          <span className="capitalize">
+                            {computeAutomaticLifecycleStatus(disposition, hasLinkedCreditMemo, rmaStatus).replace(/_/g, ' ')}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
@@ -34662,13 +34758,21 @@ import {
   ArrowDown,
   ArrowUpDown,
   Package,
-  ClipboardCheck
+  ClipboardCheck,
+  ChevronDown
 } from 'lucide-react';
 import { exportRMAReportsToCSV, exportSupplierOutboundClaimsToCSV } from '../utils/exportCsv';
 import TablePagination from './TablePagination';
 import ImageLightboxModal from './ImageLightboxModal';
 import { supplierClaimService } from '../services/supplierClaimService';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
+import { 
+  isBatchManifest, 
+  getReportManifestItems, 
+  isManifestSubItem, 
+  formatQuantityWithPackSize, 
+  hasAssignedSku 
+} from '../utils/rmaHelpers';
 
 export default function SupplierClaimsTab({
   reportsList = [],
@@ -34689,6 +34793,7 @@ export default function SupplierClaimsTab({
   const [sortField, setSortField] = useState('created_at');
   const [sortDirection, setSortDirection] = useState('desc');
   const [selectedRmaIds, setSelectedRmaIds] = useState(new Set());
+  const [expandedManifestIds, setExpandedManifestIds] = useState(new Set());
   const [activeClaimBatch, setActiveClaimBatch] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -34696,6 +34801,15 @@ export default function SupplierClaimsTab({
   const [savedClaims, setSavedClaims] = useState([]);
   const [isSavingClaim, setIsSavingClaim] = useState(false);
   const [financialWarningTarget, setFinancialWarningTarget] = useState(null);
+
+  const toggleManifestExpand = (id) => {
+    setExpandedManifestIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Role permissions
   const canDeleteReports = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
@@ -34711,9 +34825,39 @@ export default function SupplierClaimsTab({
         qty: 1,
         total: 0,
         isUnassigned: true,
-        matchedProduct: null
+        matchedProduct: null,
+        isManifest: false,
+        manifestChildren: []
       };
     }
+
+    const isManifest = isBatchManifest(r, reportsList);
+    if (isManifest) {
+      const children = getReportManifestItems(r, reportsList);
+      const totalUnits = children.reduce((sum, c) => sum + (Number(c.quantity || c.qty) || 1), 0) || Number(r.quantity) || 1;
+      const totalSum = children.reduce((sum, c) => {
+        const cMatched = c.barcode ? savedProductsList.find(p => p.barcode && String(p.barcode).trim() === String(c.barcode).trim()) : null;
+        const cPrice = Number(c.price_with_vat || c.price || cMatched?.price_with_vat || cMatched?.price || 0);
+        const cQty = Number(c.quantity || c.qty) || 1;
+        return sum + (cPrice * cQty);
+      }, 0);
+      const avgPrice = totalUnits > 0 ? (totalSum / totalUnits) : 0;
+      const supplier = r.supplier_name && r.supplier_name !== 'Warehouse' ? r.supplier_name : (children[0]?.supplier_name || 'Savemore');
+
+      return {
+        name: `Batch Return Manifest (${children.length} Line Items)`,
+        code: 'MANIFEST-BATCH',
+        supplier,
+        price: avgPrice,
+        qty: totalUnits,
+        total: totalSum,
+        isUnassigned: false,
+        matchedProduct: null,
+        isManifest: true,
+        manifestChildren: children
+      };
+    }
+
     const barcodeStr = r.barcode ? String(r.barcode).trim() : '';
     const matched = barcodeStr ? savedProductsList.find(p => p.barcode && String(p.barcode).trim() === barcodeStr) : null;
 
@@ -34745,7 +34889,9 @@ export default function SupplierClaimsTab({
       qty,
       total,
       isUnassigned,
-      matchedProduct: matched
+      matchedProduct: matched,
+      isManifest: false,
+      manifestChildren: []
     };
   };
 
@@ -34799,123 +34945,66 @@ export default function SupplierClaimsTab({
 
   // Filter & sort reports suitable for Supplier Outbound / RTV
   const rtvCandidates = useMemo(() => {
-    // 1. Gather all line-item candidates, unpacking parent manifests if needed
     const rawItems = [];
 
-    // Identify which parent IDs or RMA numbers are already being displayed as main rows or unpacked
-    const displayedOrUnpackedParentIds = new Set();
-    const displayedOrUnpackedParentRmas = new Set();
-
     reportsList.forEach(r => {
-      if (!r.parent_rma_id) {
-        const isParentManifest = Boolean(
-          r.is_parent ||
-          (Number(r.total_items) > 1 && String(r.name || '').toLowerCase().startsWith('batch return manifest')) ||
-          String(r.name || '').toLowerCase().startsWith('batch return manifest')
-        );
-
-        if (!isParentManifest) {
-          // Standard single item report is directly displayed
-          if (r.id) displayedOrUnpackedParentIds.add(String(r.id));
-          if (r.rma_number) displayedOrUnpackedParentRmas.add(String(r.rma_number));
-        } else if (Array.isArray(r.items) && r.items.length > 0) {
-          // Parent manifest has items and will be unpacked into line items
-          if (r.id) displayedOrUnpackedParentIds.add(String(r.id));
-          if (r.rma_number) displayedOrUnpackedParentRmas.add(String(r.rma_number));
-        }
-      }
-    });
-
-    reportsList.forEach(r => {
-      // Ensure items with parent_rma_id are not displayed if the parent container is also being displayed or unpacked
-      if (r.parent_rma_id) {
-        const parentIdStr = String(r.parent_rma_id);
-        const rmaStr = String(r.rma_number || '');
-        if (displayedOrUnpackedParentIds.has(parentIdStr) || displayedOrUnpackedParentRmas.has(rmaStr)) {
-          return;
-        }
+      // 1. Omit child sub-items from appearing as top-level rows (they are rendered in the manifest drawer)
+      if (isManifestSubItem(r, reportsList)) {
+        return;
       }
 
-      // Any item with rma_type === 'supplier_outbound' is an explicit vendor claim and is NOT filtered out by disposition checks
       const isExplicitSupplierOutbound = r.rma_type === 'supplier_outbound';
       const disp = String(r.disposition || '').toLowerCase();
 
-      if (!isExplicitSupplierOutbound) {
+      // Check if parent batch manifest contains any supplier outbound or RTV line items
+      const isManifest = isBatchManifest(r, reportsList);
+      const manifestChildren = isManifest ? getReportManifestItems(r, reportsList) : [];
+      const hasRtvChild = manifestChildren.some(c => {
+        const cDisp = String(c.disposition || '').toLowerCase();
+        return c.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+      });
+
+      if (!isExplicitSupplierOutbound && !hasRtvChild) {
         // Exclude items triaged to Restock to Inventory, Scrap / Dispose, Quarantine, Buffer Exchange, or Pending Triage
         if (disp.includes('restock') || disp.includes('scrap') || disp.includes('quarantine') || disp.includes('buffer') || disp.includes('pending triage')) {
           return;
         }
 
         // Must strictly have an RTV disposition
-        const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv');
+        const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor');
         if (!isRtvDisposition) {
           return;
         }
       }
 
-      const isParentManifest = Boolean(
-        r.is_parent ||
-        (Number(r.total_items) > 1 && String(r.name || '').toLowerCase().startsWith('batch return manifest')) ||
-        String(r.name || '').toLowerCase().startsWith('batch return manifest')
-      );
-
-      // If it is a generic parent manifest container:
-      if (isParentManifest) {
-        // If child rows are not separate rows in reportsList, unpack r.items into individual line items
-        if (Array.isArray(r.items) && r.items.length > 0) {
-          r.items.forEach((childIt, idx) => {
-            rawItems.push({
-              ...r,
-              id: `${r.id || r.rma_number}_item_${childIt.barcode || idx}`,
-              child_id: childIt.id || idx,
-              barcode: childIt.barcode || r.barcode,
-              code: (childIt.code && childIt.code !== childIt.barcode) ? childIt.code : (childIt.sku && childIt.sku !== childIt.barcode ? childIt.sku : ''),
-              sku: (childIt.sku && childIt.sku !== childIt.barcode) ? childIt.sku : (childIt.code && childIt.code !== childIt.barcode ? childIt.code : ''),
-              name: childIt.name || childIt.productName || 'Line Item',
-              quantity: Number(childIt.quantity) || 1,
-              unit_name: childIt.unit_name || childIt.unit || r.unit_name || 'pc',
-              price: Number(childIt.price_with_vat || childIt.price || 0),
-              price_with_vat: Number(childIt.price_with_vat || childIt.price || 0),
-              supplier_name: childIt.supplier_name || r.supplier_name,
-              reason: childIt.reason || r.reason,
-              photos: Array.isArray(childIt.photos) && childIt.photos.length > 0 ? childIt.photos : r.photos,
-              is_parent: false,
-              is_manifest_child: true
-            });
-          });
-          return;
-        }
-        // If empty parent manifest, skip
-        return;
-      }
-
-      // Single item or child line item
+      // Do NOT unpack batch manifests into separate flat rows; keep parent container intact for drawer view
       rawItems.push(r);
     });
 
-    // 2. Eliminate duplicate rows: ensure each unique RMA line item appears exactly once
+    // Eliminate duplicate rows: ensure each unique RMA ticket appears exactly once
     const dedupedItems = [];
     const seenKeys = new Set();
     rawItems.forEach(item => {
-      const uniqueKey = item.barcode 
-        ? `${item.rma_number}_${item.barcode}`
-        : (item.id ? String(item.id) : `${item.rma_number}`);
-
+      const uniqueKey = item.id ? String(item.id) : String(item.rma_number);
       if (!seenKeys.has(uniqueKey)) {
         seenKeys.add(uniqueKey);
         dedupedItems.push(item);
       }
     });
 
-    // 3. Filter by Supplier, Disposition, and Search
+    // Filter by Supplier, Disposition, and Search
     let list = dedupedItems.filter(r => {
       const res = resolveReportProduct(r);
 
       const matchesSupplier = selectedSupplier === 'All' || 
-        res.supplier.toLowerCase() === selectedSupplier.toLowerCase();
+        res.supplier.toLowerCase() === selectedSupplier.toLowerCase() ||
+        (r.supplier_name && r.supplier_name.toLowerCase() === selectedSupplier.toLowerCase());
 
+      const rDisp = String(r.disposition || '1 - Pending Vendor Pickup').toLowerCase();
+      const cleanFilter = dispositionFilter.toLowerCase().replace(/^\d+\s*-\s*/, '').trim();
       const matchesDisposition = dispositionFilter === 'All' || 
-        (r.disposition || 'Pending Triage').replace(/^\d+-\s*/, '').toLowerCase() === dispositionFilter.replace(/^\d+-\s*/, '').toLowerCase();
+        rDisp === dispositionFilter.toLowerCase() ||
+        rDisp.replace(/^\d+\s*-\s*/, '').trim() === cleanFilter;
 
       const q = searchTerm.toLowerCase().trim();
       const matchesSearch = !q || 
@@ -35441,11 +35530,11 @@ export default function SupplierClaimsTab({
                 title="Filter by Triage Disposition"
               >
                 <option value="All">All Dispositions</option>
-                <option value="1- Pending Triage">1- Pending Triage</option>
-                <option value="2- Restock to Inventory">2- Restock to Inventory</option>
-                <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
-                <option value="4- Quarantine">4- Quarantine</option>
-                <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
+                <option value="1 - Pending Vendor Pickup">1 - Pending Vendor Pickup</option>
+                <option value="2 - In Transit to Vendor">2 - In Transit to Vendor</option>
+                <option value="3 - Vendor Credit / AP Deduction Settled">3 - Vendor Credit / AP Deduction Settled</option>
+                <option value="4 - Vendor Replacement Stock Received">4 - Vendor Replacement Stock Received</option>
+                <option value="5 - Claim Rejected by Vendor">5 - Claim Rejected by Vendor</option>
               </select>
             </div>
 
@@ -35722,258 +35811,441 @@ export default function SupplierClaimsTab({
                   const res = resolveReportProduct(r);
                   const photos = getPhotos(r);
                   const existingClaim = getClaimForReport(r);
-                  const isClaimable = res.price > 0 && res.supplier && res.supplier !== 'Pending Assignment' && res.supplier !== 'Unassigned';
+                  const isManifest = isBatchManifest(r, reportsList);
+                  const manifestChildren = isManifest ? getReportManifestItems(r, reportsList) : [];
+                  const manifestKey = r.id || r.rma_number;
+                  const isManifestExpanded = expandedManifestIds.has(manifestKey);
+                  const hasSku = isManifest || hasAssignedSku(r, savedProductsList);
+                  const isClaimable = hasSku && res.price > 0 && res.supplier && res.supplier !== 'Pending Assignment' && res.supplier !== 'Unassigned';
 
                   return (
-                    <tr 
-                      key={id}
-                      onClick={(e) => {
-                        if (e.target.closest('input, button, a')) return;
-                        if (onOpenQuickAction) {
-                          onOpenQuickAction(r.rma_number);
-                        }
-                      }}
-                      className={`hover:bg-amber-50/50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer ${
-                        isSelected ? 'bg-amber-50/80 dark:bg-amber-950/40' : ''
-                      }`}
-                    >
-                      {/* Checkbox */}
-                      <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleToggleSelect(id)}
-                          className="rounded-md border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
-                        />
-                      </td>
+                    <React.Fragment key={manifestKey}>
+                      <tr 
+                        onClick={(e) => {
+                          if (e.target.closest('input, button, a')) return;
+                          if (onOpenQuickAction) {
+                            onOpenQuickAction(r.rma_number);
+                          }
+                        }}
+                        className={`hover:bg-amber-50/50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer ${
+                          isSelected ? 'bg-amber-50/80 dark:bg-amber-950/40' : ''
+                        }`}
+                      >
+                        {/* Checkbox */}
+                        <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleSelect(id)}
+                            className="rounded-md border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                          />
+                        </td>
 
-                      {/* SN Column */}
-                      <td className="p-3 font-mono">
-                        <span className="font-black text-amber-900 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded-lg text-xs">
-                          #{(currentPage - 1) * pageSize + idx + 1}
-                        </span>
-                      </td>
+                        {/* SN Column */}
+                        <td className="p-3 font-mono">
+                          <span className="font-black text-amber-900 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded-lg text-xs">
+                            #{(currentPage - 1) * pageSize + idx + 1}
+                          </span>
+                        </td>
 
-                      {/* Photo Thumbnail */}
-                      <td className="p-2 text-center" onClick={(e) => e.stopPropagation()}>
-                        {photos.length > 0 ? (
-                          <button
-                            type="button"
-                            onClick={() => handleOpenPhotoPreview(r)}
-                            className="relative w-9 h-9 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:scale-105 transition-all shadow-2xs cursor-zoom-in"
-                            title="Click to view full-size photo"
-                          >
-                            <img 
-                              src={photos[0]} 
-                              alt="Proof" 
-                              className="w-full h-full object-cover" 
-                            />
-                            {photos.length > 1 && (
-                              <span className="absolute bottom-0 right-0 bg-black/70 text-white text-[8px] font-black px-1 rounded-tl">
-                                +{photos.length - 1}
-                              </span>
-                            )}
-                          </button>
-                        ) : (
-                          <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
-                            <ImageIcon className="w-3.5 h-3.5" />
-                          </div>
-                        )}
-                      </td>
-
-                      {/* RMA Identifier */}
-                      <td className="p-3">
-                        <div className="font-mono font-black text-slate-900 dark:text-white hover:text-amber-600 hover:underline">
-                          {r.rma_number}
-                        </div>
-                        <div className="text-[10px] text-slate-400 flex items-center gap-1.5 flex-wrap">
-                          <span>{r.created_at ? new Date(r.created_at).toLocaleDateString() : ''}</span>
-                          {r.gps_latitude && r.gps_longitude && (
-                            <a
-                              href={`https://www.google.com/maps?q=${r.gps_latitude},${r.gps_longitude}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 font-bold"
-                              title="View GPS Location on Google Maps"
-                            >
-                              <MapPin className="w-2.5 h-2.5 text-rose-500" />
-                              <span>Map</span>
-                            </a>
-                          )}
-                        </div>
-                        {existingClaim && (
-                          <div className="mt-1">
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 inline-flex items-center gap-0.5 shadow-2xs" title={`Official RTV Voucher Active: ${existingClaim.claimNumber || existingClaim.claim_number}`}>
-                              <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
-                              <span>RTV Voucher Active</span>
-                            </span>
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Vendor / Supplier & Warehouse Bin */}
-                      <td className="p-3">
-                        <div className={`font-bold ${res.supplier === 'Pending Assignment' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`}>
-                          {res.supplier}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                          Bin: <strong className="text-slate-600 dark:text-slate-300">{r.warehouse_location || 'DOCK'}</strong>
-                          {r.batch_lot_number && (
-                            <span className="text-purple-600 dark:text-purple-400 font-bold ml-1.5">• Lot: {r.batch_lot_number}</span>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Product Description & SKU */}
-                      <td className="p-3">
-                        <div className="font-bold text-slate-900 dark:text-white truncate max-w-xs" title={res.name}>
-                          {res.name}
-                        </div>
-                        <div className="text-[10px] font-mono text-slate-400">
-                          Qty: <strong className="text-slate-800 dark:text-slate-200 font-bold">{res.qty} {r.unit_name || 'pc'}</strong> • SKU: <strong className={res.code ? 'text-slate-600 dark:text-slate-300' : 'text-amber-600 dark:text-amber-400'}>{res.code || 'Unassigned'}</strong> • BC: {r.barcode}
-                        </div>
-                      </td>
-
-                      {/* Triage Disposition */}
-                      <td className="p-3">
-                        <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${
-                          r.disposition === 'Return to Vendor (RTV)'
-                            ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800'
-                            : r.disposition === 'Restock to Inventory'
-                            ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800'
-                            : r.disposition === 'Quarantine'
-                            ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800'
-                            : r.disposition === 'Scrap / Dispose'
-                            ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950 dark:text-rose-300'
-                            : 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                        }`}>
-                          {r.disposition || 'Pending Triage'}
-                        </span>
-                      </td>
-
-                      {/* Qty & Unit */}
-                      <td className="p-3 text-right whitespace-nowrap font-mono">
-                        <span className="px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-800 font-black text-amber-900 dark:text-amber-200 text-xs inline-flex items-center gap-1 shadow-2xs">
-                          <span>{res.qty}</span>
-                          <span className="text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400">{r.unit_name || 'pc'}</span>
-                        </span>
-                      </td>
-
-                      {/* Unit Price */}
-                      <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">
-                        <span className={res.price <= 0 ? 'text-amber-600 dark:text-amber-400 font-semibold' : ''}>
-                          ₱{res.price.toFixed(2)}
-                        </span>
-                      </td>
-
-                      {/* Total Claim */}
-                      <td className="p-3 text-right font-mono font-black text-amber-700 dark:text-amber-400">
-                        <span className={res.total <= 0 ? 'text-amber-600 dark:text-amber-400' : ''}>
-                          ₱{res.total.toFixed(2)}
-                        </span>
-                      </td>
-
-                      {/* Actions Column: Thermal Label, Inspect/Triage, Assign SKU, Debit Claim & Delete */}
-                      <td className="p-2.5 text-center" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                          
-                          {/* 1. Print 4x6 Thermal Box Label */}
-                          {onPrintLabel && (
+                        {/* Photo Thumbnail */}
+                        <td className="p-2 text-center" onClick={(e) => e.stopPropagation()}>
+                          {photos.length > 0 ? (
                             <button
                               type="button"
-                              onClick={() => onPrintLabel(r)}
-                              className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                              title="Print 4x6 inch Thermal Box Label"
+                              onClick={() => handleOpenPhotoPreview(r)}
+                              className="relative w-9 h-9 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:scale-105 transition-all shadow-2xs cursor-zoom-in"
+                              title="Click to view full-size photo"
                             >
-                              <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
-                            </button>
-                          )}
-
-                          {/* 2. Inspect / Triage Physical Return */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (onOpenQuickAction) {
-                                onOpenQuickAction(r.rma_number);
-                              }
-                            }}
-                            className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                            title={`Inspect, triage condition grade, and assign rack/bin location for ${r.rma_number}`}
-                          >
-                            <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                            <span>Inspect / Triage</span>
-                          </button>
-
-                          {/* 3. Assign SKU (if item has unassigned SKU or ₱0.00 or unassigned vendor) */}
-                          {res.isUnassigned && (onAssignSku || onEditProductFromReport) && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (onAssignSku) onAssignSku(r);
-                                else if (onEditProductFromReport) onEditProductFromReport(r);
-                              }}
-                              className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                              title={`Assign official SKU, pricing, and master vendor for "${res.name || r.barcode}"`}
-                            >
-                              <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                              <span>Assign SKU</span>
-                            </button>
-                          )}
-
-                          {/* 4. Official Debit Claim Generation or Viewing */}
-                          {existingClaim ? (
-                            <button
-                              type="button"
-                              onClick={() => setActiveClaimBatch(existingClaim)}
-                              className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                              title={`View Official RTV Debit Claim Voucher: ${existingClaim.claimNumber || existingClaim.claim_number}`}
-                            >
-                              <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                              <span>RTV Voucher Active</span>
-                            </button>
-                          ) : !isClaimable ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setFinancialWarningTarget({
-                                  item: r,
-                                  message: "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Please click 'Assign SKU' first to set the official item price and master supplier."
-                                });
-                              }}
-                              className="px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-2xs hover:border-amber-400 hover:text-amber-600"
-                              title="Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Click 'Assign SKU' first."
-                            >
-                              <AlertTriangle className="w-3 h-3 text-amber-500" />
-                              <span>+ Debit Claim (₱0.00)</span>
+                              <img 
+                                src={photos[0]} 
+                                alt="Proof" 
+                                className="w-full h-full object-cover" 
+                              />
+                              {photos.length > 1 && (
+                                <span className="absolute bottom-0 right-0 bg-black/70 text-white text-[8px] font-black px-1 rounded-tl">
+                                  +{photos.length - 1}
+                                </span>
+                              )}
                             </button>
                           ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleGenerateSingleClaim(r)}
-                              disabled={isSavingClaim}
-                              className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                              title={`Generate RTV Debit Claim Voucher for ${r.rma_number}`}
-                            >
-                              <Receipt className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                              <span>+ Debit Claim</span>
-                            </button>
+                            <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
+                              <ImageIcon className="w-3.5 h-3.5" />
+                            </div>
                           )}
+                        </td>
 
-                          {/* 5. Delete Report */}
-                          {canDeleteReports && onRequestDeleteReport && (
+                        {/* RMA Identifier */}
+                        <td className="p-3">
+                          <div className="font-mono font-black text-slate-900 dark:text-white hover:text-amber-600 hover:underline">
+                            {r.rma_number}
+                          </div>
+                          <div className="text-[10px] text-slate-400 flex items-center gap-1.5 flex-wrap">
+                            <span>{r.created_at ? new Date(r.created_at).toLocaleDateString() : ''}</span>
+                            {r.gps_latitude && r.gps_longitude && (
+                              <a
+                                href={`https://www.google.com/maps?q=${r.gps_latitude},${r.gps_longitude}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 font-bold"
+                                title="View GPS Location on Google Maps"
+                              >
+                                <MapPin className="w-2.5 h-2.5 text-rose-500" />
+                                <span>Map</span>
+                              </a>
+                            )}
+                          </div>
+                          {isManifest && (
+                            <div className="mt-1">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleManifestExpand(manifestKey);
+                                }}
+                                className={`px-2 py-0.5 rounded text-[9.5px] font-black uppercase tracking-wider inline-flex items-center gap-1 shadow-2xs cursor-pointer ${
+                                  isManifestExpanded
+                                    ? 'bg-purple-600 text-white border border-purple-700'
+                                    : 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800'
+                                }`}
+                                title={isManifestExpanded ? "Collapse Manifest Items" : "Expand Manifest Items"}
+                              >
+                                <span>📦 Manifest ({manifestChildren.length})</span>
+                                <ChevronDown className={`w-3 h-3 transform transition-transform ${isManifestExpanded ? 'rotate-180' : ''}`} />
+                              </button>
+                            </div>
+                          )}
+                          {existingClaim && (
+                            <div className="mt-1">
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 inline-flex items-center gap-0.5 shadow-2xs" title={`Official RTV Voucher Active: ${existingClaim.claimNumber || existingClaim.claim_number}`}>
+                                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
+                                <span>RTV Voucher Active</span>
+                              </span>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Vendor / Supplier & Warehouse Bin */}
+                        <td className="p-3">
+                          <div className={`font-bold ${res.supplier === 'Pending Assignment' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                            {res.supplier}
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                            Bin: <strong className="text-slate-600 dark:text-slate-300">{r.warehouse_location || 'DOCK'}</strong>
+                            {r.batch_lot_number && (
+                              <span className="text-purple-600 dark:text-purple-400 font-bold ml-1.5">• Lot: {r.batch_lot_number}</span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Product Description & SKU */}
+                        <td className="p-3">
+                          <div className="font-bold text-slate-900 dark:text-white truncate max-w-xs" title={res.name}>
+                            {res.name}
+                          </div>
+                          <div className="text-[10px] font-mono text-slate-400">
+                            {isManifest ? (
+                              <span>Total: <strong className="text-slate-800 dark:text-slate-200 font-bold">{res.qty} units</strong> • Batch Manifest</span>
+                            ) : (
+                              <span>Qty: <strong className="text-slate-800 dark:text-slate-200 font-bold">{formatQuantityWithPackSize(res.qty, r.unit_name, r.pieces_per_case || res.matchedProduct?.pieces_per_case)}</strong> • SKU: <strong className={res.code ? 'text-slate-600 dark:text-slate-300' : 'text-amber-600 dark:text-amber-400'}>{res.code || 'Unassigned'}</strong> • BC: {r.barcode}</span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Triage Disposition */}
+                        <td className="p-3">
+                          <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${
+                            r.disposition === 'Return to Vendor (RTV)' || (r.disposition && r.disposition.includes('Vendor'))
+                              ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800'
+                              : 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                          }`}>
+                            {r.disposition || '1 - Pending Vendor Pickup'}
+                          </span>
+                        </td>
+
+                        {/* Qty & Unit */}
+                        <td className="p-3 text-right whitespace-nowrap font-mono">
+                          <span className="px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-800 font-black text-amber-900 dark:text-amber-200 text-xs inline-flex items-center gap-1 shadow-2xs">
+                            <span>{formatQuantityWithPackSize(res.qty, r.unit_name, r.pieces_per_case || res.matchedProduct?.pieces_per_case)}</span>
+                          </span>
+                        </td>
+
+                        {/* Unit Price */}
+                        <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">
+                          {isManifest ? (
+                            <span className="text-slate-400 italic text-[11px]">—</span>
+                          ) : (
+                            <span className={res.price <= 0 ? 'text-amber-600 dark:text-amber-400 font-semibold' : ''}>
+                              ₱{res.price.toFixed(2)}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Total Claim */}
+                        <td className="p-3 text-right font-mono font-black text-amber-700 dark:text-amber-400">
+                          <span className={res.total <= 0 ? 'text-amber-600 dark:text-amber-400' : ''}>
+                            ₱{res.total.toFixed(2)}
+                          </span>
+                        </td>
+
+                        {/* Actions Column: Thermal Label, Inspect/Triage, Assign SKU, Debit Claim & Delete */}
+                        <td className="p-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                            
+                            {/* 1. Print 4x6 Thermal Box Label */}
+                            {onPrintLabel && (
+                              <button
+                                type="button"
+                                onClick={() => onPrintLabel(r)}
+                                className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                                title="Print 4x6 inch Thermal Box Label"
+                              >
+                                <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
+                              </button>
+                            )}
+
+                            {/* 2. Inspect / Triage Physical Return (Safeguarded by Assign SKU) */}
                             <button
                               type="button"
-                              onClick={() => onRequestDeleteReport(r.id, r.rma_number, r)}
-                              className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
-                              title={`Delete RMA #${r.rma_number} and remove stored proof photos`}
+                              onClick={() => {
+                                if (!isManifest && !hasAssignedSku(r, savedProductsList)) {
+                                  setFinancialWarningTarget({
+                                    item: r,
+                                    title: "Assign SKU Required First",
+                                    message: "This item does not have an official catalog SKU assigned yet. Please assign an SKU first before conducting warehouse inspection and physical triage."
+                                  });
+                                  return;
+                                }
+                                if (onOpenQuickAction) {
+                                  onOpenQuickAction(r.rma_number);
+                                }
+                              }}
+                              className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                              title={`Inspect, triage condition grade, and assign rack/bin location for ${r.rma_number}`}
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                              <span>Inspect / Triage</span>
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+
+                            {/* 3. Assign SKU (for single items if unassigned) */}
+                            {!isManifest && res.isUnassigned && (onAssignSku || onEditProductFromReport) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (onAssignSku) onAssignSku(r);
+                                  else if (onEditProductFromReport) onEditProductFromReport(r);
+                                }}
+                                className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                title={`Assign official SKU, pricing, and master vendor for "${res.name || r.barcode}"`}
+                              >
+                                <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                                <span>Assign SKU</span>
+                              </button>
+                            )}
+
+                            {/* 4. Official Debit Claim Generation or Viewing */}
+                            {existingClaim ? (
+                              <button
+                                type="button"
+                                onClick={() => setActiveClaimBatch(existingClaim)}
+                                className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                title={`View Official RTV Debit Claim Voucher: ${existingClaim.claimNumber || existingClaim.claim_number}`}
+                              >
+                                <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                <span>RTV Voucher Active</span>
+                              </button>
+                            ) : !isClaimable ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFinancialWarningTarget({
+                                    item: r,
+                                    title: "Assign SKU & Price Required",
+                                    message: "Cannot issue RTV Debit Claim for ₱0.00 or unassigned SKU/vendor. Please click 'Assign SKU' first to set the official item price and master supplier."
+                                  });
+                                }}
+                                className="px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-2xs hover:border-amber-400 hover:text-amber-600"
+                                title="Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Click 'Assign SKU' first."
+                              >
+                                <AlertTriangle className="w-3 h-3 text-amber-500" />
+                                <span>+ Debit Claim (₱0.00 / Unassigned)</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleGenerateSingleClaim(r)}
+                                disabled={isSavingClaim}
+                                className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                title={`Generate RTV Debit Claim Voucher for ${r.rma_number}`}
+                              >
+                                <Receipt className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                                <span>+ Debit Claim</span>
+                              </button>
+                            )}
+
+                            {/* 5. Delete Report */}
+                            {canDeleteReports && onRequestDeleteReport && (
+                              <button
+                                type="button"
+                                onClick={() => onRequestDeleteReport(r.id, r.rma_number, r)}
+                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
+                                title={`Delete RMA #${r.rma_number} and remove stored proof photos`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+
+                      {/* Expandable Multi-Item Manifest Sub-Table Drawer */}
+                      {isManifest && isManifestExpanded && (
+                        <tr className="bg-amber-50/40 dark:bg-slate-900/90 border-y-2 border-amber-200 dark:border-amber-900/60">
+                          <td colSpan={11} className="p-3 sm:p-4">
+                            <div className="bg-white dark:bg-slate-800/90 rounded-xl border border-amber-200 dark:border-amber-800/60 shadow-sm overflow-hidden">
+                              {/* Manifest Header */}
+                              <div className="p-3 bg-amber-50/70 dark:bg-amber-950/40 border-b border-amber-200/80 dark:border-amber-900/50 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="p-1 rounded-md bg-amber-600 text-white">
+                                    <Package className="w-3.5 h-3.5" />
+                                  </span>
+                                  <span className="font-extrabold text-xs text-amber-900 dark:text-amber-200 uppercase tracking-wider">
+                                    Supplier RTV Manifest Items ({manifestChildren.length})
+                                  </span>
+                                  <span className="text-[11px] text-amber-700 dark:text-amber-300 font-mono">
+                                    RMA: {r.rma_number}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    Total manifest quantity: <strong className="text-slate-900 dark:text-white font-bold">{res.qty} units</strong>
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleManifestExpand(manifestKey)}
+                                    className="text-xs text-amber-700 dark:text-amber-300 hover:text-amber-900 font-bold px-2 py-0.5 rounded hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors cursor-pointer"
+                                  >
+                                    Collapse ▲
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Child Items Table */}
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-left text-xs border-collapse">
+                                  <thead>
+                                    <tr className="bg-slate-50/80 dark:bg-slate-800/50 text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
+                                      <th className="py-2 px-2 text-center w-12">#</th>
+                                      <th className="py-2 px-3">Product Description / Name</th>
+                                      <th className="py-2 px-3 font-mono">Barcode</th>
+                                      <th className="py-2 px-3 font-mono">Assigned SKU</th>
+                                      <th className="py-2 px-3 text-right">Qty &amp; Unit</th>
+                                      <th className="py-2 px-3 text-right">Unit Price</th>
+                                      <th className="py-2 px-3 text-right">Total Claim</th>
+                                      <th className="py-2 px-3">Triage &amp; Reason</th>
+                                      <th className="py-2 px-2 text-center">Actions</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                                    {manifestChildren.map((child, cIdx) => {
+                                      const childBarcode = String(child.barcode || '').trim();
+                                      const matchedChild = childBarcode ? savedProductsList.find(p => p.barcode && String(p.barcode).trim() === childBarcode) : null;
+                                      const childName = (child.name || child.productName || matchedChild?.name || `Item #${cIdx + 1}`).trim();
+                                      const childRawSku = String(child.code || child.sku || matchedChild?.code || matchedChild?.sku || '').trim();
+                                      const isChildSkuValid = Boolean(childRawSku && childRawSku !== childBarcode && !childRawSku.toLowerCase().includes('awaiting'));
+                                      const childQty = Number(child.quantity || child.qty) || 1;
+                                      const childUnit = child.unit_name || child.unit || r.unit_name || 'pc';
+                                      const childPrice = Number(child.price_with_vat || child.price || matchedChild?.price_with_vat || matchedChild?.price || 0);
+                                      const childTotal = childQty * childPrice;
+                                      const childDisp = child.disposition || r.disposition || '1 - Pending Vendor Pickup';
+
+                                      const childReportItem = {
+                                        ...child,
+                                        id: child.id || `${r.id || r.rma_number}_item_${childBarcode || cIdx}`,
+                                        rma_number: r.rma_number,
+                                        barcode: childBarcode,
+                                        code: isChildSkuValid ? childRawSku : null,
+                                        sku: isChildSkuValid ? childRawSku : null,
+                                        name: childName,
+                                        quantity: childQty,
+                                        unit_name: childUnit,
+                                        price: childPrice,
+                                        price_with_vat: childPrice,
+                                        supplier_name: child.supplier_name || r.supplier_name || 'Savemore',
+                                        parent_rma_id: r.id
+                                      };
+
+                                      return (
+                                        <tr key={childReportItem.id || cIdx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                                          <td className="py-2 px-2 text-center font-mono font-bold text-slate-400">
+                                            #{cIdx + 1}
+                                          </td>
+                                          <td className="py-2 px-3 font-bold text-slate-900 dark:text-white truncate max-w-xs" title={childName}>
+                                            {childName}
+                                          </td>
+                                          <td className="py-2 px-3 font-mono text-slate-700 dark:text-slate-300 font-bold">
+                                            {childBarcode || '—'}
+                                          </td>
+                                          <td className="py-2 px-3 font-mono">
+                                            {isChildSkuValid ? (
+                                              <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800 text-[11px]">
+                                                {childRawSku}
+                                              </span>
+                                            ) : (
+                                              <span className="text-amber-600 dark:text-amber-400 font-semibold text-[10px]">
+                                                Awaiting SKU
+                                              </span>
+                                            )}
+                                          </td>
+                                          <td className="py-2 px-3 text-right font-mono font-bold text-slate-800 dark:text-slate-200">
+                                            {formatQuantityWithPackSize(childQty, childUnit, child.pieces_per_case || matchedChild?.pieces_per_case)}
+                                          </td>
+                                          <td className="py-2 px-3 text-right font-mono text-slate-600 dark:text-slate-400">
+                                            ₱{childPrice.toFixed(2)}
+                                          </td>
+                                          <td className="py-2 px-3 text-right font-mono font-bold text-amber-700 dark:text-amber-400">
+                                            ₱{childTotal.toFixed(2)}
+                                          </td>
+                                          <td className="py-2 px-3">
+                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800">
+                                              {childDisp}
+                                            </span>
+                                          </td>
+                                          <td className="py-2 px-2 text-center">
+                                            <div className="flex items-center justify-center gap-1">
+                                              {!isChildSkuValid && onAssignSku && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => onAssignSku(childReportItem)}
+                                                  className="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 rounded text-[10px] font-bold border border-blue-200 dark:border-blue-800 cursor-pointer"
+                                                  title="Assign SKU"
+                                                >
+                                                  Assign SKU
+                                                </button>
+                                              )}
+                                              <button
+                                                type="button"
+                                                onClick={() => handleGenerateSingleClaim(childReportItem)}
+                                                disabled={!isChildSkuValid || childPrice <= 0 || isSavingClaim}
+                                                className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 rounded text-[10px] font-bold border border-amber-300 dark:border-amber-700 cursor-pointer disabled:opacity-40"
+                                                title="Generate individual debit claim"
+                                              >
+                                                + Claim
+                                              </button>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -40417,11 +40689,12 @@ export const catalogService = {
   /**
    * ADMIN ACTION: Add a brand new product to the saved catalog
    */
-  async createProduct({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
+  async createProduct({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, pieces_per_case, piecesPerCase, imageUrl, aeName, aeEmail, company }) {
     const cleanBarcode = String(barcode || '').trim();
     if (!cleanBarcode) throw new Error('Product Barcode is required.');
     if (!name || !name.trim()) throw new Error('Product Name is required.');
 
+    const resolvedPcs = (pieces_per_case !== undefined ? pieces_per_case : piecesPerCase);
     const newProd = {
       barcode: cleanBarcode,
       code: code ? code.trim() : null,
@@ -40431,6 +40704,7 @@ export const catalogService = {
       price_with_vat: Number(priceWithVat || price || 0),
       brand_name: brandName ? brandName.trim() : null,
       unit_name: unitName ? unitName.trim() : 'pc',
+      pieces_per_case: resolvedPcs ? Number(resolvedPcs) : null,
       image_url: imageUrl ? imageUrl.trim() : null,
       ae_name: aeName ? aeName.trim() : null,
       ae_email: aeEmail ? aeEmail.trim() : null,
@@ -40454,9 +40728,10 @@ export const catalogService = {
   /**
    * ADMIN ACTION: Edit an existing product record
    */
-  async updateProduct(id, { barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
+  async updateProduct(id, { barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, pieces_per_case, piecesPerCase, imageUrl, aeName, aeEmail, company }) {
     if (!id && !barcode) throw new Error('Product identifier required for update.');
 
+    const resolvedPcs = (pieces_per_case !== undefined ? pieces_per_case : piecesPerCase);
     // Deduplication removed: 1 SKU from company can have more than one barcode assignation
     const updates = {
       name: name ? name.trim() : undefined,
@@ -40466,6 +40741,7 @@ export const catalogService = {
       price_with_vat: priceWithVat !== undefined ? Number(priceWithVat || price || 0) : undefined,
       brand_name: brandName !== undefined ? (brandName ? brandName.trim() : null) : undefined,
       unit_name: unitName ? unitName.trim() : undefined,
+      pieces_per_case: resolvedPcs !== undefined ? (Number(resolvedPcs) || null) : undefined,
       image_url: imageUrl !== undefined ? (imageUrl ? imageUrl.trim() : null) : undefined,
       ae_name: aeName !== undefined ? (aeName ? aeName.trim() : null) : undefined,
       ae_email: aeEmail !== undefined ? (aeEmail ? aeEmail.trim() : null) : undefined,
@@ -40706,6 +40982,8 @@ export const catalogService = {
     google_drive_folder_id = null,
     gps = null,
     items = [],
+    pieces_per_case = null,
+    piecesPerCase = null,
     total_items = null,
     total_quantity = null,
     is_parent = false,
@@ -40864,6 +41142,9 @@ export const catalogService = {
       condition_grade: 'B - Damaged Packaging Only',
       disposition: 'Pending Triage',
       warehouse_location: null,
+      pieces_per_case: (pieces_per_case || piecesPerCase)
+        ? Number(pieces_per_case || piecesPerCase)
+        : (isKnown ? (resolvedProduct.pieces_per_case || resolvedProduct.piecesPerCase || null) : (hasItems && (items[0]?.pieces_per_case || items[0]?.piecesPerCase) ? Number(items[0].pieces_per_case || items[0].piecesPerCase) : null)),
       inspected_by: null,
       inspected_at: null,
       audit_trail: [],
@@ -40902,6 +41183,7 @@ export const catalogService = {
       delete fallbackRow.items;
       delete fallbackRow.total_items;
       delete fallbackRow.total_quantity;
+      delete fallbackRow.pieces_per_case;
       if (reportError.message?.includes('rma_type')) {
         delete fallbackRow.rma_type;
       }
@@ -40938,6 +41220,7 @@ export const catalogService = {
           name: it.name || it.productName || `Item (${it.barcode})`,
           quantity: Number(it.quantity) || 1,
           unit_name: it.unit_name || it.unit || 'pc',
+          pieces_per_case: it.pieces_per_case || it.piecesPerCase || null,
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
           supplier_name: it.supplier_name || 'Savemore',
@@ -40962,6 +41245,7 @@ export const catalogService = {
           name: it.name || it.productName || `Item (${it.barcode})`,
           quantity: Number(it.quantity) || 1,
           unit_name: it.unit_name || it.unit || 'pc',
+          pieces_per_case: it.pieces_per_case || it.piecesPerCase || null,
           supplier_name: it.supplier_name || 'Savemore',
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
@@ -41055,11 +41339,33 @@ export const catalogService = {
       updates.disposition = disposition;
     }
 
+    // 1. Fetch current record to resolve id, rma_number, and child items
+    let target = null;
+    try {
+      const getQuery = isNum 
+        ? supabase.from('rma_reports').select('*').eq('id', parseInt(cleanId, 10)).maybeSingle()
+        : supabase.from('rma_reports').select('*').eq('rma_number', cleanId).maybeSingle();
+      const { data } = await getQuery;
+      target = data;
+    } catch {}
+
+    const recordId = target?.id || (isNum ? parseInt(cleanId, 10) : null);
+    const rmaNum = target?.rma_number || (!isNum ? cleanId : null);
+
+    // If report has items JSON array, cascade rma_type and disposition to child items
+    if (target && Array.isArray(target.items) && target.items.length > 0) {
+      updates.items = target.items.map(it => ({
+        ...it,
+        rma_type: cleanType,
+        disposition: disposition || it.disposition || (cleanType === 'supplier_outbound' ? '1 - Pending Vendor Pickup' : '1- Pending Triage')
+      }));
+    }
+
     let query = supabase.from('rma_reports').update(updates);
-    if (isNum) {
-      query = query.eq('id', parseInt(cleanId, 10));
+    if (recordId) {
+      query = query.eq('id', recordId);
     } else {
-      query = query.eq('rma_number', cleanId);
+      query = query.eq('rma_number', rmaNum);
     }
 
     const { data, error } = await query.select().single();
@@ -41067,6 +41373,31 @@ export const catalogService = {
       console.error('Failed to update rma_type:', error);
       throw error;
     }
+
+    // 2. Cascade update to all child records in rma_reports sharing parent_rma_id or rma_number
+    try {
+      const childUpdates = { rma_type: cleanType };
+      if (disposition) childUpdates.disposition = disposition;
+
+      if (recordId) {
+        await supabase.from('rma_reports').update(childUpdates).eq('parent_rma_id', recordId);
+      }
+      if (rmaNum) {
+        await supabase.from('rma_reports').update(childUpdates).eq('rma_number', rmaNum).neq('id', data.id);
+      }
+    } catch (e) {
+      console.warn('Notice cascading rma_type to child rma_reports:', e?.message);
+    }
+
+    // 3. Cascade to child records in rma_items if table exists
+    try {
+      if (recordId) {
+        await supabase.from('rma_items').update({ disposition: disposition || undefined }).eq('rma_report_id', recordId);
+      }
+    } catch (e) {
+      console.warn('Notice cascading disposition to rma_items:', e?.message);
+    }
+
     this.notifyChange('report-updated', { report: data });
     return data;
   },
@@ -41197,10 +41528,11 @@ export const catalogService = {
   /**
    * ADMIN ACTION: Fill in details for an unknown barcode, including optional product reference image.
    */
-  async updateBarcodeDetails({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
+  async updateBarcodeDetails({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, pieces_per_case, piecesPerCase, imageUrl, aeName, aeEmail, company }) {
     const cleanBarcode = String(barcode || '').trim();
     if (!cleanBarcode) throw new Error('Barcode is required to update details.');
 
+    const resolvedPcs = (pieces_per_case !== undefined ? pieces_per_case : piecesPerCase);
     const updates = {
       code: code ? code.trim() : null,
       name: name ? name.trim() : 'Unknown Item',
@@ -41209,6 +41541,7 @@ export const catalogService = {
       price_with_vat: Number(priceWithVat || price || 0),
       brand_name: brandName ? brandName.trim() : null,
       unit_name: unitName ? unitName.trim() : 'pc',
+      pieces_per_case: resolvedPcs !== undefined ? (Number(resolvedPcs) || null) : undefined,
       image_url: imageUrl ? imageUrl.trim() : null,
       ae_name: aeName ? aeName.trim() : null,
       ae_email: aeEmail ? aeEmail.trim() : null,
@@ -46695,6 +47028,29 @@ export function isBatchManifest(report, allReports = []) {
 }
 
 /**
+ * Checks if a report item is a child line item of a batch manifest
+ */
+export function isManifestSubItem(item, allReports = []) {
+  if (!item) return false;
+  // 1. Any item that has parent_rma_id populated is strictly a child item of a manifest
+  if (item.parent_rma_id !== null && item.parent_rma_id !== undefined && String(item.parent_rma_id).trim() !== '') {
+    return true;
+  }
+  // 2. If an item shares rma_number with a parent batch manifest, but is NOT the parent container itself
+  if (Array.isArray(allReports) && item.rma_number) {
+    const parent = allReports.find(p => (
+      p &&
+      p.rma_number === item.rma_number &&
+      (p.is_parent === true || (Array.isArray(p.items) && p.items.length > 0) || String(p.name || '').toLowerCase().startsWith('batch return manifest'))
+    ));
+    if (parent && String(parent.id) !== String(item.id)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Safely extracts clean SKU decoupling it strictly from barcode.
  * Returns empty string if sku matches barcode, or is empty/placeholder.
  */
@@ -46706,6 +47062,24 @@ export function getCleanSku(skuOrCode, barcode) {
   if (cleanCode.toLowerCase().includes('awaiting') || cleanCode.toLowerCase().includes('unidentified')) return '';
   return cleanCode;
 }
+
+/**
+ * Format quantity and unit, appending pack size when unit is 'case' and pieces_per_case is available
+ * Example: "6 case (24 pcs/cs = 144 pcs total)"
+ */
+export function formatQuantityWithPackSize(quantity, unitName, piecesPerCase) {
+  const qty = Number(quantity) || 1;
+  const unit = String(unitName || 'pc').trim();
+  const pcs = Number(piecesPerCase || 0);
+
+  const isCase = unit.toLowerCase() === 'case' || unit.toLowerCase() === 'cases' || unit.toLowerCase() === 'cs';
+  if (isCase && pcs > 0) {
+    const totalPcs = qty * pcs;
+    return `${qty} ${unit} (${pcs} pcs/cs = ${totalPcs} pcs total)`;
+  }
+  return `${qty} ${unit}`;
+}
+
 
 
 

@@ -267,6 +267,29 @@ export function isBatchManifest(report, allReports = []) {
 }
 
 /**
+ * Checks if a report item is a child line item of a batch manifest
+ */
+export function isManifestSubItem(item, allReports = []) {
+  if (!item) return false;
+  // 1. Any item that has parent_rma_id populated is strictly a child item of a manifest
+  if (item.parent_rma_id !== null && item.parent_rma_id !== undefined && String(item.parent_rma_id).trim() !== '') {
+    return true;
+  }
+  // 2. If an item shares rma_number with a parent batch manifest, but is NOT the parent container itself
+  if (Array.isArray(allReports) && item.rma_number) {
+    const parent = allReports.find(p => (
+      p &&
+      p.rma_number === item.rma_number &&
+      (p.is_parent === true || (Array.isArray(p.items) && p.items.length > 0) || String(p.name || '').toLowerCase().startsWith('batch return manifest'))
+    ));
+    if (parent && String(parent.id) !== String(item.id)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Safely extracts clean SKU decoupling it strictly from barcode.
  * Returns empty string if sku matches barcode, or is empty/placeholder.
  */
@@ -278,6 +301,24 @@ export function getCleanSku(skuOrCode, barcode) {
   if (cleanCode.toLowerCase().includes('awaiting') || cleanCode.toLowerCase().includes('unidentified')) return '';
   return cleanCode;
 }
+
+/**
+ * Format quantity and unit, appending pack size when unit is 'case' and pieces_per_case is available
+ * Example: "6 case (24 pcs/cs = 144 pcs total)"
+ */
+export function formatQuantityWithPackSize(quantity, unitName, piecesPerCase) {
+  const qty = Number(quantity) || 1;
+  const unit = String(unitName || 'pc').trim();
+  const pcs = Number(piecesPerCase || 0);
+
+  const isCase = unit.toLowerCase() === 'case' || unit.toLowerCase() === 'cases' || unit.toLowerCase() === 'cs';
+  if (isCase && pcs > 0) {
+    const totalPcs = qty * pcs;
+    return `${qty} ${unit} (${pcs} pcs/cs = ${totalPcs} pcs total)`;
+  }
+  return `${qty} ${unit}`;
+}
+
 
 
 

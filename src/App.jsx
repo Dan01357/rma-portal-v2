@@ -89,7 +89,7 @@ import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest } from './utils/rmaHelpers';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest, formatQuantityWithPackSize } from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
   '1- Damaged Box / Crushed Packaging',
@@ -4316,10 +4316,7 @@ export default function App() {
                                   {/* Quantity & Unit Column */}
                                   <td className="py-3 px-3 text-center whitespace-nowrap">
                                     <span className="font-mono font-black text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs inline-flex items-center gap-1">
-                                      <span>{item.quantity || 1}</span>
-                                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-extrabold uppercase">
-                                        {item.unit_name || 'pc'}
-                                      </span>
+                                      <span>{formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}</span>
                                     </span>
                                   </td>
 
@@ -4375,7 +4372,19 @@ export default function App() {
 
                                   {/* 8. Lifecycle Stage */}
                                   <td className="py-3 px-3 text-center whitespace-nowrap">
-                                    {(() => {
+                                    {isManifest ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleManifestExpand(manifestKey);
+                                        }}
+                                        className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1 hover:bg-purple-200 cursor-pointer shadow-2xs"
+                                        title="Click to view child line items in drawer"
+                                      >
+                                        <span>📦 Multi-Item Status (See Drawer)</span>
+                                      </button>
+                                    ) : (() => {
                                       const stageInfo = formatLifecycleStage(item.status);
                                       return (
                                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-block shadow-2xs ${stageInfo.color}`}>
@@ -4387,7 +4396,19 @@ export default function App() {
 
                                   {/* 10. Disposition (Full text without truncation) */}
                                   <td className="py-3 px-3.5 text-center whitespace-nowrap">
-                                    {(() => {
+                                    {isManifest ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleManifestExpand(manifestKey);
+                                        }}
+                                        className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1 hover:bg-purple-200 cursor-pointer shadow-2xs"
+                                        title="Click to view child line items in drawer"
+                                      >
+                                        <span>📦 Multi-Item Status (See Drawer)</span>
+                                      </button>
+                                    ) : (() => {
                                       const disp = item.disposition || 'Pending Triage';
                                       let color = 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
                                       if (disp === 'Restock to Inventory') color = 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800';
@@ -4715,8 +4736,8 @@ export default function App() {
                                                       {/* Qty & Unit: 80px */}
                                                       <td className="py-2 px-3 text-center font-mono w-[80px]">
                                                         <div className="flex flex-col items-center gap-0.5">
-                                                          <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded-md text-[11px] truncate">
-                                                            {childQty} {childUnit}
+                                                          <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded-md text-[11px] truncate" title={formatQuantityWithPackSize(childQty, childUnit, child.pieces_per_case || matchedChild?.pieces_per_case)}>
+                                                            {formatQuantityWithPackSize(childQty, childUnit, child.pieces_per_case || matchedChild?.pieces_per_case)}
                                                           </span>
                                                           {childLocation && (
                                                             <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold truncate max-w-[75px]" title={childLocation}>
@@ -4916,7 +4937,7 @@ export default function App() {
                                     📥 Inbound
                                   </span>
                                   <span className="font-mono font-black text-xs text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-0.5 rounded-md shadow-2xs">
-                                    Qty: <strong className="text-blue-600 dark:text-blue-400 font-black">{item.quantity || 1} {item.unit_name || 'pc'}</strong>
+                                    Qty: <strong className="text-blue-600 dark:text-blue-400 font-black">{formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}</strong>
                                   </span>
                                   <button
                                     type="button"
@@ -4962,7 +4983,7 @@ export default function App() {
                                   {resolvedName}
                                 </h4>
                                 <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                                  Qty: <strong className="text-slate-900 dark:text-white font-bold">{item.quantity || 1} {item.unit_name || 'pc'}</strong> • Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
+                                  Qty: <strong className="text-slate-900 dark:text-white font-bold">{formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}</strong> • Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
                                   {(item.code || matchedProduct?.code) && <span> • SKU: {item.code || matchedProduct?.code}</span>}
                                 </div>
                               </div>
@@ -5934,6 +5955,7 @@ export default function App() {
       <GatekeeperPinModal
         isOpen={(() => {
           if (typeof window === 'undefined') return false;
+          if (isAdminView) return false;
           // Only users already authenticated as currentUser?.role === 'super_admin' can view "/" for testing
           if (currentUser?.role === 'super_admin') return false;
 

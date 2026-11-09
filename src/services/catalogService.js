@@ -790,11 +790,12 @@ export const catalogService = {
   /**
    * ADMIN ACTION: Add a brand new product to the saved catalog
    */
-  async createProduct({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
+  async createProduct({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, pieces_per_case, piecesPerCase, imageUrl, aeName, aeEmail, company }) {
     const cleanBarcode = String(barcode || '').trim();
     if (!cleanBarcode) throw new Error('Product Barcode is required.');
     if (!name || !name.trim()) throw new Error('Product Name is required.');
 
+    const resolvedPcs = (pieces_per_case !== undefined ? pieces_per_case : piecesPerCase);
     const newProd = {
       barcode: cleanBarcode,
       code: code ? code.trim() : null,
@@ -804,6 +805,7 @@ export const catalogService = {
       price_with_vat: Number(priceWithVat || price || 0),
       brand_name: brandName ? brandName.trim() : null,
       unit_name: unitName ? unitName.trim() : 'pc',
+      pieces_per_case: resolvedPcs ? Number(resolvedPcs) : null,
       image_url: imageUrl ? imageUrl.trim() : null,
       ae_name: aeName ? aeName.trim() : null,
       ae_email: aeEmail ? aeEmail.trim() : null,
@@ -827,9 +829,10 @@ export const catalogService = {
   /**
    * ADMIN ACTION: Edit an existing product record
    */
-  async updateProduct(id, { barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
+  async updateProduct(id, { barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, pieces_per_case, piecesPerCase, imageUrl, aeName, aeEmail, company }) {
     if (!id && !barcode) throw new Error('Product identifier required for update.');
 
+    const resolvedPcs = (pieces_per_case !== undefined ? pieces_per_case : piecesPerCase);
     // Deduplication removed: 1 SKU from company can have more than one barcode assignation
     const updates = {
       name: name ? name.trim() : undefined,
@@ -839,6 +842,7 @@ export const catalogService = {
       price_with_vat: priceWithVat !== undefined ? Number(priceWithVat || price || 0) : undefined,
       brand_name: brandName !== undefined ? (brandName ? brandName.trim() : null) : undefined,
       unit_name: unitName ? unitName.trim() : undefined,
+      pieces_per_case: resolvedPcs !== undefined ? (Number(resolvedPcs) || null) : undefined,
       image_url: imageUrl !== undefined ? (imageUrl ? imageUrl.trim() : null) : undefined,
       ae_name: aeName !== undefined ? (aeName ? aeName.trim() : null) : undefined,
       ae_email: aeEmail !== undefined ? (aeEmail ? aeEmail.trim() : null) : undefined,
@@ -1079,6 +1083,8 @@ export const catalogService = {
     google_drive_folder_id = null,
     gps = null,
     items = [],
+    pieces_per_case = null,
+    piecesPerCase = null,
     total_items = null,
     total_quantity = null,
     is_parent = false,
@@ -1237,6 +1243,9 @@ export const catalogService = {
       condition_grade: 'B - Damaged Packaging Only',
       disposition: 'Pending Triage',
       warehouse_location: null,
+      pieces_per_case: (pieces_per_case || piecesPerCase)
+        ? Number(pieces_per_case || piecesPerCase)
+        : (isKnown ? (resolvedProduct.pieces_per_case || resolvedProduct.piecesPerCase || null) : (hasItems && (items[0]?.pieces_per_case || items[0]?.piecesPerCase) ? Number(items[0].pieces_per_case || items[0].piecesPerCase) : null)),
       inspected_by: null,
       inspected_at: null,
       audit_trail: [],
@@ -1275,6 +1284,7 @@ export const catalogService = {
       delete fallbackRow.items;
       delete fallbackRow.total_items;
       delete fallbackRow.total_quantity;
+      delete fallbackRow.pieces_per_case;
       if (reportError.message?.includes('rma_type')) {
         delete fallbackRow.rma_type;
       }
@@ -1311,6 +1321,7 @@ export const catalogService = {
           name: it.name || it.productName || `Item (${it.barcode})`,
           quantity: Number(it.quantity) || 1,
           unit_name: it.unit_name || it.unit || 'pc',
+          pieces_per_case: it.pieces_per_case || it.piecesPerCase || null,
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
           supplier_name: it.supplier_name || 'Savemore',
@@ -1335,6 +1346,7 @@ export const catalogService = {
           name: it.name || it.productName || `Item (${it.barcode})`,
           quantity: Number(it.quantity) || 1,
           unit_name: it.unit_name || it.unit || 'pc',
+          pieces_per_case: it.pieces_per_case || it.piecesPerCase || null,
           supplier_name: it.supplier_name || 'Savemore',
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
@@ -1428,11 +1440,33 @@ export const catalogService = {
       updates.disposition = disposition;
     }
 
+    // 1. Fetch current record to resolve id, rma_number, and child items
+    let target = null;
+    try {
+      const getQuery = isNum 
+        ? supabase.from('rma_reports').select('*').eq('id', parseInt(cleanId, 10)).maybeSingle()
+        : supabase.from('rma_reports').select('*').eq('rma_number', cleanId).maybeSingle();
+      const { data } = await getQuery;
+      target = data;
+    } catch {}
+
+    const recordId = target?.id || (isNum ? parseInt(cleanId, 10) : null);
+    const rmaNum = target?.rma_number || (!isNum ? cleanId : null);
+
+    // If report has items JSON array, cascade rma_type and disposition to child items
+    if (target && Array.isArray(target.items) && target.items.length > 0) {
+      updates.items = target.items.map(it => ({
+        ...it,
+        rma_type: cleanType,
+        disposition: disposition || it.disposition || (cleanType === 'supplier_outbound' ? '1 - Pending Vendor Pickup' : '1- Pending Triage')
+      }));
+    }
+
     let query = supabase.from('rma_reports').update(updates);
-    if (isNum) {
-      query = query.eq('id', parseInt(cleanId, 10));
+    if (recordId) {
+      query = query.eq('id', recordId);
     } else {
-      query = query.eq('rma_number', cleanId);
+      query = query.eq('rma_number', rmaNum);
     }
 
     const { data, error } = await query.select().single();
@@ -1440,6 +1474,31 @@ export const catalogService = {
       console.error('Failed to update rma_type:', error);
       throw error;
     }
+
+    // 2. Cascade update to all child records in rma_reports sharing parent_rma_id or rma_number
+    try {
+      const childUpdates = { rma_type: cleanType };
+      if (disposition) childUpdates.disposition = disposition;
+
+      if (recordId) {
+        await supabase.from('rma_reports').update(childUpdates).eq('parent_rma_id', recordId);
+      }
+      if (rmaNum) {
+        await supabase.from('rma_reports').update(childUpdates).eq('rma_number', rmaNum).neq('id', data.id);
+      }
+    } catch (e) {
+      console.warn('Notice cascading rma_type to child rma_reports:', e?.message);
+    }
+
+    // 3. Cascade to child records in rma_items if table exists
+    try {
+      if (recordId) {
+        await supabase.from('rma_items').update({ disposition: disposition || undefined }).eq('rma_report_id', recordId);
+      }
+    } catch (e) {
+      console.warn('Notice cascading disposition to rma_items:', e?.message);
+    }
+
     this.notifyChange('report-updated', { report: data });
     return data;
   },
@@ -1570,10 +1629,11 @@ export const catalogService = {
   /**
    * ADMIN ACTION: Fill in details for an unknown barcode, including optional product reference image.
    */
-  async updateBarcodeDetails({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, imageUrl, aeName, aeEmail, company }) {
+  async updateBarcodeDetails({ barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, pieces_per_case, piecesPerCase, imageUrl, aeName, aeEmail, company }) {
     const cleanBarcode = String(barcode || '').trim();
     if (!cleanBarcode) throw new Error('Barcode is required to update details.');
 
+    const resolvedPcs = (pieces_per_case !== undefined ? pieces_per_case : piecesPerCase);
     const updates = {
       code: code ? code.trim() : null,
       name: name ? name.trim() : 'Unknown Item',
@@ -1582,6 +1642,7 @@ export const catalogService = {
       price_with_vat: Number(priceWithVat || price || 0),
       brand_name: brandName ? brandName.trim() : null,
       unit_name: unitName ? unitName.trim() : 'pc',
+      pieces_per_case: resolvedPcs !== undefined ? (Number(resolvedPcs) || null) : undefined,
       image_url: imageUrl ? imageUrl.trim() : null,
       ae_name: aeName ? aeName.trim() : null,
       ae_email: aeEmail ? aeEmail.trim() : null,

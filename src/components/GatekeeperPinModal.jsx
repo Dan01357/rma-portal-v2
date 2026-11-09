@@ -1,15 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   ShieldCheck, 
   ShieldAlert, 
   Lock, 
-  LogIn, 
   RefreshCw, 
   AlertTriangle,
   Building2,
   Clock,
   Mail,
-  UserCheck,
   Truck,
   Store
 } from 'lucide-react';
@@ -33,6 +31,9 @@ export default function GatekeeperPinModal({
   const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
 
+  const hasValidatedRef = useRef(false);
+  const validatedTokenRef = useRef(null);
+
   // 1. Resolve token from URL query params, hash fragments, or pending OAuth storage
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -47,7 +48,14 @@ export default function GatekeeperPinModal({
 
     if (!t) {
       try {
-        t = sessionStorage.getItem('rma_pending_oauth_token');
+        t = sessionStorage.getItem('rma_active_invite_token') || sessionStorage.getItem('rma_pending_oauth_token');
+      } catch {}
+    }
+
+    if (t) {
+      try {
+        sessionStorage.setItem('rma_active_invite_token', t);
+        sessionStorage.setItem('rma_pending_oauth_token', t);
       } catch {}
     }
 
@@ -98,7 +106,7 @@ export default function GatekeeperPinModal({
             localStorage.setItem('rma_reporter_contact', authorizedEmail);
             localStorage.setItem('rma_portal_verified_email', userEmail);
 
-            // Clean up OAuth tokens from URL hash for a clean address bar
+            // Clean up OAuth tokens from URL hash for a clean address bar while strictly preserving search params
             if (window.location.hash && window.location.hash.includes('access_token')) {
               window.history.replaceState(null, '', window.location.pathname + window.location.search);
             }
@@ -111,8 +119,7 @@ export default function GatekeeperPinModal({
           return;
         } else {
           // CRITICAL SECURITY MISMATCH: Signed in with unauthorized Google account
-          // DO NOT UNLOCK THE PORTAL.
-          // Immediately sign out of Supabase to prevent unauthorized session retention
+          // Immediately sign out locally to prevent unauthorized session retention
           await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
           try {
             localStorage.removeItem('rma_portal_gate_session');
@@ -123,6 +130,7 @@ export default function GatekeeperPinModal({
             authorizedEmail: invite.authorized_email
           });
           setIsCheckingAuth(false);
+          setIsValidatingToken(false);
           return;
         }
       }
@@ -133,7 +141,7 @@ export default function GatekeeperPinModal({
     }
   }, [onUnlock]);
 
-  // 3. Validate token from URL / database
+  // 3. Validate token from URL / database with ref guard to prevent loop
   useEffect(() => {
     let isMounted = true;
     if (!token) {
@@ -142,20 +150,31 @@ export default function GatekeeperPinModal({
       return;
     }
 
+    // Ref guard: only validate once per unique token to eliminate loading flicker loop
+    if (hasValidatedRef.current && validatedTokenRef.current === token) {
+      setIsValidatingToken(false);
+      return;
+    }
+
     setIsValidatingToken(true);
     inviteService.validateInviteToken(token).then(async (res) => {
       if (!isMounted) return;
+      hasValidatedRef.current = true;
+      validatedTokenRef.current = token;
       setValidationResult(res);
       setIsValidatingToken(false);
 
       if (res?.valid && res?.invite) {
         try {
+          sessionStorage.setItem('rma_active_invite_token', token);
           sessionStorage.setItem('rma_pending_oauth_token', token);
         } catch {}
 
         // Check if user is already authenticated via Supabase Google OAuth
         await verifyIdentityWithSupabase(res.invite);
       }
+    }).catch(() => {
+      if (isMounted) setIsValidatingToken(false);
     });
 
     return () => { isMounted = false; };
@@ -164,6 +183,7 @@ export default function GatekeeperPinModal({
   // 4. Subscribe to Supabase Auth state changes (triggers on OAuth redirect return)
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (identityMismatch) return;
       if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && session?.user) {
         if (validationResult?.valid && validationResult?.invite) {
           await verifyIdentityWithSupabase(validationResult.invite, session.user);
@@ -174,7 +194,7 @@ export default function GatekeeperPinModal({
     return () => {
       subscription?.unsubscribe();
     };
-  }, [validationResult, verifyIdentityWithSupabase]);
+  }, [validationResult, verifyIdentityWithSupabase, identityMismatch]);
 
   // 5. Countdown timer for valid invite
   useEffect(() => {
@@ -202,6 +222,7 @@ export default function GatekeeperPinModal({
     try {
       if (token) {
         try {
+          sessionStorage.setItem('rma_active_invite_token', token);
           sessionStorage.setItem('rma_pending_oauth_token', token);
         } catch {}
       }
@@ -291,7 +312,7 @@ export default function GatekeeperPinModal({
             </p>
           </div>
         ) : identityMismatch ? (
-          /* 2. 403 Forbidden Screen — Identity Mismatch (Cryptographic Google OAuth Block) */
+          /* 2. 403 Forbidden Screen — Identity Mismatch (Strict Google OAuth Block) */
           <div className="space-y-5 animate-in zoom-in-95">
             <div className="w-16 h-16 rounded-3xl bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto shadow-inner">
               <ShieldAlert className="w-8 h-8" />
@@ -320,7 +341,7 @@ export default function GatekeeperPinModal({
               </div>
             </div>
 
-            <div className="space-y-2 pt-2">
+            <div className="pt-2">
               <button
                 type="button"
                 onClick={() => {
@@ -332,18 +353,10 @@ export default function GatekeeperPinModal({
                 <RefreshCw className="w-4 h-4" />
                 <span>Switch Google Account</span>
               </button>
-
-              <button
-                type="button"
-                onClick={onOpenAdminLogin}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
-              >
-                <span>Admin & Staff Login</span>
-              </button>
             </div>
           </div>
         ) : !token ? (
-          /* 3. Visited Without a Token */
+          /* 3. Visited Without a Token (Public Root / Lock Screen - Zero Admin Buttons) */
           <div className="space-y-5 animate-in zoom-in-95">
             <div className="w-16 h-16 rounded-3xl bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-inner">
               <Lock className="w-8 h-8" />
@@ -369,7 +382,7 @@ export default function GatekeeperPinModal({
             </div>
           </div>
         ) : !validationResult?.valid ? (
-          /* 4. Token Invalid / Expired / Revoked */
+          /* 4. Token Invalid / Expired / Revoked (Zero Admin Buttons) */
           <div className="space-y-5 animate-in zoom-in-95">
             <div className="w-16 h-16 rounded-3xl bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto shadow-inner">
               <Clock className="w-8 h-8" />
@@ -394,19 +407,9 @@ export default function GatekeeperPinModal({
                 Please contact your Pingcon representative to generate a fresh return authorization link for your account.
               </p>
             </div>
-
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={onOpenAdminLogin}
-                className="w-full py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
-              >
-                <span>Admin & Staff Login</span>
-              </button>
-            </div>
           </div>
         ) : (
-          /* 5. Valid Token -> 1-Click Google Identity Lock OAuth Screen (Zero Manual Email Typing) */
+          /* 5. Valid Token -> 1-Click Google Identity Lock OAuth Screen (Zero Admin Buttons) */
           <div className="space-y-5 animate-in zoom-in-95">
             <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mx-auto shadow-inner ${
               isSupplier 
@@ -559,16 +562,6 @@ export default function GatekeeperPinModal({
               >
                 <Mail className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                 <span>{magicLinkSent ? '✓ One-Time Link Dispatched to Your Inbox' : isSendingMagicLink ? 'Dispatching Access Link...' : 'Email One-Time Access Link to ' + validationResult.invite.authorized_email}</span>
-              </button>
-            </div>
-
-            <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={onOpenAdminLogin}
-                className="w-full py-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-xs transition-colors cursor-pointer"
-              >
-                <span>Admin & Staff Login</span>
               </button>
             </div>
           </div>
