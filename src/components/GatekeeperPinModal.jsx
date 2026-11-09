@@ -215,7 +215,7 @@ export default function GatekeeperPinModal({
           const checkJson = await checkRes.json();
           if (checkJson && checkJson.enabled === false) {
             console.warn('Supabase Google OAuth provider is disabled:', checkJson.error);
-            setOauthError(checkJson.error || 'Google OAuth provider is not enabled in your Supabase project dashboard.');
+            setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
             setIsSigningIn(false);
             return;
           }
@@ -240,7 +240,7 @@ export default function GatekeeperPinModal({
 
       if (error) {
         console.error('Google OAuth sign-in error:', error);
-        setOauthError(error.message || 'Failed to initialize Google Authentication.');
+        setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
         setIsSigningIn(false);
         return;
       }
@@ -249,12 +249,12 @@ export default function GatekeeperPinModal({
         // Safe to navigate to Google OAuth!
         window.location.assign(data.url);
       } else {
-        setOauthError('Unable to generate Google authentication URL.');
+        setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
         setIsSigningIn(false);
       }
     } catch (err) {
       console.error('Google OAuth invocation exception:', err);
-      setOauthError(err?.message || 'Unexpected authentication error.');
+      setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
       setIsSigningIn(false);
     }
   };
@@ -274,12 +274,14 @@ export default function GatekeeperPinModal({
         }
       });
       if (error) {
-        setOauthError(error.message || 'Failed to dispatch verification link.');
+        console.warn('Magic link error:', error);
+        setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
       } else {
         setMagicLinkSent(true);
       }
     } catch (e) {
-      setOauthError(e.message || 'Failed to send verification email.');
+      console.warn('Magic link exception:', e);
+      setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
     } finally {
       setIsSendingMagicLink(false);
     }
@@ -515,12 +517,10 @@ export default function GatekeeperPinModal({
               <div className="p-4 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-900 rounded-2xl text-xs text-amber-900 dark:text-amber-200 text-left space-y-2.5 animate-in fade-in">
                 <div className="font-bold flex items-center gap-2 text-amber-800 dark:text-amber-300">
                   <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>Access Authorization Notice</span>
+                  <span>Google Sign-In Notice</span>
                 </div>
-                <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-300">
-                  {oauthError.toLowerCase().includes('provider is not enabled')
-                    ? 'Direct Google Sign-In is temporarily unavailable on this portal. To proceed immediately, please request a 1-click Secure Access Link sent directly to your authorized email address below, or contact your Pingcon representative.'
-                    : oauthError}
+                <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-300 font-medium">
+                  Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.
                 </p>
 
                 {/* Secure Magic Link Fallback strictly dispatched to authorized inbox */}
@@ -532,9 +532,22 @@ export default function GatekeeperPinModal({
                     className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60 shadow-sm"
                   >
                     <Mail className="w-4 h-4" />
-                    <span>{magicLinkSent ? '✓ Secure Access Link Dispatched to Your Email' : isSendingMagicLink ? 'Dispatching Access Link...' : `Email Secure Access Link to ${validationResult.invite.authorized_email}`}</span>
+                    <span>{magicLinkSent ? '✓ One-Time Link Dispatched to Your Inbox' : isSendingMagicLink ? 'Dispatching Access Link...' : `Email One-Time Access Link to ${validationResult.invite.authorized_email}`}</span>
                   </button>
                 </div>
+              </div>
+            )}
+
+            {/* Magic Link Sent Confirmation Banner */}
+            {magicLinkSent && (
+              <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 rounded-2xl text-xs text-left space-y-1.5 animate-in fade-in">
+                <div className="font-bold flex items-center gap-2 text-emerald-800 dark:text-emerald-300">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Secure Access Link Dispatched</span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-emerald-800 dark:text-emerald-300">
+                  A one-time secure login link has been dispatched to <strong className="font-mono">{validationResult.invite.authorized_email}</strong>. Please check your inbox and click the link to automatically access the return portal.
+                </p>
               </div>
             )}
 
@@ -572,7 +585,7 @@ export default function GatekeeperPinModal({
                 className="w-full py-2.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 shadow-2xs"
               >
                 <Mail className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                <span>{magicLinkSent ? '✓ Secure Access Link Dispatched' : isSendingMagicLink ? 'Dispatching...' : 'Email One-Time Access Link to ' + validationResult.invite.authorized_email}</span>
+                <span>{magicLinkSent ? '✓ One-Time Link Dispatched to Your Inbox' : isSendingMagicLink ? 'Dispatching Access Link...' : 'Email One-Time Access Link to ' + validationResult.invite.authorized_email}</span>
               </button>
             </div>
 

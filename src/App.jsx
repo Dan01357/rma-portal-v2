@@ -5966,7 +5966,6 @@ export default function App() {
           setIsAdminView(true);
           setIsLoginModalOpen(true);
         }}
-        isTestMode={isTestMode}
       />
 
       {/* Customer RMA Invites Modal (Google Identity Locked Return Links) */}
