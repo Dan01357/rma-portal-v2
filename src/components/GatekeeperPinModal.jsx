@@ -208,23 +208,7 @@ export default function GatekeeperPinModal({
 
       const currentUrl = window.location.href;
       
-      // Step A: Pre-flight check via backend API to verify if Google OAuth provider is active in Supabase
-      try {
-        const checkRes = await fetch('/api/auth-provider-check?provider=google');
-        if (checkRes.ok) {
-          const checkJson = await checkRes.json();
-          if (checkJson && checkJson.enabled === false) {
-            console.warn('Supabase Google OAuth provider is disabled:', checkJson.error);
-            setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
-            setIsSigningIn(false);
-            return;
-          }
-        }
-      } catch (checkErr) {
-        console.warn('Pre-flight provider check skipped:', checkErr);
-      }
-
-      // Step B: Use skipBrowserRedirect: true first to safely get the authorization URL
+      // Use skipBrowserRedirect: true first to safely get the authorization URL
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {

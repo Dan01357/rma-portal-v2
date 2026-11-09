@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-09T04:29:13.140Z
+Generated At: 2026-11-09T04:47:58.894Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -40,7 +40,6 @@ rma-portal-v2/
 │   │   │   │   │   │   ├── [id].js
 │   │   │   │   │   │   └── index.js
 │   │   │   │   └── health.js
-│   │   ├── auth-provider-check.js
 │   │   ├── docs.js
 │   │   ├── send-email.js
 │   │   └── upload-photo.js
@@ -4062,56 +4061,6 @@ When the customer opens their private link (`/intake?token=inv_...`):
 
 
 --- END FILE: docs/WHOLESALE_RMA_OPERATIONS_GUIDE.md ---
-
---- START FILE: api/auth-provider-check.js ---
-// Serverless handler to probe Supabase Auth OAuth provider status without CORS restrictions
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
-  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://lschluviltzsknptwgrz.supabase.co';
-  const provider = (req.query.provider || 'google').toLowerCase();
-
-  try {
-    const probeRes = await fetch(`${supabaseUrl}/auth/v1/authorize?provider=${provider}`, {
-      method: 'GET',
-      redirect: 'manual'
-    });
-
-    // Supabase returns HTTP 400 with { code: 400, error_code: 'validation_failed', msg: 'Unsupported provider: provider is not enabled' }
-    // if the provider is not enabled in Supabase Dashboard -> Authentication -> Providers.
-    if (probeRes.status === 400) {
-      const errJson = await probeRes.json().catch(() => ({}));
-      return res.status(200).json({
-        enabled: false,
-        status: 400,
-        provider,
-        error: errJson.msg || errJson.message || 'Unsupported provider: provider is not enabled in Supabase Dashboard'
-      });
-    }
-
-    // 302 or 200 indicates the provider is enabled and redirecting to the OAuth provider (e.g. accounts.google.com)
-    return res.status(200).json({
-      enabled: true,
-      provider,
-      status: probeRes.status
-    });
-  } catch (err) {
-    return res.status(200).json({
-      enabled: false,
-      provider,
-      error: err.message
-    });
-  }
-}
-
-
---- END FILE: api/auth-provider-check.js ---
 
 --- START FILE: api/docs.js ---
 import fs from 'fs';
@@ -20679,23 +20628,7 @@ export default function GatekeeperPinModal({
 
       const currentUrl = window.location.href;
       
-      // Step A: Pre-flight check via backend API to verify if Google OAuth provider is active in Supabase
-      try {
-        const checkRes = await fetch('/api/auth-provider-check?provider=google');
-        if (checkRes.ok) {
-          const checkJson = await checkRes.json();
-          if (checkJson && checkJson.enabled === false) {
-            console.warn('Supabase Google OAuth provider is disabled:', checkJson.error);
-            setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
-            setIsSigningIn(false);
-            return;
-          }
-        }
-      } catch (checkErr) {
-        console.warn('Pre-flight provider check skipped:', checkErr);
-      }
-
-      // Step B: Use skipBrowserRedirect: true first to safely get the authorization URL
+      // Use skipBrowserRedirect: true first to safely get the authorization URL
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
