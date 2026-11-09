@@ -19,6 +19,7 @@ import {
   Ban
 } from 'lucide-react';
 import { inviteService, formatRemainingCountdown } from '../services/inviteService';
+import TablePagination from './TablePagination';
 
 const PRESET_EXPIRIES = [
   { label: '15 Mins', num: 15, unit: 'minutes' },
@@ -47,6 +48,8 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
 
   // Filter for the invites table
   const [streamFilter, setStreamFilter] = useState('all'); // 'all' | 'customer_inbound' | 'supplier_outbound'
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedInvite, setGeneratedInvite] = useState(null);
@@ -112,7 +115,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
         authorizedEmail: authorizedEmail.trim(),
         entityName: entityName.trim(),
         storeBranch: entityName.trim(),
-        durationValue: expiryNumber,
+        durationValue: Math.max(1, parseInt(expiryNumber, 10) || 1),
         durationUnit: expiryUnit,
         createdBy
       });
@@ -170,22 +173,15 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   };
 
   const handleDelete = async (inv) => {
-    const countdown = formatRemainingCountdown(inv.expires_at, inv.status);
-    const isExpired = countdown.isExpired;
-    const isRevoked = inv.status === 'revoked';
-
-    if (!isExpired && !isRevoked) {
-      alert('Active invites cannot be deleted until they are expired or revoked.');
-      return;
-    }
-
-    if (!window.confirm(`Permanently delete expired invite record for ${inv.authorized_email}?`)) {
+    if (!inv) return;
+    const email = inv.authorized_email || 'this recipient';
+    if (!window.confirm(`Permanently delete RMA invite record for ${email}? This will invalidate any associated private return links.`)) {
       return;
     }
 
     try {
       await inviteService.deleteInvite(inv.token || inv.id);
-      showToast('Expired invite record deleted.');
+      showToast('Invite record deleted successfully.');
       loadInvites();
       if (generatedInvite?.token === inv.token) {
         setGeneratedInvite(null);
@@ -199,6 +195,23 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     if (streamFilter === 'all') return invites;
     return invites.filter(i => (i.stream_type || 'customer_inbound') === streamFilter);
   }, [invites, streamFilter]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [streamFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredInvites.length / pageSize));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
+  const paginatedInvites = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredInvites.slice(start, start + pageSize);
+  }, [filteredInvites, currentPage, pageSize]);
 
   const customerCount = useMemo(() => {
     return invites.filter(i => (i.stream_type || 'customer_inbound') === 'customer_inbound').length;
@@ -223,7 +236,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                  RMA Invites
+                  Generate RMA Invites
                 </h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300">
                   Google Identity Lock
@@ -400,7 +413,20 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                       max="365"
                       required
                       value={expiryNumber}
-                      onChange={(e) => setExpiryNumber(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '') {
+                          setExpiryNumber('');
+                        } else {
+                          const parsed = parseInt(val, 10);
+                          setExpiryNumber(isNaN(parsed) ? '' : parsed);
+                        }
+                      }}
+                      onBlur={() => {
+                        if (!expiryNumber || Number(expiryNumber) < 1) {
+                          setExpiryNumber(1);
+                        }
+                      }}
                       className="w-full px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-black font-mono text-center text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs"
                       placeholder="24"
                     />
@@ -427,7 +453,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 Quick Presets:
               </span>
               {PRESET_EXPIRIES.map((preset) => {
-                const isSelected = expiryNumber === preset.num && expiryUnit === preset.unit;
+                const isSelected = Number(expiryNumber) === preset.num && expiryUnit === preset.unit;
                 return (
                   <button
                     key={preset.label}
@@ -618,7 +644,8 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 No authorization invites found for this filter. Use the form above to generate your first secure return link.
               </div>
             ) : (
-              <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl">
+              <div className="space-y-2">
+                <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
                     <tr>
@@ -632,7 +659,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {filteredInvites.map((inv) => {
+                    {paginatedInvites.map((inv) => {
                       const countdown = formatRemainingCountdown(inv.expires_at, inv.status);
                       const isRevoked = inv.status === 'revoked';
                       const isExpired = countdown.isExpired;
@@ -684,7 +711,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                           </td>
                           <td className="p-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {!isRevoked && !isExpired ? (
+                              {!isRevoked && !isExpired && (
                                 <>
                                   <button
                                     type="button"
@@ -712,16 +739,15 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                                     <Ban className="w-3.5 h-3.5" />
                                   </button>
                                 </>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => handleDelete(inv)}
-                                  className="p-1.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
-                                  title="Delete Expired Invite Record"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
                               )}
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(inv)}
+                                className="p-1.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
+                                title="Delete Invite Record"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -729,6 +755,20 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                     })}
                   </tbody>
                 </table>
+              </div>
+
+                <TablePagination
+                  currentPage={currentPage}
+                  totalItems={filteredInvites.length}
+                  pageSize={pageSize}
+                  onPageChange={setCurrentPage}
+                  onPageSizeChange={(newSize) => {
+                    setPageSize(newSize);
+                    setCurrentPage(1);
+                  }}
+                  pageSizeOptions={[10, 25, 50]}
+                  itemLabel="invites"
+                />
               </div>
             )}
           </div>

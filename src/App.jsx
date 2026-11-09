@@ -3443,7 +3443,7 @@ export default function App() {
                   title="Generate & Manage Google Identity Locked RMA Return Links (Warehouse or Customer)"
                 >
                   <Ticket className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span>🎫 RMA Invites</span>
+                  <span>🎫 Generate RMA Invites</span>
                 </button>
 
                 <button

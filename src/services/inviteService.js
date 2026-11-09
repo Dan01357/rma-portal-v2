@@ -309,11 +309,17 @@ export const inviteService = {
 
     // 1. Update in table
     try {
-      await supabase
-        .from('rma_invites')
-        .update({ status: 'revoked' })
-        .or(`token.eq.${tokenOrId},id.eq.${tokenOrId}`);
-    } catch {}
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tokenOrId).trim());
+      let query = supabase.from('rma_invites').update({ status: 'revoked' });
+      if (isUUID) {
+        query = query.eq('id', tokenOrId);
+      } else {
+        query = query.eq('token', tokenOrId);
+      }
+      await query;
+    } catch (e) {
+      console.warn('Failed to update revoked invite in rma_invites:', e);
+    }
 
     // 2. Update in rma_settings
     try {
@@ -340,17 +346,21 @@ export const inviteService = {
   },
 
   /**
-   * Delete an expired invite record (Strictly allowed only for expired or revoked invites)
+   * Delete an invite record directly
    */
   async deleteInvite(tokenOrId) {
     if (!tokenOrId) return false;
 
     // 1. Delete from rma_invites table
     try {
-      await supabase
-        .from('rma_invites')
-        .delete()
-        .or(`token.eq.${tokenOrId},id.eq.${tokenOrId}`);
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tokenOrId).trim());
+      let query = supabase.from('rma_invites').delete();
+      if (isUUID) {
+        query = query.eq('id', tokenOrId);
+      } else {
+        query = query.eq('token', tokenOrId);
+      }
+      await query;
     } catch (e) {
       console.warn('Failed to delete from rma_invites table:', e);
     }
