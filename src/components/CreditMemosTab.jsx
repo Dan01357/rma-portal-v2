@@ -22,6 +22,7 @@ import {
   Square
 } from 'lucide-react';
 import TablePagination from './TablePagination';
+import { formatFilenameDateTime } from '../utils/exportCsv';
 
 export default function CreditMemosTab({
   creditMemosList = [],
@@ -299,7 +300,7 @@ export default function CreditMemosTab({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `Finance_Credit_Memos_${dateFrom || 'all'}_to_${dateTo || new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `Finance_Credit_Memos_${formatFilenameDateTime()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

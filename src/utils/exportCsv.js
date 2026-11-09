@@ -3,6 +3,33 @@
  * Formats financial records with clean headers and UTF-8 BOM for Microsoft Excel & Google Sheets.
  */
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Format timestamp strictly for filenames:
+ * YYYY-MMMon-DD HHMM (e.g. 2026-11Nov-09 1430)
+ */
+export function formatFilenameDateTime(date = new Date()) {
+  const d = (date instanceof Date && !isNaN(date.getTime())) ? date : new Date(date || Date.now());
+  const safeDate = isNaN(d.getTime()) ? new Date() : d;
+  const yyyy = safeDate.getFullYear();
+  const mm = String(safeDate.getMonth() + 1).padStart(2, '0');
+  const mon = MONTH_NAMES[safeDate.getMonth()] || 'Jan';
+  const dd = String(safeDate.getDate()).padStart(2, '0');
+  const hh = String(safeDate.getHours()).padStart(2, '0');
+  const min = String(safeDate.getMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}${mon}-${dd} ${hh}${min}`;
+}
+
+export function resolveFilenameWithTimestamp(defaultPrefix, customFilename) {
+  const ts = formatFilenameDateTime();
+  if (!customFilename) return `${defaultPrefix}_${ts}.csv`;
+  if (customFilename.toLowerCase().endsWith('.csv')) {
+    return customFilename.replace(/\.csv$/i, `_${ts}.csv`);
+  }
+  return `${customFilename}_${ts}.csv`;
+}
+
 /**
  * Format any date or timestamp strictly to 24-hour military time without colons:
  * YYYY-MM-DD HHMM (e.g. 2026-11-06 0845)
@@ -135,7 +162,7 @@ export function exportRMAReportsToCSV(reports, filename = null) {
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Pingcon_RMA_Reports_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_RMA_Reports', filename);
   downloadCsvBlob(csv, actualFilename);
 }
 
@@ -215,7 +242,7 @@ export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Pingcon_Customer_Inbound_RMAs_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Customer_Inbound_RMAs', filename);
   downloadCsvBlob(csv, actualFilename);
 }
 
@@ -289,7 +316,7 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Pingcon_Supplier_Outbound_Claims_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Supplier_Outbound_Claims', filename);
   downloadCsvBlob(csv, actualFilename);
 }
 
@@ -351,6 +378,6 @@ export function exportCreditMemosToCSV(memos, filename = null) {
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Pingcon_Credit_Memos_Export_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Credit_Memos_Export', filename);
   downloadCsvBlob(csv, actualFilename);
 }

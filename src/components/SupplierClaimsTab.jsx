@@ -156,26 +156,55 @@ export default function SupplierClaimsTab({
     // 1. Gather all line-item candidates, unpacking parent manifests if needed
     const rawItems = [];
 
-    // Identify which parent IDs have individual child reports already present in reportsList
-    const parentIdsWithDirectChildren = new Set();
+    // Identify which parent IDs or RMA numbers are already being displayed as main rows or unpacked
+    const displayedOrUnpackedParentIds = new Set();
+    const displayedOrUnpackedParentRmas = new Set();
+
     reportsList.forEach(r => {
-      if (r.parent_rma_id) {
-        parentIdsWithDirectChildren.add(String(r.parent_rma_id));
+      if (!r.parent_rma_id) {
+        const isParentManifest = Boolean(
+          r.is_parent ||
+          (Number(r.total_items) > 1 && String(r.name || '').toLowerCase().startsWith('batch return manifest')) ||
+          String(r.name || '').toLowerCase().startsWith('batch return manifest')
+        );
+
+        if (!isParentManifest) {
+          // Standard single item report is directly displayed
+          if (r.id) displayedOrUnpackedParentIds.add(String(r.id));
+          if (r.rma_number) displayedOrUnpackedParentRmas.add(String(r.rma_number));
+        } else if (Array.isArray(r.items) && r.items.length > 0) {
+          // Parent manifest has items and will be unpacked into line items
+          if (r.id) displayedOrUnpackedParentIds.add(String(r.id));
+          if (r.rma_number) displayedOrUnpackedParentRmas.add(String(r.rma_number));
+        }
       }
     });
 
     reportsList.forEach(r => {
-      // Strictly enforce RTV disposition filtering:
-      // Exclude items triaged to Restock to Inventory, Scrap / Dispose, Quarantine, Buffer Exchange, or Pending Triage
-      const disp = String(r.disposition || '').toLowerCase();
-      if (disp.includes('restock') || disp.includes('scrap') || disp.includes('quarantine') || disp.includes('buffer') || disp.includes('pending triage')) {
-        return;
+      // Ensure items with parent_rma_id are not displayed if the parent container is also being displayed or unpacked
+      if (r.parent_rma_id) {
+        const parentIdStr = String(r.parent_rma_id);
+        const rmaStr = String(r.rma_number || '');
+        if (displayedOrUnpackedParentIds.has(parentIdStr) || displayedOrUnpackedParentRmas.has(rmaStr)) {
+          return;
+        }
       }
 
-      // Must strictly have an RTV disposition (or be an untriaged supplier outbound claim)
-      const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv');
-      if (!isRtvDisposition && r.rma_type !== 'supplier_outbound') {
-        return;
+      // Any item with rma_type === 'supplier_outbound' is an explicit vendor claim and is NOT filtered out by disposition checks
+      const isExplicitSupplierOutbound = r.rma_type === 'supplier_outbound';
+      const disp = String(r.disposition || '').toLowerCase();
+
+      if (!isExplicitSupplierOutbound) {
+        // Exclude items triaged to Restock to Inventory, Scrap / Dispose, Quarantine, Buffer Exchange, or Pending Triage
+        if (disp.includes('restock') || disp.includes('scrap') || disp.includes('quarantine') || disp.includes('buffer') || disp.includes('pending triage')) {
+          return;
+        }
+
+        // Must strictly have an RTV disposition
+        const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv');
+        if (!isRtvDisposition) {
+          return;
+        }
       }
 
       const isParentManifest = Boolean(
@@ -186,11 +215,6 @@ export default function SupplierClaimsTab({
 
       // If it is a generic parent manifest container:
       if (isParentManifest) {
-        // If its child rows already exist in reportsList, completely skip the parent container
-        if (parentIdsWithDirectChildren.has(String(r.id))) {
-          return;
-        }
-
         // If child rows are not separate rows in reportsList, unpack r.items into individual line items
         if (Array.isArray(r.items) && r.items.length > 0) {
           r.items.forEach((childIt, idx) => {
@@ -227,9 +251,9 @@ export default function SupplierClaimsTab({
     const dedupedItems = [];
     const seenKeys = new Set();
     rawItems.forEach(item => {
-      const uniqueKey = item.parent_rma_id 
-        ? `${item.rma_number}_${item.barcode}_${item.id || item.child_id}`
-        : (item.id ? String(item.id) : `${item.rma_number}_${item.barcode}`);
+      const uniqueKey = item.barcode 
+        ? `${item.rma_number}_${item.barcode}`
+        : (item.id ? String(item.id) : `${item.rma_number}`);
 
       if (!seenKeys.has(uniqueKey)) {
         seenKeys.add(uniqueKey);

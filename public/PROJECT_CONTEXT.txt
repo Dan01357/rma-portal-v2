@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-09T00:54:07.265Z
+Generated At: 2026-11-09T02:11:06.826Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -15066,19 +15066,10 @@ export default function App() {
             });
           } else if (updated && (updated.id || updated.rma_number)) {
             setRecentReportsList(prev => prev.map(r => {
-              if (r && r.id && updated.id && String(r.id) === String(updated.id)) {
+              const idMatch = r && r.id && updated.id && String(r.id) === String(updated.id);
+              const rmaMatch = r && r.rma_number && updated.rma_number && String(r.rma_number) === String(updated.rma_number) && !r.parent_rma_id;
+              if (idMatch || rmaMatch) {
                 return { ...r, ...updated };
-              }
-              if (r && r.rma_number && updated.rma_number && r.rma_number === updated.rma_number && !r.parent_rma_id) {
-                return {
-                  ...r,
-                  status: updated.status !== undefined ? updated.status : r.status,
-                  disposition: updated.disposition !== undefined ? updated.disposition : r.disposition,
-                  condition_grade: updated.condition_grade !== undefined ? updated.condition_grade : r.condition_grade,
-                  warehouse_location: updated.warehouse_location !== undefined ? updated.warehouse_location : r.warehouse_location,
-                  inspected_by: updated.inspected_by !== undefined ? updated.inspected_by : r.inspected_by,
-                  inspected_at: updated.inspected_at !== undefined ? updated.inspected_at : r.inspected_at
-                };
               }
               return r;
             }));
@@ -17473,6 +17464,7 @@ import {
   Square
 } from 'lucide-react';
 import TablePagination from './TablePagination';
+import { formatFilenameDateTime } from '../utils/exportCsv';
 
 export default function CreditMemosTab({
   creditMemosList = [],
@@ -17750,7 +17742,7 @@ export default function CreditMemosTab({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `Finance_Credit_Memos_${dateFrom || 'all'}_to_${dateTo || new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `Finance_Credit_Memos_${formatFilenameDateTime()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -27387,13 +27379,42 @@ export default function QuickRMAActionModal({
     setIsUpdatingType(true);
     setTypeFeedback(null);
     try {
+      const currentDisp = String(report.disposition || '').trim();
+      const isPendingTriage = !currentDisp || 
+        currentDisp.toLowerCase().includes('pending triage') ||
+        currentDisp === '1- Pending Triage' ||
+        currentDisp === '1 - Pending Triage';
+
+      // Automatically update disposition to 'Return to Vendor (RTV)' if toggling to supplier_outbound from pending triage
+      const targetDisposition = (newType === 'supplier_outbound' && isPendingTriage)
+        ? '3- Return to Vendor (RTV)'
+        : (report.disposition || '1- Pending Triage');
+
       // Optimistic update
-      setReport(prev => ({ ...prev, rma_type: newType }));
+      const updatedReport = { 
+        ...report, 
+        rma_type: newType,
+        disposition: targetDisposition
+      };
+      setReport(updatedReport);
+      setDisposition(targetDisposition);
+
       const cleanId = report.id || report.rma_number;
-      await catalogService.updateRMAType(cleanId, newType);
+      const savedData = await catalogService.updateRMAType(cleanId, newType, targetDisposition);
+      const finalReport = { ...updatedReport, ...(savedData || {}) };
+      setReport(finalReport);
+
       setTypeFeedback(newType === 'customer_inbound' ? 'Moved to Customer RMA Hub (Inbound)' : 'Moved to Supplier RMA Hub (Outbound / RTV)');
       setTimeout(() => setTypeFeedback(null), 3000);
-      if (onRefresh) onRefresh();
+      
+      if (onRefresh) {
+        onRefresh(finalReport);
+      }
+      try {
+        window.dispatchEvent(new CustomEvent('rma-data-changed', {
+          detail: { type: 'report-updated', report: finalReport }
+        }));
+      } catch {}
     } catch (err) {
       console.error('Failed to update RMA type:', err);
       // Revert optimistic update
@@ -34804,26 +34825,55 @@ export default function SupplierClaimsTab({
     // 1. Gather all line-item candidates, unpacking parent manifests if needed
     const rawItems = [];
 
-    // Identify which parent IDs have individual child reports already present in reportsList
-    const parentIdsWithDirectChildren = new Set();
+    // Identify which parent IDs or RMA numbers are already being displayed as main rows or unpacked
+    const displayedOrUnpackedParentIds = new Set();
+    const displayedOrUnpackedParentRmas = new Set();
+
     reportsList.forEach(r => {
-      if (r.parent_rma_id) {
-        parentIdsWithDirectChildren.add(String(r.parent_rma_id));
+      if (!r.parent_rma_id) {
+        const isParentManifest = Boolean(
+          r.is_parent ||
+          (Number(r.total_items) > 1 && String(r.name || '').toLowerCase().startsWith('batch return manifest')) ||
+          String(r.name || '').toLowerCase().startsWith('batch return manifest')
+        );
+
+        if (!isParentManifest) {
+          // Standard single item report is directly displayed
+          if (r.id) displayedOrUnpackedParentIds.add(String(r.id));
+          if (r.rma_number) displayedOrUnpackedParentRmas.add(String(r.rma_number));
+        } else if (Array.isArray(r.items) && r.items.length > 0) {
+          // Parent manifest has items and will be unpacked into line items
+          if (r.id) displayedOrUnpackedParentIds.add(String(r.id));
+          if (r.rma_number) displayedOrUnpackedParentRmas.add(String(r.rma_number));
+        }
       }
     });
 
     reportsList.forEach(r => {
-      // Strictly enforce RTV disposition filtering:
-      // Exclude items triaged to Restock to Inventory, Scrap / Dispose, Quarantine, Buffer Exchange, or Pending Triage
-      const disp = String(r.disposition || '').toLowerCase();
-      if (disp.includes('restock') || disp.includes('scrap') || disp.includes('quarantine') || disp.includes('buffer') || disp.includes('pending triage')) {
-        return;
+      // Ensure items with parent_rma_id are not displayed if the parent container is also being displayed or unpacked
+      if (r.parent_rma_id) {
+        const parentIdStr = String(r.parent_rma_id);
+        const rmaStr = String(r.rma_number || '');
+        if (displayedOrUnpackedParentIds.has(parentIdStr) || displayedOrUnpackedParentRmas.has(rmaStr)) {
+          return;
+        }
       }
 
-      // Must strictly have an RTV disposition (or be an untriaged supplier outbound claim)
-      const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv');
-      if (!isRtvDisposition && r.rma_type !== 'supplier_outbound') {
-        return;
+      // Any item with rma_type === 'supplier_outbound' is an explicit vendor claim and is NOT filtered out by disposition checks
+      const isExplicitSupplierOutbound = r.rma_type === 'supplier_outbound';
+      const disp = String(r.disposition || '').toLowerCase();
+
+      if (!isExplicitSupplierOutbound) {
+        // Exclude items triaged to Restock to Inventory, Scrap / Dispose, Quarantine, Buffer Exchange, or Pending Triage
+        if (disp.includes('restock') || disp.includes('scrap') || disp.includes('quarantine') || disp.includes('buffer') || disp.includes('pending triage')) {
+          return;
+        }
+
+        // Must strictly have an RTV disposition
+        const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv');
+        if (!isRtvDisposition) {
+          return;
+        }
       }
 
       const isParentManifest = Boolean(
@@ -34834,11 +34884,6 @@ export default function SupplierClaimsTab({
 
       // If it is a generic parent manifest container:
       if (isParentManifest) {
-        // If its child rows already exist in reportsList, completely skip the parent container
-        if (parentIdsWithDirectChildren.has(String(r.id))) {
-          return;
-        }
-
         // If child rows are not separate rows in reportsList, unpack r.items into individual line items
         if (Array.isArray(r.items) && r.items.length > 0) {
           r.items.forEach((childIt, idx) => {
@@ -34875,9 +34920,9 @@ export default function SupplierClaimsTab({
     const dedupedItems = [];
     const seenKeys = new Set();
     rawItems.forEach(item => {
-      const uniqueKey = item.parent_rma_id 
-        ? `${item.rma_number}_${item.barcode}_${item.id || item.child_id}`
-        : (item.id ? String(item.id) : `${item.rma_number}_${item.barcode}`);
+      const uniqueKey = item.barcode 
+        ? `${item.rma_number}_${item.barcode}`
+        : (item.id ? String(item.id) : `${item.rma_number}`);
 
       if (!seenKeys.has(uniqueKey)) {
         seenKeys.add(uniqueKey);
@@ -40904,8 +40949,9 @@ export const catalogService = {
       store_branch: store_branch || insertedReport?.store_branch
     };
 
-    // 1.1 If this is a multi-item batch return, insert children into rma_items and child rma_reports asynchronously
-    if (finalReport?.id && hasItems && items.length > 0) {
+    // 1.1 If this is a multi-item batch return, only insert child rows into rma_items and child rma_reports if isBatch && items.length > 1
+    // Single-item returns are already recorded as finalReport itself; inserting child rows for single-items creates duplicate records.
+    if (finalReport?.id && isBatch && items.length > 1) {
       try {
         const rmaItemRows = items.map(it => ({
           rma_report_id: finalReport.id,
@@ -41022,12 +41068,17 @@ export const catalogService = {
   /**
    * Reclassify RMA Type between 'customer_inbound' and 'supplier_outbound'
    */
-  async updateRMAType(id, rma_type) {
+  async updateRMAType(id, rma_type, disposition = null) {
     const cleanType = rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
     const cleanId = String(id).trim();
     const isNum = /^\d+$/.test(cleanId);
 
-    let query = supabase.from('rma_reports').update({ rma_type: cleanType });
+    const updates = { rma_type: cleanType };
+    if (disposition) {
+      updates.disposition = disposition;
+    }
+
+    let query = supabase.from('rma_reports').update(updates);
     if (isNum) {
       query = query.eq('id', parseInt(cleanId, 10));
     } else {
@@ -44888,6 +44939,33 @@ export async function getDeviceFingerprint() {
  * Formats financial records with clean headers and UTF-8 BOM for Microsoft Excel & Google Sheets.
  */
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Format timestamp strictly for filenames:
+ * YYYY-MMMon-DD HHMM (e.g. 2026-11Nov-09 1430)
+ */
+export function formatFilenameDateTime(date = new Date()) {
+  const d = (date instanceof Date && !isNaN(date.getTime())) ? date : new Date(date || Date.now());
+  const safeDate = isNaN(d.getTime()) ? new Date() : d;
+  const yyyy = safeDate.getFullYear();
+  const mm = String(safeDate.getMonth() + 1).padStart(2, '0');
+  const mon = MONTH_NAMES[safeDate.getMonth()] || 'Jan';
+  const dd = String(safeDate.getDate()).padStart(2, '0');
+  const hh = String(safeDate.getHours()).padStart(2, '0');
+  const min = String(safeDate.getMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}${mon}-${dd} ${hh}${min}`;
+}
+
+export function resolveFilenameWithTimestamp(defaultPrefix, customFilename) {
+  const ts = formatFilenameDateTime();
+  if (!customFilename) return `${defaultPrefix}_${ts}.csv`;
+  if (customFilename.toLowerCase().endsWith('.csv')) {
+    return customFilename.replace(/\.csv$/i, `_${ts}.csv`);
+  }
+  return `${customFilename}_${ts}.csv`;
+}
+
 /**
  * Format any date or timestamp strictly to 24-hour military time without colons:
  * YYYY-MM-DD HHMM (e.g. 2026-11-06 0845)
@@ -45020,7 +45098,7 @@ export function exportRMAReportsToCSV(reports, filename = null) {
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Pingcon_RMA_Reports_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_RMA_Reports', filename);
   downloadCsvBlob(csv, actualFilename);
 }
 
@@ -45100,7 +45178,7 @@ export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Pingcon_Customer_Inbound_RMAs_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Customer_Inbound_RMAs', filename);
   downloadCsvBlob(csv, actualFilename);
 }
 
@@ -45174,7 +45252,7 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Pingcon_Supplier_Outbound_Claims_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Supplier_Outbound_Claims', filename);
   downloadCsvBlob(csv, actualFilename);
 }
 
@@ -45236,7 +45314,7 @@ export function exportCreditMemosToCSV(memos, filename = null) {
   });
 
   const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = filename || `Pingcon_Credit_Memos_Export_${new Date().toISOString().slice(0, 10)}.csv`;
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Credit_Memos_Export', filename);
   downloadCsvBlob(csv, actualFilename);
 }
 

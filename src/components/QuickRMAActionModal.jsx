@@ -137,13 +137,42 @@ export default function QuickRMAActionModal({
     setIsUpdatingType(true);
     setTypeFeedback(null);
     try {
+      const currentDisp = String(report.disposition || '').trim();
+      const isPendingTriage = !currentDisp || 
+        currentDisp.toLowerCase().includes('pending triage') ||
+        currentDisp === '1- Pending Triage' ||
+        currentDisp === '1 - Pending Triage';
+
+      // Automatically update disposition to 'Return to Vendor (RTV)' if toggling to supplier_outbound from pending triage
+      const targetDisposition = (newType === 'supplier_outbound' && isPendingTriage)
+        ? '3- Return to Vendor (RTV)'
+        : (report.disposition || '1- Pending Triage');
+
       // Optimistic update
-      setReport(prev => ({ ...prev, rma_type: newType }));
+      const updatedReport = { 
+        ...report, 
+        rma_type: newType,
+        disposition: targetDisposition
+      };
+      setReport(updatedReport);
+      setDisposition(targetDisposition);
+
       const cleanId = report.id || report.rma_number;
-      await catalogService.updateRMAType(cleanId, newType);
+      const savedData = await catalogService.updateRMAType(cleanId, newType, targetDisposition);
+      const finalReport = { ...updatedReport, ...(savedData || {}) };
+      setReport(finalReport);
+
       setTypeFeedback(newType === 'customer_inbound' ? 'Moved to Customer RMA Hub (Inbound)' : 'Moved to Supplier RMA Hub (Outbound / RTV)');
       setTimeout(() => setTypeFeedback(null), 3000);
-      if (onRefresh) onRefresh();
+      
+      if (onRefresh) {
+        onRefresh(finalReport);
+      }
+      try {
+        window.dispatchEvent(new CustomEvent('rma-data-changed', {
+          detail: { type: 'report-updated', report: finalReport }
+        }));
+      } catch {}
     } catch (err) {
       console.error('Failed to update RMA type:', err);
       // Revert optimistic update

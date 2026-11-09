@@ -5892,19 +5892,10 @@ export default function App() {
             });
           } else if (updated && (updated.id || updated.rma_number)) {
             setRecentReportsList(prev => prev.map(r => {
-              if (r && r.id && updated.id && String(r.id) === String(updated.id)) {
+              const idMatch = r && r.id && updated.id && String(r.id) === String(updated.id);
+              const rmaMatch = r && r.rma_number && updated.rma_number && String(r.rma_number) === String(updated.rma_number) && !r.parent_rma_id;
+              if (idMatch || rmaMatch) {
                 return { ...r, ...updated };
-              }
-              if (r && r.rma_number && updated.rma_number && r.rma_number === updated.rma_number && !r.parent_rma_id) {
-                return {
-                  ...r,
-                  status: updated.status !== undefined ? updated.status : r.status,
-                  disposition: updated.disposition !== undefined ? updated.disposition : r.disposition,
-                  condition_grade: updated.condition_grade !== undefined ? updated.condition_grade : r.condition_grade,
-                  warehouse_location: updated.warehouse_location !== undefined ? updated.warehouse_location : r.warehouse_location,
-                  inspected_by: updated.inspected_by !== undefined ? updated.inspected_by : r.inspected_by,
-                  inspected_at: updated.inspected_at !== undefined ? updated.inspected_at : r.inspected_at
-                };
               }
               return r;
             }));

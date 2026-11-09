@@ -1299,8 +1299,9 @@ export const catalogService = {
       store_branch: store_branch || insertedReport?.store_branch
     };
 
-    // 1.1 If this is a multi-item batch return, insert children into rma_items and child rma_reports asynchronously
-    if (finalReport?.id && hasItems && items.length > 0) {
+    // 1.1 If this is a multi-item batch return, only insert child rows into rma_items and child rma_reports if isBatch && items.length > 1
+    // Single-item returns are already recorded as finalReport itself; inserting child rows for single-items creates duplicate records.
+    if (finalReport?.id && isBatch && items.length > 1) {
       try {
         const rmaItemRows = items.map(it => ({
           rma_report_id: finalReport.id,
@@ -1417,12 +1418,17 @@ export const catalogService = {
   /**
    * Reclassify RMA Type between 'customer_inbound' and 'supplier_outbound'
    */
-  async updateRMAType(id, rma_type) {
+  async updateRMAType(id, rma_type, disposition = null) {
     const cleanType = rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
     const cleanId = String(id).trim();
     const isNum = /^\d+$/.test(cleanId);
 
-    let query = supabase.from('rma_reports').update({ rma_type: cleanType });
+    const updates = { rma_type: cleanType };
+    if (disposition) {
+      updates.disposition = disposition;
+    }
+
+    let query = supabase.from('rma_reports').update(updates);
     if (isNum) {
       query = query.eq('id', parseInt(cleanId, 10));
     } else {
