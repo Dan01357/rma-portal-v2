@@ -239,6 +239,12 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
   const processedPendingList = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     let list = pendingList.filter(item => {
+      // Exclude batch manifests: batches contain multiple items and do not have an individual SKU
+      const name = String(item.name || '').toLowerCase();
+      const b = String(item.barcode || '');
+      if (item.is_parent || name.startsWith('batch return manifest') || name.startsWith('batch rma') || b.startsWith('RMA-')) {
+        return false;
+      }
       if (!q) return true;
       return (
         (item.barcode || '').toLowerCase().includes(q) ||

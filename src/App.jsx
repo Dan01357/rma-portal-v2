@@ -826,6 +826,7 @@ export default function App() {
     if (!hasAssignedSku(report, savedProductsList)) {
       setCreditMemoWarningTarget({
         item: report,
+        title: "Financial Validation & Safety Guard",
         message: "Cannot issue Finance Credit Memo for ₱0.00 or unassigned SKU. Please click 'Assign SKU' first to register the official item code and verified price into the catalog."
       });
       return;
@@ -833,6 +834,23 @@ export default function App() {
     setSelectedCreditMemoReport(report);
     setEditingCreditMemo(null);
     setIsCreditMemoModalOpen(true);
+  };
+
+  // Physical Triage & Inspection Handler with Assign SKU Safeguard
+  const handleInspectTriageForReport = (report) => {
+    if (!report) return;
+    const isManifest = isBatchManifest(report, recentReportsList);
+    // For single-item returns, an official catalog SKU is required before physical triage
+    if (!isManifest && !hasAssignedSku(report, savedProductsList)) {
+      setCreditMemoWarningTarget({
+        item: report,
+        title: "Assign SKU Required First",
+        message: "Physical inspection and warehouse triage require an official catalog SKU / Item Code to be assigned first. Please click 'Assign SKU' to register the product in the catalog before triaging."
+      });
+      return;
+    }
+    setQuickRmaNumber(report.rma_number);
+    setIsQuickRmaModalOpen(true);
   };
 
   const handleOpenCreateCreditMemo = () => {
@@ -4136,8 +4154,7 @@ export default function App() {
                               <tr
                                 onClick={(e) => {
                                   if (e.target.closest('input, button, a')) return;
-                                  setQuickRmaNumber(item.rma_number);
-                                  setIsQuickRmaModalOpen(true);
+                                  handleInspectTriageForReport(item);
                                 }}
                                 className={`transition-colors cursor-pointer ${isSelected
                                     ? 'bg-blue-50/80 dark:bg-blue-950/50'
@@ -4167,10 +4184,7 @@ export default function App() {
                                   <div className="flex items-center gap-1.5">
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        setQuickRmaNumber(item.rma_number);
-                                        setIsQuickRmaModalOpen(true);
-                                      }}
+                                      onClick={() => handleInspectTriageForReport(item)}
                                       className="font-mono font-bold text-blue-700 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-200 hover:underline text-left cursor-pointer"
                                       title={`Inspect, triage, and process RMA #${item.rma_number}`}
                                     >
@@ -4431,10 +4445,7 @@ export default function App() {
                                     {/* Inspect & Triage Physical Return */}
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        setQuickRmaNumber(item.rma_number);
-                                        setIsQuickRmaModalOpen(true);
-                                      }}
+                                      onClick={() => handleInspectTriageForReport(item)}
                                       className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
                                       title={`Inspect, triage condition grade, and assign rack/bin location for ${item.rma_number}`}
                                     >
@@ -4907,10 +4918,7 @@ export default function App() {
                                   </span>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setQuickRmaNumber(item.rma_number);
-                                      setIsQuickRmaModalOpen(true);
-                                    }}
+                                    onClick={() => handleInspectTriageForReport(item)}
                                     className="font-mono font-black text-blue-700 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-200 hover:underline text-sm cursor-pointer"
                                     title={`Inspect & Triage RMA #${item.rma_number}`}
                                   >
@@ -4971,10 +4979,7 @@ export default function App() {
                                 {/* Inspect & Triage Physical Return */}
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setQuickRmaNumber(item.rma_number);
-                                    setIsQuickRmaModalOpen(true);
-                                  }}
+                                  onClick={() => handleInspectTriageForReport(item)}
                                   className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
                                   title={`Inspect condition and set warehouse disposition for ${item.rma_number}`}
                                 >
@@ -5757,7 +5762,7 @@ export default function App() {
               </div>
               <div className="space-y-1.5 min-w-0">
                 <h4 className="text-sm font-black text-slate-900 dark:text-white">
-                  Financial Validation & Safety Guard
+                  {creditMemoWarningTarget.title || "Financial Validation & Safety Guard"}
                 </h4>
                 <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                   {creditMemoWarningTarget.message || "Cannot issue Finance Credit Memo for ₱0.00 or unassigned SKU. Please click 'Assign SKU' first to register the official item code and verified price into the catalog."}

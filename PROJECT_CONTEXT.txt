@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-06T11:15:33.082Z
+Generated At: 2026-11-09T00:54:07.265Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -10000,6 +10000,7 @@ export default function App() {
     if (!hasAssignedSku(report, savedProductsList)) {
       setCreditMemoWarningTarget({
         item: report,
+        title: "Financial Validation & Safety Guard",
         message: "Cannot issue Finance Credit Memo for ₱0.00 or unassigned SKU. Please click 'Assign SKU' first to register the official item code and verified price into the catalog."
       });
       return;
@@ -10007,6 +10008,23 @@ export default function App() {
     setSelectedCreditMemoReport(report);
     setEditingCreditMemo(null);
     setIsCreditMemoModalOpen(true);
+  };
+
+  // Physical Triage & Inspection Handler with Assign SKU Safeguard
+  const handleInspectTriageForReport = (report) => {
+    if (!report) return;
+    const isManifest = isBatchManifest(report, recentReportsList);
+    // For single-item returns, an official catalog SKU is required before physical triage
+    if (!isManifest && !hasAssignedSku(report, savedProductsList)) {
+      setCreditMemoWarningTarget({
+        item: report,
+        title: "Assign SKU Required First",
+        message: "Physical inspection and warehouse triage require an official catalog SKU / Item Code to be assigned first. Please click 'Assign SKU' to register the product in the catalog before triaging."
+      });
+      return;
+    }
+    setQuickRmaNumber(report.rma_number);
+    setIsQuickRmaModalOpen(true);
   };
 
   const handleOpenCreateCreditMemo = () => {
@@ -13310,8 +13328,7 @@ export default function App() {
                               <tr
                                 onClick={(e) => {
                                   if (e.target.closest('input, button, a')) return;
-                                  setQuickRmaNumber(item.rma_number);
-                                  setIsQuickRmaModalOpen(true);
+                                  handleInspectTriageForReport(item);
                                 }}
                                 className={`transition-colors cursor-pointer ${isSelected
                                     ? 'bg-blue-50/80 dark:bg-blue-950/50'
@@ -13341,10 +13358,7 @@ export default function App() {
                                   <div className="flex items-center gap-1.5">
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        setQuickRmaNumber(item.rma_number);
-                                        setIsQuickRmaModalOpen(true);
-                                      }}
+                                      onClick={() => handleInspectTriageForReport(item)}
                                       className="font-mono font-bold text-blue-700 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-200 hover:underline text-left cursor-pointer"
                                       title={`Inspect, triage, and process RMA #${item.rma_number}`}
                                     >
@@ -13605,10 +13619,7 @@ export default function App() {
                                     {/* Inspect & Triage Physical Return */}
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        setQuickRmaNumber(item.rma_number);
-                                        setIsQuickRmaModalOpen(true);
-                                      }}
+                                      onClick={() => handleInspectTriageForReport(item)}
                                       className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
                                       title={`Inspect, triage condition grade, and assign rack/bin location for ${item.rma_number}`}
                                     >
@@ -14081,10 +14092,7 @@ export default function App() {
                                   </span>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setQuickRmaNumber(item.rma_number);
-                                      setIsQuickRmaModalOpen(true);
-                                    }}
+                                    onClick={() => handleInspectTriageForReport(item)}
                                     className="font-mono font-black text-blue-700 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-200 hover:underline text-sm cursor-pointer"
                                     title={`Inspect & Triage RMA #${item.rma_number}`}
                                   >
@@ -14145,10 +14153,7 @@ export default function App() {
                                 {/* Inspect & Triage Physical Return */}
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setQuickRmaNumber(item.rma_number);
-                                    setIsQuickRmaModalOpen(true);
-                                  }}
+                                  onClick={() => handleInspectTriageForReport(item)}
                                   className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
                                   title={`Inspect condition and set warehouse disposition for ${item.rma_number}`}
                                 >
@@ -14931,7 +14936,7 @@ export default function App() {
               </div>
               <div className="space-y-1.5 min-w-0">
                 <h4 className="text-sm font-black text-slate-900 dark:text-white">
-                  Financial Validation & Safety Guard
+                  {creditMemoWarningTarget.title || "Financial Validation & Safety Guard"}
                 </h4>
                 <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                   {creditMemoWarningTarget.message || "Cannot issue Finance Credit Memo for ₱0.00 or unassigned SKU. Please click 'Assign SKU' first to register the official item code and verified price into the catalog."}
@@ -20452,8 +20457,7 @@ export default function GatekeeperPinModal({
   isOpen,
   currentSlug,
   onUnlock,
-  onOpenAdminLogin,
-  isTestMode = false
+  onOpenAdminLogin
 }) {
   const [token, setToken] = useState(null);
   const [isValidatingToken, setIsValidatingToken] = useState(true);
@@ -20465,16 +20469,6 @@ export default function GatekeeperPinModal({
   const [countdownStr, setCountdownStr] = useState('');
   const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
-
-  const isTestModeActive = Boolean(
-    isTestMode || 
-    (typeof window !== 'undefined' && (
-      window.location.hostname === 'localhost' || 
-      window.location.search.includes('test=true') || 
-      window.location.search.includes('sandbox=true') ||
-      Boolean(oauthError)
-    ))
-  );
 
   // 1. Resolve token from URL query params, hash fragments, or pending OAuth storage
   useEffect(() => {
@@ -20955,42 +20949,24 @@ export default function GatekeeperPinModal({
 
             {/* Google OAuth Error Alert */}
             {oauthError && (
-              <div className="p-4 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-900 rounded-2xl text-xs text-rose-800 dark:text-rose-300 text-left space-y-2.5 animate-in fade-in">
-                <div className="font-bold flex items-center gap-2 text-rose-700 dark:text-rose-300">
-                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  <span>Google Authentication Configuration Required</span>
+              <div className="p-4 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-900 rounded-2xl text-xs text-amber-900 dark:text-amber-200 text-left space-y-2.5 animate-in fade-in">
+                <div className="font-bold flex items-center gap-2 text-amber-800 dark:text-amber-300">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Access Authorization Notice</span>
                 </div>
-                <p className="text-[11px] leading-relaxed text-rose-700 dark:text-rose-400">
-                  {oauthError}
+                <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-300">
+                  {oauthError.toLowerCase().includes('provider is not enabled')
+                    ? 'Direct Google Sign-In is temporarily unavailable on this portal. To proceed immediately, please request a 1-click Secure Access Link sent directly to your authorized email address below, or contact your Pingcon representative.'
+                    : oauthError}
                 </p>
 
-                {oauthError.toLowerCase().includes('provider is not enabled') && (
-                  <div className="text-[11px] bg-white/80 dark:bg-black/40 p-3 rounded-xl border border-rose-200 dark:border-rose-900/60 text-slate-700 dark:text-slate-300 space-y-2 leading-relaxed">
-                    <div className="font-bold text-slate-900 dark:text-white">
-                      🛠️ How to Enable Google OAuth in Supabase:
-                    </div>
-                    <ol className="list-decimal pl-4 space-y-1 text-[10.5px]">
-                      <li>
-                        Go to <a href="https://supabase.com/dashboard/project/lschluviltzsknptwgrz/auth/providers" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline font-bold">Supabase Dashboard &rarr; Authentication &rarr; Providers &rarr; Google</a>.
-                      </li>
-                      <li>Toggle <strong>Enable Google</strong> to ON.</li>
-                      <li>Enter your Google Cloud <strong>Client ID</strong> and <strong>Client Secret</strong>.</li>
-                      <li>Set Authorized Redirect URI in Google Cloud Console to:
-                        <code className="block mt-1 p-1 bg-slate-100 dark:bg-slate-800 rounded text-[10px] break-all select-all font-mono">
-                          https://lschluviltzsknptwgrz.supabase.co/auth/v1/callback
-                        </code>
-                      </li>
-                    </ol>
-                  </div>
-                )}
-
                 {/* Secure Magic Link Fallback strictly dispatched to authorized inbox */}
-                <div className="pt-2">
+                <div className="pt-1">
                   <button
                     type="button"
                     onClick={handleSendMagicLink}
                     disabled={isSendingMagicLink || magicLinkSent}
-                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60 shadow-sm"
+                    className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60 shadow-sm"
                   >
                     <Mail className="w-4 h-4" />
                     <span>{magicLinkSent ? '✓ Secure Access Link Dispatched to Your Email' : isSendingMagicLink ? 'Dispatching Access Link...' : `Email Secure Access Link to ${validationResult.invite.authorized_email}`}</span>
@@ -21038,7 +21014,6 @@ export default function GatekeeperPinModal({
             </div>
 
             <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              {/* QA Sandbox Test Mode Quick Bypass */}
               <button
                 type="button"
                 onClick={onOpenAdminLogin}
@@ -22093,6 +22068,12 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
   const processedPendingList = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     let list = pendingList.filter(item => {
+      // Exclude batch manifests: batches contain multiple items and do not have an individual SKU
+      const name = String(item.name || '').toLowerCase();
+      const b = String(item.barcode || '');
+      if (item.is_parent || name.startsWith('batch return manifest') || name.startsWith('batch rma') || b.startsWith('RMA-')) {
+        return false;
+      }
       if (!q) return true;
       return (
         (item.barcode || '').toLowerCase().includes(q) ||
@@ -27309,7 +27290,7 @@ import {
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
-import { isSplitChildTicket, isSplitParentTicket } from '../utils/rmaHelpers';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku } from '../utils/rmaHelpers';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -27512,6 +27493,10 @@ export default function QuickRMAActionModal({
 
   const handleSaveTriage = async () => {
     if (!report) return;
+    if (!isMultiItemManifest && !hasAssignedSku(report, savedProductsList)) {
+      setTriageSaveError("Cannot save physical triage: Official catalog SKU must be assigned first.");
+      return;
+    }
     setIsSavingTriage(true);
     setTriageSaveError(null);
     try {
@@ -28299,6 +28284,8 @@ export default function QuickRMAActionModal({
     (Array.isArray(report?.items) && report.items.length > 1) ||
     (typeof report?.name === 'string' && report.name.toLowerCase().startsWith('batch return manifest'))
   );
+
+  const isSkuAssigned = isMultiItemManifest ? true : hasAssignedSku(report, savedProductsList);
 
   // Enterprise Multi-Tier Financial Threshold Rule:
   // If total claim exceeds ₱10,000, Super Admin authorization is required to activate Credit Memo button
@@ -29620,9 +29607,37 @@ export default function QuickRMAActionModal({
                   </div>
                 ) : (
                   /* STANDARD SINGLE-ITEM TRIAGE INTERFACE */
-                  <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                      {/* Condition Grade */}
+                  !isSkuAssigned ? (
+                    <div className="p-4 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-2xl text-xs space-y-3">
+                      <div className="flex items-start gap-2.5 text-amber-900 dark:text-amber-200">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <h5 className="font-bold text-xs uppercase tracking-wide">
+                            Assign SKU Required Before Triage
+                          </h5>
+                          <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                            Physical triage, condition grading, and warehouse disposition require an official catalog SKU / Item Code to be registered first.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 border-t border-amber-200 dark:border-amber-900/60">
+                        <span className="text-[10px] text-amber-700 dark:text-amber-400 font-mono">
+                          Barcode: {report?.barcode || 'N/A'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => onAssignSku && onAssignSku(report)}
+                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                        >
+                          <Tag className="w-3.5 h-3.5" />
+                          <span>+ Assign Official SKU</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                        {/* Condition Grade */}
                       <div>
                         <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
                           Condition Grade
@@ -29769,6 +29784,7 @@ export default function QuickRMAActionModal({
                       </button>
                     </div>
                   </>
+                  )
                 )}
               </div>
 
@@ -40798,7 +40814,7 @@ export const catalogService = {
       unit_name: hasItems
         ? (items.every(it => (it.unit_name || it.unit) === (items[0].unit_name || items[0].unit)) ? (items[0].unit_name || items[0].unit || 'pc') : 'mixed')
         : (isKnown ? (resolvedProduct.unit_name || resolvedProduct.unitName || 'pc') : (resolvedProduct?.unit_name || 'pc')),
-      status: isKnown || (hasItems && items.every(it => Number(it.price) > 0)) ? 'pending' : 'pending_admin_details',
+      status: isBatch ? 'pending' : (isKnown || (hasItems && items.every(it => Number(it.price) > 0)) ? 'pending' : 'pending_admin_details'),
       reason: reason || (hasItems && items.length > 1 ? `Multi-Item Defect (${items.length} items)` : 'Damaged Box / Crushed Packaging'),
       explanation: explanation || null,
       photos: allPhotos,
@@ -41035,7 +41051,7 @@ export const catalogService = {
       // 1. Fetch active (non-deleted) RMA reports to know which barcodes are actually in play
       const { data: activeReports, error: rError } = await supabase
         .from('rma_reports')
-        .select('id, rma_number, barcode, code, name, supplier_name, price, price_with_vat, status, created_at')
+        .select('id, rma_number, barcode, code, name, supplier_name, price, price_with_vat, status, created_at, is_parent, items')
         .not('status', 'eq', 'deleted')
         .order('created_at', { ascending: false });
 
@@ -41043,9 +41059,34 @@ export const catalogService = {
         console.warn('Error fetching active reports for pending cross-check:', rError.message);
       }
 
-      const activeBarcodesWithReports = new Set(
-        (activeReports || []).map(r => r.barcode).filter(Boolean)
-      );
+      // Helper to identify batch manifest parent containers.
+      // Batches contain multiple items and do not have an individual SKU; they must NEVER enter pending queue.
+      const isBatchReport = (r) => {
+        if (!r) return false;
+        if (r.is_parent) return true;
+        const name = String(r.name || '').toLowerCase();
+        if (name.startsWith('batch return manifest') || name.startsWith('batch rma')) return true;
+        const b = String(r.barcode || '');
+        if (b.startsWith('RMA-') || (r.rma_number && b === r.rma_number)) return true;
+        if (Array.isArray(r.items) && r.items.length > 1) return true;
+        return false;
+      };
+
+      const activeBarcodesWithReports = new Set();
+      (activeReports || []).forEach(r => {
+        if (!isBatchReport(r) && r.barcode) {
+          activeBarcodesWithReports.add(r.barcode);
+        }
+        // If it's a batch manifest, extract child product barcodes so child items can be verified
+        if (Array.isArray(r.items) && r.items.length > 0) {
+          r.items.forEach(child => {
+            const childBarcode = child.barcode ? String(child.barcode).trim() : '';
+            if (childBarcode && !childBarcode.startsWith('RMA-')) {
+              activeBarcodesWithReports.add(childBarcode);
+            }
+          });
+        }
+      });
 
       // 2. Fetch unverified items from products table
       const { data: unverifiedProds, error: pError } = await supabase
@@ -41079,8 +41120,9 @@ export const catalogService = {
       });
 
       // 3. Include any active rma_reports marked as 'pending_admin_details'
+      // STRICT FILTER: Batch RMA manifests NEVER have an SKU and must NOT be included!
       (activeReports || [])
-        .filter(r => r.status === 'pending_admin_details')
+        .filter(r => r.status === 'pending_admin_details' && !isBatchReport(r))
         .forEach(r => {
           if (r.barcode && !pendingMap.has(r.barcode)) {
             pendingMap.set(r.barcode, {

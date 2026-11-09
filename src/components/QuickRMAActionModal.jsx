@@ -40,7 +40,7 @@ import {
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
-import { isSplitChildTicket, isSplitParentTicket } from '../utils/rmaHelpers';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku } from '../utils/rmaHelpers';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -243,6 +243,10 @@ export default function QuickRMAActionModal({
 
   const handleSaveTriage = async () => {
     if (!report) return;
+    if (!isMultiItemManifest && !hasAssignedSku(report, savedProductsList)) {
+      setTriageSaveError("Cannot save physical triage: Official catalog SKU must be assigned first.");
+      return;
+    }
     setIsSavingTriage(true);
     setTriageSaveError(null);
     try {
@@ -1030,6 +1034,8 @@ export default function QuickRMAActionModal({
     (Array.isArray(report?.items) && report.items.length > 1) ||
     (typeof report?.name === 'string' && report.name.toLowerCase().startsWith('batch return manifest'))
   );
+
+  const isSkuAssigned = isMultiItemManifest ? true : hasAssignedSku(report, savedProductsList);
 
   // Enterprise Multi-Tier Financial Threshold Rule:
   // If total claim exceeds ₱10,000, Super Admin authorization is required to activate Credit Memo button
@@ -2351,9 +2357,37 @@ export default function QuickRMAActionModal({
                   </div>
                 ) : (
                   /* STANDARD SINGLE-ITEM TRIAGE INTERFACE */
-                  <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                      {/* Condition Grade */}
+                  !isSkuAssigned ? (
+                    <div className="p-4 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-2xl text-xs space-y-3">
+                      <div className="flex items-start gap-2.5 text-amber-900 dark:text-amber-200">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <h5 className="font-bold text-xs uppercase tracking-wide">
+                            Assign SKU Required Before Triage
+                          </h5>
+                          <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                            Physical triage, condition grading, and warehouse disposition require an official catalog SKU / Item Code to be registered first.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 border-t border-amber-200 dark:border-amber-900/60">
+                        <span className="text-[10px] text-amber-700 dark:text-amber-400 font-mono">
+                          Barcode: {report?.barcode || 'N/A'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => onAssignSku && onAssignSku(report)}
+                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                        >
+                          <Tag className="w-3.5 h-3.5" />
+                          <span>+ Assign Official SKU</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                        {/* Condition Grade */}
                       <div>
                         <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
                           Condition Grade
@@ -2500,6 +2534,7 @@ export default function QuickRMAActionModal({
                       </button>
                     </div>
                   </>
+                  )
                 )}
               </div>
 

@@ -20,8 +20,7 @@ export default function GatekeeperPinModal({
   isOpen,
   currentSlug,
   onUnlock,
-  onOpenAdminLogin,
-  isTestMode = false
+  onOpenAdminLogin
 }) {
   const [token, setToken] = useState(null);
   const [isValidatingToken, setIsValidatingToken] = useState(true);
@@ -33,16 +32,6 @@ export default function GatekeeperPinModal({
   const [countdownStr, setCountdownStr] = useState('');
   const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
-
-  const isTestModeActive = Boolean(
-    isTestMode || 
-    (typeof window !== 'undefined' && (
-      window.location.hostname === 'localhost' || 
-      window.location.search.includes('test=true') || 
-      window.location.search.includes('sandbox=true') ||
-      Boolean(oauthError)
-    ))
-  );
 
   // 1. Resolve token from URL query params, hash fragments, or pending OAuth storage
   useEffect(() => {
@@ -523,42 +512,24 @@ export default function GatekeeperPinModal({
 
             {/* Google OAuth Error Alert */}
             {oauthError && (
-              <div className="p-4 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-900 rounded-2xl text-xs text-rose-800 dark:text-rose-300 text-left space-y-2.5 animate-in fade-in">
-                <div className="font-bold flex items-center gap-2 text-rose-700 dark:text-rose-300">
-                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  <span>Google Authentication Configuration Required</span>
+              <div className="p-4 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-900 rounded-2xl text-xs text-amber-900 dark:text-amber-200 text-left space-y-2.5 animate-in fade-in">
+                <div className="font-bold flex items-center gap-2 text-amber-800 dark:text-amber-300">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Access Authorization Notice</span>
                 </div>
-                <p className="text-[11px] leading-relaxed text-rose-700 dark:text-rose-400">
-                  {oauthError}
+                <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-300">
+                  {oauthError.toLowerCase().includes('provider is not enabled')
+                    ? 'Direct Google Sign-In is temporarily unavailable on this portal. To proceed immediately, please request a 1-click Secure Access Link sent directly to your authorized email address below, or contact your Pingcon representative.'
+                    : oauthError}
                 </p>
 
-                {oauthError.toLowerCase().includes('provider is not enabled') && (
-                  <div className="text-[11px] bg-white/80 dark:bg-black/40 p-3 rounded-xl border border-rose-200 dark:border-rose-900/60 text-slate-700 dark:text-slate-300 space-y-2 leading-relaxed">
-                    <div className="font-bold text-slate-900 dark:text-white">
-                      🛠️ How to Enable Google OAuth in Supabase:
-                    </div>
-                    <ol className="list-decimal pl-4 space-y-1 text-[10.5px]">
-                      <li>
-                        Go to <a href="https://supabase.com/dashboard/project/lschluviltzsknptwgrz/auth/providers" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline font-bold">Supabase Dashboard &rarr; Authentication &rarr; Providers &rarr; Google</a>.
-                      </li>
-                      <li>Toggle <strong>Enable Google</strong> to ON.</li>
-                      <li>Enter your Google Cloud <strong>Client ID</strong> and <strong>Client Secret</strong>.</li>
-                      <li>Set Authorized Redirect URI in Google Cloud Console to:
-                        <code className="block mt-1 p-1 bg-slate-100 dark:bg-slate-800 rounded text-[10px] break-all select-all font-mono">
-                          https://lschluviltzsknptwgrz.supabase.co/auth/v1/callback
-                        </code>
-                      </li>
-                    </ol>
-                  </div>
-                )}
-
                 {/* Secure Magic Link Fallback strictly dispatched to authorized inbox */}
-                <div className="pt-2">
+                <div className="pt-1">
                   <button
                     type="button"
                     onClick={handleSendMagicLink}
                     disabled={isSendingMagicLink || magicLinkSent}
-                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60 shadow-sm"
+                    className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60 shadow-sm"
                   >
                     <Mail className="w-4 h-4" />
                     <span>{magicLinkSent ? '✓ Secure Access Link Dispatched to Your Email' : isSendingMagicLink ? 'Dispatching Access Link...' : `Email Secure Access Link to ${validationResult.invite.authorized_email}`}</span>
@@ -606,7 +577,6 @@ export default function GatekeeperPinModal({
             </div>
 
             <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              {/* QA Sandbox Test Mode Quick Bypass */}
               <button
                 type="button"
                 onClick={onOpenAdminLogin}

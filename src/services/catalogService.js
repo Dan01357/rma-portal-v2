@@ -1209,7 +1209,7 @@ export const catalogService = {
       unit_name: hasItems
         ? (items.every(it => (it.unit_name || it.unit) === (items[0].unit_name || items[0].unit)) ? (items[0].unit_name || items[0].unit || 'pc') : 'mixed')
         : (isKnown ? (resolvedProduct.unit_name || resolvedProduct.unitName || 'pc') : (resolvedProduct?.unit_name || 'pc')),
-      status: isKnown || (hasItems && items.every(it => Number(it.price) > 0)) ? 'pending' : 'pending_admin_details',
+      status: isBatch ? 'pending' : (isKnown || (hasItems && items.every(it => Number(it.price) > 0)) ? 'pending' : 'pending_admin_details'),
       reason: reason || (hasItems && items.length > 1 ? `Multi-Item Defect (${items.length} items)` : 'Damaged Box / Crushed Packaging'),
       explanation: explanation || null,
       photos: allPhotos,
@@ -1446,7 +1446,7 @@ export const catalogService = {
       // 1. Fetch active (non-deleted) RMA reports to know which barcodes are actually in play
       const { data: activeReports, error: rError } = await supabase
         .from('rma_reports')
-        .select('id, rma_number, barcode, code, name, supplier_name, price, price_with_vat, status, created_at')
+        .select('id, rma_number, barcode, code, name, supplier_name, price, price_with_vat, status, created_at, is_parent, items')
         .not('status', 'eq', 'deleted')
         .order('created_at', { ascending: false });
 
@@ -1454,9 +1454,34 @@ export const catalogService = {
         console.warn('Error fetching active reports for pending cross-check:', rError.message);
       }
 
-      const activeBarcodesWithReports = new Set(
-        (activeReports || []).map(r => r.barcode).filter(Boolean)
-      );
+      // Helper to identify batch manifest parent containers.
+      // Batches contain multiple items and do not have an individual SKU; they must NEVER enter pending queue.
+      const isBatchReport = (r) => {
+        if (!r) return false;
+        if (r.is_parent) return true;
+        const name = String(r.name || '').toLowerCase();
+        if (name.startsWith('batch return manifest') || name.startsWith('batch rma')) return true;
+        const b = String(r.barcode || '');
+        if (b.startsWith('RMA-') || (r.rma_number && b === r.rma_number)) return true;
+        if (Array.isArray(r.items) && r.items.length > 1) return true;
+        return false;
+      };
+
+      const activeBarcodesWithReports = new Set();
+      (activeReports || []).forEach(r => {
+        if (!isBatchReport(r) && r.barcode) {
+          activeBarcodesWithReports.add(r.barcode);
+        }
+        // If it's a batch manifest, extract child product barcodes so child items can be verified
+        if (Array.isArray(r.items) && r.items.length > 0) {
+          r.items.forEach(child => {
+            const childBarcode = child.barcode ? String(child.barcode).trim() : '';
+            if (childBarcode && !childBarcode.startsWith('RMA-')) {
+              activeBarcodesWithReports.add(childBarcode);
+            }
+          });
+        }
+      });
 
       // 2. Fetch unverified items from products table
       const { data: unverifiedProds, error: pError } = await supabase
@@ -1490,8 +1515,9 @@ export const catalogService = {
       });
 
       // 3. Include any active rma_reports marked as 'pending_admin_details'
+      // STRICT FILTER: Batch RMA manifests NEVER have an SKU and must NOT be included!
       (activeReports || [])
-        .filter(r => r.status === 'pending_admin_details')
+        .filter(r => r.status === 'pending_admin_details' && !isBatchReport(r))
         .forEach(r => {
           if (r.barcode && !pendingMap.has(r.barcode)) {
             pendingMap.set(r.barcode, {
