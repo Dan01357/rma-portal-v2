@@ -762,7 +762,18 @@ export const catalogService = {
         console.warn('Error fetching saved products from Supabase:', error.message);
         return [];
       }
-      return data || [];
+      return (data || []).map(p => {
+        const brand = p.brand_name || '';
+        const pcsMatch = brand.match(/\[Pcs\/Cs:(\d+)\]/i);
+        const pieces = pcsMatch ? parseInt(pcsMatch[1], 10) : (p.pieces_per_case || null);
+        const cleanBrand = brand.replace(/\[Pcs\/Cs:\d+\]/gi, '').trim() || null;
+        return {
+          ...p,
+          pieces_per_case: pieces,
+          piecesPerCase: pieces,
+          brand_name: cleanBrand
+        };
+      });
     } catch (e) {
       console.warn('Saved products fetch exception:', e);
       return [];
@@ -795,7 +806,12 @@ export const catalogService = {
     if (!cleanBarcode) throw new Error('Product Barcode is required.');
     if (!name || !name.trim()) throw new Error('Product Name is required.');
 
-    const resolvedPcs = (pieces_per_case !== undefined ? pieces_per_case : piecesPerCase);
+    const resolvedPcs = (pieces_per_case !== undefined && pieces_per_case !== null) ? pieces_per_case : piecesPerCase;
+    let resolvedBrand = brandName ? brandName.trim() : null;
+    if (resolvedPcs && Number(resolvedPcs) > 0) {
+      resolvedBrand = resolvedBrand ? `${resolvedBrand} [Pcs/Cs:${resolvedPcs}]` : `[Pcs/Cs:${resolvedPcs}]`;
+    }
+
     const newProd = {
       barcode: cleanBarcode,
       code: code ? code.trim() : null,
@@ -803,9 +819,8 @@ export const catalogService = {
       supplier_name: supplierName ? supplierName.trim() : 'Savemore',
       price: Number(price || 0),
       price_with_vat: Number(priceWithVat || price || 0),
-      brand_name: brandName ? brandName.trim() : null,
+      brand_name: resolvedBrand,
       unit_name: unitName ? unitName.trim() : 'pc',
-      pieces_per_case: resolvedPcs ? Number(resolvedPcs) : null,
       image_url: imageUrl ? imageUrl.trim() : null,
       ae_name: aeName ? aeName.trim() : null,
       ae_email: aeEmail ? aeEmail.trim() : null,
@@ -814,16 +829,44 @@ export const catalogService = {
       updated_at: new Date().toISOString()
     };
 
+    let savedData = null;
+    let saveError = null;
+
     const { data, error } = await supabase
       .from('products')
       .upsert([newProd], { onConflict: 'barcode' })
       .select()
       .single();
 
-    if (error) throw new Error(`Failed to save product: ${error.message}`);
+    if (!error && data) {
+      savedData = data;
+    } else {
+      saveError = error;
+      // If error mentions unknown column, strip and retry
+      const errMsg = String(error?.message || '');
+      const colMatch = errMsg.match(/Could not find the '([^']+)' column/i) || errMsg.match(/column products\.([a-zA-Z0-9_]+) does not exist/i);
+      if (colMatch && colMatch[1] && colMatch[1] in newProd) {
+        delete newProd[colMatch[1]];
+        const retry = await supabase.from('products').upsert([newProd], { onConflict: 'barcode' }).select().single();
+        if (!retry.error) {
+          savedData = retry.data;
+          saveError = null;
+        }
+      }
+    }
 
-    this.notifyChange('product-created', { barcode: cleanBarcode, product: data });
-    return { success: true, product: data };
+    if (saveError || !savedData) {
+      throw new Error(`Failed to save product: ${saveError?.message || 'Database insert failed'}`);
+    }
+
+    const enrichedProduct = {
+      ...savedData,
+      pieces_per_case: resolvedPcs ? Number(resolvedPcs) : null,
+      piecesPerCase: resolvedPcs ? Number(resolvedPcs) : null
+    };
+
+    this.notifyChange('product-created', { barcode: cleanBarcode, product: enrichedProduct });
+    return { success: true, product: enrichedProduct };
   },
 
   /**
@@ -832,17 +875,25 @@ export const catalogService = {
   async updateProduct(id, { barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, pieces_per_case, piecesPerCase, imageUrl, aeName, aeEmail, company }) {
     if (!id && !barcode) throw new Error('Product identifier required for update.');
 
-    const resolvedPcs = (pieces_per_case !== undefined ? pieces_per_case : piecesPerCase);
-    // Deduplication removed: 1 SKU from company can have more than one barcode assignation
+    const resolvedPcs = (pieces_per_case !== undefined && pieces_per_case !== null) ? pieces_per_case : piecesPerCase;
+    let resolvedBrand = brandName !== undefined ? (brandName ? brandName.trim() : null) : undefined;
+    if (resolvedPcs !== undefined) {
+      if (resolvedPcs && Number(resolvedPcs) > 0) {
+        resolvedBrand = (resolvedBrand || '').replace(/\[Pcs\/Cs:\d+\]/gi, '').trim();
+        resolvedBrand = resolvedBrand ? `${resolvedBrand} [Pcs/Cs:${resolvedPcs}]` : `[Pcs/Cs:${resolvedPcs}]`;
+      } else if (resolvedBrand) {
+        resolvedBrand = resolvedBrand.replace(/\[Pcs\/Cs:\d+\]/gi, '').trim() || null;
+      }
+    }
+
     const updates = {
       name: name ? name.trim() : undefined,
       code: code !== undefined ? (code ? code.trim() : null) : undefined,
       supplier_name: supplierName ? supplierName.trim() : undefined,
       price: price !== undefined ? Number(price || 0) : undefined,
       price_with_vat: priceWithVat !== undefined ? Number(priceWithVat || price || 0) : undefined,
-      brand_name: brandName !== undefined ? (brandName ? brandName.trim() : null) : undefined,
+      brand_name: resolvedBrand,
       unit_name: unitName ? unitName.trim() : undefined,
-      pieces_per_case: resolvedPcs !== undefined ? (Number(resolvedPcs) || null) : undefined,
       image_url: imageUrl !== undefined ? (imageUrl ? imageUrl.trim() : null) : undefined,
       ae_name: aeName !== undefined ? (aeName ? aeName.trim() : null) : undefined,
       ae_email: aeEmail !== undefined ? (aeEmail ? aeEmail.trim() : null) : undefined,
@@ -858,12 +909,32 @@ export const catalogService = {
     if (id) query = query.eq('id', id);
     else query = query.eq('barcode', barcode);
 
-    const { data, error } = await query.select();
+    let { data, error } = await query.select();
+
+    if (error) {
+      const errMsg = String(error?.message || '');
+      const colMatch = errMsg.match(/Could not find the '([^']+)' column/i) || errMsg.match(/column products\.([a-zA-Z0-9_]+) does not exist/i);
+      if (colMatch && colMatch[1] && colMatch[1] in updates) {
+        delete updates[colMatch[1]];
+        let retryQuery = supabase.from('products').update(updates);
+        if (id) retryQuery = retryQuery.eq('id', id);
+        else retryQuery = retryQuery.eq('barcode', barcode);
+        const retryRes = await retryQuery.select();
+        data = retryRes.data;
+        error = retryRes.error;
+      }
+    }
 
     if (error) throw new Error(`Failed to update product: ${error.message}`);
 
+    const updatedProd = data?.[0] ? {
+      ...data[0],
+      pieces_per_case: resolvedPcs ? Number(resolvedPcs) : null,
+      piecesPerCase: resolvedPcs ? Number(resolvedPcs) : null
+    } : null;
+
     this.notifyChange('product-updated', { id, barcode, updates });
-    return { success: true, product: data?.[0] };
+    return { success: true, product: updatedProd };
   },
 
   /**
@@ -1243,9 +1314,6 @@ export const catalogService = {
       condition_grade: 'B - Damaged Packaging Only',
       disposition: 'Pending Triage',
       warehouse_location: null,
-      pieces_per_case: (pieces_per_case || piecesPerCase)
-        ? Number(pieces_per_case || piecesPerCase)
-        : (isKnown ? (resolvedProduct.pieces_per_case || resolvedProduct.piecesPerCase || null) : (hasItems && (items[0]?.pieces_per_case || items[0]?.piecesPerCase) ? Number(items[0].pieces_per_case || items[0].piecesPerCase) : null)),
       inspected_by: null,
       inspected_at: null,
       audit_trail: [],
@@ -1265,38 +1333,54 @@ export const catalogService = {
       .select()
       .single();
 
-    if (reportError && (reportError.message?.includes('paperwork_photos') || reportError.message?.includes('invoice_dr_number') || reportError.message?.includes('items') || reportError.message?.includes('column'))) {
-      console.warn('Retrying insert without new manifest/AI/Drive columns (pending SQL migration):', reportError.message);
+    if (reportError) {
+      console.warn('Initial insert of rma_reports failed, attempting smart retry:', reportError.message);
       const fallbackRow = { ...reportRow };
-      delete fallbackRow.paperwork_photos;
-      delete fallbackRow.invoice_dr_number;
-      delete fallbackRow.si_number;
-      delete fallbackRow.dr_number;
-      delete fallbackRow.po_number;
-      delete fallbackRow.store_branch;
-      delete fallbackRow.expiry_date;
-      delete fallbackRow.batch_lot_number;
-      delete fallbackRow.ai_document_metadata;
-      delete fallbackRow.google_drive_folder_url;
-      delete fallbackRow.google_drive_folder_id;
-      delete fallbackRow.parent_rma_id;
-      delete fallbackRow.is_parent;
-      delete fallbackRow.items;
-      delete fallbackRow.total_items;
-      delete fallbackRow.total_quantity;
-      delete fallbackRow.pieces_per_case;
-      if (reportError.message?.includes('rma_type')) {
-        delete fallbackRow.rma_type;
+      const errMsg = String(reportError.message || '');
+      const colMatch = errMsg.match(/Could not find the '([^']+)' column/i) || errMsg.match(/column rma_reports\.([a-zA-Z0-9_]+) does not exist/i);
+      if (colMatch && colMatch[1] && colMatch[1] in fallbackRow) {
+        delete fallbackRow[colMatch[1]];
       }
+      if (errMsg.includes('paperwork_photos')) delete fallbackRow.paperwork_photos;
+      if (errMsg.includes('invoice_dr_number')) delete fallbackRow.invoice_dr_number;
+      if (errMsg.includes('si_number')) delete fallbackRow.si_number;
+      if (errMsg.includes('dr_number')) delete fallbackRow.dr_number;
+      if (errMsg.includes('po_number')) delete fallbackRow.po_number;
+      if (errMsg.includes('store_branch')) delete fallbackRow.store_branch;
+      if (errMsg.includes('expiry_date')) delete fallbackRow.expiry_date;
+      if (errMsg.includes('batch_lot_number')) delete fallbackRow.batch_lot_number;
+      if (errMsg.includes('ai_document_metadata')) delete fallbackRow.ai_document_metadata;
+      if (errMsg.includes('google_drive_folder')) {
+        delete fallbackRow.google_drive_folder_url;
+        delete fallbackRow.google_drive_folder_id;
+      }
+      if (errMsg.includes('rma_type')) delete fallbackRow.rma_type;
+
+      // Only delete manifest columns if DB explicitly rejected THEM
+      if (errMsg.includes('items') && !errMsg.includes('rma_items')) delete fallbackRow.items;
+      if (errMsg.includes('is_parent')) delete fallbackRow.is_parent;
+      if (errMsg.includes('parent_rma_id')) delete fallbackRow.parent_rma_id;
+      if (errMsg.includes('total_items')) delete fallbackRow.total_items;
+      if (errMsg.includes('total_quantity')) delete fallbackRow.total_quantity;
+
       const retry = await supabase.from('rma_reports').insert([fallbackRow]).select().single();
       if (!retry.error) {
         insertedReport = retry.data;
       } else {
-        throw new Error(`Database error saving return report: ${retry.error.message}`);
+        const retryErrMsg = String(retry.error.message || '');
+        const retryColMatch = retryErrMsg.match(/Could not find the '([^']+)' column/i) || retryErrMsg.match(/column rma_reports\.([a-zA-Z0-9_]+) does not exist/i);
+        if (retryColMatch && retryColMatch[1] && retryColMatch[1] in fallbackRow) {
+          delete fallbackRow[retryColMatch[1]];
+          const retry2 = await supabase.from('rma_reports').insert([fallbackRow]).select().single();
+          if (!retry2.error) {
+            insertedReport = retry2.data;
+          } else {
+            throw new Error(`Database error saving return report: ${retry2.error.message}`);
+          }
+        } else {
+          throw new Error(`Database error saving return report: ${retry.error.message}`);
+        }
       }
-    } else if (reportError) {
-      console.error('Failed to insert rma_report to Supabase:', reportError);
-      throw new Error(`Database error saving return report: ${reportError.message}`);
     } else {
       insertedReport = insertedData;
     }
@@ -1321,7 +1405,6 @@ export const catalogService = {
           name: it.name || it.productName || `Item (${it.barcode})`,
           quantity: Number(it.quantity) || 1,
           unit_name: it.unit_name || it.unit || 'pc',
-          pieces_per_case: it.pieces_per_case || it.piecesPerCase || null,
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
           supplier_name: it.supplier_name || 'Savemore',
@@ -1346,7 +1429,6 @@ export const catalogService = {
           name: it.name || it.productName || `Item (${it.barcode})`,
           quantity: Number(it.quantity) || 1,
           unit_name: it.unit_name || it.unit || 'pc',
-          pieces_per_case: it.pieces_per_case || it.piecesPerCase || null,
           supplier_name: it.supplier_name || 'Savemore',
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
@@ -1634,15 +1716,19 @@ export const catalogService = {
     if (!cleanBarcode) throw new Error('Barcode is required to update details.');
 
     const resolvedPcs = (pieces_per_case !== undefined ? pieces_per_case : piecesPerCase);
+    let resolvedBrand = brandName ? brandName.trim() : null;
+    if (resolvedPcs && Number(resolvedPcs) > 0) {
+      resolvedBrand = resolvedBrand ? `${resolvedBrand} [Pcs/Cs:${resolvedPcs}]` : `[Pcs/Cs:${resolvedPcs}]`;
+    }
+
     const updates = {
       code: code ? code.trim() : null,
       name: name ? name.trim() : 'Unknown Item',
       supplier_name: supplierName ? supplierName.trim() : 'Savemore',
       price: Number(price || 0),
       price_with_vat: Number(priceWithVat || price || 0),
-      brand_name: brandName ? brandName.trim() : null,
+      brand_name: resolvedBrand,
       unit_name: unitName ? unitName.trim() : 'pc',
-      pieces_per_case: resolvedPcs !== undefined ? (Number(resolvedPcs) || null) : undefined,
       image_url: imageUrl ? imageUrl.trim() : null,
       ae_name: aeName ? aeName.trim() : null,
       ae_email: aeEmail ? aeEmail.trim() : null,

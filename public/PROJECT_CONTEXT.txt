@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-09T07:21:37.345Z
+Generated At: 2026-11-10T00:42:04.213Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -9209,6 +9209,7 @@ import ReturnQRModal from './components/ReturnQRModal';
 import QuickRMAActionModal from './components/QuickRMAActionModal';
 import GatekeeperPinModal from './components/GatekeeperPinModal';
 import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
+import { inviteService, formatRemainingCountdown } from './services/inviteService';
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
@@ -9428,15 +9429,24 @@ export default function App() {
     return accessKeyService.getActiveSession(slug);
   });
 
+  // Live ticking countdown state for public return session
+  const [sessionCountdown, setSessionCountdown] = useState({ text: '', isExpired: false, totalSeconds: 0 });
+
   // Active Real-Time Watchdog for Gatekeeper Session Expiration (Unbypassable live enforcement)
   useEffect(() => {
     const expStr = gateSession?.expires_at || gateSession?.expiresAt;
-    if (!expStr) return;
+    if (!expStr) {
+      setSessionCountdown({ text: '', isExpired: false, totalSeconds: 0 });
+      return;
+    }
 
     const checkExpiration = () => {
       const expTime = new Date(expStr).getTime();
       const now = Date.now();
-      if (now >= expTime) {
+      const countdown = formatRemainingCountdown(expStr, gateSession?.status || 'active');
+      setSessionCountdown(countdown);
+
+      if (now >= expTime || countdown.isExpired) {
         // Session reached expiration!
         try {
           localStorage.removeItem('rma_portal_gate_session');
@@ -9444,7 +9454,7 @@ export default function App() {
         const slug = gateSession.slug;
         accessKeyService.clearSession(slug);
         setGateSession(null);
-        showToast('Your authorized return session has expired. Device locked.', 'warning');
+        showToast('Your authorized return session has expired. Portal locked.', 'warning');
       }
     };
 
@@ -9452,6 +9462,79 @@ export default function App() {
     const interval = setInterval(checkExpiration, 1000);
     return () => clearInterval(interval);
   }, [gateSession]);
+
+  // Active background token verification: Detect revoked or deleted invite links in real-time
+  useEffect(() => {
+    if (!gateSession?.token) return;
+
+    const verifyActiveToken = async () => {
+      try {
+        const res = await inviteService.validateInviteToken(gateSession.token);
+        if (!res.valid) {
+          try {
+            localStorage.removeItem('rma_portal_gate_session');
+          } catch { }
+          const slug = gateSession.slug;
+          accessKeyService.clearSession(slug);
+          setGateSession(null);
+
+          if (res.error === 'REVOKED') {
+            showToast('Return authorization was revoked by Pingcon Operations. Portal locked.', 'error');
+          } else if (res.error === 'EXPIRED') {
+            showToast('Return authorization has expired. Portal locked.', 'warning');
+          } else if (res.error === 'NOT_FOUND') {
+            showToast('Return authorization link has been deleted or is invalid.', 'error');
+          }
+        }
+      } catch (err) {
+        console.warn('Background invite token verification notice:', err);
+      }
+    };
+
+    // 1. Immediate validation on mount / session load
+    verifyActiveToken();
+
+    // 2. Poll every 4 seconds to catch dashboard revokes and deletes instantly
+    const pollInterval = setInterval(verifyActiveToken, 4000);
+
+    // 3. Re-verify on window focus and visibility change
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        verifyActiveToken();
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', verifyActiveToken);
+
+    // 4. Supabase Realtime channel on rma_invites table
+    const inviteChannel = supabase.channel(`rma_inv_guard_${gateSession.token}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rma_invites' }, (payload) => {
+        const token = gateSession.token;
+        if (payload.eventType === 'DELETE') {
+          if (payload.old?.token === token || payload.old?.id === gateSession.id) {
+            try { localStorage.removeItem('rma_portal_gate_session'); } catch { }
+            setGateSession(null);
+            showToast('Return authorization has been deleted by Pingcon Operations.', 'error');
+          }
+        } else if (payload.eventType === 'UPDATE') {
+          if (payload.new?.token === token || payload.new?.id === gateSession.id) {
+            if (payload.new?.status === 'revoked') {
+              try { localStorage.removeItem('rma_portal_gate_session'); } catch { }
+              setGateSession(null);
+              showToast('Return authorization was revoked by Pingcon Operations.', 'error');
+            }
+          }
+        }
+      })
+      .subscribe();
+
+    return () => {
+      clearInterval(pollInterval);
+      window.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', verifyActiveToken);
+      supabase.removeChannel(inviteChannel);
+    };
+  }, [gateSession?.token, gateSession?.id, gateSession?.slug]);
 
   // Synchronize Google Identity authorized email and branch into intake form automatically
   useEffect(() => {
@@ -11026,11 +11109,30 @@ export default function App() {
         showToast('This station is locked. Please enter PIN to resume.', 'warning');
         return;
       }
-      const active = accessKeyService.getActiveSession(intakeSlug || gateSession?.slug);
-      if (!active) {
-        showToast('Your return session has expired. You cannot submit this report.', 'error');
-        setGateSession(null);
-        return;
+      if (gateSession.token) {
+        const check = await inviteService.validateInviteToken(gateSession.token);
+        if (!check.valid) {
+          try {
+            localStorage.removeItem('rma_portal_gate_session');
+          } catch { }
+          setGateSession(null);
+          showToast(
+            check.error === 'REVOKED'
+              ? 'Submission blocked: Your return authorization has been revoked by Pingcon Operations.'
+              : check.error === 'EXPIRED'
+              ? 'Submission blocked: Your return authorization link has expired.'
+              : 'Submission blocked: Your return authorization link is invalid or deleted.',
+            'error'
+          );
+          return;
+        }
+      } else {
+        const active = accessKeyService.getActiveSession(intakeSlug || gateSession?.slug);
+        if (!active) {
+          showToast('Your return session has expired. You cannot submit this report.', 'error');
+          setGateSession(null);
+          return;
+        }
       }
     }
 
@@ -11333,19 +11435,24 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
-                    {gateSession
-                      ? (gateSession.expiresAt ? (() => {
-                        const remainingMs = Math.max(0, new Date(gateSession.expiresAt).getTime() - Date.now());
-                        const remainingMins = Math.max(1, Math.round(remainingMs / (60 * 1000)));
-                        if (remainingMins < 60) {
-                          return `Session active (~${remainingMins}m remaining)`;
-                        }
-                        const hrs = (remainingMins / 60).toFixed(1).replace('.0', '');
-                        return `Session active (~${hrs}h remaining)`;
-                      })() : 'Permanent Station Unlock')
-                      : 'Pingcon RMA Return Intake'}
-                  </div>
+                  {sessionCountdown.text ? (
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border transition-all ${
+                        sessionCountdown.totalSeconds < 300
+                          ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-300 dark:border-rose-800 animate-pulse'
+                          : sessionCountdown.totalSeconds < 1800
+                          ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                          : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                      }`}>
+                        <Clock className="w-3 h-3 shrink-0" />
+                        <span>Link expires in: <strong>{sessionCountdown.text}</strong></span>
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                      {gateSession ? 'Authorized Return Intake Active' : 'Pingcon RMA Return Intake'}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -11650,6 +11757,47 @@ export default function App() {
               </div>
             ) : (
               <form onSubmit={handleSubmitReport} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
+
+                {/* Authorized Return Identity & Live Session Timer Banner */}
+                {gateSession && (
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-inner ${
+                        gateSession.stream_type === 'supplier_outbound'
+                          ? 'bg-purple-100 dark:bg-purple-900/60 text-purple-600 dark:text-purple-400'
+                          : 'bg-blue-100 dark:bg-blue-900/60 text-blue-600 dark:text-blue-400'
+                      }`}>
+                        {gateSession.stream_type === 'supplier_outbound' ? <Truck className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                          <span>{gateSession.entity_name || gateSession.store_branch || 'Authorized Partner'}</span>
+                          {gateSession.authorized_email && (
+                            <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400 bg-emerald-100/70 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full font-bold">
+                              ✓ {gateSession.authorized_email}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">
+                          {gateSession.stream_type === 'supplier_outbound' ? 'Authorized Supplier Return to Vendor (RTV)' : 'Customer Return Authorization'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {sessionCountdown.text && (
+                      <div className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 shrink-0 self-start sm:self-auto border transition-all ${
+                        sessionCountdown.totalSeconds < 300
+                          ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-300 dark:border-rose-800 animate-pulse'
+                          : sessionCountdown.totalSeconds < 1800
+                          ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                          : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                      }`}>
+                        <Clock className="w-3.5 h-3.5 shrink-0" />
+                        <span>Link expires in: <strong>{sessionCountdown.text}</strong></span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* 1. LINE ITEM DETAILS & MANIFEST BUILDER */}
                 <div className="p-4 sm:p-5 rounded-3xl bg-slate-50/70 dark:bg-slate-800/40 border-2 border-slate-200 dark:border-slate-800 space-y-4 shadow-xs">
@@ -20583,7 +20731,15 @@ export default function GatekeeperPinModal({
     }
   }, [onUnlock]);
 
-  // 3. Validate token from URL / database with ref guard to prevent loop
+  // Reset ref guard when isOpen changes to always revalidate cleanly
+  useEffect(() => {
+    if (isOpen) {
+      hasValidatedRef.current = false;
+      validatedTokenRef.current = null;
+    }
+  }, [isOpen]);
+
+  // 3. Validate token from URL / database
   useEffect(() => {
     let isMounted = true;
     if (!token) {
@@ -20598,29 +20754,48 @@ export default function GatekeeperPinModal({
       return;
     }
 
-    setIsValidatingToken(true);
-    inviteService.validateInviteToken(token).then(async (res) => {
-      if (!isMounted) return;
-      hasValidatedRef.current = true;
-      validatedTokenRef.current = token;
-      setValidationResult(res);
-      setIsValidatingToken(false);
+    const checkToken = async () => {
+      try {
+        const res = await inviteService.validateInviteToken(token);
+        if (!isMounted) return;
+        hasValidatedRef.current = true;
+        validatedTokenRef.current = token;
+        setValidationResult(res);
+        setIsValidatingToken(false);
 
-      if (res?.valid && res?.invite) {
-        try {
-          sessionStorage.setItem('rma_active_invite_token', token);
-          sessionStorage.setItem('rma_pending_oauth_token', token);
-        } catch {}
+        if (res?.valid && res?.invite) {
+          try {
+            sessionStorage.setItem('rma_active_invite_token', token);
+            sessionStorage.setItem('rma_pending_oauth_token', token);
+          } catch {}
 
-        // Check if user is already authenticated via Supabase Google OAuth
-        await verifyIdentityWithSupabase(res.invite);
+          // Check if user is already authenticated via Supabase Google OAuth
+          await verifyIdentityWithSupabase(res.invite);
+        }
+      } catch {
+        if (isMounted) setIsValidatingToken(false);
       }
-    }).catch(() => {
-      if (isMounted) setIsValidatingToken(false);
-    });
+    };
 
-    return () => { isMounted = false; };
-  }, [token, verifyIdentityWithSupabase]);
+    setIsValidatingToken(true);
+    checkToken();
+
+    // Active polling every 4 seconds to catch real-time admin revocation while gatekeeper is open
+    const pollInterval = setInterval(async () => {
+      if (!isMounted) return;
+      try {
+        const fresh = await inviteService.validateInviteToken(token);
+        if (isMounted && (!fresh.valid || fresh.invite?.status !== validationResult?.invite?.status)) {
+          setValidationResult(fresh);
+        }
+      } catch {}
+    }, 4000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+    };
+  }, [token, verifyIdentityWithSupabase, isOpen]);
 
   // 4. Subscribe to Supabase Auth state changes (triggers on OAuth redirect return)
   useEffect(() => {
@@ -20638,7 +20813,7 @@ export default function GatekeeperPinModal({
     };
   }, [validationResult, verifyIdentityWithSupabase, identityMismatch]);
 
-  // 5. Countdown timer for valid invite
+  // 5. Live ticking countdown timer for valid invite (updates every 1s)
   useEffect(() => {
     if (!validationResult?.invite?.expires_at) return;
 
@@ -20651,9 +20826,9 @@ export default function GatekeeperPinModal({
     };
 
     updateTimer();
-    const interval = setInterval(updateTimer, 15000);
+    const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
-  }, [validationResult?.invite?.expires_at]);
+  }, [validationResult?.invite?.expires_at, validationResult?.invite?.status]);
 
   // 6. Handle "Continue with Google" OAuth trigger
   const handleContinueWithGoogle = async () => {
@@ -20824,32 +20999,80 @@ export default function GatekeeperPinModal({
             </div>
           </div>
         ) : !validationResult?.valid ? (
-          /* 4. Token Invalid / Expired / Revoked (Zero Admin Buttons) */
-          <div className="space-y-5 animate-in zoom-in-95">
-            <div className="w-16 h-16 rounded-3xl bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto shadow-inner">
-              <Clock className="w-8 h-8" />
-            </div>
+          /* 4. Token Invalid / Expired / Revoked / Deleted (Zero Admin Buttons) */
+          validationResult?.error === 'REVOKED' ? (
+            <div className="space-y-5 animate-in zoom-in-95">
+              <div className="w-16 h-16 rounded-3xl bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto shadow-inner">
+                <ShieldAlert className="w-8 h-8" />
+              </div>
 
-            <div className="space-y-1">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-                {validationResult?.error === 'REVOKED' ? 'Authorization Revoked' : 'Link Expired'}
-              </span>
-              <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
-                Authorization Unavailable
-              </h2>
-            </div>
+              <div className="space-y-1">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                  403 Forbidden — Authorization Revoked
+                </span>
+                <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                  Authorization Revoked
+                </h2>
+              </div>
 
-            <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-2xl text-xs text-left space-y-2 text-slate-700 dark:text-slate-300">
-              <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400">
-                {validationResult?.error === 'REVOKED'
-                  ? 'This return authorization was revoked by Pingcon Operations.'
-                  : 'This personalized return link has exceeded its validity period and expired.'}
-              </p>
-              <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400 font-bold">
-                Please contact your Pingcon representative to generate a fresh return authorization link for your account.
-              </p>
+              <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl text-xs text-left space-y-2 text-slate-800 dark:text-slate-200">
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400">
+                  This return authorization link was revoked by Pingcon Operations. Submissions are no longer accepted under this link.
+                </p>
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400 font-bold">
+                  Please contact your assigned Pingcon representative or Account Executive if you require a new return authorization.
+                </p>
+              </div>
             </div>
-          </div>
+          ) : validationResult?.error === 'NOT_FOUND' ? (
+            <div className="space-y-5 animate-in zoom-in-95">
+              <div className="w-16 h-16 rounded-3xl bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto shadow-inner">
+                <ShieldAlert className="w-8 h-8" />
+              </div>
+
+              <div className="space-y-1">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                  Authorization Link Deleted or Invalid
+                </span>
+                <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                  Authorization Unavailable
+                </h2>
+              </div>
+
+              <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl text-xs text-left space-y-2 text-slate-800 dark:text-slate-200">
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400">
+                  This return authorization link has been deleted or does not exist in the Pingcon registry.
+                </p>
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400 font-bold">
+                  Please check the link provided by your Pingcon representative or request a fresh return invitation.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-5 animate-in zoom-in-95">
+              <div className="w-16 h-16 rounded-3xl bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto shadow-inner">
+                <Clock className="w-8 h-8" />
+              </div>
+
+              <div className="space-y-1">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                  Link Expired
+                </span>
+                <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                  Authorization Expired
+                </h2>
+              </div>
+
+              <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-2xl text-xs text-left space-y-2 text-slate-700 dark:text-slate-300">
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400">
+                  This personalized return link has exceeded its validity period and expired.
+                </p>
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400 font-bold">
+                  Please contact your Pingcon representative to generate a fresh return authorization link for your account.
+                </p>
+              </div>
+            </div>
+          )
         ) : (
           /* 5. Valid Token -> 1-Click Google Identity Lock OAuth Screen (Zero Admin Buttons) */
           <div className="space-y-5 animate-in zoom-in-95">
@@ -40661,7 +40884,18 @@ export const catalogService = {
         console.warn('Error fetching saved products from Supabase:', error.message);
         return [];
       }
-      return data || [];
+      return (data || []).map(p => {
+        const brand = p.brand_name || '';
+        const pcsMatch = brand.match(/\[Pcs\/Cs:(\d+)\]/i);
+        const pieces = pcsMatch ? parseInt(pcsMatch[1], 10) : (p.pieces_per_case || null);
+        const cleanBrand = brand.replace(/\[Pcs\/Cs:\d+\]/gi, '').trim() || null;
+        return {
+          ...p,
+          pieces_per_case: pieces,
+          piecesPerCase: pieces,
+          brand_name: cleanBrand
+        };
+      });
     } catch (e) {
       console.warn('Saved products fetch exception:', e);
       return [];
@@ -40694,7 +40928,12 @@ export const catalogService = {
     if (!cleanBarcode) throw new Error('Product Barcode is required.');
     if (!name || !name.trim()) throw new Error('Product Name is required.');
 
-    const resolvedPcs = (pieces_per_case !== undefined ? pieces_per_case : piecesPerCase);
+    const resolvedPcs = (pieces_per_case !== undefined && pieces_per_case !== null) ? pieces_per_case : piecesPerCase;
+    let resolvedBrand = brandName ? brandName.trim() : null;
+    if (resolvedPcs && Number(resolvedPcs) > 0) {
+      resolvedBrand = resolvedBrand ? `${resolvedBrand} [Pcs/Cs:${resolvedPcs}]` : `[Pcs/Cs:${resolvedPcs}]`;
+    }
+
     const newProd = {
       barcode: cleanBarcode,
       code: code ? code.trim() : null,
@@ -40702,9 +40941,8 @@ export const catalogService = {
       supplier_name: supplierName ? supplierName.trim() : 'Savemore',
       price: Number(price || 0),
       price_with_vat: Number(priceWithVat || price || 0),
-      brand_name: brandName ? brandName.trim() : null,
+      brand_name: resolvedBrand,
       unit_name: unitName ? unitName.trim() : 'pc',
-      pieces_per_case: resolvedPcs ? Number(resolvedPcs) : null,
       image_url: imageUrl ? imageUrl.trim() : null,
       ae_name: aeName ? aeName.trim() : null,
       ae_email: aeEmail ? aeEmail.trim() : null,
@@ -40713,16 +40951,44 @@ export const catalogService = {
       updated_at: new Date().toISOString()
     };
 
+    let savedData = null;
+    let saveError = null;
+
     const { data, error } = await supabase
       .from('products')
       .upsert([newProd], { onConflict: 'barcode' })
       .select()
       .single();
 
-    if (error) throw new Error(`Failed to save product: ${error.message}`);
+    if (!error && data) {
+      savedData = data;
+    } else {
+      saveError = error;
+      // If error mentions unknown column, strip and retry
+      const errMsg = String(error?.message || '');
+      const colMatch = errMsg.match(/Could not find the '([^']+)' column/i) || errMsg.match(/column products\.([a-zA-Z0-9_]+) does not exist/i);
+      if (colMatch && colMatch[1] && colMatch[1] in newProd) {
+        delete newProd[colMatch[1]];
+        const retry = await supabase.from('products').upsert([newProd], { onConflict: 'barcode' }).select().single();
+        if (!retry.error) {
+          savedData = retry.data;
+          saveError = null;
+        }
+      }
+    }
 
-    this.notifyChange('product-created', { barcode: cleanBarcode, product: data });
-    return { success: true, product: data };
+    if (saveError || !savedData) {
+      throw new Error(`Failed to save product: ${saveError?.message || 'Database insert failed'}`);
+    }
+
+    const enrichedProduct = {
+      ...savedData,
+      pieces_per_case: resolvedPcs ? Number(resolvedPcs) : null,
+      piecesPerCase: resolvedPcs ? Number(resolvedPcs) : null
+    };
+
+    this.notifyChange('product-created', { barcode: cleanBarcode, product: enrichedProduct });
+    return { success: true, product: enrichedProduct };
   },
 
   /**
@@ -40731,17 +40997,25 @@ export const catalogService = {
   async updateProduct(id, { barcode, code, name, supplierName, price, priceWithVat, brandName, unitName, pieces_per_case, piecesPerCase, imageUrl, aeName, aeEmail, company }) {
     if (!id && !barcode) throw new Error('Product identifier required for update.');
 
-    const resolvedPcs = (pieces_per_case !== undefined ? pieces_per_case : piecesPerCase);
-    // Deduplication removed: 1 SKU from company can have more than one barcode assignation
+    const resolvedPcs = (pieces_per_case !== undefined && pieces_per_case !== null) ? pieces_per_case : piecesPerCase;
+    let resolvedBrand = brandName !== undefined ? (brandName ? brandName.trim() : null) : undefined;
+    if (resolvedPcs !== undefined) {
+      if (resolvedPcs && Number(resolvedPcs) > 0) {
+        resolvedBrand = (resolvedBrand || '').replace(/\[Pcs\/Cs:\d+\]/gi, '').trim();
+        resolvedBrand = resolvedBrand ? `${resolvedBrand} [Pcs/Cs:${resolvedPcs}]` : `[Pcs/Cs:${resolvedPcs}]`;
+      } else if (resolvedBrand) {
+        resolvedBrand = resolvedBrand.replace(/\[Pcs\/Cs:\d+\]/gi, '').trim() || null;
+      }
+    }
+
     const updates = {
       name: name ? name.trim() : undefined,
       code: code !== undefined ? (code ? code.trim() : null) : undefined,
       supplier_name: supplierName ? supplierName.trim() : undefined,
       price: price !== undefined ? Number(price || 0) : undefined,
       price_with_vat: priceWithVat !== undefined ? Number(priceWithVat || price || 0) : undefined,
-      brand_name: brandName !== undefined ? (brandName ? brandName.trim() : null) : undefined,
+      brand_name: resolvedBrand,
       unit_name: unitName ? unitName.trim() : undefined,
-      pieces_per_case: resolvedPcs !== undefined ? (Number(resolvedPcs) || null) : undefined,
       image_url: imageUrl !== undefined ? (imageUrl ? imageUrl.trim() : null) : undefined,
       ae_name: aeName !== undefined ? (aeName ? aeName.trim() : null) : undefined,
       ae_email: aeEmail !== undefined ? (aeEmail ? aeEmail.trim() : null) : undefined,
@@ -40757,12 +41031,32 @@ export const catalogService = {
     if (id) query = query.eq('id', id);
     else query = query.eq('barcode', barcode);
 
-    const { data, error } = await query.select();
+    let { data, error } = await query.select();
+
+    if (error) {
+      const errMsg = String(error?.message || '');
+      const colMatch = errMsg.match(/Could not find the '([^']+)' column/i) || errMsg.match(/column products\.([a-zA-Z0-9_]+) does not exist/i);
+      if (colMatch && colMatch[1] && colMatch[1] in updates) {
+        delete updates[colMatch[1]];
+        let retryQuery = supabase.from('products').update(updates);
+        if (id) retryQuery = retryQuery.eq('id', id);
+        else retryQuery = retryQuery.eq('barcode', barcode);
+        const retryRes = await retryQuery.select();
+        data = retryRes.data;
+        error = retryRes.error;
+      }
+    }
 
     if (error) throw new Error(`Failed to update product: ${error.message}`);
 
+    const updatedProd = data?.[0] ? {
+      ...data[0],
+      pieces_per_case: resolvedPcs ? Number(resolvedPcs) : null,
+      piecesPerCase: resolvedPcs ? Number(resolvedPcs) : null
+    } : null;
+
     this.notifyChange('product-updated', { id, barcode, updates });
-    return { success: true, product: data?.[0] };
+    return { success: true, product: updatedProd };
   },
 
   /**
@@ -41142,9 +41436,6 @@ export const catalogService = {
       condition_grade: 'B - Damaged Packaging Only',
       disposition: 'Pending Triage',
       warehouse_location: null,
-      pieces_per_case: (pieces_per_case || piecesPerCase)
-        ? Number(pieces_per_case || piecesPerCase)
-        : (isKnown ? (resolvedProduct.pieces_per_case || resolvedProduct.piecesPerCase || null) : (hasItems && (items[0]?.pieces_per_case || items[0]?.piecesPerCase) ? Number(items[0].pieces_per_case || items[0].piecesPerCase) : null)),
       inspected_by: null,
       inspected_at: null,
       audit_trail: [],
@@ -41164,38 +41455,54 @@ export const catalogService = {
       .select()
       .single();
 
-    if (reportError && (reportError.message?.includes('paperwork_photos') || reportError.message?.includes('invoice_dr_number') || reportError.message?.includes('items') || reportError.message?.includes('column'))) {
-      console.warn('Retrying insert without new manifest/AI/Drive columns (pending SQL migration):', reportError.message);
+    if (reportError) {
+      console.warn('Initial insert of rma_reports failed, attempting smart retry:', reportError.message);
       const fallbackRow = { ...reportRow };
-      delete fallbackRow.paperwork_photos;
-      delete fallbackRow.invoice_dr_number;
-      delete fallbackRow.si_number;
-      delete fallbackRow.dr_number;
-      delete fallbackRow.po_number;
-      delete fallbackRow.store_branch;
-      delete fallbackRow.expiry_date;
-      delete fallbackRow.batch_lot_number;
-      delete fallbackRow.ai_document_metadata;
-      delete fallbackRow.google_drive_folder_url;
-      delete fallbackRow.google_drive_folder_id;
-      delete fallbackRow.parent_rma_id;
-      delete fallbackRow.is_parent;
-      delete fallbackRow.items;
-      delete fallbackRow.total_items;
-      delete fallbackRow.total_quantity;
-      delete fallbackRow.pieces_per_case;
-      if (reportError.message?.includes('rma_type')) {
-        delete fallbackRow.rma_type;
+      const errMsg = String(reportError.message || '');
+      const colMatch = errMsg.match(/Could not find the '([^']+)' column/i) || errMsg.match(/column rma_reports\.([a-zA-Z0-9_]+) does not exist/i);
+      if (colMatch && colMatch[1] && colMatch[1] in fallbackRow) {
+        delete fallbackRow[colMatch[1]];
       }
+      if (errMsg.includes('paperwork_photos')) delete fallbackRow.paperwork_photos;
+      if (errMsg.includes('invoice_dr_number')) delete fallbackRow.invoice_dr_number;
+      if (errMsg.includes('si_number')) delete fallbackRow.si_number;
+      if (errMsg.includes('dr_number')) delete fallbackRow.dr_number;
+      if (errMsg.includes('po_number')) delete fallbackRow.po_number;
+      if (errMsg.includes('store_branch')) delete fallbackRow.store_branch;
+      if (errMsg.includes('expiry_date')) delete fallbackRow.expiry_date;
+      if (errMsg.includes('batch_lot_number')) delete fallbackRow.batch_lot_number;
+      if (errMsg.includes('ai_document_metadata')) delete fallbackRow.ai_document_metadata;
+      if (errMsg.includes('google_drive_folder')) {
+        delete fallbackRow.google_drive_folder_url;
+        delete fallbackRow.google_drive_folder_id;
+      }
+      if (errMsg.includes('rma_type')) delete fallbackRow.rma_type;
+
+      // Only delete manifest columns if DB explicitly rejected THEM
+      if (errMsg.includes('items') && !errMsg.includes('rma_items')) delete fallbackRow.items;
+      if (errMsg.includes('is_parent')) delete fallbackRow.is_parent;
+      if (errMsg.includes('parent_rma_id')) delete fallbackRow.parent_rma_id;
+      if (errMsg.includes('total_items')) delete fallbackRow.total_items;
+      if (errMsg.includes('total_quantity')) delete fallbackRow.total_quantity;
+
       const retry = await supabase.from('rma_reports').insert([fallbackRow]).select().single();
       if (!retry.error) {
         insertedReport = retry.data;
       } else {
-        throw new Error(`Database error saving return report: ${retry.error.message}`);
+        const retryErrMsg = String(retry.error.message || '');
+        const retryColMatch = retryErrMsg.match(/Could not find the '([^']+)' column/i) || retryErrMsg.match(/column rma_reports\.([a-zA-Z0-9_]+) does not exist/i);
+        if (retryColMatch && retryColMatch[1] && retryColMatch[1] in fallbackRow) {
+          delete fallbackRow[retryColMatch[1]];
+          const retry2 = await supabase.from('rma_reports').insert([fallbackRow]).select().single();
+          if (!retry2.error) {
+            insertedReport = retry2.data;
+          } else {
+            throw new Error(`Database error saving return report: ${retry2.error.message}`);
+          }
+        } else {
+          throw new Error(`Database error saving return report: ${retry.error.message}`);
+        }
       }
-    } else if (reportError) {
-      console.error('Failed to insert rma_report to Supabase:', reportError);
-      throw new Error(`Database error saving return report: ${reportError.message}`);
     } else {
       insertedReport = insertedData;
     }
@@ -41220,7 +41527,6 @@ export const catalogService = {
           name: it.name || it.productName || `Item (${it.barcode})`,
           quantity: Number(it.quantity) || 1,
           unit_name: it.unit_name || it.unit || 'pc',
-          pieces_per_case: it.pieces_per_case || it.piecesPerCase || null,
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
           supplier_name: it.supplier_name || 'Savemore',
@@ -41245,7 +41551,6 @@ export const catalogService = {
           name: it.name || it.productName || `Item (${it.barcode})`,
           quantity: Number(it.quantity) || 1,
           unit_name: it.unit_name || it.unit || 'pc',
-          pieces_per_case: it.pieces_per_case || it.piecesPerCase || null,
           supplier_name: it.supplier_name || 'Savemore',
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
@@ -41533,15 +41838,19 @@ export const catalogService = {
     if (!cleanBarcode) throw new Error('Barcode is required to update details.');
 
     const resolvedPcs = (pieces_per_case !== undefined ? pieces_per_case : piecesPerCase);
+    let resolvedBrand = brandName ? brandName.trim() : null;
+    if (resolvedPcs && Number(resolvedPcs) > 0) {
+      resolvedBrand = resolvedBrand ? `${resolvedBrand} [Pcs/Cs:${resolvedPcs}]` : `[Pcs/Cs:${resolvedPcs}]`;
+    }
+
     const updates = {
       code: code ? code.trim() : null,
       name: name ? name.trim() : 'Unknown Item',
       supplier_name: supplierName ? supplierName.trim() : 'Savemore',
       price: Number(price || 0),
       price_with_vat: Number(priceWithVat || price || 0),
-      brand_name: brandName ? brandName.trim() : null,
+      brand_name: resolvedBrand,
       unit_name: unitName ? unitName.trim() : 'pc',
-      pieces_per_case: resolvedPcs !== undefined ? (Number(resolvedPcs) || null) : undefined,
       image_url: imageUrl ? imageUrl.trim() : null,
       ae_name: aeName ? aeName.trim() : null,
       ae_email: aeEmail ? aeEmail.trim() : null,
@@ -42442,22 +42751,29 @@ export function maskEmail(email) {
 }
 
 export function formatRemainingCountdown(expiresAt, status = 'active') {
-  if (status === 'revoked') return { text: 'Revoked', isExpired: true, isRevoked: true };
-  if (!expiresAt) return { text: 'Expired', isExpired: true, isRevoked: false };
+  if (status === 'revoked') return { text: 'Revoked', isExpired: true, isRevoked: true, totalSeconds: 0 };
+  if (!expiresAt) return { text: 'Expired', isExpired: true, isRevoked: false, totalSeconds: 0 };
   const diff = new Date(expiresAt).getTime() - Date.now();
-  if (diff <= 0) return { text: 'Expired', isExpired: true, isRevoked: false };
+  if (diff <= 0) return { text: 'Expired', isExpired: true, isRevoked: false, totalSeconds: 0 };
+  
+  const totalSecs = Math.floor(diff / 1000);
   const totalMins = Math.floor(diff / (1000 * 60));
-  if (totalMins < 60) {
-    return { text: `${Math.max(1, totalMins)}m remaining`, isExpired: false };
-  }
   const hours = Math.floor(totalMins / 60);
   const mins = totalMins % 60;
-  if (hours < 24) {
-    return { text: `${hours}h ${mins}m remaining`, isExpired: false };
+  const secs = totalSecs % 60;
+
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    const remHours = hours % 24;
+    return { text: `${days}d ${remHours}h ${mins}m remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
   }
-  const days = Math.floor(hours / 24);
-  const remHours = hours % 24;
-  return { text: `${days}d ${remHours}h remaining`, isExpired: false };
+  if (hours > 0) {
+    return { text: `${hours}h ${mins}m ${secs}s remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
+  }
+  if (mins > 0) {
+    return { text: `${mins}m ${secs}s remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
+  }
+  return { text: `${secs}s remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
 }
 
 /**
@@ -42652,8 +42968,9 @@ export const inviteService = {
 
     const cleanToken = String(token).trim();
     let invite = null;
+    let checkedTableSuccessfully = false;
 
-    // 1. Check database
+    // 1. Primary check against database table: public.rma_invites
     try {
       const { data, error } = await supabase
         .from('rma_invites')
@@ -42661,28 +42978,47 @@ export const inviteService = {
         .eq('token', cleanToken)
         .maybeSingle();
 
-      if (!error && data) {
-        invite = {
-          ...data,
-          stream_type: data.stream_type || 'customer_inbound',
-          entity_name: data.entity_name || data.store_branch || '',
-          store_branch: data.store_branch || data.entity_name || ''
-        };
+      if (!error) {
+        checkedTableSuccessfully = true;
+        if (data) {
+          invite = {
+            ...data,
+            stream_type: data.stream_type || 'customer_inbound',
+            entity_name: data.entity_name || data.store_branch || '',
+            store_branch: data.store_branch || data.entity_name || ''
+          };
+        } else {
+          // Table exists and query completed with 0 rows:
+          // Token is DELETED or completely invalid. DO NOT fall back to localStorage to resurrect deleted tokens!
+          return { valid: false, error: 'NOT_FOUND' };
+        }
       }
     } catch {
-      // Fallback
+      // Table may be unreachable
     }
 
-    if (!invite) {
-      const all = await this.getInvites();
-      invite = all.find(i => i.token === cleanToken) || null;
-      if (invite) {
-        invite = {
-          ...invite,
-          stream_type: invite.stream_type || 'customer_inbound',
-          entity_name: invite.entity_name || invite.store_branch || '',
-          store_branch: invite.store_branch || invite.entity_name || ''
-        };
+    // 2. Only check fallback rma_settings if the primary table query threw an error
+    if (!checkedTableSuccessfully) {
+      try {
+        const { data, error } = await supabase
+          .from('rma_settings')
+          .select('value')
+          .eq('key', SETTINGS_KEY)
+          .maybeSingle();
+
+        if (!error && Array.isArray(data?.value)) {
+          const found = data.value.find(i => i.token === cleanToken);
+          if (found) {
+            invite = {
+              ...found,
+              stream_type: found.stream_type || 'customer_inbound',
+              entity_name: found.entity_name || found.store_branch || '',
+              store_branch: found.store_branch || found.entity_name || ''
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('Fallback settings check failed:', e);
       }
     }
 
@@ -42711,7 +43047,7 @@ export const inviteService = {
     // 1. Update in table
     try {
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tokenOrId).trim());
-      let query = supabase.from('rma_invites').update({ status: 'revoked' });
+      let query = supabase.from('rma_invites').update({ status: 'revoked', updated_at: new Date().toISOString() });
       if (isUUID) {
         query = query.eq('id', tokenOrId);
       } else {
@@ -42742,6 +43078,17 @@ export const inviteService = {
     } catch (e) {
       console.warn('Failed to update revoked invite in rma_settings:', e);
     }
+
+    // 3. Clear local storage gate session if it matches revoked invite
+    try {
+      const rawSession = localStorage.getItem('rma_portal_gate_session');
+      if (rawSession) {
+        const sess = JSON.parse(rawSession);
+        if (sess?.token === tokenOrId || sess?.id === tokenOrId) {
+          localStorage.removeItem('rma_portal_gate_session');
+        }
+      }
+    } catch {}
 
     return true;
   },
@@ -42780,7 +43127,20 @@ export const inviteService = {
       saveLocalInvites(updated);
     } catch (e) {
       console.warn('Failed to delete invite from rma_settings:', e);
+      const local = getLocalInvites().filter(inv => inv.token !== tokenOrId && inv.id !== tokenOrId);
+      saveLocalInvites(local);
     }
+
+    // 3. Clear local storage gate session if it matches deleted invite
+    try {
+      const rawSession = localStorage.getItem('rma_portal_gate_session');
+      if (rawSession) {
+        const sess = JSON.parse(rawSession);
+        if (sess?.token === tokenOrId || sess?.id === tokenOrId) {
+          localStorage.removeItem('rma_portal_gate_session');
+        }
+      }
+    } catch {}
 
     return true;
   },
@@ -47010,6 +47370,17 @@ export function getReportManifestItems(report, allReports = []) {
       !r.is_parent
     ));
     if (children.length > 0) return children;
+  }
+  // Robust fallback: Match child records by rma_number if parent_rma_id was unpopulated
+  if (Array.isArray(allReports) && allReports.length > 0 && report.rma_number) {
+    const childrenByRma = allReports.filter(r => (
+      r &&
+      r.rma_number === report.rma_number &&
+      r.id !== report.id &&
+      !r.is_parent &&
+      r.barcode !== report.barcode
+    ));
+    if (childrenByRma.length > 0) return childrenByRma;
   }
   return [];
 }

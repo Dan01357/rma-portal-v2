@@ -41,22 +41,29 @@ export function maskEmail(email) {
 }
 
 export function formatRemainingCountdown(expiresAt, status = 'active') {
-  if (status === 'revoked') return { text: 'Revoked', isExpired: true, isRevoked: true };
-  if (!expiresAt) return { text: 'Expired', isExpired: true, isRevoked: false };
+  if (status === 'revoked') return { text: 'Revoked', isExpired: true, isRevoked: true, totalSeconds: 0 };
+  if (!expiresAt) return { text: 'Expired', isExpired: true, isRevoked: false, totalSeconds: 0 };
   const diff = new Date(expiresAt).getTime() - Date.now();
-  if (diff <= 0) return { text: 'Expired', isExpired: true, isRevoked: false };
+  if (diff <= 0) return { text: 'Expired', isExpired: true, isRevoked: false, totalSeconds: 0 };
+  
+  const totalSecs = Math.floor(diff / 1000);
   const totalMins = Math.floor(diff / (1000 * 60));
-  if (totalMins < 60) {
-    return { text: `${Math.max(1, totalMins)}m remaining`, isExpired: false };
-  }
   const hours = Math.floor(totalMins / 60);
   const mins = totalMins % 60;
-  if (hours < 24) {
-    return { text: `${hours}h ${mins}m remaining`, isExpired: false };
+  const secs = totalSecs % 60;
+
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    const remHours = hours % 24;
+    return { text: `${days}d ${remHours}h ${mins}m remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
   }
-  const days = Math.floor(hours / 24);
-  const remHours = hours % 24;
-  return { text: `${days}d ${remHours}h remaining`, isExpired: false };
+  if (hours > 0) {
+    return { text: `${hours}h ${mins}m ${secs}s remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
+  }
+  if (mins > 0) {
+    return { text: `${mins}m ${secs}s remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
+  }
+  return { text: `${secs}s remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
 }
 
 /**
@@ -251,8 +258,9 @@ export const inviteService = {
 
     const cleanToken = String(token).trim();
     let invite = null;
+    let checkedTableSuccessfully = false;
 
-    // 1. Check database
+    // 1. Primary check against database table: public.rma_invites
     try {
       const { data, error } = await supabase
         .from('rma_invites')
@@ -260,28 +268,47 @@ export const inviteService = {
         .eq('token', cleanToken)
         .maybeSingle();
 
-      if (!error && data) {
-        invite = {
-          ...data,
-          stream_type: data.stream_type || 'customer_inbound',
-          entity_name: data.entity_name || data.store_branch || '',
-          store_branch: data.store_branch || data.entity_name || ''
-        };
+      if (!error) {
+        checkedTableSuccessfully = true;
+        if (data) {
+          invite = {
+            ...data,
+            stream_type: data.stream_type || 'customer_inbound',
+            entity_name: data.entity_name || data.store_branch || '',
+            store_branch: data.store_branch || data.entity_name || ''
+          };
+        } else {
+          // Table exists and query completed with 0 rows:
+          // Token is DELETED or completely invalid. DO NOT fall back to localStorage to resurrect deleted tokens!
+          return { valid: false, error: 'NOT_FOUND' };
+        }
       }
     } catch {
-      // Fallback
+      // Table may be unreachable
     }
 
-    if (!invite) {
-      const all = await this.getInvites();
-      invite = all.find(i => i.token === cleanToken) || null;
-      if (invite) {
-        invite = {
-          ...invite,
-          stream_type: invite.stream_type || 'customer_inbound',
-          entity_name: invite.entity_name || invite.store_branch || '',
-          store_branch: invite.store_branch || invite.entity_name || ''
-        };
+    // 2. Only check fallback rma_settings if the primary table query threw an error
+    if (!checkedTableSuccessfully) {
+      try {
+        const { data, error } = await supabase
+          .from('rma_settings')
+          .select('value')
+          .eq('key', SETTINGS_KEY)
+          .maybeSingle();
+
+        if (!error && Array.isArray(data?.value)) {
+          const found = data.value.find(i => i.token === cleanToken);
+          if (found) {
+            invite = {
+              ...found,
+              stream_type: found.stream_type || 'customer_inbound',
+              entity_name: found.entity_name || found.store_branch || '',
+              store_branch: found.store_branch || found.entity_name || ''
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('Fallback settings check failed:', e);
       }
     }
 
@@ -310,7 +337,7 @@ export const inviteService = {
     // 1. Update in table
     try {
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tokenOrId).trim());
-      let query = supabase.from('rma_invites').update({ status: 'revoked' });
+      let query = supabase.from('rma_invites').update({ status: 'revoked', updated_at: new Date().toISOString() });
       if (isUUID) {
         query = query.eq('id', tokenOrId);
       } else {
@@ -341,6 +368,17 @@ export const inviteService = {
     } catch (e) {
       console.warn('Failed to update revoked invite in rma_settings:', e);
     }
+
+    // 3. Clear local storage gate session if it matches revoked invite
+    try {
+      const rawSession = localStorage.getItem('rma_portal_gate_session');
+      if (rawSession) {
+        const sess = JSON.parse(rawSession);
+        if (sess?.token === tokenOrId || sess?.id === tokenOrId) {
+          localStorage.removeItem('rma_portal_gate_session');
+        }
+      }
+    } catch {}
 
     return true;
   },
@@ -379,7 +417,20 @@ export const inviteService = {
       saveLocalInvites(updated);
     } catch (e) {
       console.warn('Failed to delete invite from rma_settings:', e);
+      const local = getLocalInvites().filter(inv => inv.token !== tokenOrId && inv.id !== tokenOrId);
+      saveLocalInvites(local);
     }
+
+    // 3. Clear local storage gate session if it matches deleted invite
+    try {
+      const rawSession = localStorage.getItem('rma_portal_gate_session');
+      if (rawSession) {
+        const sess = JSON.parse(rawSession);
+        if (sess?.token === tokenOrId || sess?.id === tokenOrId) {
+          localStorage.removeItem('rma_portal_gate_session');
+        }
+      }
+    } catch {}
 
     return true;
   },

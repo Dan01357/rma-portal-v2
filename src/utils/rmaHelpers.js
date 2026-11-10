@@ -250,6 +250,17 @@ export function getReportManifestItems(report, allReports = []) {
     ));
     if (children.length > 0) return children;
   }
+  // Robust fallback: Match child records by rma_number if parent_rma_id was unpopulated
+  if (Array.isArray(allReports) && allReports.length > 0 && report.rma_number) {
+    const childrenByRma = allReports.filter(r => (
+      r &&
+      r.rma_number === report.rma_number &&
+      r.id !== report.id &&
+      !r.is_parent &&
+      r.barcode !== report.barcode
+    ));
+    if (childrenByRma.length > 0) return childrenByRma;
+  }
   return [];
 }
 

@@ -141,7 +141,15 @@ export default function GatekeeperPinModal({
     }
   }, [onUnlock]);
 
-  // 3. Validate token from URL / database with ref guard to prevent loop
+  // Reset ref guard when isOpen changes to always revalidate cleanly
+  useEffect(() => {
+    if (isOpen) {
+      hasValidatedRef.current = false;
+      validatedTokenRef.current = null;
+    }
+  }, [isOpen]);
+
+  // 3. Validate token from URL / database
   useEffect(() => {
     let isMounted = true;
     if (!token) {
@@ -156,29 +164,48 @@ export default function GatekeeperPinModal({
       return;
     }
 
-    setIsValidatingToken(true);
-    inviteService.validateInviteToken(token).then(async (res) => {
-      if (!isMounted) return;
-      hasValidatedRef.current = true;
-      validatedTokenRef.current = token;
-      setValidationResult(res);
-      setIsValidatingToken(false);
+    const checkToken = async () => {
+      try {
+        const res = await inviteService.validateInviteToken(token);
+        if (!isMounted) return;
+        hasValidatedRef.current = true;
+        validatedTokenRef.current = token;
+        setValidationResult(res);
+        setIsValidatingToken(false);
 
-      if (res?.valid && res?.invite) {
-        try {
-          sessionStorage.setItem('rma_active_invite_token', token);
-          sessionStorage.setItem('rma_pending_oauth_token', token);
-        } catch {}
+        if (res?.valid && res?.invite) {
+          try {
+            sessionStorage.setItem('rma_active_invite_token', token);
+            sessionStorage.setItem('rma_pending_oauth_token', token);
+          } catch {}
 
-        // Check if user is already authenticated via Supabase Google OAuth
-        await verifyIdentityWithSupabase(res.invite);
+          // Check if user is already authenticated via Supabase Google OAuth
+          await verifyIdentityWithSupabase(res.invite);
+        }
+      } catch {
+        if (isMounted) setIsValidatingToken(false);
       }
-    }).catch(() => {
-      if (isMounted) setIsValidatingToken(false);
-    });
+    };
 
-    return () => { isMounted = false; };
-  }, [token, verifyIdentityWithSupabase]);
+    setIsValidatingToken(true);
+    checkToken();
+
+    // Active polling every 4 seconds to catch real-time admin revocation while gatekeeper is open
+    const pollInterval = setInterval(async () => {
+      if (!isMounted) return;
+      try {
+        const fresh = await inviteService.validateInviteToken(token);
+        if (isMounted && (!fresh.valid || fresh.invite?.status !== validationResult?.invite?.status)) {
+          setValidationResult(fresh);
+        }
+      } catch {}
+    }, 4000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+    };
+  }, [token, verifyIdentityWithSupabase, isOpen]);
 
   // 4. Subscribe to Supabase Auth state changes (triggers on OAuth redirect return)
   useEffect(() => {
@@ -196,7 +223,7 @@ export default function GatekeeperPinModal({
     };
   }, [validationResult, verifyIdentityWithSupabase, identityMismatch]);
 
-  // 5. Countdown timer for valid invite
+  // 5. Live ticking countdown timer for valid invite (updates every 1s)
   useEffect(() => {
     if (!validationResult?.invite?.expires_at) return;
 
@@ -209,9 +236,9 @@ export default function GatekeeperPinModal({
     };
 
     updateTimer();
-    const interval = setInterval(updateTimer, 15000);
+    const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
-  }, [validationResult?.invite?.expires_at]);
+  }, [validationResult?.invite?.expires_at, validationResult?.invite?.status]);
 
   // 6. Handle "Continue with Google" OAuth trigger
   const handleContinueWithGoogle = async () => {
@@ -382,32 +409,80 @@ export default function GatekeeperPinModal({
             </div>
           </div>
         ) : !validationResult?.valid ? (
-          /* 4. Token Invalid / Expired / Revoked (Zero Admin Buttons) */
-          <div className="space-y-5 animate-in zoom-in-95">
-            <div className="w-16 h-16 rounded-3xl bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto shadow-inner">
-              <Clock className="w-8 h-8" />
-            </div>
+          /* 4. Token Invalid / Expired / Revoked / Deleted (Zero Admin Buttons) */
+          validationResult?.error === 'REVOKED' ? (
+            <div className="space-y-5 animate-in zoom-in-95">
+              <div className="w-16 h-16 rounded-3xl bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto shadow-inner">
+                <ShieldAlert className="w-8 h-8" />
+              </div>
 
-            <div className="space-y-1">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-                {validationResult?.error === 'REVOKED' ? 'Authorization Revoked' : 'Link Expired'}
-              </span>
-              <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
-                Authorization Unavailable
-              </h2>
-            </div>
+              <div className="space-y-1">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                  403 Forbidden — Authorization Revoked
+                </span>
+                <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                  Authorization Revoked
+                </h2>
+              </div>
 
-            <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-2xl text-xs text-left space-y-2 text-slate-700 dark:text-slate-300">
-              <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400">
-                {validationResult?.error === 'REVOKED'
-                  ? 'This return authorization was revoked by Pingcon Operations.'
-                  : 'This personalized return link has exceeded its validity period and expired.'}
-              </p>
-              <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400 font-bold">
-                Please contact your Pingcon representative to generate a fresh return authorization link for your account.
-              </p>
+              <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl text-xs text-left space-y-2 text-slate-800 dark:text-slate-200">
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400">
+                  This return authorization link was revoked by Pingcon Operations. Submissions are no longer accepted under this link.
+                </p>
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400 font-bold">
+                  Please contact your assigned Pingcon representative or Account Executive if you require a new return authorization.
+                </p>
+              </div>
             </div>
-          </div>
+          ) : validationResult?.error === 'NOT_FOUND' ? (
+            <div className="space-y-5 animate-in zoom-in-95">
+              <div className="w-16 h-16 rounded-3xl bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto shadow-inner">
+                <ShieldAlert className="w-8 h-8" />
+              </div>
+
+              <div className="space-y-1">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                  Authorization Link Deleted or Invalid
+                </span>
+                <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                  Authorization Unavailable
+                </h2>
+              </div>
+
+              <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl text-xs text-left space-y-2 text-slate-800 dark:text-slate-200">
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400">
+                  This return authorization link has been deleted or does not exist in the Pingcon registry.
+                </p>
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400 font-bold">
+                  Please check the link provided by your Pingcon representative or request a fresh return invitation.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-5 animate-in zoom-in-95">
+              <div className="w-16 h-16 rounded-3xl bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto shadow-inner">
+                <Clock className="w-8 h-8" />
+              </div>
+
+              <div className="space-y-1">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                  Link Expired
+                </span>
+                <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                  Authorization Expired
+                </h2>
+              </div>
+
+              <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-2xl text-xs text-left space-y-2 text-slate-700 dark:text-slate-300">
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400">
+                  This personalized return link has exceeded its validity period and expired.
+                </p>
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400 font-bold">
+                  Please contact your Pingcon representative to generate a fresh return authorization link for your account.
+                </p>
+              </div>
+            </div>
+          )
         ) : (
           /* 5. Valid Token -> 1-Click Google Identity Lock OAuth Screen (Zero Admin Buttons) */
           <div className="space-y-5 animate-in zoom-in-95">

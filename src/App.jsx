@@ -86,6 +86,7 @@ import ReturnQRModal from './components/ReturnQRModal';
 import QuickRMAActionModal from './components/QuickRMAActionModal';
 import GatekeeperPinModal from './components/GatekeeperPinModal';
 import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
+import { inviteService, formatRemainingCountdown } from './services/inviteService';
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
@@ -305,15 +306,24 @@ export default function App() {
     return accessKeyService.getActiveSession(slug);
   });
 
+  // Live ticking countdown state for public return session
+  const [sessionCountdown, setSessionCountdown] = useState({ text: '', isExpired: false, totalSeconds: 0 });
+
   // Active Real-Time Watchdog for Gatekeeper Session Expiration (Unbypassable live enforcement)
   useEffect(() => {
     const expStr = gateSession?.expires_at || gateSession?.expiresAt;
-    if (!expStr) return;
+    if (!expStr) {
+      setSessionCountdown({ text: '', isExpired: false, totalSeconds: 0 });
+      return;
+    }
 
     const checkExpiration = () => {
       const expTime = new Date(expStr).getTime();
       const now = Date.now();
-      if (now >= expTime) {
+      const countdown = formatRemainingCountdown(expStr, gateSession?.status || 'active');
+      setSessionCountdown(countdown);
+
+      if (now >= expTime || countdown.isExpired) {
         // Session reached expiration!
         try {
           localStorage.removeItem('rma_portal_gate_session');
@@ -321,7 +331,7 @@ export default function App() {
         const slug = gateSession.slug;
         accessKeyService.clearSession(slug);
         setGateSession(null);
-        showToast('Your authorized return session has expired. Device locked.', 'warning');
+        showToast('Your authorized return session has expired. Portal locked.', 'warning');
       }
     };
 
@@ -329,6 +339,79 @@ export default function App() {
     const interval = setInterval(checkExpiration, 1000);
     return () => clearInterval(interval);
   }, [gateSession]);
+
+  // Active background token verification: Detect revoked or deleted invite links in real-time
+  useEffect(() => {
+    if (!gateSession?.token) return;
+
+    const verifyActiveToken = async () => {
+      try {
+        const res = await inviteService.validateInviteToken(gateSession.token);
+        if (!res.valid) {
+          try {
+            localStorage.removeItem('rma_portal_gate_session');
+          } catch { }
+          const slug = gateSession.slug;
+          accessKeyService.clearSession(slug);
+          setGateSession(null);
+
+          if (res.error === 'REVOKED') {
+            showToast('Return authorization was revoked by Pingcon Operations. Portal locked.', 'error');
+          } else if (res.error === 'EXPIRED') {
+            showToast('Return authorization has expired. Portal locked.', 'warning');
+          } else if (res.error === 'NOT_FOUND') {
+            showToast('Return authorization link has been deleted or is invalid.', 'error');
+          }
+        }
+      } catch (err) {
+        console.warn('Background invite token verification notice:', err);
+      }
+    };
+
+    // 1. Immediate validation on mount / session load
+    verifyActiveToken();
+
+    // 2. Poll every 4 seconds to catch dashboard revokes and deletes instantly
+    const pollInterval = setInterval(verifyActiveToken, 4000);
+
+    // 3. Re-verify on window focus and visibility change
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        verifyActiveToken();
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', verifyActiveToken);
+
+    // 4. Supabase Realtime channel on rma_invites table
+    const inviteChannel = supabase.channel(`rma_inv_guard_${gateSession.token}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rma_invites' }, (payload) => {
+        const token = gateSession.token;
+        if (payload.eventType === 'DELETE') {
+          if (payload.old?.token === token || payload.old?.id === gateSession.id) {
+            try { localStorage.removeItem('rma_portal_gate_session'); } catch { }
+            setGateSession(null);
+            showToast('Return authorization has been deleted by Pingcon Operations.', 'error');
+          }
+        } else if (payload.eventType === 'UPDATE') {
+          if (payload.new?.token === token || payload.new?.id === gateSession.id) {
+            if (payload.new?.status === 'revoked') {
+              try { localStorage.removeItem('rma_portal_gate_session'); } catch { }
+              setGateSession(null);
+              showToast('Return authorization was revoked by Pingcon Operations.', 'error');
+            }
+          }
+        }
+      })
+      .subscribe();
+
+    return () => {
+      clearInterval(pollInterval);
+      window.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', verifyActiveToken);
+      supabase.removeChannel(inviteChannel);
+    };
+  }, [gateSession?.token, gateSession?.id, gateSession?.slug]);
 
   // Synchronize Google Identity authorized email and branch into intake form automatically
   useEffect(() => {
@@ -1903,11 +1986,30 @@ export default function App() {
         showToast('This station is locked. Please enter PIN to resume.', 'warning');
         return;
       }
-      const active = accessKeyService.getActiveSession(intakeSlug || gateSession?.slug);
-      if (!active) {
-        showToast('Your return session has expired. You cannot submit this report.', 'error');
-        setGateSession(null);
-        return;
+      if (gateSession.token) {
+        const check = await inviteService.validateInviteToken(gateSession.token);
+        if (!check.valid) {
+          try {
+            localStorage.removeItem('rma_portal_gate_session');
+          } catch { }
+          setGateSession(null);
+          showToast(
+            check.error === 'REVOKED'
+              ? 'Submission blocked: Your return authorization has been revoked by Pingcon Operations.'
+              : check.error === 'EXPIRED'
+              ? 'Submission blocked: Your return authorization link has expired.'
+              : 'Submission blocked: Your return authorization link is invalid or deleted.',
+            'error'
+          );
+          return;
+        }
+      } else {
+        const active = accessKeyService.getActiveSession(intakeSlug || gateSession?.slug);
+        if (!active) {
+          showToast('Your return session has expired. You cannot submit this report.', 'error');
+          setGateSession(null);
+          return;
+        }
       }
     }
 
@@ -2210,19 +2312,24 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
-                    {gateSession
-                      ? (gateSession.expiresAt ? (() => {
-                        const remainingMs = Math.max(0, new Date(gateSession.expiresAt).getTime() - Date.now());
-                        const remainingMins = Math.max(1, Math.round(remainingMs / (60 * 1000)));
-                        if (remainingMins < 60) {
-                          return `Session active (~${remainingMins}m remaining)`;
-                        }
-                        const hrs = (remainingMins / 60).toFixed(1).replace('.0', '');
-                        return `Session active (~${hrs}h remaining)`;
-                      })() : 'Permanent Station Unlock')
-                      : 'Pingcon RMA Return Intake'}
-                  </div>
+                  {sessionCountdown.text ? (
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border transition-all ${
+                        sessionCountdown.totalSeconds < 300
+                          ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-300 dark:border-rose-800 animate-pulse'
+                          : sessionCountdown.totalSeconds < 1800
+                          ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                          : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                      }`}>
+                        <Clock className="w-3 h-3 shrink-0" />
+                        <span>Link expires in: <strong>{sessionCountdown.text}</strong></span>
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                      {gateSession ? 'Authorized Return Intake Active' : 'Pingcon RMA Return Intake'}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2527,6 +2634,47 @@ export default function App() {
               </div>
             ) : (
               <form onSubmit={handleSubmitReport} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
+
+                {/* Authorized Return Identity & Live Session Timer Banner */}
+                {gateSession && (
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-inner ${
+                        gateSession.stream_type === 'supplier_outbound'
+                          ? 'bg-purple-100 dark:bg-purple-900/60 text-purple-600 dark:text-purple-400'
+                          : 'bg-blue-100 dark:bg-blue-900/60 text-blue-600 dark:text-blue-400'
+                      }`}>
+                        {gateSession.stream_type === 'supplier_outbound' ? <Truck className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                          <span>{gateSession.entity_name || gateSession.store_branch || 'Authorized Partner'}</span>
+                          {gateSession.authorized_email && (
+                            <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400 bg-emerald-100/70 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full font-bold">
+                              ✓ {gateSession.authorized_email}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">
+                          {gateSession.stream_type === 'supplier_outbound' ? 'Authorized Supplier Return to Vendor (RTV)' : 'Customer Return Authorization'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {sessionCountdown.text && (
+                      <div className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 shrink-0 self-start sm:self-auto border transition-all ${
+                        sessionCountdown.totalSeconds < 300
+                          ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-300 dark:border-rose-800 animate-pulse'
+                          : sessionCountdown.totalSeconds < 1800
+                          ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                          : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                      }`}>
+                        <Clock className="w-3.5 h-3.5 shrink-0" />
+                        <span>Link expires in: <strong>{sessionCountdown.text}</strong></span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* 1. LINE ITEM DETAILS & MANIFEST BUILDER */}
                 <div className="p-4 sm:p-5 rounded-3xl bg-slate-50/70 dark:bg-slate-800/40 border-2 border-slate-200 dark:border-slate-800 space-y-4 shadow-xs">
