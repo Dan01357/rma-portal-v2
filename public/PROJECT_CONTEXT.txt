@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-10T05:47:57.344Z
+Generated At: 2026-11-10T06:35:27.638Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -9451,9 +9451,71 @@ function getIntakeSlugFromUrl() {
   return null;
 }
 
+/**
+ * Reconciles Google OAuth / Magic Link callback redirects for public invite tokens.
+ * If Supabase's Site URL redirected an invite OAuth login to '/admin#access_token=...',
+ * this immediately restores '/intake?token=...' while preserving the '#access_token' hash
+ * so GatekeeperPinModal can verify the Google identity cleanly.
+ */
+function reconcileInviteOAuthRedirectOnLoad() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+    const path = window.location.pathname.toLowerCase();
+
+    const hasAuthCallback =
+      hash.includes('access_token=') ||
+      hash.includes('id_token=') ||
+      /[?&]code=/.test(search) ||
+      /[?&]token_hash=/.test(search);
+
+    const isOAuthInProgress =
+      localStorage.getItem('rma_oauth_in_progress') === 'true' ||
+      sessionStorage.getItem('rma_oauth_in_progress') === 'true';
+
+    const pendingToken =
+      new URLSearchParams(search).get('token') ||
+      localStorage.getItem('rma_pending_oauth_token') ||
+      sessionStorage.getItem('rma_pending_oauth_token') ||
+      localStorage.getItem('rma_active_invite_token') ||
+      sessionStorage.getItem('rma_active_invite_token');
+
+    if (hasAuthCallback && isOAuthInProgress && pendingToken) {
+      sessionStorage.setItem('rma_active_invite_token', pendingToken);
+      sessionStorage.setItem('rma_pending_oauth_token', pendingToken);
+      sessionStorage.setItem('rma_oauth_in_progress', 'true');
+      localStorage.setItem('rma_active_invite_token', pendingToken);
+      localStorage.setItem('rma_pending_oauth_token', pendingToken);
+      localStorage.setItem('rma_oauth_in_progress', 'true');
+
+      const currentParams = new URLSearchParams(search);
+      if (path.startsWith('/admin') || currentParams.get('token') !== pendingToken) {
+        window.history.replaceState(
+          null,
+          '',
+          `/intake?token=${encodeURIComponent(pendingToken)}${hash}`
+        );
+      }
+      return pendingToken;
+    }
+
+    // If visiting /admin directly (not returning from an invite OAuth flow), clear leftover invite token flags
+    if (path === '/admin' || path.startsWith('/admin/') || hash.toLowerCase() === '#/admin' || search.includes('admin=true')) {
+      sessionStorage.removeItem('rma_active_invite_token');
+      sessionStorage.removeItem('rma_pending_oauth_token');
+      sessionStorage.removeItem('rma_oauth_in_progress');
+      localStorage.removeItem('rma_pending_oauth_token');
+      localStorage.removeItem('rma_oauth_in_progress');
+    }
+  } catch { }
+  return null;
+}
+
 export default function App() {
   // ROUTE DETECTION: '/' (Public Reporter) vs '/admin' (Staff Admin Portal)
   const [isAdminView, setIsAdminView] = useState(() => {
+    reconcileInviteOAuthRedirectOnLoad();
     const path = window.location.pathname.toLowerCase();
     const hash = window.location.hash.toLowerCase();
     return path === '/admin' || path.startsWith('/admin/') || hash === '#/admin' || window.location.search.includes('admin=true');
@@ -9575,6 +9637,10 @@ export default function App() {
     const verifyActiveToken = async () => {
       try {
         const res = await inviteService.validateInviteToken(gateSession.token);
+        // Ignore transient network errors during background polling so active users are not falsely blocked
+        if (res.error === 'NETWORK_ERROR' || (!res.valid && res.transient)) {
+          return;
+        }
         if (!res.valid) {
           try {
             localStorage.removeItem('rma_portal_gate_session');
@@ -9646,7 +9712,7 @@ export default function App() {
     if (gateSession?.authorized_email) {
       setReporterContact(gateSession.authorized_email);
     }
-    const resolvedEntity = gateSession?.entity_name || gateSession?.store_branch;
+    const resolvedEntity = inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch);
     if (resolvedEntity) {
       setStoreBranch(resolvedEntity);
     }
@@ -9726,6 +9792,16 @@ export default function App() {
       const onAdmin = path === '/admin' || path.startsWith('/admin/') || hash === '#/admin' || window.location.search.includes('admin=true');
       setIsAdminView(onAdmin);
 
+      if (onAdmin) {
+        try {
+          sessionStorage.removeItem('rma_active_invite_token');
+          sessionStorage.removeItem('rma_pending_oauth_token');
+          sessionStorage.removeItem('rma_oauth_in_progress');
+          localStorage.removeItem('rma_pending_oauth_token');
+          localStorage.removeItem('rma_oauth_in_progress');
+        } catch {}
+      }
+
       const newSlug = getIntakeSlugFromUrl();
       setIntakeSlug(newSlug);
       const urlParams = new URLSearchParams(window.location.search);
@@ -9734,15 +9810,22 @@ export default function App() {
         const m = window.location.hash.match(/token=([^&]+)/);
         if (m && m[1]) urlToken = decodeURIComponent(m[1]);
       }
-      if (!urlToken && typeof window !== 'undefined') {
+      if (!urlToken && typeof window !== 'undefined' && !onAdmin) {
         try {
-          urlToken = sessionStorage.getItem('rma_active_invite_token') || localStorage.getItem('rma_pending_oauth_token');
+          const isOAuthInProgress =
+            localStorage.getItem('rma_oauth_in_progress') === 'true' ||
+            sessionStorage.getItem('rma_oauth_in_progress') === 'true';
+          if (isOAuthInProgress) {
+            urlToken =
+              localStorage.getItem('rma_pending_oauth_token') ||
+              sessionStorage.getItem('rma_pending_oauth_token');
+          }
         } catch {}
       }
 
       if (urlToken) {
-        // Enforce strict single-visit verification: do not auto-unlock from localStorage when visiting with a token parameter
-        setGateSession(null);
+        // Keep current unlocked gateSession if it is already unlocked for this exact token
+        setGateSession(prev => (prev && prev.token === urlToken) ? prev : null);
       } else {
         setGateSession(accessKeyService.getActiveSession(newSlug));
       }
@@ -9782,13 +9865,17 @@ export default function App() {
 
         const localUser = authService.getCurrentUser();
         const urlParams = new URLSearchParams(window.location.search);
-        const hasInviteToken = urlParams.has('token') || Boolean(sessionStorage.getItem('rma_pending_oauth_token'));
+        const isInviteOAuthReturn =
+          (localStorage.getItem('rma_oauth_in_progress') === 'true' ||
+            sessionStorage.getItem('rma_oauth_in_progress') === 'true') &&
+          Boolean(
+            localStorage.getItem('rma_pending_oauth_token') ||
+              sessionStorage.getItem('rma_pending_oauth_token')
+          );
+        const hasInviteToken = urlParams.has('token') || isInviteOAuthReturn;
 
-        // If visiting via an invite link, strip hash tokens while strictly preserving "?token=..." query param
+        // If visiting via an invite link or returning from invite Google OAuth, let GatekeeperPinModal handle verification and URL hash cleanup
         if (hasInviteToken) {
-          if (window.location.hash.includes('access_token')) {
-            window.history.replaceState(null, '', window.location.pathname + window.location.search);
-          }
           setIsAdminView(false);
           setIsLoginModalOpen(false);
           return;
@@ -11277,11 +11364,17 @@ export default function App() {
       return;
     }
 
-    const resolvedBranch = storeBranch.trim();
-    if (!resolvedBranch) {
-      showToast('Please enter your Store / Branch location (or snap paperwork to auto-fill).', 'warning');
-      return;
-    }
+    const inviteEntity = inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch);
+    const resolvedBranch = storeBranch.trim() || inviteEntity || 'Direct Return';
+    const resolvedSupplierFromPortal =
+      (itemsToSubmit[0]?.supplier_name &&
+        itemsToSubmit[0].supplier_name !== 'Warehouse' &&
+        itemsToSubmit[0].supplier_name !== 'Savemore' &&
+        itemsToSubmit[0].supplier_name !== 'Pending Assignment')
+        ? itemsToSubmit[0].supplier_name
+        : (gateSession?.stream_type === 'supplier_outbound' && (storeBranch.trim() || inviteEntity))
+          ? (storeBranch.trim() || inviteEntity)
+          : (itemsToSubmit[0]?.supplier_name || 'Pending Assignment');
 
     // Persist reporter contact info in localStorage for 1-tap zero-typing returns
     try {
@@ -11322,8 +11415,8 @@ export default function App() {
       is_parent: isBatchManifestTicket,
       store_branch: resolvedBranch,
       store: resolvedBranch,
-      supplier_name: (itemsToSubmit[0]?.supplier_name && itemsToSubmit[0].supplier_name !== 'Warehouse' && itemsToSubmit[0].supplier_name !== 'Savemore') ? itemsToSubmit[0].supplier_name : (itemsToSubmit[0]?.supplier_name || 'Pending Assignment'),
-      supplier: (itemsToSubmit[0]?.supplier_name && itemsToSubmit[0].supplier_name !== 'Warehouse' && itemsToSubmit[0].supplier_name !== 'Savemore') ? itemsToSubmit[0].supplier_name : (itemsToSubmit[0]?.supplier_name || 'Pending Assignment'),
+      supplier_name: resolvedSupplierFromPortal,
+      supplier: resolvedSupplierFromPortal,
       reason: primaryReason,
       reporter_name: reporterName || 'Staff',
       reporter_contact: effectiveContact,
@@ -11473,7 +11566,7 @@ export default function App() {
           dr_number: capturedDrNumber,
           po_number: capturedPoNumber,
           invoice_dr_number: capturedInvoiceDrNumber,
-          supplier_name: (capturedItems[0]?.supplier_name && capturedItems[0].supplier_name !== 'Warehouse' && capturedItems[0].supplier_name !== 'Savemore') ? capturedItems[0].supplier_name : (capturedItems[0]?.supplier_name || 'Pending Assignment'),
+          supplier_name: resolvedSupplierFromPortal,
           store_branch: capturedStoreBranch,
           expiry_date: capturedItems[0]?.expiry_date || null,
           batch_lot_number: capturedBatchLotNumber,
@@ -12603,24 +12696,24 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 3. STORE / BRANCH OR SUPPLIER LOCATION */}
+                {/* 3. STORE / BRANCH OR SUPPLIER LOCATION (OPTIONAL) */}
                 <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                       <Building className="w-4 h-4 text-blue-600" />
                       <span>
                         {gateSession?.stream_type === 'supplier_outbound'
-                          ? '3. Master Supplier / Vendor Name *'
-                          : '3. Store / Branch Location *'}
+                          ? '3. Master Supplier / Vendor Name (Optional)'
+                          : '3. Store / Branch / Supplier Location (Optional)'}
                       </span>
                     </label>
-                    {(gateSession?.entity_name || gateSession?.store_branch) ? (
+                    {inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch) ? (
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${gateSession?.stream_type === 'supplier_outbound'
                           ? 'text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 border-purple-200 dark:border-purple-800'
                           : 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800'
                         }`}>
                         <CheckCircle className="w-3 h-3" />
-                        <span>Locked via {gateSession?.stream_type === 'supplier_outbound' ? 'Supplier RTV' : 'Customer'} Invite</span>
+                        <span>Auto-Populated via {gateSession?.stream_type === 'supplier_outbound' ? 'Supplier RTV' : 'Customer'} Invite</span>
                       </span>
                     ) : storeBranch && paperworkMetadata?.store_branch ? (
                       <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
@@ -12628,37 +12721,30 @@ export default function App() {
                         Auto-filled from Paperwork
                       </span>
                     ) : (
-                      <span className="text-[10px] font-bold text-rose-500">• Required</span>
+                      <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                        Optional
+                      </span>
                     )}
                   </div>
 
                   <div className="relative">
                     <input
                       type="text"
-                      required
                       value={storeBranch}
-                      onChange={(e) => {
-                        if (!gateSession?.entity_name && !gateSession?.store_branch) {
-                          setStoreBranch(e.target.value);
-                        }
-                      }}
-                      readOnly={Boolean(gateSession?.entity_name || gateSession?.store_branch)}
+                      onChange={(e) => setStoreBranch(e.target.value)}
                       placeholder={
                         gateSession?.stream_type === 'supplier_outbound'
-                          ? 'e.g., Liwayway Marketing, Mondelez, Universal Robina'
-                          : 'e.g., Savemore Taguig, Puregold Cubao, or Dock Bay 4 (or auto-filled from DR)'
+                          ? 'Optional: e.g., Walter Mart, Liwayway Marketing, Mondelez'
+                          : 'Optional: e.g., Walter Mart, Savemore Taguig, Puregold Cubao (or auto-filled)'
                       }
-                      className={`w-full px-3.5 py-3 border-2 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none shadow-2xs transition-all ${(gateSession?.entity_name || gateSession?.store_branch)
-                          ? 'bg-slate-100 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700 cursor-not-allowed text-slate-700 dark:text-slate-300'
-                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20'
-                        }`}
+                      className="w-full px-3.5 py-3 border-2 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none shadow-2xs transition-all bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20"
                     />
-                    {storeBranch && !gateSession?.entity_name && !gateSession?.store_branch && (
+                    {storeBranch && (
                       <button
                         type="button"
                         onClick={() => setStoreBranch('')}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full cursor-pointer"
-                        title="Clear branch location"
+                        title="Clear location / supplier"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -12666,8 +12752,8 @@ export default function App() {
                   </div>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">
                     {gateSession?.stream_type === 'supplier_outbound'
-                      ? 'Authorized supplier organization handling return-to-vendor logistics.'
-                      : 'Type your store branch or let Gemini Flash detect it automatically from the attached receipt / invoice.'}
+                      ? 'Optional: Auto-populated from your invite link or catalog item if specified.'
+                      : 'Optional: Auto-populated if specified in your invite link or detected from paperwork.'}
                   </p>
                 </div>
 
@@ -15337,7 +15423,16 @@ export default function App() {
           }
           if (!urlToken) {
             try {
-              urlToken = sessionStorage.getItem('rma_active_invite_token') || localStorage.getItem('rma_pending_oauth_token');
+              const isOAuthInProgress =
+                localStorage.getItem('rma_oauth_in_progress') === 'true' ||
+                sessionStorage.getItem('rma_oauth_in_progress') === 'true';
+              if (isOAuthInProgress) {
+                urlToken =
+                  localStorage.getItem('rma_pending_oauth_token') ||
+                  sessionStorage.getItem('rma_pending_oauth_token') ||
+                  sessionStorage.getItem('rma_active_invite_token') ||
+                  localStorage.getItem('rma_active_invite_token');
+              }
             } catch {}
           }
 
@@ -15347,7 +15442,7 @@ export default function App() {
           }
 
           // Only users already authenticated as currentUser?.role === 'super_admin' can view "/" without a token for testing
-          if (currentUser?.role === 'super_admin') return false;
+          if (currentUser?.role === 'super_admin' && window.location.pathname === '/') return false;
 
           // Lock root URL (/): If anyone visits "/" directly without a "?token=", keep the portal locked with the Gatekeeper overlay
           return true;
@@ -15361,9 +15456,11 @@ export default function App() {
           if (session?.authorized_email) {
             setReporterContact(session.authorized_email);
           }
-          const entity = session?.entity_name || session?.store_branch;
+          const entity = inviteService.normalizeEntityName(session?.entity_name || session?.store_branch);
           if (entity) {
             setStoreBranch(entity);
+          } else {
+            setStoreBranch('');
           }
           showToast(`Portal Unlocked: ${session.profileName || session.authorized_email}`, 'success');
         }}
@@ -19265,32 +19362,31 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 </p>
               </div>
 
-              {/* Entity / Branch Name */}
+              {/* Entity / Branch Name (Optional) */}
               <div className="sm:col-span-1 space-y-1">
                 <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
                   {streamType === 'supplier_outbound'
-                    ? 'Master Supplier / Vendor Name *'
-                    : 'Store / Supermarket Branch Location *'}
+                    ? 'Master Supplier / Vendor Name (Optional)'
+                    : 'Store / Supermarket Branch / Supplier (Optional)'}
                 </label>
                 <div className="relative">
                   <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
                     type="text"
-                    required
                     value={entityName}
                     onChange={(e) => setEntityName(e.target.value)}
                     placeholder={
                       streamType === 'supplier_outbound'
-                        ? 'e.g. Liwayway Marketing, Mondelez'
-                        : 'e.g. Savemore Market Taguig, SM Fairview'
+                        ? 'Optional: e.g. Walter Mart, Liwayway, Mondelez'
+                        : 'Optional: e.g. Walter Mart, Savemore Taguig'
                     }
                     className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
                   />
                 </div>
                 <p className="text-[10px] text-slate-400">
                   {streamType === 'supplier_outbound'
-                    ? 'Locks the Supplier field on the RTV intake form'
-                    : 'Locks the Store/Branch field on the Customer intake form'}
+                    ? 'If entered, auto-populates the Supplier field on the portal'
+                    : 'If entered (e.g. Walter Mart), auto-populates on the portal'}
                 </p>
               </div>
 
@@ -19378,7 +19474,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
             <div className="flex justify-end pt-1">
               <button
                 type="submit"
-                disabled={isGenerating || !authorizedEmail.trim() || !entityName.trim()}
+                disabled={isGenerating || !authorizedEmail.trim()}
                 className={`px-5 py-2.5 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer disabled:opacity-50 ${
                   streamType === 'supplier_outbound'
                     ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-600/20'
@@ -19583,7 +19679,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                             {inv.authorized_email}
                           </td>
                           <td className="p-3 text-slate-700 dark:text-slate-300 font-semibold">
-                            {inv.entity_name || inv.store_branch || <span className="text-slate-400 italic">Unassigned</span>}
+                            {inviteService.normalizeEntityName(inv.entity_name || inv.store_branch) || <span className="text-slate-400 italic">Optional / Open</span>}
                           </td>
                           <td className="p-3 text-slate-600 dark:text-slate-400 font-mono text-[11px]">
                             {inv.duration_display || '24 hour(s)'}
@@ -20721,7 +20817,58 @@ import {
   Store
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { inviteService, formatRemainingCountdown } from '../services/inviteService';
+import { inviteService, formatRemainingCountdown, normalizeEntityName } from '../services/inviteService';
+
+// Capture OAuth callback hash tokens synchronously at bundle evaluation time before any URL cleanup runs
+let initialCapturedOAuthHash = null;
+let initialPageLoadHadAuthCallback = false;
+
+if (typeof window !== 'undefined') {
+  try {
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+    if (
+      hash.includes('access_token=') ||
+      hash.includes('id_token=') ||
+      /[?&]code=/.test(search) ||
+      /[?&]token_hash=/.test(search)
+    ) {
+      initialPageLoadHadAuthCallback = true;
+    }
+    if (hash.includes('access_token=')) {
+      const params = new URLSearchParams(hash.replace(/^#/, ''));
+      const access_token = params.get('access_token');
+      const refresh_token = params.get('refresh_token');
+      if (access_token) {
+        initialCapturedOAuthHash = { access_token, refresh_token };
+      }
+    }
+  } catch {}
+}
+
+function decodeJwtUserFallback(accessToken) {
+  if (!accessToken) return null;
+  try {
+    const parts = accessToken.split('.');
+    if (parts.length < 2) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const payload = JSON.parse(jsonPayload);
+    if (payload && payload.email) {
+      return {
+        id: payload.sub,
+        email: payload.email,
+        user_metadata: payload.user_metadata || {}
+      };
+    }
+  } catch {}
+  return null;
+}
 
 export default function GatekeeperPinModal({
   isOpen,
@@ -20732,7 +20879,7 @@ export default function GatekeeperPinModal({
   const [token, setToken] = useState(null);
   const [isValidatingToken, setIsValidatingToken] = useState(true);
   const [validationResult, setValidationResult] = useState(null); // { valid, invite, error }
-  const [isCheckingAuth, setIsCheckingAuth] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(() => initialPageLoadHadAuthCallback);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [identityMismatch, setIdentityMismatch] = useState(null); // { signedInEmail, authorizedEmail }
   const [oauthError, setOauthError] = useState(null);
@@ -20742,6 +20889,12 @@ export default function GatekeeperPinModal({
 
   const hasValidatedRef = useRef(false);
   const validatedTokenRef = useRef(null);
+  const onUnlockRef = useRef(onUnlock);
+  const isRedirectingToGoogleRef = useRef(false);
+
+  useEffect(() => {
+    onUnlockRef.current = onUnlock;
+  }, [onUnlock]);
 
   // 1. Resolve token from URL query params, hash fragments, or pending OAuth storage
   useEffect(() => {
@@ -20757,15 +20910,24 @@ export default function GatekeeperPinModal({
 
     if (!t) {
       try {
-        t = sessionStorage.getItem('rma_active_invite_token') || sessionStorage.getItem('rma_pending_oauth_token') || localStorage.getItem('rma_pending_oauth_token');
+        const isOAuthReturn =
+          initialPageLoadHadAuthCallback ||
+          localStorage.getItem('rma_oauth_in_progress') === 'true' ||
+          sessionStorage.getItem('rma_oauth_in_progress') === 'true';
+        if (isOAuthReturn) {
+          t =
+            localStorage.getItem('rma_pending_oauth_token') ||
+            sessionStorage.getItem('rma_pending_oauth_token') ||
+            sessionStorage.getItem('rma_active_invite_token') ||
+            localStorage.getItem('rma_active_invite_token');
+        }
       } catch {}
     }
 
     if (t) {
       try {
         sessionStorage.setItem('rma_active_invite_token', t);
-        sessionStorage.setItem('rma_pending_oauth_token', t);
-        localStorage.setItem('rma_pending_oauth_token', t);
+        localStorage.setItem('rma_active_invite_token', t);
       } catch {}
     }
 
@@ -20775,16 +20937,79 @@ export default function GatekeeperPinModal({
   // 2. Cryptographic Google OAuth Identity Verification
   const verifyIdentityWithSupabase = useCallback(async (invite, sessionUser = null) => {
     if (!invite?.authorized_email) return;
+    // Never unlock while initiating outbound redirect to accounts.google.com
+    if (isRedirectingToGoogleRef.current) return;
+
     setIsCheckingAuth(true);
 
     try {
       let user = sessionUser;
+
+      // 1. If we captured an OAuth access_token in the URL hash on return from Google, verify it directly
+      if (!user && initialCapturedOAuthHash?.access_token) {
+        try {
+          if (initialCapturedOAuthHash.refresh_token) {
+            await supabase.auth.setSession({
+              access_token: initialCapturedOAuthHash.access_token,
+              refresh_token: initialCapturedOAuthHash.refresh_token
+            }).catch(() => {});
+          }
+          const { data: { user: tokenUser } } = await supabase.auth.getUser(initialCapturedOAuthHash.access_token);
+          if (tokenUser?.email) {
+            user = tokenUser;
+          }
+        } catch {}
+
+        if (!user) {
+          user = decodeJwtUserFallback(initialCapturedOAuthHash.access_token);
+        }
+      }
+
+      // 2. Otherwise check Supabase active session / getUser (with brief retry if hash exchange is in flight)
       if (!user) {
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        user = currentUser;
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user?.email) {
+              user = session.user;
+              break;
+            }
+            const { data: { user: currentUser } } = await supabase.auth.getUser();
+            if (currentUser?.email) {
+              user = currentUser;
+              break;
+            }
+          } catch {}
+          if (attempt < 3) {
+            await new Promise(r => setTimeout(r, 250));
+          }
+        }
       }
 
       if (user && user.email) {
+        // Consume the one-time OAuth return flags now that we have resolved the user
+        initialPageLoadHadAuthCallback = false;
+        initialCapturedOAuthHash = null;
+        try {
+          sessionStorage.removeItem('rma_oauth_in_progress');
+          localStorage.removeItem('rma_oauth_in_progress');
+          sessionStorage.removeItem('rma_pending_oauth_token');
+          localStorage.removeItem('rma_pending_oauth_token');
+
+          // Clean up OAuth tokens from URL hash and ensure /intake?token=... is preserved
+          if (typeof window !== 'undefined') {
+            const cleanUrl = new URL(window.location.href);
+            cleanUrl.hash = '';
+            if (cleanUrl.pathname.toLowerCase().startsWith('/admin')) {
+              cleanUrl.pathname = '/intake';
+            }
+            if (!cleanUrl.searchParams.get('token') && invite.token) {
+              cleanUrl.searchParams.set('token', invite.token);
+            }
+            window.history.replaceState(null, '', cleanUrl.pathname + cleanUrl.search);
+          }
+        } catch {}
+
         const userEmail = user.email.toLowerCase().trim();
         const authorizedEmail = invite.authorized_email.toLowerCase().trim();
 
@@ -20793,7 +21018,7 @@ export default function GatekeeperPinModal({
           setIdentityMismatch(null);
           setOauthError(null);
 
-          const resolvedEntity = invite.entity_name || invite.store_branch || '';
+          const resolvedEntity = normalizeEntityName(invite.entity_name || invite.store_branch);
           const resolvedStream = invite.stream_type || 'customer_inbound';
 
           const unlockedSession = {
@@ -20811,26 +21036,13 @@ export default function GatekeeperPinModal({
           };
 
           try {
-            sessionStorage.removeItem('rma_pending_oauth_token');
-            localStorage.removeItem('rma_pending_oauth_token');
-            localStorage.removeItem('rma_oauth_in_progress');
             localStorage.setItem('rma_portal_gate_session', JSON.stringify(unlockedSession));
             localStorage.setItem('rma_reporter_contact', authorizedEmail);
             localStorage.setItem('rma_portal_verified_email', userEmail);
-
-            // Clean up OAuth tokens from URL hash and ensure token query parameter is preserved
-            if (typeof window !== 'undefined' && window.location.hash && (window.location.hash.includes('access_token') || window.location.hash.includes('id_token'))) {
-              const cleanUrl = new URL(window.location.href);
-              cleanUrl.hash = '';
-              if (!cleanUrl.searchParams.get('token') && invite.token) {
-                cleanUrl.searchParams.set('token', invite.token);
-              }
-              window.history.replaceState(null, '', cleanUrl.pathname + cleanUrl.search);
-            }
           } catch {}
 
-          if (onUnlock) {
-            onUnlock(unlockedSession);
+          if (onUnlockRef.current) {
+            onUnlockRef.current(unlockedSession);
           }
           setIsCheckingAuth(false);
           return;
@@ -20856,13 +21068,14 @@ export default function GatekeeperPinModal({
     } finally {
       setIsCheckingAuth(false);
     }
-  }, [onUnlock]);
+  }, []);
 
   // Reset ref guard when isOpen changes to always revalidate cleanly
   useEffect(() => {
     if (isOpen) {
       hasValidatedRef.current = false;
       validatedTokenRef.current = null;
+      isRedirectingToGoogleRef.current = false;
     }
   }, [isOpen]);
 
@@ -20885,9 +21098,9 @@ export default function GatekeeperPinModal({
       try {
         let res = await inviteService.validateInviteToken(token);
         // Fix false "Link Expired / Authorization Unavailable":
-        // If token was just generated, re-fetch from Supabase after 600ms to eliminate replication race conditions
-        if (!res?.valid && res?.error === 'NOT_FOUND') {
-          await new Promise(r => setTimeout(r, 600));
+        // If token was just generated or had a transient network error, re-fetch after 700ms
+        if (!res?.valid && (res?.error === 'NOT_FOUND' || res?.error === 'NETWORK_ERROR')) {
+          await new Promise(r => setTimeout(r, 700));
           if (!isMounted) return;
           res = await inviteService.validateInviteToken(token);
         }
@@ -20901,24 +21114,38 @@ export default function GatekeeperPinModal({
         if (res?.valid && res?.invite) {
           try {
             sessionStorage.setItem('rma_active_invite_token', token);
-            sessionStorage.setItem('rma_pending_oauth_token', token);
+            localStorage.setItem('rma_active_invite_token', token);
           } catch {}
 
-          // Only verify identity automatically if actively returning from OAuth redirect or magic link
-          const isReturningFromOAuth = typeof window !== 'undefined' && (
-            window.location.hash.includes('access_token') ||
-            window.location.hash.includes('id_token') ||
-            new URLSearchParams(window.location.search).has('code') ||
-            sessionStorage.getItem('rma_oauth_in_progress') === 'true'
-          );
+          // Strictly verify identity automatically ONLY when returning from an OAuth redirect / Magic Link callback
+          const isReturningFromOAuthCallback =
+            !isRedirectingToGoogleRef.current &&
+            (initialPageLoadHadAuthCallback ||
+              Boolean(initialCapturedOAuthHash?.access_token) ||
+              (typeof window !== 'undefined' &&
+                (window.location.hash.includes('access_token=') ||
+                  window.location.hash.includes('id_token=') ||
+                  new URLSearchParams(window.location.search).has('code'))));
 
-          if (isReturningFromOAuth) {
-            try { sessionStorage.removeItem('rma_oauth_in_progress'); } catch {}
+          if (isReturningFromOAuthCallback) {
             await verifyIdentityWithSupabase(res.invite);
+          } else {
+            // Fresh visit to the invite link (not returning from Google OAuth yet):
+            // Clear any stale OAuth-in-progress flags so the user must click "Continue with Google"
+            try {
+              sessionStorage.removeItem('rma_oauth_in_progress');
+              localStorage.removeItem('rma_oauth_in_progress');
+            } catch {}
+            setIsCheckingAuth(false);
           }
+        } else {
+          setIsCheckingAuth(false);
         }
       } catch {
-        if (isMounted) setIsValidatingToken(false);
+        if (isMounted) {
+          setIsValidatingToken(false);
+          setIsCheckingAuth(false);
+        }
       }
     };
 
@@ -20927,9 +21154,13 @@ export default function GatekeeperPinModal({
 
     // Active polling every 4 seconds to catch real-time admin revocation while gatekeeper is open
     const pollInterval = setInterval(async () => {
-      if (!isMounted) return;
+      if (!isMounted || isRedirectingToGoogleRef.current) return;
       try {
         const fresh = await inviteService.validateInviteToken(token);
+        // Never overwrite valid state on transient network hiccups
+        if (fresh?.error === 'NETWORK_ERROR' || (!fresh?.valid && fresh?.transient)) {
+          return;
+        }
         if (isMounted && (!fresh.valid || fresh.invite?.status !== validationResult?.invite?.status)) {
           setValidationResult(fresh);
         }
@@ -20945,17 +21176,18 @@ export default function GatekeeperPinModal({
   // 4. Subscribe to Supabase Auth state changes (triggers on OAuth redirect return)
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (identityMismatch) return;
-      const isOAuthInProgress = typeof window !== 'undefined' && sessionStorage.getItem('rma_oauth_in_progress') === 'true';
-      const hasAuthHash = typeof window !== 'undefined' && (
-        window.location.hash.includes('access_token') ||
-        window.location.hash.includes('id_token') ||
-        window.location.search.includes('code=')
-      );
+      if (identityMismatch || isRedirectingToGoogleRef.current) return;
 
-      if ((event === 'SIGNED_IN' || ((event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && (isOAuthInProgress || hasAuthHash))) && session?.user) {
+      const hasCallbackSignal =
+        initialPageLoadHadAuthCallback ||
+        Boolean(initialCapturedOAuthHash?.access_token) ||
+        (typeof window !== 'undefined' &&
+          (window.location.hash.includes('access_token=') ||
+            window.location.hash.includes('id_token=') ||
+            window.location.search.includes('code=')));
+
+      if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && hasCallbackSignal && session?.user) {
         if (validationResult?.valid && validationResult?.invite) {
-          try { sessionStorage.removeItem('rma_oauth_in_progress'); } catch {}
           await verifyIdentityWithSupabase(validationResult.invite, session.user);
         }
       }
@@ -20986,27 +21218,38 @@ export default function GatekeeperPinModal({
   // 6. Handle "Continue with Google" OAuth trigger
   const handleContinueWithGoogle = async () => {
     if (!validationResult?.invite) return;
+    isRedirectingToGoogleRef.current = true;
     setIsSigningIn(true);
     setOauthError(null);
 
     try {
-      if (token) {
+      // Clear any previous local Supabase session before starting fresh Google OAuth
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+      try {
+        localStorage.removeItem('rma_portal_gate_session');
+      } catch {}
+
+      const activeToken = token || validationResult.invite.token;
+      if (activeToken) {
         try {
-          sessionStorage.setItem('rma_active_invite_token', token);
-          sessionStorage.setItem('rma_pending_oauth_token', token);
+          sessionStorage.setItem('rma_active_invite_token', activeToken);
+          sessionStorage.setItem('rma_pending_oauth_token', activeToken);
           sessionStorage.setItem('rma_oauth_in_progress', 'true');
-          localStorage.setItem('rma_pending_oauth_token', token);
+          localStorage.setItem('rma_active_invite_token', activeToken);
+          localStorage.setItem('rma_pending_oauth_token', activeToken);
           localStorage.setItem('rma_oauth_in_progress', 'true');
         } catch {}
       }
 
-      const currentUrl = window.location.href;
+      const redirectUrl = activeToken
+        ? `${window.location.origin}/intake?token=${encodeURIComponent(activeToken)}`
+        : window.location.href;
       
       // Use skipBrowserRedirect: true first to safely get the authorization URL
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: currentUrl,
+          redirectTo: redirectUrl,
           skipBrowserRedirect: true,
           queryParams: {
             access_type: 'offline',
@@ -21018,6 +21261,7 @@ export default function GatekeeperPinModal({
 
       if (error) {
         console.error('Google OAuth sign-in error:', error);
+        isRedirectingToGoogleRef.current = false;
         setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
         setIsSigningIn(false);
         return;
@@ -21027,11 +21271,13 @@ export default function GatekeeperPinModal({
         // Safe to navigate to Google OAuth!
         window.location.assign(data.url);
       } else {
+        isRedirectingToGoogleRef.current = false;
         setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
         setIsSigningIn(false);
       }
     } catch (err) {
       console.error('Google OAuth invocation exception:', err);
+      isRedirectingToGoogleRef.current = false;
       setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
       setIsSigningIn(false);
     }
@@ -21043,15 +21289,25 @@ export default function GatekeeperPinModal({
     setIsSendingMagicLink(true);
     setOauthError(null);
     try {
+      const activeToken = token || validationResult.invite.token;
       try {
+        if (activeToken) {
+          sessionStorage.setItem('rma_active_invite_token', activeToken);
+          sessionStorage.setItem('rma_pending_oauth_token', activeToken);
+          localStorage.setItem('rma_active_invite_token', activeToken);
+          localStorage.setItem('rma_pending_oauth_token', activeToken);
+        }
         sessionStorage.setItem('rma_oauth_in_progress', 'true');
+        localStorage.setItem('rma_oauth_in_progress', 'true');
       } catch {}
-      const currentUrl = window.location.href;
+      const redirectUrl = activeToken
+        ? `${window.location.origin}/intake?token=${encodeURIComponent(activeToken)}`
+        : window.location.href;
       const targetEmail = validationResult.invite.authorized_email.toLowerCase().trim();
       const { error } = await supabase.auth.signInWithOtp({
         email: targetEmail,
         options: {
-          emailRedirectTo: currentUrl
+          emailRedirectTo: redirectUrl
         }
       });
       if (error) {
@@ -21206,6 +21462,41 @@ export default function GatekeeperPinModal({
                   Please check the link provided by your Pingcon representative or request a fresh return invitation.
                 </p>
               </div>
+            </div>
+          ) : validationResult?.error === 'NETWORK_ERROR' ? (
+            <div className="space-y-5 animate-in zoom-in-95">
+              <div className="w-16 h-16 rounded-3xl bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-inner">
+                <RefreshCw className="w-8 h-8" />
+              </div>
+
+              <div className="space-y-1">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
+                  Connection Interrupted
+                </span>
+                <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                  Reconnecting to Server
+                </h2>
+              </div>
+
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs text-left space-y-2 text-slate-700 dark:text-slate-300">
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400">
+                  A temporary network interruption occurred while verifying your return authorization link.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsValidatingToken(true);
+                  const res = await inviteService.validateInviteToken(token);
+                  setValidationResult(res);
+                  setIsValidatingToken(false);
+                }}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Retry Verification</span>
+              </button>
             </div>
           ) : (
             <div className="space-y-5 animate-in zoom-in-95">
@@ -43207,8 +43498,25 @@ export function verifyGoogleIdentity(user, invite) {
   };
 }
 
+export function normalizeEntityName(val) {
+  if (!val) return '';
+  const clean = String(val).trim();
+  const lower = clean.toLowerCase();
+  if (
+    !clean ||
+    lower === 'pingcon wholesale client' ||
+    lower === 'master supplier partner' ||
+    lower === 'unassigned' ||
+    lower === 'optional'
+  ) {
+    return '';
+  }
+  return clean;
+}
+
 export const inviteService = {
   verifyGoogleIdentity,
+  normalizeEntityName,
   /**
    * Fetch all invites from Supabase (table or fallback settings)
    */
@@ -43221,12 +43529,15 @@ export const inviteService = {
         .order('created_at', { ascending: false });
 
       if (!error && Array.isArray(data)) {
-        const normalized = data.map(i => ({
-          ...i,
-          stream_type: i.stream_type || 'customer_inbound',
-          entity_name: i.entity_name || i.store_branch || '',
-          store_branch: i.store_branch || i.entity_name || ''
-        }));
+        const normalized = data.map(i => {
+          const ent = normalizeEntityName(i.store_branch) || normalizeEntityName(i.entity_name);
+          return {
+            ...i,
+            stream_type: i.stream_type || 'customer_inbound',
+            entity_name: ent,
+            store_branch: ent
+          };
+        });
         saveLocalInvites(normalized);
         return normalized;
       }
@@ -43243,8 +43554,17 @@ export const inviteService = {
         .maybeSingle();
 
       if (!error && data?.value && Array.isArray(data.value)) {
-        saveLocalInvites(data.value);
-        return data.value;
+        const normalized = data.value.map(i => {
+          const ent = normalizeEntityName(i.store_branch) || normalizeEntityName(i.entity_name);
+          return {
+            ...i,
+            stream_type: i.stream_type || 'customer_inbound',
+            entity_name: ent,
+            store_branch: ent
+          };
+        });
+        saveLocalInvites(normalized);
+        return normalized;
       }
     } catch (e) {
       console.warn('Failed to fetch invites from rma_settings:', e);
@@ -43272,9 +43592,10 @@ export const inviteService = {
 
     const cleanStream = streamType === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
     const cleanEmail = authorizedEmail.trim().toLowerCase();
-    const cleanEntity = (entityName || storeBranch || '').trim();
-    const fallbackEntity = cleanStream === 'supplier_outbound' ? 'Master Supplier Partner' : 'Pingcon Wholesale Client';
-    const resolvedEntity = cleanEntity || fallbackEntity;
+    const cleanEntity = normalizeEntityName(entityName || storeBranch || '');
+    // Database column entity_name has NOT NULL constraint in SQL, so pass placeholder for SQL only when blank
+    const dbEntityFallback = cleanStream === 'supplier_outbound' ? 'Master Supplier Partner' : 'Pingcon Wholesale Client';
+    const dbEntityValue = cleanEntity || dbEntityFallback;
 
     // Calculate expiration in milliseconds based on user-customized input number and unit
     let durationMs = 24 * 3600 * 1000;
@@ -43302,7 +43623,7 @@ export const inviteService = {
       token,
       stream_type: cleanStream,
       authorized_email: cleanEmail,
-      entity_name: resolvedEntity,
+      entity_name: dbEntityValue,
       store_branch: cleanEntity,
       duration_value: num,
       duration_unit: unit,
@@ -43327,8 +43648,8 @@ export const inviteService = {
         createdRecord = {
           ...data,
           stream_type: data.stream_type || cleanStream,
-          entity_name: data.entity_name || resolvedEntity,
-          store_branch: data.store_branch || data.entity_name || resolvedEntity
+          entity_name: cleanEntity,
+          store_branch: cleanEntity
         };
       }
     } catch {
@@ -43337,7 +43658,9 @@ export const inviteService = {
 
     const newInvite = createdRecord || {
       id: `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      ...insertPayload
+      ...insertPayload,
+      entity_name: cleanEntity,
+      store_branch: cleanEntity
     };
 
     // 2. Always persist to rma_settings for universal sync across all admin sessions
@@ -43369,7 +43692,23 @@ export const inviteService = {
 
     const cleanToken = String(token).trim();
     let invite = null;
-    let checkedTableSuccessfully = false;
+    let tableQuerySucceeded = false;
+    let settingsQuerySucceeded = false;
+    let networkErrorDetected = false;
+
+    const isNetworkError = (err) => {
+      if (!err) return false;
+      const msg = String(err.message || err.details || err || '').toLowerCase();
+      return (
+        msg.includes('fetch') ||
+        msg.includes('network') ||
+        msg.includes('connection') ||
+        msg.includes('resolved') ||
+        msg.includes('load failed') ||
+        msg.includes('abort') ||
+        !err.code
+      );
+    };
 
     // 1. Primary check against database table: public.rma_invites
     try {
@@ -43379,17 +43718,24 @@ export const inviteService = {
         .eq('token', cleanToken)
         .maybeSingle();
 
-      if (!error && data) {
-        checkedTableSuccessfully = true;
-        invite = {
-          ...data,
-          stream_type: data.stream_type || 'customer_inbound',
-          entity_name: data.entity_name || data.store_branch || '',
-          store_branch: data.store_branch || data.entity_name || ''
-        };
+      if (!error) {
+        tableQuerySucceeded = true;
+        if (data) {
+          const ent = normalizeEntityName(data.store_branch) || normalizeEntityName(data.entity_name);
+          invite = {
+            ...data,
+            stream_type: data.stream_type || 'customer_inbound',
+            entity_name: ent,
+            store_branch: ent
+          };
+        }
+      } else if (isNetworkError(error)) {
+        networkErrorDetected = true;
       }
-    } catch {
-      // Table may be unreachable
+    } catch (err) {
+      if (isNetworkError(err)) {
+        networkErrorDetected = true;
+      }
     }
 
     // 2. Secondary check against rma_settings (handles replication lag or single-store setups)
@@ -43401,23 +43747,55 @@ export const inviteService = {
           .eq('key', SETTINGS_KEY)
           .maybeSingle();
 
-        if (!error && Array.isArray(data?.value)) {
-          const found = data.value.find(i => i.token === cleanToken);
-          if (found) {
-            invite = {
-              ...found,
-              stream_type: found.stream_type || 'customer_inbound',
-              entity_name: found.entity_name || found.store_branch || '',
-              store_branch: found.store_branch || found.entity_name || ''
-            };
+        if (!error) {
+          settingsQuerySucceeded = true;
+          if (Array.isArray(data?.value)) {
+            const found = data.value.find(i => i.token === cleanToken);
+            if (found) {
+              const ent = normalizeEntityName(found.store_branch) || normalizeEntityName(found.entity_name);
+              invite = {
+                ...found,
+                stream_type: found.stream_type || 'customer_inbound',
+                entity_name: ent,
+                store_branch: ent
+              };
+            }
           }
+        } else if (isNetworkError(error)) {
+          networkErrorDetected = true;
         }
       } catch (e) {
+        networkErrorDetected = true;
         console.warn('Fallback settings check failed:', e);
       }
     }
 
+    // Cache validated invite locally so transient network blips do not kick active users out
+    if (invite) {
+      try {
+        const local = getLocalInvites();
+        const updated = [invite, ...local.filter(i => i.token !== cleanToken)];
+        saveLocalInvites(updated.slice(0, 100));
+      } catch {}
+    }
+
+    // 3. If neither database check found the invite, check if it was a transient network failure
     if (!invite) {
+      const dbConfirmedMissing = settingsQuerySucceeded || (tableQuerySucceeded && !networkErrorDetected);
+      if (!dbConfirmedMissing) {
+        const cached = getLocalInvites().find(i => i.token === cleanToken);
+        if (cached) {
+          if (cached.status === 'revoked') {
+            return { valid: false, invite: cached, error: 'REVOKED' };
+          }
+          if (Date.now() > new Date(cached.expires_at).getTime()) {
+            return { valid: false, invite: cached, error: 'EXPIRED' };
+          }
+          return { valid: true, invite: cached, transient: true };
+        }
+        return { valid: false, error: 'NETWORK_ERROR', transient: true };
+      }
+
       return { valid: false, error: 'NOT_FOUND' };
     }
 

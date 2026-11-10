@@ -96,8 +96,25 @@ export function verifyGoogleIdentity(user, invite) {
   };
 }
 
+export function normalizeEntityName(val) {
+  if (!val) return '';
+  const clean = String(val).trim();
+  const lower = clean.toLowerCase();
+  if (
+    !clean ||
+    lower === 'pingcon wholesale client' ||
+    lower === 'master supplier partner' ||
+    lower === 'unassigned' ||
+    lower === 'optional'
+  ) {
+    return '';
+  }
+  return clean;
+}
+
 export const inviteService = {
   verifyGoogleIdentity,
+  normalizeEntityName,
   /**
    * Fetch all invites from Supabase (table or fallback settings)
    */
@@ -110,12 +127,15 @@ export const inviteService = {
         .order('created_at', { ascending: false });
 
       if (!error && Array.isArray(data)) {
-        const normalized = data.map(i => ({
-          ...i,
-          stream_type: i.stream_type || 'customer_inbound',
-          entity_name: i.entity_name || i.store_branch || '',
-          store_branch: i.store_branch || i.entity_name || ''
-        }));
+        const normalized = data.map(i => {
+          const ent = normalizeEntityName(i.store_branch) || normalizeEntityName(i.entity_name);
+          return {
+            ...i,
+            stream_type: i.stream_type || 'customer_inbound',
+            entity_name: ent,
+            store_branch: ent
+          };
+        });
         saveLocalInvites(normalized);
         return normalized;
       }
@@ -132,8 +152,17 @@ export const inviteService = {
         .maybeSingle();
 
       if (!error && data?.value && Array.isArray(data.value)) {
-        saveLocalInvites(data.value);
-        return data.value;
+        const normalized = data.value.map(i => {
+          const ent = normalizeEntityName(i.store_branch) || normalizeEntityName(i.entity_name);
+          return {
+            ...i,
+            stream_type: i.stream_type || 'customer_inbound',
+            entity_name: ent,
+            store_branch: ent
+          };
+        });
+        saveLocalInvites(normalized);
+        return normalized;
       }
     } catch (e) {
       console.warn('Failed to fetch invites from rma_settings:', e);
@@ -161,9 +190,10 @@ export const inviteService = {
 
     const cleanStream = streamType === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
     const cleanEmail = authorizedEmail.trim().toLowerCase();
-    const cleanEntity = (entityName || storeBranch || '').trim();
-    const fallbackEntity = cleanStream === 'supplier_outbound' ? 'Master Supplier Partner' : 'Pingcon Wholesale Client';
-    const resolvedEntity = cleanEntity || fallbackEntity;
+    const cleanEntity = normalizeEntityName(entityName || storeBranch || '');
+    // Database column entity_name has NOT NULL constraint in SQL, so pass placeholder for SQL only when blank
+    const dbEntityFallback = cleanStream === 'supplier_outbound' ? 'Master Supplier Partner' : 'Pingcon Wholesale Client';
+    const dbEntityValue = cleanEntity || dbEntityFallback;
 
     // Calculate expiration in milliseconds based on user-customized input number and unit
     let durationMs = 24 * 3600 * 1000;
@@ -191,7 +221,7 @@ export const inviteService = {
       token,
       stream_type: cleanStream,
       authorized_email: cleanEmail,
-      entity_name: resolvedEntity,
+      entity_name: dbEntityValue,
       store_branch: cleanEntity,
       duration_value: num,
       duration_unit: unit,
@@ -216,8 +246,8 @@ export const inviteService = {
         createdRecord = {
           ...data,
           stream_type: data.stream_type || cleanStream,
-          entity_name: data.entity_name || resolvedEntity,
-          store_branch: data.store_branch || data.entity_name || resolvedEntity
+          entity_name: cleanEntity,
+          store_branch: cleanEntity
         };
       }
     } catch {
@@ -226,7 +256,9 @@ export const inviteService = {
 
     const newInvite = createdRecord || {
       id: `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      ...insertPayload
+      ...insertPayload,
+      entity_name: cleanEntity,
+      store_branch: cleanEntity
     };
 
     // 2. Always persist to rma_settings for universal sync across all admin sessions
@@ -258,7 +290,23 @@ export const inviteService = {
 
     const cleanToken = String(token).trim();
     let invite = null;
-    let checkedTableSuccessfully = false;
+    let tableQuerySucceeded = false;
+    let settingsQuerySucceeded = false;
+    let networkErrorDetected = false;
+
+    const isNetworkError = (err) => {
+      if (!err) return false;
+      const msg = String(err.message || err.details || err || '').toLowerCase();
+      return (
+        msg.includes('fetch') ||
+        msg.includes('network') ||
+        msg.includes('connection') ||
+        msg.includes('resolved') ||
+        msg.includes('load failed') ||
+        msg.includes('abort') ||
+        !err.code
+      );
+    };
 
     // 1. Primary check against database table: public.rma_invites
     try {
@@ -268,17 +316,24 @@ export const inviteService = {
         .eq('token', cleanToken)
         .maybeSingle();
 
-      if (!error && data) {
-        checkedTableSuccessfully = true;
-        invite = {
-          ...data,
-          stream_type: data.stream_type || 'customer_inbound',
-          entity_name: data.entity_name || data.store_branch || '',
-          store_branch: data.store_branch || data.entity_name || ''
-        };
+      if (!error) {
+        tableQuerySucceeded = true;
+        if (data) {
+          const ent = normalizeEntityName(data.store_branch) || normalizeEntityName(data.entity_name);
+          invite = {
+            ...data,
+            stream_type: data.stream_type || 'customer_inbound',
+            entity_name: ent,
+            store_branch: ent
+          };
+        }
+      } else if (isNetworkError(error)) {
+        networkErrorDetected = true;
       }
-    } catch {
-      // Table may be unreachable
+    } catch (err) {
+      if (isNetworkError(err)) {
+        networkErrorDetected = true;
+      }
     }
 
     // 2. Secondary check against rma_settings (handles replication lag or single-store setups)
@@ -290,23 +345,55 @@ export const inviteService = {
           .eq('key', SETTINGS_KEY)
           .maybeSingle();
 
-        if (!error && Array.isArray(data?.value)) {
-          const found = data.value.find(i => i.token === cleanToken);
-          if (found) {
-            invite = {
-              ...found,
-              stream_type: found.stream_type || 'customer_inbound',
-              entity_name: found.entity_name || found.store_branch || '',
-              store_branch: found.store_branch || found.entity_name || ''
-            };
+        if (!error) {
+          settingsQuerySucceeded = true;
+          if (Array.isArray(data?.value)) {
+            const found = data.value.find(i => i.token === cleanToken);
+            if (found) {
+              const ent = normalizeEntityName(found.store_branch) || normalizeEntityName(found.entity_name);
+              invite = {
+                ...found,
+                stream_type: found.stream_type || 'customer_inbound',
+                entity_name: ent,
+                store_branch: ent
+              };
+            }
           }
+        } else if (isNetworkError(error)) {
+          networkErrorDetected = true;
         }
       } catch (e) {
+        networkErrorDetected = true;
         console.warn('Fallback settings check failed:', e);
       }
     }
 
+    // Cache validated invite locally so transient network blips do not kick active users out
+    if (invite) {
+      try {
+        const local = getLocalInvites();
+        const updated = [invite, ...local.filter(i => i.token !== cleanToken)];
+        saveLocalInvites(updated.slice(0, 100));
+      } catch {}
+    }
+
+    // 3. If neither database check found the invite, check if it was a transient network failure
     if (!invite) {
+      const dbConfirmedMissing = settingsQuerySucceeded || (tableQuerySucceeded && !networkErrorDetected);
+      if (!dbConfirmedMissing) {
+        const cached = getLocalInvites().find(i => i.token === cleanToken);
+        if (cached) {
+          if (cached.status === 'revoked') {
+            return { valid: false, invite: cached, error: 'REVOKED' };
+          }
+          if (Date.now() > new Date(cached.expires_at).getTime()) {
+            return { valid: false, invite: cached, error: 'EXPIRED' };
+          }
+          return { valid: true, invite: cached, transient: true };
+        }
+        return { valid: false, error: 'NETWORK_ERROR', transient: true };
+      }
+
       return { valid: false, error: 'NOT_FOUND' };
     }
 

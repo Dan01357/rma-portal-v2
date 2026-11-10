@@ -225,9 +225,71 @@ function getIntakeSlugFromUrl() {
   return null;
 }
 
+/**
+ * Reconciles Google OAuth / Magic Link callback redirects for public invite tokens.
+ * If Supabase's Site URL redirected an invite OAuth login to '/admin#access_token=...',
+ * this immediately restores '/intake?token=...' while preserving the '#access_token' hash
+ * so GatekeeperPinModal can verify the Google identity cleanly.
+ */
+function reconcileInviteOAuthRedirectOnLoad() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+    const path = window.location.pathname.toLowerCase();
+
+    const hasAuthCallback =
+      hash.includes('access_token=') ||
+      hash.includes('id_token=') ||
+      /[?&]code=/.test(search) ||
+      /[?&]token_hash=/.test(search);
+
+    const isOAuthInProgress =
+      localStorage.getItem('rma_oauth_in_progress') === 'true' ||
+      sessionStorage.getItem('rma_oauth_in_progress') === 'true';
+
+    const pendingToken =
+      new URLSearchParams(search).get('token') ||
+      localStorage.getItem('rma_pending_oauth_token') ||
+      sessionStorage.getItem('rma_pending_oauth_token') ||
+      localStorage.getItem('rma_active_invite_token') ||
+      sessionStorage.getItem('rma_active_invite_token');
+
+    if (hasAuthCallback && isOAuthInProgress && pendingToken) {
+      sessionStorage.setItem('rma_active_invite_token', pendingToken);
+      sessionStorage.setItem('rma_pending_oauth_token', pendingToken);
+      sessionStorage.setItem('rma_oauth_in_progress', 'true');
+      localStorage.setItem('rma_active_invite_token', pendingToken);
+      localStorage.setItem('rma_pending_oauth_token', pendingToken);
+      localStorage.setItem('rma_oauth_in_progress', 'true');
+
+      const currentParams = new URLSearchParams(search);
+      if (path.startsWith('/admin') || currentParams.get('token') !== pendingToken) {
+        window.history.replaceState(
+          null,
+          '',
+          `/intake?token=${encodeURIComponent(pendingToken)}${hash}`
+        );
+      }
+      return pendingToken;
+    }
+
+    // If visiting /admin directly (not returning from an invite OAuth flow), clear leftover invite token flags
+    if (path === '/admin' || path.startsWith('/admin/') || hash.toLowerCase() === '#/admin' || search.includes('admin=true')) {
+      sessionStorage.removeItem('rma_active_invite_token');
+      sessionStorage.removeItem('rma_pending_oauth_token');
+      sessionStorage.removeItem('rma_oauth_in_progress');
+      localStorage.removeItem('rma_pending_oauth_token');
+      localStorage.removeItem('rma_oauth_in_progress');
+    }
+  } catch { }
+  return null;
+}
+
 export default function App() {
   // ROUTE DETECTION: '/' (Public Reporter) vs '/admin' (Staff Admin Portal)
   const [isAdminView, setIsAdminView] = useState(() => {
+    reconcileInviteOAuthRedirectOnLoad();
     const path = window.location.pathname.toLowerCase();
     const hash = window.location.hash.toLowerCase();
     return path === '/admin' || path.startsWith('/admin/') || hash === '#/admin' || window.location.search.includes('admin=true');
@@ -349,6 +411,10 @@ export default function App() {
     const verifyActiveToken = async () => {
       try {
         const res = await inviteService.validateInviteToken(gateSession.token);
+        // Ignore transient network errors during background polling so active users are not falsely blocked
+        if (res.error === 'NETWORK_ERROR' || (!res.valid && res.transient)) {
+          return;
+        }
         if (!res.valid) {
           try {
             localStorage.removeItem('rma_portal_gate_session');
@@ -420,7 +486,7 @@ export default function App() {
     if (gateSession?.authorized_email) {
       setReporterContact(gateSession.authorized_email);
     }
-    const resolvedEntity = gateSession?.entity_name || gateSession?.store_branch;
+    const resolvedEntity = inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch);
     if (resolvedEntity) {
       setStoreBranch(resolvedEntity);
     }
@@ -500,6 +566,16 @@ export default function App() {
       const onAdmin = path === '/admin' || path.startsWith('/admin/') || hash === '#/admin' || window.location.search.includes('admin=true');
       setIsAdminView(onAdmin);
 
+      if (onAdmin) {
+        try {
+          sessionStorage.removeItem('rma_active_invite_token');
+          sessionStorage.removeItem('rma_pending_oauth_token');
+          sessionStorage.removeItem('rma_oauth_in_progress');
+          localStorage.removeItem('rma_pending_oauth_token');
+          localStorage.removeItem('rma_oauth_in_progress');
+        } catch {}
+      }
+
       const newSlug = getIntakeSlugFromUrl();
       setIntakeSlug(newSlug);
       const urlParams = new URLSearchParams(window.location.search);
@@ -508,15 +584,22 @@ export default function App() {
         const m = window.location.hash.match(/token=([^&]+)/);
         if (m && m[1]) urlToken = decodeURIComponent(m[1]);
       }
-      if (!urlToken && typeof window !== 'undefined') {
+      if (!urlToken && typeof window !== 'undefined' && !onAdmin) {
         try {
-          urlToken = sessionStorage.getItem('rma_active_invite_token') || localStorage.getItem('rma_pending_oauth_token');
+          const isOAuthInProgress =
+            localStorage.getItem('rma_oauth_in_progress') === 'true' ||
+            sessionStorage.getItem('rma_oauth_in_progress') === 'true';
+          if (isOAuthInProgress) {
+            urlToken =
+              localStorage.getItem('rma_pending_oauth_token') ||
+              sessionStorage.getItem('rma_pending_oauth_token');
+          }
         } catch {}
       }
 
       if (urlToken) {
-        // Enforce strict single-visit verification: do not auto-unlock from localStorage when visiting with a token parameter
-        setGateSession(null);
+        // Keep current unlocked gateSession if it is already unlocked for this exact token
+        setGateSession(prev => (prev && prev.token === urlToken) ? prev : null);
       } else {
         setGateSession(accessKeyService.getActiveSession(newSlug));
       }
@@ -556,13 +639,17 @@ export default function App() {
 
         const localUser = authService.getCurrentUser();
         const urlParams = new URLSearchParams(window.location.search);
-        const hasInviteToken = urlParams.has('token') || Boolean(sessionStorage.getItem('rma_pending_oauth_token'));
+        const isInviteOAuthReturn =
+          (localStorage.getItem('rma_oauth_in_progress') === 'true' ||
+            sessionStorage.getItem('rma_oauth_in_progress') === 'true') &&
+          Boolean(
+            localStorage.getItem('rma_pending_oauth_token') ||
+              sessionStorage.getItem('rma_pending_oauth_token')
+          );
+        const hasInviteToken = urlParams.has('token') || isInviteOAuthReturn;
 
-        // If visiting via an invite link, strip hash tokens while strictly preserving "?token=..." query param
+        // If visiting via an invite link or returning from invite Google OAuth, let GatekeeperPinModal handle verification and URL hash cleanup
         if (hasInviteToken) {
-          if (window.location.hash.includes('access_token')) {
-            window.history.replaceState(null, '', window.location.pathname + window.location.search);
-          }
           setIsAdminView(false);
           setIsLoginModalOpen(false);
           return;
@@ -2051,11 +2138,17 @@ export default function App() {
       return;
     }
 
-    const resolvedBranch = storeBranch.trim();
-    if (!resolvedBranch) {
-      showToast('Please enter your Store / Branch location (or snap paperwork to auto-fill).', 'warning');
-      return;
-    }
+    const inviteEntity = inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch);
+    const resolvedBranch = storeBranch.trim() || inviteEntity || 'Direct Return';
+    const resolvedSupplierFromPortal =
+      (itemsToSubmit[0]?.supplier_name &&
+        itemsToSubmit[0].supplier_name !== 'Warehouse' &&
+        itemsToSubmit[0].supplier_name !== 'Savemore' &&
+        itemsToSubmit[0].supplier_name !== 'Pending Assignment')
+        ? itemsToSubmit[0].supplier_name
+        : (gateSession?.stream_type === 'supplier_outbound' && (storeBranch.trim() || inviteEntity))
+          ? (storeBranch.trim() || inviteEntity)
+          : (itemsToSubmit[0]?.supplier_name || 'Pending Assignment');
 
     // Persist reporter contact info in localStorage for 1-tap zero-typing returns
     try {
@@ -2096,8 +2189,8 @@ export default function App() {
       is_parent: isBatchManifestTicket,
       store_branch: resolvedBranch,
       store: resolvedBranch,
-      supplier_name: (itemsToSubmit[0]?.supplier_name && itemsToSubmit[0].supplier_name !== 'Warehouse' && itemsToSubmit[0].supplier_name !== 'Savemore') ? itemsToSubmit[0].supplier_name : (itemsToSubmit[0]?.supplier_name || 'Pending Assignment'),
-      supplier: (itemsToSubmit[0]?.supplier_name && itemsToSubmit[0].supplier_name !== 'Warehouse' && itemsToSubmit[0].supplier_name !== 'Savemore') ? itemsToSubmit[0].supplier_name : (itemsToSubmit[0]?.supplier_name || 'Pending Assignment'),
+      supplier_name: resolvedSupplierFromPortal,
+      supplier: resolvedSupplierFromPortal,
       reason: primaryReason,
       reporter_name: reporterName || 'Staff',
       reporter_contact: effectiveContact,
@@ -2247,7 +2340,7 @@ export default function App() {
           dr_number: capturedDrNumber,
           po_number: capturedPoNumber,
           invoice_dr_number: capturedInvoiceDrNumber,
-          supplier_name: (capturedItems[0]?.supplier_name && capturedItems[0].supplier_name !== 'Warehouse' && capturedItems[0].supplier_name !== 'Savemore') ? capturedItems[0].supplier_name : (capturedItems[0]?.supplier_name || 'Pending Assignment'),
+          supplier_name: resolvedSupplierFromPortal,
           store_branch: capturedStoreBranch,
           expiry_date: capturedItems[0]?.expiry_date || null,
           batch_lot_number: capturedBatchLotNumber,
@@ -3377,24 +3470,24 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 3. STORE / BRANCH OR SUPPLIER LOCATION */}
+                {/* 3. STORE / BRANCH OR SUPPLIER LOCATION (OPTIONAL) */}
                 <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                       <Building className="w-4 h-4 text-blue-600" />
                       <span>
                         {gateSession?.stream_type === 'supplier_outbound'
-                          ? '3. Master Supplier / Vendor Name *'
-                          : '3. Store / Branch Location *'}
+                          ? '3. Master Supplier / Vendor Name (Optional)'
+                          : '3. Store / Branch / Supplier Location (Optional)'}
                       </span>
                     </label>
-                    {(gateSession?.entity_name || gateSession?.store_branch) ? (
+                    {inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch) ? (
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${gateSession?.stream_type === 'supplier_outbound'
                           ? 'text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 border-purple-200 dark:border-purple-800'
                           : 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800'
                         }`}>
                         <CheckCircle className="w-3 h-3" />
-                        <span>Locked via {gateSession?.stream_type === 'supplier_outbound' ? 'Supplier RTV' : 'Customer'} Invite</span>
+                        <span>Auto-Populated via {gateSession?.stream_type === 'supplier_outbound' ? 'Supplier RTV' : 'Customer'} Invite</span>
                       </span>
                     ) : storeBranch && paperworkMetadata?.store_branch ? (
                       <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
@@ -3402,37 +3495,30 @@ export default function App() {
                         Auto-filled from Paperwork
                       </span>
                     ) : (
-                      <span className="text-[10px] font-bold text-rose-500">• Required</span>
+                      <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                        Optional
+                      </span>
                     )}
                   </div>
 
                   <div className="relative">
                     <input
                       type="text"
-                      required
                       value={storeBranch}
-                      onChange={(e) => {
-                        if (!gateSession?.entity_name && !gateSession?.store_branch) {
-                          setStoreBranch(e.target.value);
-                        }
-                      }}
-                      readOnly={Boolean(gateSession?.entity_name || gateSession?.store_branch)}
+                      onChange={(e) => setStoreBranch(e.target.value)}
                       placeholder={
                         gateSession?.stream_type === 'supplier_outbound'
-                          ? 'e.g., Liwayway Marketing, Mondelez, Universal Robina'
-                          : 'e.g., Savemore Taguig, Puregold Cubao, or Dock Bay 4 (or auto-filled from DR)'
+                          ? 'Optional: e.g., Walter Mart, Liwayway Marketing, Mondelez'
+                          : 'Optional: e.g., Walter Mart, Savemore Taguig, Puregold Cubao (or auto-filled)'
                       }
-                      className={`w-full px-3.5 py-3 border-2 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none shadow-2xs transition-all ${(gateSession?.entity_name || gateSession?.store_branch)
-                          ? 'bg-slate-100 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700 cursor-not-allowed text-slate-700 dark:text-slate-300'
-                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20'
-                        }`}
+                      className="w-full px-3.5 py-3 border-2 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none shadow-2xs transition-all bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20"
                     />
-                    {storeBranch && !gateSession?.entity_name && !gateSession?.store_branch && (
+                    {storeBranch && (
                       <button
                         type="button"
                         onClick={() => setStoreBranch('')}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full cursor-pointer"
-                        title="Clear branch location"
+                        title="Clear location / supplier"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -3440,8 +3526,8 @@ export default function App() {
                   </div>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">
                     {gateSession?.stream_type === 'supplier_outbound'
-                      ? 'Authorized supplier organization handling return-to-vendor logistics.'
-                      : 'Type your store branch or let Gemini Flash detect it automatically from the attached receipt / invoice.'}
+                      ? 'Optional: Auto-populated from your invite link or catalog item if specified.'
+                      : 'Optional: Auto-populated if specified in your invite link or detected from paperwork.'}
                   </p>
                 </div>
 
@@ -6111,7 +6197,16 @@ export default function App() {
           }
           if (!urlToken) {
             try {
-              urlToken = sessionStorage.getItem('rma_active_invite_token') || localStorage.getItem('rma_pending_oauth_token');
+              const isOAuthInProgress =
+                localStorage.getItem('rma_oauth_in_progress') === 'true' ||
+                sessionStorage.getItem('rma_oauth_in_progress') === 'true';
+              if (isOAuthInProgress) {
+                urlToken =
+                  localStorage.getItem('rma_pending_oauth_token') ||
+                  sessionStorage.getItem('rma_pending_oauth_token') ||
+                  sessionStorage.getItem('rma_active_invite_token') ||
+                  localStorage.getItem('rma_active_invite_token');
+              }
             } catch {}
           }
 
@@ -6121,7 +6216,7 @@ export default function App() {
           }
 
           // Only users already authenticated as currentUser?.role === 'super_admin' can view "/" without a token for testing
-          if (currentUser?.role === 'super_admin') return false;
+          if (currentUser?.role === 'super_admin' && window.location.pathname === '/') return false;
 
           // Lock root URL (/): If anyone visits "/" directly without a "?token=", keep the portal locked with the Gatekeeper overlay
           return true;
@@ -6135,9 +6230,11 @@ export default function App() {
           if (session?.authorized_email) {
             setReporterContact(session.authorized_email);
           }
-          const entity = session?.entity_name || session?.store_branch;
+          const entity = inviteService.normalizeEntityName(session?.entity_name || session?.store_branch);
           if (entity) {
             setStoreBranch(entity);
+          } else {
+            setStoreBranch('');
           }
           showToast(`Portal Unlocked: ${session.profileName || session.authorized_email}`, 'success');
         }}

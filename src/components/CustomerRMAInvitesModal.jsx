@@ -371,32 +371,31 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 </p>
               </div>
 
-              {/* Entity / Branch Name */}
+              {/* Entity / Branch Name (Optional) */}
               <div className="sm:col-span-1 space-y-1">
                 <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
                   {streamType === 'supplier_outbound'
-                    ? 'Master Supplier / Vendor Name *'
-                    : 'Store / Supermarket Branch Location *'}
+                    ? 'Master Supplier / Vendor Name (Optional)'
+                    : 'Store / Supermarket Branch / Supplier (Optional)'}
                 </label>
                 <div className="relative">
                   <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
                     type="text"
-                    required
                     value={entityName}
                     onChange={(e) => setEntityName(e.target.value)}
                     placeholder={
                       streamType === 'supplier_outbound'
-                        ? 'e.g. Liwayway Marketing, Mondelez'
-                        : 'e.g. Savemore Market Taguig, SM Fairview'
+                        ? 'Optional: e.g. Walter Mart, Liwayway, Mondelez'
+                        : 'Optional: e.g. Walter Mart, Savemore Taguig'
                     }
                     className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
                   />
                 </div>
                 <p className="text-[10px] text-slate-400">
                   {streamType === 'supplier_outbound'
-                    ? 'Locks the Supplier field on the RTV intake form'
-                    : 'Locks the Store/Branch field on the Customer intake form'}
+                    ? 'If entered, auto-populates the Supplier field on the portal'
+                    : 'If entered (e.g. Walter Mart), auto-populates on the portal'}
                 </p>
               </div>
 
@@ -484,7 +483,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
             <div className="flex justify-end pt-1">
               <button
                 type="submit"
-                disabled={isGenerating || !authorizedEmail.trim() || !entityName.trim()}
+                disabled={isGenerating || !authorizedEmail.trim()}
                 className={`px-5 py-2.5 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer disabled:opacity-50 ${
                   streamType === 'supplier_outbound'
                     ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-600/20'
@@ -689,7 +688,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                             {inv.authorized_email}
                           </td>
                           <td className="p-3 text-slate-700 dark:text-slate-300 font-semibold">
-                            {inv.entity_name || inv.store_branch || <span className="text-slate-400 italic">Unassigned</span>}
+                            {inviteService.normalizeEntityName(inv.entity_name || inv.store_branch) || <span className="text-slate-400 italic">Optional / Open</span>}
                           </td>
                           <td className="p-3 text-slate-600 dark:text-slate-400 font-mono text-[11px]">
                             {inv.duration_display || '24 hour(s)'}

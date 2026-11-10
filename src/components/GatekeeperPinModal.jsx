@@ -12,7 +12,58 @@ import {
   Store
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { inviteService, formatRemainingCountdown } from '../services/inviteService';
+import { inviteService, formatRemainingCountdown, normalizeEntityName } from '../services/inviteService';
+
+// Capture OAuth callback hash tokens synchronously at bundle evaluation time before any URL cleanup runs
+let initialCapturedOAuthHash = null;
+let initialPageLoadHadAuthCallback = false;
+
+if (typeof window !== 'undefined') {
+  try {
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+    if (
+      hash.includes('access_token=') ||
+      hash.includes('id_token=') ||
+      /[?&]code=/.test(search) ||
+      /[?&]token_hash=/.test(search)
+    ) {
+      initialPageLoadHadAuthCallback = true;
+    }
+    if (hash.includes('access_token=')) {
+      const params = new URLSearchParams(hash.replace(/^#/, ''));
+      const access_token = params.get('access_token');
+      const refresh_token = params.get('refresh_token');
+      if (access_token) {
+        initialCapturedOAuthHash = { access_token, refresh_token };
+      }
+    }
+  } catch {}
+}
+
+function decodeJwtUserFallback(accessToken) {
+  if (!accessToken) return null;
+  try {
+    const parts = accessToken.split('.');
+    if (parts.length < 2) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const payload = JSON.parse(jsonPayload);
+    if (payload && payload.email) {
+      return {
+        id: payload.sub,
+        email: payload.email,
+        user_metadata: payload.user_metadata || {}
+      };
+    }
+  } catch {}
+  return null;
+}
 
 export default function GatekeeperPinModal({
   isOpen,
@@ -23,7 +74,7 @@ export default function GatekeeperPinModal({
   const [token, setToken] = useState(null);
   const [isValidatingToken, setIsValidatingToken] = useState(true);
   const [validationResult, setValidationResult] = useState(null); // { valid, invite, error }
-  const [isCheckingAuth, setIsCheckingAuth] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(() => initialPageLoadHadAuthCallback);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [identityMismatch, setIdentityMismatch] = useState(null); // { signedInEmail, authorizedEmail }
   const [oauthError, setOauthError] = useState(null);
@@ -33,6 +84,12 @@ export default function GatekeeperPinModal({
 
   const hasValidatedRef = useRef(false);
   const validatedTokenRef = useRef(null);
+  const onUnlockRef = useRef(onUnlock);
+  const isRedirectingToGoogleRef = useRef(false);
+
+  useEffect(() => {
+    onUnlockRef.current = onUnlock;
+  }, [onUnlock]);
 
   // 1. Resolve token from URL query params, hash fragments, or pending OAuth storage
   useEffect(() => {
@@ -48,15 +105,24 @@ export default function GatekeeperPinModal({
 
     if (!t) {
       try {
-        t = sessionStorage.getItem('rma_active_invite_token') || sessionStorage.getItem('rma_pending_oauth_token') || localStorage.getItem('rma_pending_oauth_token');
+        const isOAuthReturn =
+          initialPageLoadHadAuthCallback ||
+          localStorage.getItem('rma_oauth_in_progress') === 'true' ||
+          sessionStorage.getItem('rma_oauth_in_progress') === 'true';
+        if (isOAuthReturn) {
+          t =
+            localStorage.getItem('rma_pending_oauth_token') ||
+            sessionStorage.getItem('rma_pending_oauth_token') ||
+            sessionStorage.getItem('rma_active_invite_token') ||
+            localStorage.getItem('rma_active_invite_token');
+        }
       } catch {}
     }
 
     if (t) {
       try {
         sessionStorage.setItem('rma_active_invite_token', t);
-        sessionStorage.setItem('rma_pending_oauth_token', t);
-        localStorage.setItem('rma_pending_oauth_token', t);
+        localStorage.setItem('rma_active_invite_token', t);
       } catch {}
     }
 
@@ -66,16 +132,79 @@ export default function GatekeeperPinModal({
   // 2. Cryptographic Google OAuth Identity Verification
   const verifyIdentityWithSupabase = useCallback(async (invite, sessionUser = null) => {
     if (!invite?.authorized_email) return;
+    // Never unlock while initiating outbound redirect to accounts.google.com
+    if (isRedirectingToGoogleRef.current) return;
+
     setIsCheckingAuth(true);
 
     try {
       let user = sessionUser;
+
+      // 1. If we captured an OAuth access_token in the URL hash on return from Google, verify it directly
+      if (!user && initialCapturedOAuthHash?.access_token) {
+        try {
+          if (initialCapturedOAuthHash.refresh_token) {
+            await supabase.auth.setSession({
+              access_token: initialCapturedOAuthHash.access_token,
+              refresh_token: initialCapturedOAuthHash.refresh_token
+            }).catch(() => {});
+          }
+          const { data: { user: tokenUser } } = await supabase.auth.getUser(initialCapturedOAuthHash.access_token);
+          if (tokenUser?.email) {
+            user = tokenUser;
+          }
+        } catch {}
+
+        if (!user) {
+          user = decodeJwtUserFallback(initialCapturedOAuthHash.access_token);
+        }
+      }
+
+      // 2. Otherwise check Supabase active session / getUser (with brief retry if hash exchange is in flight)
       if (!user) {
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        user = currentUser;
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user?.email) {
+              user = session.user;
+              break;
+            }
+            const { data: { user: currentUser } } = await supabase.auth.getUser();
+            if (currentUser?.email) {
+              user = currentUser;
+              break;
+            }
+          } catch {}
+          if (attempt < 3) {
+            await new Promise(r => setTimeout(r, 250));
+          }
+        }
       }
 
       if (user && user.email) {
+        // Consume the one-time OAuth return flags now that we have resolved the user
+        initialPageLoadHadAuthCallback = false;
+        initialCapturedOAuthHash = null;
+        try {
+          sessionStorage.removeItem('rma_oauth_in_progress');
+          localStorage.removeItem('rma_oauth_in_progress');
+          sessionStorage.removeItem('rma_pending_oauth_token');
+          localStorage.removeItem('rma_pending_oauth_token');
+
+          // Clean up OAuth tokens from URL hash and ensure /intake?token=... is preserved
+          if (typeof window !== 'undefined') {
+            const cleanUrl = new URL(window.location.href);
+            cleanUrl.hash = '';
+            if (cleanUrl.pathname.toLowerCase().startsWith('/admin')) {
+              cleanUrl.pathname = '/intake';
+            }
+            if (!cleanUrl.searchParams.get('token') && invite.token) {
+              cleanUrl.searchParams.set('token', invite.token);
+            }
+            window.history.replaceState(null, '', cleanUrl.pathname + cleanUrl.search);
+          }
+        } catch {}
+
         const userEmail = user.email.toLowerCase().trim();
         const authorizedEmail = invite.authorized_email.toLowerCase().trim();
 
@@ -84,7 +213,7 @@ export default function GatekeeperPinModal({
           setIdentityMismatch(null);
           setOauthError(null);
 
-          const resolvedEntity = invite.entity_name || invite.store_branch || '';
+          const resolvedEntity = normalizeEntityName(invite.entity_name || invite.store_branch);
           const resolvedStream = invite.stream_type || 'customer_inbound';
 
           const unlockedSession = {
@@ -102,26 +231,13 @@ export default function GatekeeperPinModal({
           };
 
           try {
-            sessionStorage.removeItem('rma_pending_oauth_token');
-            localStorage.removeItem('rma_pending_oauth_token');
-            localStorage.removeItem('rma_oauth_in_progress');
             localStorage.setItem('rma_portal_gate_session', JSON.stringify(unlockedSession));
             localStorage.setItem('rma_reporter_contact', authorizedEmail);
             localStorage.setItem('rma_portal_verified_email', userEmail);
-
-            // Clean up OAuth tokens from URL hash and ensure token query parameter is preserved
-            if (typeof window !== 'undefined' && window.location.hash && (window.location.hash.includes('access_token') || window.location.hash.includes('id_token'))) {
-              const cleanUrl = new URL(window.location.href);
-              cleanUrl.hash = '';
-              if (!cleanUrl.searchParams.get('token') && invite.token) {
-                cleanUrl.searchParams.set('token', invite.token);
-              }
-              window.history.replaceState(null, '', cleanUrl.pathname + cleanUrl.search);
-            }
           } catch {}
 
-          if (onUnlock) {
-            onUnlock(unlockedSession);
+          if (onUnlockRef.current) {
+            onUnlockRef.current(unlockedSession);
           }
           setIsCheckingAuth(false);
           return;
@@ -147,13 +263,14 @@ export default function GatekeeperPinModal({
     } finally {
       setIsCheckingAuth(false);
     }
-  }, [onUnlock]);
+  }, []);
 
   // Reset ref guard when isOpen changes to always revalidate cleanly
   useEffect(() => {
     if (isOpen) {
       hasValidatedRef.current = false;
       validatedTokenRef.current = null;
+      isRedirectingToGoogleRef.current = false;
     }
   }, [isOpen]);
 
@@ -176,9 +293,9 @@ export default function GatekeeperPinModal({
       try {
         let res = await inviteService.validateInviteToken(token);
         // Fix false "Link Expired / Authorization Unavailable":
-        // If token was just generated, re-fetch from Supabase after 600ms to eliminate replication race conditions
-        if (!res?.valid && res?.error === 'NOT_FOUND') {
-          await new Promise(r => setTimeout(r, 600));
+        // If token was just generated or had a transient network error, re-fetch after 700ms
+        if (!res?.valid && (res?.error === 'NOT_FOUND' || res?.error === 'NETWORK_ERROR')) {
+          await new Promise(r => setTimeout(r, 700));
           if (!isMounted) return;
           res = await inviteService.validateInviteToken(token);
         }
@@ -192,24 +309,38 @@ export default function GatekeeperPinModal({
         if (res?.valid && res?.invite) {
           try {
             sessionStorage.setItem('rma_active_invite_token', token);
-            sessionStorage.setItem('rma_pending_oauth_token', token);
+            localStorage.setItem('rma_active_invite_token', token);
           } catch {}
 
-          // Only verify identity automatically if actively returning from OAuth redirect or magic link
-          const isReturningFromOAuth = typeof window !== 'undefined' && (
-            window.location.hash.includes('access_token') ||
-            window.location.hash.includes('id_token') ||
-            new URLSearchParams(window.location.search).has('code') ||
-            sessionStorage.getItem('rma_oauth_in_progress') === 'true'
-          );
+          // Strictly verify identity automatically ONLY when returning from an OAuth redirect / Magic Link callback
+          const isReturningFromOAuthCallback =
+            !isRedirectingToGoogleRef.current &&
+            (initialPageLoadHadAuthCallback ||
+              Boolean(initialCapturedOAuthHash?.access_token) ||
+              (typeof window !== 'undefined' &&
+                (window.location.hash.includes('access_token=') ||
+                  window.location.hash.includes('id_token=') ||
+                  new URLSearchParams(window.location.search).has('code'))));
 
-          if (isReturningFromOAuth) {
-            try { sessionStorage.removeItem('rma_oauth_in_progress'); } catch {}
+          if (isReturningFromOAuthCallback) {
             await verifyIdentityWithSupabase(res.invite);
+          } else {
+            // Fresh visit to the invite link (not returning from Google OAuth yet):
+            // Clear any stale OAuth-in-progress flags so the user must click "Continue with Google"
+            try {
+              sessionStorage.removeItem('rma_oauth_in_progress');
+              localStorage.removeItem('rma_oauth_in_progress');
+            } catch {}
+            setIsCheckingAuth(false);
           }
+        } else {
+          setIsCheckingAuth(false);
         }
       } catch {
-        if (isMounted) setIsValidatingToken(false);
+        if (isMounted) {
+          setIsValidatingToken(false);
+          setIsCheckingAuth(false);
+        }
       }
     };
 
@@ -218,9 +349,13 @@ export default function GatekeeperPinModal({
 
     // Active polling every 4 seconds to catch real-time admin revocation while gatekeeper is open
     const pollInterval = setInterval(async () => {
-      if (!isMounted) return;
+      if (!isMounted || isRedirectingToGoogleRef.current) return;
       try {
         const fresh = await inviteService.validateInviteToken(token);
+        // Never overwrite valid state on transient network hiccups
+        if (fresh?.error === 'NETWORK_ERROR' || (!fresh?.valid && fresh?.transient)) {
+          return;
+        }
         if (isMounted && (!fresh.valid || fresh.invite?.status !== validationResult?.invite?.status)) {
           setValidationResult(fresh);
         }
@@ -236,17 +371,18 @@ export default function GatekeeperPinModal({
   // 4. Subscribe to Supabase Auth state changes (triggers on OAuth redirect return)
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (identityMismatch) return;
-      const isOAuthInProgress = typeof window !== 'undefined' && sessionStorage.getItem('rma_oauth_in_progress') === 'true';
-      const hasAuthHash = typeof window !== 'undefined' && (
-        window.location.hash.includes('access_token') ||
-        window.location.hash.includes('id_token') ||
-        window.location.search.includes('code=')
-      );
+      if (identityMismatch || isRedirectingToGoogleRef.current) return;
 
-      if ((event === 'SIGNED_IN' || ((event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && (isOAuthInProgress || hasAuthHash))) && session?.user) {
+      const hasCallbackSignal =
+        initialPageLoadHadAuthCallback ||
+        Boolean(initialCapturedOAuthHash?.access_token) ||
+        (typeof window !== 'undefined' &&
+          (window.location.hash.includes('access_token=') ||
+            window.location.hash.includes('id_token=') ||
+            window.location.search.includes('code=')));
+
+      if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && hasCallbackSignal && session?.user) {
         if (validationResult?.valid && validationResult?.invite) {
-          try { sessionStorage.removeItem('rma_oauth_in_progress'); } catch {}
           await verifyIdentityWithSupabase(validationResult.invite, session.user);
         }
       }
@@ -277,27 +413,38 @@ export default function GatekeeperPinModal({
   // 6. Handle "Continue with Google" OAuth trigger
   const handleContinueWithGoogle = async () => {
     if (!validationResult?.invite) return;
+    isRedirectingToGoogleRef.current = true;
     setIsSigningIn(true);
     setOauthError(null);
 
     try {
-      if (token) {
+      // Clear any previous local Supabase session before starting fresh Google OAuth
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+      try {
+        localStorage.removeItem('rma_portal_gate_session');
+      } catch {}
+
+      const activeToken = token || validationResult.invite.token;
+      if (activeToken) {
         try {
-          sessionStorage.setItem('rma_active_invite_token', token);
-          sessionStorage.setItem('rma_pending_oauth_token', token);
+          sessionStorage.setItem('rma_active_invite_token', activeToken);
+          sessionStorage.setItem('rma_pending_oauth_token', activeToken);
           sessionStorage.setItem('rma_oauth_in_progress', 'true');
-          localStorage.setItem('rma_pending_oauth_token', token);
+          localStorage.setItem('rma_active_invite_token', activeToken);
+          localStorage.setItem('rma_pending_oauth_token', activeToken);
           localStorage.setItem('rma_oauth_in_progress', 'true');
         } catch {}
       }
 
-      const currentUrl = window.location.href;
+      const redirectUrl = activeToken
+        ? `${window.location.origin}/intake?token=${encodeURIComponent(activeToken)}`
+        : window.location.href;
       
       // Use skipBrowserRedirect: true first to safely get the authorization URL
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: currentUrl,
+          redirectTo: redirectUrl,
           skipBrowserRedirect: true,
           queryParams: {
             access_type: 'offline',
@@ -309,6 +456,7 @@ export default function GatekeeperPinModal({
 
       if (error) {
         console.error('Google OAuth sign-in error:', error);
+        isRedirectingToGoogleRef.current = false;
         setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
         setIsSigningIn(false);
         return;
@@ -318,11 +466,13 @@ export default function GatekeeperPinModal({
         // Safe to navigate to Google OAuth!
         window.location.assign(data.url);
       } else {
+        isRedirectingToGoogleRef.current = false;
         setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
         setIsSigningIn(false);
       }
     } catch (err) {
       console.error('Google OAuth invocation exception:', err);
+      isRedirectingToGoogleRef.current = false;
       setOauthError('Google Sign-In is temporarily unavailable. Please click below to receive a secure one-time login link sent directly to your authorized email address.');
       setIsSigningIn(false);
     }
@@ -334,15 +484,25 @@ export default function GatekeeperPinModal({
     setIsSendingMagicLink(true);
     setOauthError(null);
     try {
+      const activeToken = token || validationResult.invite.token;
       try {
+        if (activeToken) {
+          sessionStorage.setItem('rma_active_invite_token', activeToken);
+          sessionStorage.setItem('rma_pending_oauth_token', activeToken);
+          localStorage.setItem('rma_active_invite_token', activeToken);
+          localStorage.setItem('rma_pending_oauth_token', activeToken);
+        }
         sessionStorage.setItem('rma_oauth_in_progress', 'true');
+        localStorage.setItem('rma_oauth_in_progress', 'true');
       } catch {}
-      const currentUrl = window.location.href;
+      const redirectUrl = activeToken
+        ? `${window.location.origin}/intake?token=${encodeURIComponent(activeToken)}`
+        : window.location.href;
       const targetEmail = validationResult.invite.authorized_email.toLowerCase().trim();
       const { error } = await supabase.auth.signInWithOtp({
         email: targetEmail,
         options: {
-          emailRedirectTo: currentUrl
+          emailRedirectTo: redirectUrl
         }
       });
       if (error) {
@@ -497,6 +657,41 @@ export default function GatekeeperPinModal({
                   Please check the link provided by your Pingcon representative or request a fresh return invitation.
                 </p>
               </div>
+            </div>
+          ) : validationResult?.error === 'NETWORK_ERROR' ? (
+            <div className="space-y-5 animate-in zoom-in-95">
+              <div className="w-16 h-16 rounded-3xl bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-inner">
+                <RefreshCw className="w-8 h-8" />
+              </div>
+
+              <div className="space-y-1">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
+                  Connection Interrupted
+                </span>
+                <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                  Reconnecting to Server
+                </h2>
+              </div>
+
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs text-left space-y-2 text-slate-700 dark:text-slate-300">
+                <p className="leading-relaxed text-[11px] text-slate-600 dark:text-slate-400">
+                  A temporary network interruption occurred while verifying your return authorization link.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsValidatingToken(true);
+                  const res = await inviteService.validateInviteToken(token);
+                  setValidationResult(res);
+                  setIsValidatingToken(false);
+                }}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider rounded-2xl flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Retry Verification</span>
+              </button>
             </div>
           ) : (
             <div className="space-y-5 animate-in zoom-in-95">
