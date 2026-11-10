@@ -2,6 +2,7 @@
  * QR Code & Box Sticker Download Utility
  * Client-side high-resolution PNG & SVG generation for mobile and desktop devices.
  */
+import { formatQuantityWithPackSize, formatManifestBreakdown } from './rmaHelpers';
 
 /**
  * Convert an SVG element to an HTMLImageElement
@@ -412,8 +413,11 @@ export async function generateBoxStickerCanvas({
       }
 
       ctx.fillStyle = '#0f172a';
-      ctx.font = '900 36px "Inter", sans-serif';
-      ctx.fillText(`${effectiveTotalItems} LINE ITEMS   •   ${effectiveTotalQuantity} UNITS TOTAL`, 120, boxY + 100);
+      ctx.font = '900 32px "Inter", sans-serif';
+      const manifestSummaryText = Array.isArray(items) && items.length > 0
+        ? formatManifestBreakdown(items, true)
+        : `${effectiveTotalItems} LINE ITEMS`;
+      ctx.fillText(manifestSummaryText, 120, boxY + 100);
 
       // Divider 1
       ctx.strokeStyle = '#cbd5e1';
@@ -433,9 +437,9 @@ export async function generateBoxStickerCanvas({
       const maxDisplay = 4;
       const displayItems = manifestList.slice(0, maxDisplay);
 
-      displayItems.forEach((it, idx) => {
+      displayItems.forEach((it) => {
         const itName = it.name || it.productName || 'Merchandise';
-        const itQty = `${it.quantity || 1} ${it.unit_name || it.unit || 'pc'}`;
+        const itQty = formatQuantityWithPackSize(it.quantity || 1, it.unit_name || it.unit || 'pc', it.pieces_per_case || it.piecesPerCase);
         const itCode = it.code || it.sku || it.barcode || '';
         const itReason = it.reason || 'Defective';
 

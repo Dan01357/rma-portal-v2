@@ -190,12 +190,6 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
       return;
     }
 
-    // Customer AE required
-    if (!selectedAe || !selectedAe.email) {
-      setStatusMsg({ type: 'error', text: 'Customer Account Executive (AE) is required. Please search and select an AE.' });
-      return;
-    }
-
     // Deduplication removed: 1 SKU from company can have more than one barcode assignation
     setIsSaving(true);
     setStatusMsg(null);
@@ -211,8 +205,10 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
         brandName: formData.brandName,
         unitName: formData.unitName,
         imageUrl: formData.imageUrl,
-        aeName: selectedAe.name,
-        aeEmail: selectedAe.email,
+        aeName: selectedAe?.name || null,
+        aeEmail: selectedAe?.email || null,
+        ae_name: selectedAe?.name || null,
+        ae_email: selectedAe?.email || null,
         company: company
       });
 
@@ -503,7 +499,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
               <div className="p-3 bg-blue-50/60 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 rounded-2xl space-y-2 relative">
                 <div className="flex items-center justify-between">
                   <label className="block text-xs font-black text-blue-950 dark:text-blue-300">
-                    Customer Account Executive (AE) * <span className="text-rose-500 font-bold">(Required)</span>
+                    Customer Account Executive (AE) <span className="text-slate-500 dark:text-slate-400 font-semibold">(Optional)</span>
                   </label>
                   <span className="text-[10px] text-blue-700 dark:text-blue-400 font-semibold">
                     Receives CC on report emails

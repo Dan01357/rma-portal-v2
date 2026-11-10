@@ -470,6 +470,10 @@ export const catalogService = {
         const json = await res.json();
         if (json.success && json.found && json.product) {
           const p = json.product;
+          const rawBrand = p.brandName || p.brand_name || '';
+          const pcsMatch = rawBrand.match(/\[Pcs\/Cs:(\d+)\]/);
+          const cleanBrand = rawBrand.replace(/\s*\[Pcs\/Cs:\d+\]/g, '').trim() || null;
+          const parsedPcs = p.pieces_per_case || p.piecesPerCase || (pcsMatch ? parseInt(pcsMatch[1], 10) : null);
           const matchedProd = {
             id: p.id,
             barcode: p.barcode || clean,
@@ -478,8 +482,10 @@ export const catalogService = {
             price: Number(p.price || 0),
             priceWithVat: Number(p.priceWithVat || p.price_with_vat || p.price || 0),
             supplierName: p.supplierName || p.supplier_name || 'Pending Assignment',
-            brandName: p.brandName || p.brand_name || null,
+            brandName: cleanBrand,
             unitName: p.unitName || p.unit_name || 'pc',
+            pieces_per_case: parsedPcs,
+            piecesPerCase: parsedPcs,
             hasSerialNumbers: Boolean(p.hasSerialNumbers || p.has_serial_numbers),
             imageUrl: p.imageUrl || p.image_url || null,
             ae_name: p.ae_name || null,
@@ -573,6 +579,10 @@ export const catalogService = {
       }
 
       if (supaItem) {
+        const rawBrand = supaItem.brand_name || '';
+        const pcsMatch = rawBrand.match(/\[Pcs\/Cs:(\d+)\]/);
+        const cleanBrand = rawBrand.replace(/\s*\[Pcs\/Cs:\d+\]/g, '').trim() || null;
+        const parsedPcs = supaItem.pieces_per_case || (pcsMatch ? parseInt(pcsMatch[1], 10) : null);
         return {
           id: supaItem.id,
           barcode: supaItem.barcode,
@@ -581,8 +591,10 @@ export const catalogService = {
           price: Number(supaItem.price || 0),
           priceWithVat: Number(supaItem.price_with_vat || supaItem.price || 0),
           supplierName: supaItem.supplier_name || 'Pending Assignment',
-          brandName: supaItem.brand_name || null,
+          brandName: cleanBrand,
           unitName: supaItem.unit_name || 'pc',
+          pieces_per_case: parsedPcs,
+          piecesPerCase: parsedPcs,
           hasSerialNumbers: supaItem.has_serial_numbers || false,
           imageUrl: supaItem.image_url || null,
           ae_name: supaItem.ae_name || null,
@@ -656,6 +668,10 @@ export const catalogService = {
             const key = String(item.barcode || item.code || item.id).trim().toLowerCase();
             if (!seenKeys.has(key)) {
               seenKeys.add(key);
+              const rawBrand = item.brandName || item.brand_name || '';
+              const pcsMatch = rawBrand.match(/\[Pcs\/Cs:(\d+)\]/);
+              const cleanBrand = rawBrand.replace(/\s*\[Pcs\/Cs:\d+\]/g, '').trim() || null;
+              const parsedPcs = item.pieces_per_case || item.piecesPerCase || (pcsMatch ? parseInt(pcsMatch[1], 10) : null);
               results.push({
                 id: item.id,
                 barcode: item.barcode,
@@ -664,8 +680,10 @@ export const catalogService = {
                 price: Number(item.price || 0),
                 priceWithVat: Number(item.priceWithVat || item.price_with_vat || item.price || 0),
                 supplierName: item.supplierName || item.supplier_name || 'Pending Assignment',
-                brandName: item.brandName || item.brand_name || null,
+                brandName: cleanBrand,
                 unitName: item.unitName || item.unit_name || 'pc',
+                pieces_per_case: parsedPcs,
+                piecesPerCase: parsedPcs,
                 hasSerialNumbers: Boolean(item.hasSerialNumbers || item.has_serial_numbers),
                 imageUrl: item.imageUrl || item.image_url || null,
                 isVerified: item.isVerified !== false && item.is_verified !== false,
@@ -694,6 +712,10 @@ export const catalogService = {
           const key = String(item.barcode || item.code || item.id).trim().toLowerCase();
           if (!seenKeys.has(key)) {
             seenKeys.add(key);
+            const rawBrand = item.brand_name || '';
+            const pcsMatch = rawBrand.match(/\[Pcs\/Cs:(\d+)\]/);
+            const cleanBrand = rawBrand.replace(/\s*\[Pcs\/Cs:\d+\]/g, '').trim() || null;
+            const parsedPcs = item.pieces_per_case || (pcsMatch ? parseInt(pcsMatch[1], 10) : null);
             results.push({
               id: item.id,
               barcode: item.barcode,
@@ -702,8 +724,10 @@ export const catalogService = {
               price: Number(item.price || 0),
               priceWithVat: Number(item.price_with_vat || item.price || 0),
               supplierName: item.supplier_name || 'Pending Assignment',
-              brandName: item.brand_name || null,
+              brandName: cleanBrand,
               unitName: item.unit_name || 'pc',
+              pieces_per_case: parsedPcs,
+              piecesPerCase: parsedPcs,
               hasSerialNumbers: item.has_serial_numbers || false,
               imageUrl: item.image_url || null,
               isVerified: item.is_verified !== false,
@@ -1341,7 +1365,7 @@ export const catalogService = {
       ae_email: isKnown ? (resolvedProduct.ae_email || resolvedProduct.aeEmail || null) : null,
       company: isKnown ? (resolvedProduct.company || null) : null,
       condition_grade: 'B - Damaged Packaging Only',
-      disposition: 'Pending Triage',
+      disposition: (rma_type === 'supplier_outbound' || rmaType === 'supplier_outbound') ? '3- Return to Vendor (RTV)' : 'Pending Triage',
       warehouse_location: null,
       inspected_by: null,
       inspected_at: null,
@@ -1615,14 +1639,14 @@ export const catalogService = {
   },
 
   /**
-   * Fetch all unverified barcodes awaiting admin details
+   * Fetch all unmapped items (Awaiting SKU) across active standalone reports and batch manifest child items
    */
   async getPendingBarcodes() {
     try {
-      // 1. Fetch active (non-deleted) RMA reports to know which barcodes are actually in play
+      // 1. Fetch active (non-deleted) RMA reports (regardless of whether status is pending, received_at_dock, etc.)
       const { data: activeReports, error: rError } = await supabase
         .from('rma_reports')
-        .select('id, rma_number, barcode, code, name, supplier_name, price, price_with_vat, status, created_at, is_parent, items')
+        .select('id, rma_number, parent_rma_id, barcode, code, name, supplier_name, price, price_with_vat, unit_name, status, created_at, is_parent, items')
         .not('status', 'eq', 'deleted')
         .order('created_at', { ascending: false });
 
@@ -1630,11 +1654,47 @@ export const catalogService = {
         console.warn('Error fetching active reports for pending cross-check:', rError.message);
       }
 
-      // Helper to identify batch manifest parent containers.
-      // Batches contain multiple items and do not have an individual SKU; they must NEVER enter pending queue.
+      // 2. Fetch products table to check if a barcode has already been mapped to a valid SKU
+      const { data: allProds, error: pError } = await supabase
+        .from('products')
+        .select('id, barcode, code, name, supplier_name, price, price_with_vat, unit_name, is_verified, created_at')
+        .not('name', 'like', '[DELETED]%')
+        .order('created_at', { ascending: false });
+
+      if (pError) {
+        console.warn('Error fetching products for SKU check:', pError.message);
+      }
+
+      const isValidSku = (codeVal, barcodeVal) => {
+        const c = String(codeVal || '').trim();
+        const b = String(barcodeVal || '').trim();
+        if (!c || c === '—') return false;
+        const lower = c.toLowerCase();
+        if (
+          lower === 'awaiting sku' ||
+          lower === 'unassigned' ||
+          lower.includes('awaiting') ||
+          lower.includes('unidentified')
+        ) {
+          return false;
+        }
+        if (b && c === b) return false;
+        return true;
+      };
+
+      const verifiedSkuByBarcode = new Map();
+      (allProds || []).forEach(p => {
+        const b = String(p.barcode || '').trim();
+        if (b && p.is_verified !== false && isValidSku(p.code, b)) {
+          verifiedSkuByBarcode.set(b, String(p.code).trim());
+        }
+      });
+
+      const reports = activeReports || [];
+
       const isBatchReport = (r) => {
         if (!r) return false;
-        if (r.is_parent) return true;
+        if (r.is_parent === true) return true;
         const name = String(r.name || '').toLowerCase();
         if (name.startsWith('batch return manifest') || name.startsWith('batch rma')) return true;
         const b = String(r.barcode || '');
@@ -1643,74 +1703,87 @@ export const catalogService = {
         return false;
       };
 
-      const activeBarcodesWithReports = new Set();
-      (activeReports || []).forEach(r => {
-        if (!isBatchReport(r) && r.barcode) {
-          activeBarcodesWithReports.add(r.barcode);
-        }
-        // If it's a batch manifest, extract child product barcodes so child items can be verified
-        if (Array.isArray(r.items) && r.items.length > 0) {
-          r.items.forEach(child => {
-            const childBarcode = child.barcode ? String(child.barcode).trim() : '';
-            if (childBarcode && !childBarcode.startsWith('RMA-')) {
-              activeBarcodesWithReports.add(childBarcode);
+      // Identify child rma_reports rows that belong to an existing parent manifest container
+      const isChildRowOfManifest = (r) => {
+        if (!r || isBatchReport(r)) return false;
+        // Standalone split tickets (-B, -C, -D, -E) are independent rows
+        if (/-(?:B|C|D|E)$/i.test(String(r.rma_number || ''))) return false;
+        const parent = reports.find(p => (
+          p &&
+          String(p.id) !== String(r.id) &&
+          isBatchReport(p) &&
+          (p.rma_number === r.rma_number || (r.parent_rma_id && String(p.id) === String(r.parent_rma_id)))
+        ));
+        return Boolean(parent);
+      };
+
+      const unmappedItems = [];
+
+      reports.forEach(r => {
+        if (!r) return;
+        // Skip child rma_reports rows that belong to a parent manifest (we inspect the parent's items below)
+        if (isChildRowOfManifest(r)) return;
+
+        if (isBatchReport(r)) {
+          // Inspect child items inside the items JSON array (or fallback child rows if items JSON is empty)
+          const childList = (Array.isArray(r.items) && r.items.length > 0)
+            ? r.items
+            : reports.filter(c => (
+                c &&
+                String(c.id) !== String(r.id) &&
+                !/-(?:B|C|D|E)$/i.test(String(c.rma_number || '')) &&
+                (c.rma_number === r.rma_number || (c.parent_rma_id && String(c.parent_rma_id) === String(r.id)))
+              ));
+
+          childList.forEach((child, idx) => {
+            if (!child) return;
+            const childBarcode = String(child.barcode || '').trim();
+            if (childBarcode.startsWith('RMA-')) return;
+            const rawCode = child.code || child.sku || (childBarcode ? verifiedSkuByBarcode.get(childBarcode) : null) || null;
+            if (!isValidSku(rawCode, childBarcode)) {
+              unmappedItems.push({
+                id: child.id || `${r.id}_item_${idx}`,
+                report_id: r.id,
+                rma_number: r.rma_number,
+                barcode: childBarcode,
+                code: null,
+                name: child.name || child.productName || `Unidentified Item (${childBarcode || 'No Barcode'})`,
+                supplier_name: child.supplier_name || r.supplier_name || 'Pending Assignment',
+                price: Number(child.price || 0),
+                price_with_vat: Number(child.price_with_vat || child.priceWithVat || child.price || 0),
+                unit_name: child.unit_name || child.unit || 'pc',
+                status: child.status || r.status || 'pending',
+                is_verified: false,
+                created_at: r.created_at
+              });
             }
           });
-        }
-      });
-
-      // 2. Fetch unverified items from products table
-      const { data: unverifiedProds, error: pError } = await supabase
-        .from('products')
-        .select('*')
-        .eq('is_verified', false)
-        .not('name', 'like', '[DELETED]%')
-        .order('created_at', { ascending: false });
-
-      if (pError) {
-        console.warn('Error fetching unverified products:', pError.message);
-      }
-
-      const pendingMap = new Map();
-
-      // Only add to pending if there is an active report referencing this unverified barcode!
-      (unverifiedProds || []).forEach(p => {
-        if (p.barcode && activeBarcodesWithReports.has(p.barcode)) {
-          pendingMap.set(p.barcode, {
-            ...p,
-            id: p.id,
-            barcode: p.barcode,
-            name: p.name,
-            code: p.code,
-            supplier_name: p.supplier_name,
-            price: p.price,
-            price_with_vat: p.price_with_vat,
-            created_at: p.created_at
-          });
-        }
-      });
-
-      // 3. Include any active rma_reports marked as 'pending_admin_details'
-      // STRICT FILTER: Batch RMA manifests NEVER have an SKU and must NOT be included!
-      (activeReports || [])
-        .filter(r => r.status === 'pending_admin_details' && !isBatchReport(r))
-        .forEach(r => {
-          if (r.barcode && !pendingMap.has(r.barcode)) {
-            pendingMap.set(r.barcode, {
+        } else {
+          // Standalone report (single-item report or split ticket)
+          const barcodeStr = String(r.barcode || '').trim();
+          if (barcodeStr.startsWith('RMA-')) return;
+          const rawCode = r.code || r.sku || (barcodeStr ? verifiedSkuByBarcode.get(barcodeStr) : null) || null;
+          if (!isValidSku(rawCode, barcodeStr)) {
+            unmappedItems.push({
               id: r.id,
-              barcode: r.barcode,
-              code: r.code || null,
-              name: r.name || `Unidentified Item (${r.barcode})`,
+              report_id: r.id,
+              rma_number: r.rma_number,
+              barcode: barcodeStr,
+              code: null,
+              name: r.name || `Unidentified Item (${barcodeStr || 'No Barcode'})`,
               supplier_name: r.supplier_name || 'Pending Assignment',
-              price: r.price || 0,
-              price_with_vat: r.price_with_vat || 0,
+              price: Number(r.price || 0),
+              price_with_vat: Number(r.price_with_vat || r.price || 0),
+              unit_name: r.unit_name || 'pc',
+              status: r.status || 'pending',
               is_verified: false,
               created_at: r.created_at
             });
           }
-        });
+        }
+      });
 
-      return Array.from(pendingMap.values());
+      return unmappedItems;
     } catch (e) {
       console.warn('Error fetching pending barcodes:', e.message);
       return [];

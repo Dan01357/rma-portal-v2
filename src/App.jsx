@@ -91,7 +91,7 @@ import { inviteService, formatRemainingCountdown } from './services/inviteServic
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest, formatQuantityWithPackSize } from './utils/rmaHelpers';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest, formatQuantityWithPackSize, formatManifestBreakdown } from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
   '1- Damaged Box / Crushed Packaging',
@@ -304,6 +304,7 @@ export default function App() {
 
   // Admin Dashboard Active Tab: 'products' | 'reports' | 'search'
   const [adminActiveTab, setAdminActiveTab] = useState('products');
+  const [testModeStreamType, setTestModeStreamType] = useState('customer_inbound');
 
   // Strict role gate: Only Super Admin can view Settings & SMTP
   useEffect(() => {
@@ -909,7 +910,16 @@ export default function App() {
         setIsReportsModalOpen(true);
       }
     } else if (notif.type === 'unknown') {
-      setIsPendingModalOpen(true);
+      if (isAdminView) {
+        setAdminActiveTab('customer_reports');
+        setReportsStatusFilter('pending_admin_details');
+        setReportsCurrentPage(1);
+      } else {
+        navigateTo('/admin');
+        setAdminActiveTab('customer_reports');
+        setReportsStatusFilter('pending_admin_details');
+        setReportsCurrentPage(1);
+      }
     } else if (notif.type === 'product' || notif.type === 'delete') {
       if (isAdminView) {
         setAdminActiveTab('products');
@@ -1072,6 +1082,7 @@ export default function App() {
       price: reportOrChild.price !== undefined ? reportOrChild.price : (existing?.price || 0),
       price_with_vat: reportOrChild.price_with_vat !== undefined ? reportOrChild.price_with_vat : (existing?.price_with_vat || reportOrChild.price || 0),
       unit_name: reportOrChild.unit_name || existing?.unit_name || 'pc',
+      pieces_per_case: reportOrChild.pieces_per_case || existing?.pieces_per_case || existing?.piecesPerCase || null,
       image_url: existing?.is_verified ? (existing.image_url || '') : '',
       ae_name: reportOrChild.ae_name || existing?.ae_name || '',
       ae_email: reportOrChild.ae_email || existing?.ae_email || '',
@@ -1408,7 +1419,15 @@ export default function App() {
       if (reportsStatusFilter !== 'all') {
         const s = String(item.status || 'received_at_dock').toLowerCase();
         if (reportsStatusFilter === 'pending_admin_details') {
-          if (s !== 'pending_admin_details') return false;
+          const isManifestRow = isBatchManifest(item, recentReportsList);
+          if (isManifestRow) {
+            const children = getReportManifestItems(item, recentReportsList);
+            const hasUnmappedChild = children.some(child => !hasAssignedSku(child, savedProductsList));
+            if (!hasUnmappedChild) return false;
+          } else {
+            const isUnmappedStandalone = !hasAssignedSku(item, savedProductsList) || s === 'pending_admin_details';
+            if (!isUnmappedStandalone) return false;
+          }
         } else if (reportsStatusFilter === 'received_at_dock') {
           if (s !== 'pending' && s !== 'received_at_dock') return false;
         } else if (reportsStatusFilter === 'draft') {
@@ -2014,6 +2033,7 @@ export default function App() {
       quantity: submitQty,
       unit_name: finalUnit,
       unit: finalUnit,
+      pieces_per_case: detectedProduct?.pieces_per_case || detectedProduct?.piecesPerCase || null,
       supplier_name: (detectedProduct?.supplier_name && detectedProduct.supplier_name !== 'Savemore') ? detectedProduct.supplier_name : (detectedProduct?.supplier_name || 'Pending Assignment'),
       supplier: (detectedProduct?.supplier_name && detectedProduct.supplier_name !== 'Savemore') ? detectedProduct.supplier_name : (detectedProduct?.supplier_name || 'Pending Assignment'),
       price: Number(detectedProduct?.price || 0),
@@ -2110,6 +2130,7 @@ export default function App() {
         quantity: submitQty,
         unit_name: finalUnit,
         unit: finalUnit,
+        pieces_per_case: detectedProduct?.pieces_per_case || detectedProduct?.piecesPerCase || null,
         supplier_name: (detectedProduct?.supplier_name && detectedProduct.supplier_name !== 'Savemore') ? detectedProduct.supplier_name : (detectedProduct?.supplier_name || 'Pending Assignment'),
         supplier: (detectedProduct?.supplier_name && detectedProduct.supplier_name !== 'Savemore') ? detectedProduct.supplier_name : (detectedProduct?.supplier_name || 'Pending Assignment'),
         price: Number(detectedProduct?.price || 0),
@@ -2140,13 +2161,14 @@ export default function App() {
 
     const inviteEntity = inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch);
     const resolvedBranch = storeBranch.trim() || inviteEntity || 'Direct Return';
+    const isTestSupplierOutbound = Boolean(isTestMode && testModeStreamType === 'supplier_outbound');
     const resolvedSupplierFromPortal =
       (itemsToSubmit[0]?.supplier_name &&
         itemsToSubmit[0].supplier_name !== 'Warehouse' &&
         itemsToSubmit[0].supplier_name !== 'Savemore' &&
         itemsToSubmit[0].supplier_name !== 'Pending Assignment')
         ? itemsToSubmit[0].supplier_name
-        : (gateSession?.stream_type === 'supplier_outbound' && (storeBranch.trim() || inviteEntity))
+        : ((gateSession?.stream_type === 'supplier_outbound' || isTestSupplierOutbound) && (storeBranch.trim() || inviteEntity))
           ? (storeBranch.trim() || inviteEntity)
           : (itemsToSubmit[0]?.supplier_name || 'Pending Assignment');
 
@@ -2156,8 +2178,10 @@ export default function App() {
       localStorage.setItem('rma_reporter_contact', effectiveContact);
     } catch { }
 
-    // 2. Determine RMA Type based on station Gatekeeper profile (internal warehouse vs external customer / supplier invite)
-    const determinedRmaType = (gateSession?.stream_type === 'supplier_outbound' || gateSession?.type === 'internal_warehouse') ? 'supplier_outbound' : 'customer_inbound';
+    // 2. Determine RMA Type based on station Gatekeeper profile or Super Admin Test Mode selector
+    const determinedRmaType = (isTestSupplierOutbound || gateSession?.stream_type === 'supplier_outbound' || gateSession?.type === 'internal_warehouse')
+      ? 'supplier_outbound'
+      : 'customer_inbound';
 
     // 3. Generate ONE unique RMA Number for the batch ticket
     const rmaNumber = catalogService.generateRMANumber(recentReportsList);
@@ -2495,6 +2519,38 @@ export default function App() {
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
+
+                {isTestMode && (
+                  <div className="w-full pt-2 mt-1 border-t border-amber-300/70 dark:border-amber-800/70 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-900 dark:text-amber-300">
+                      Test Stream Destination:
+                    </span>
+                    <div className="inline-flex items-center p-1 rounded-xl bg-amber-100/80 dark:bg-slate-900 border border-amber-300 dark:border-amber-800 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setTestModeStreamType('customer_inbound')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                          testModeStreamType === 'customer_inbound'
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'text-slate-700 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        📥 Test Customer Inbound
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTestModeStreamType('supplier_outbound')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                          testModeStreamType === 'supplier_outbound'
+                            ? 'bg-purple-600 text-white shadow-xs'
+                            : 'text-slate-700 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        📤 Test Supplier Outbound (RTV)
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2532,7 +2588,7 @@ export default function App() {
                       <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
                         <span className="text-slate-500 dark:text-slate-400">Manifest Summary:</span>
                         <strong className="font-mono text-blue-700 dark:text-blue-300">
-                          {submitSuccessReport.total_items} Items ({submitSuccessReport.total_quantity} Units Total)
+                          {formatManifestBreakdown(submitSuccessReport.items, true)}
                         </strong>
                       </div>
                       <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
@@ -2550,7 +2606,7 @@ export default function App() {
                                 • {it.name || it.productName} ({it.barcode})
                               </span>
                               <span className="font-mono font-black shrink-0 text-slate-900 dark:text-white">
-                                {it.quantity} {it.unit_name || it.unit || 'pc'}
+                                {formatQuantityWithPackSize(it.quantity, it.unit_name || it.unit || 'pc', it.pieces_per_case || it.piecesPerCase)}
                               </span>
                             </div>
                           ))}
@@ -2604,8 +2660,12 @@ export default function App() {
                       </span>
                       <span className="text-[10px] text-slate-400 font-mono">
                         {submitSuccessReport.total_items > 1
-                          ? `${submitSuccessReport.total_items} items (${submitSuccessReport.total_quantity} units)`
-                          : `${submitSuccessReport.quantity || 1} unit(s)`}
+                          ? formatManifestBreakdown(submitSuccessReport.items, true)
+                          : formatQuantityWithPackSize(
+                              submitSuccessReport.quantity || 1,
+                              submitSuccessReport.unit_name || 'pc',
+                              submitSuccessReport.items?.[0]?.pieces_per_case || submitSuccessReport.items?.[0]?.piecesPerCase
+                            )}
                       </span>
                       {submitSuccessReport.store_branch && (
                         <span className="text-[10px] text-blue-700 dark:text-blue-300 font-bold truncate">
@@ -3129,7 +3189,7 @@ export default function App() {
                         </h3>
                       </div>
                       <div className="text-xs font-black text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/60 px-2.5 py-1 rounded-full border border-blue-200 dark:border-blue-800">
-                        Total Quantity: {manifestItems.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0)} units
+                        {formatManifestBreakdown(manifestItems, true)}
                       </div>
                     </div>
 
@@ -3160,7 +3220,7 @@ export default function App() {
                                   {item.code || item.barcode}
                                 </span>
                                 <span className="font-black text-blue-600 dark:text-blue-400">
-                                  Qty: {item.quantity} {item.unit_name || item.unit}
+                                  Qty: {formatQuantityWithPackSize(item.quantity, item.unit_name || item.unit, item.pieces_per_case || item.piecesPerCase)}
                                 </span>
                                 <span className="bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 px-1.5 py-0.2 rounded-full font-bold">
                                   {item.reason}
@@ -3768,9 +3828,13 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Metric 5: Pending Barcodes */}
+              {/* Metric 5: Awaiting SKU */}
               <div
-                onClick={() => setIsPendingModalOpen(true)}
+                onClick={() => {
+                  setAdminActiveTab('customer_reports');
+                  setReportsStatusFilter('pending_admin_details');
+                  setReportsCurrentPage(1);
+                }}
                 className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${pendingBarcodesList.length > 0 ? 'border-amber-400 bg-amber-50/20 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-800'
                   }`}
               >
@@ -3781,8 +3845,8 @@ export default function App() {
                 <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
                   {pendingBarcodesList.length}
                 </div>
-                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Pending Barcodes</div>
-                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Needs verification</div>
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Awaiting SKU</div>
+                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Needs SKU assignment</div>
               </div>
 
               {/* Metric 6: Staff Directory */}
@@ -3876,11 +3940,15 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={() => setIsPendingModalOpen(true)}
+                onClick={() => {
+                  setAdminActiveTab('customer_reports');
+                  setReportsStatusFilter('pending_admin_details');
+                  setReportsCurrentPage(1);
+                }}
                 className="touch-target px-3.5 py-2 rounded-xl text-xs font-bold text-amber-800 dark:text-amber-400 hover:bg-amber-100/60 dark:hover:bg-amber-950/40 flex items-center gap-1.5 sm:ml-auto transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                <span>Pending Queue ({pendingBarcodesList.length})</span>
+                <span>Awaiting SKU ({pendingBarcodesList.length})</span>
               </button>
 
               {currentUser?.role === 'super_admin' && (
@@ -4492,9 +4560,17 @@ export default function App() {
 
                                   {/* 4. Barcode */}
                                   <td className="py-3 px-3.5 font-mono">
-                                    <div className="font-bold text-slate-800 dark:text-slate-200">{item.barcode}</div>
-                                    {(item.code || matchedProduct?.code) && (
-                                      <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.code || matchedProduct?.code}</div>
+                                    {isManifest ? (
+                                      <span className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 font-bold text-[10px] border border-purple-200 dark:border-purple-800">
+                                        📦 Manifest Items
+                                      </span>
+                                    ) : (
+                                      <>
+                                        <div className="font-bold text-slate-800 dark:text-slate-200">{item.barcode}</div>
+                                        {(item.code || matchedProduct?.code) && (
+                                          <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.code || matchedProduct?.code}</div>
+                                        )}
+                                      </>
                                     )}
                                   </td>
 
@@ -4540,7 +4616,11 @@ export default function App() {
                                   {/* Quantity & Unit Column */}
                                   <td className="py-3 px-3 text-center whitespace-nowrap">
                                     <span className="font-mono font-black text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs inline-flex items-center gap-1">
-                                      <span>{formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}</span>
+                                      <span>
+                                        {isManifest
+                                          ? formatManifestBreakdown(manifestChildren, false)
+                                          : formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}
+                                      </span>
                                     </span>
                                   </td>
 
@@ -4818,7 +4898,7 @@ export default function App() {
                                           </div>
                                           <div className="flex items-center gap-3">
                                             <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                                              Total manifest quantity: <strong className="text-slate-900 dark:text-white font-bold">{manifestChildren.reduce((acc, c) => acc + (Number(c.quantity || c.qty) || 1), 0)} units</strong>
+                                              Total manifest breakdown: <strong className="text-slate-900 dark:text-white font-bold">{formatManifestBreakdown(manifestChildren, true)}</strong>
                                             </span>
                                             <button
                                               type="button"
@@ -5161,7 +5241,11 @@ export default function App() {
                                     📥 Inbound
                                   </span>
                                   <span className="font-mono font-black text-xs text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-0.5 rounded-md shadow-2xs">
-                                    Qty: <strong className="text-blue-600 dark:text-blue-400 font-black">{formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}</strong>
+                                    Qty: <strong className="text-blue-600 dark:text-blue-400 font-black">
+                                      {isManifest
+                                        ? formatManifestBreakdown(manifestChildren, false)
+                                        : formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}
+                                    </strong>
                                   </span>
                                   <button
                                     type="button"
@@ -5207,8 +5291,21 @@ export default function App() {
                                   {resolvedName}
                                 </h4>
                                 <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                                  Qty: <strong className="text-slate-900 dark:text-white font-bold">{formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}</strong> • Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
-                                  {(item.code || matchedProduct?.code) && <span> • SKU: {item.code || matchedProduct?.code}</span>}
+                                  {isManifest ? (
+                                    <span className="inline-flex items-center gap-1.5 flex-wrap">
+                                      <span className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 font-bold text-[10px] border border-purple-200 dark:border-purple-800">
+                                        📦 Manifest Items
+                                      </span>
+                                      <span className="text-slate-600 dark:text-slate-300 font-bold">
+                                        {formatManifestBreakdown(manifestChildren, true)}
+                                      </span>
+                                    </span>
+                                  ) : (
+                                    <>
+                                      Qty: <strong className="text-slate-900 dark:text-white font-bold">{formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}</strong> • Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
+                                      {(item.code || matchedProduct?.code) && <span> • SKU: {item.code || matchedProduct?.code}</span>}
+                                    </>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">
@@ -5462,7 +5559,7 @@ export default function App() {
                                             #{cIdx + 1} {childName}
                                           </div>
                                           <span className="font-mono font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded text-[10px]">
-                                            {childQty} {childUnit}
+                                            {formatQuantityWithPackSize(childQty, childUnit, child.pieces_per_case || matchedChild?.pieces_per_case)}
                                           </span>
                                         </div>
                                         <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 font-mono">
@@ -5747,6 +5844,7 @@ export default function App() {
           const price = Number(prod?.price || 0);
           const priceWithVat = Number(prod?.price_with_vat || prod?.priceWithVat || price || 0);
           const unitName = prod?.unit_name || prod?.unitName || 'pc';
+          const piecesPerCase = prod?.pieces_per_case || prod?.piecesPerCase || null;
           const aeName = prod?.ae_name || prod?.aeName || null;
           const aeEmail = prod?.ae_email || prod?.aeEmail || null;
           const childIdToMatch = prod?.child_id || editingProduct?.child_id;
@@ -5765,7 +5863,8 @@ export default function App() {
                   supplier_name: supplierName,
                   price: price,
                   price_with_vat: priceWithVat,
-                  unit_name: unitName
+                  unit_name: unitName,
+                  pieces_per_case: piecesPerCase
                 };
               }
               // Also update child items inside rep.items JSON array
@@ -5788,7 +5887,8 @@ export default function App() {
                       price: price,
                       price_with_vat: priceWithVat,
                       supplier_name: supplierName,
-                      unit_name: unitName
+                      unit_name: unitName,
+                      pieces_per_case: piecesPerCase
                     };
                   }
                   return it;
@@ -5813,6 +5913,8 @@ export default function App() {
                 price,
                 price_with_vat: priceWithVat,
                 unit_name: unitName,
+                pieces_per_case: piecesPerCase,
+                piecesPerCase: piecesPerCase,
                 supplier_name: supplierName,
                 is_verified: true
               };

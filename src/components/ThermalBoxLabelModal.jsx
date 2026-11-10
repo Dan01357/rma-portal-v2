@@ -15,6 +15,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import { supabase } from '../supabaseClient';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
+import { formatQuantityWithPackSize, formatManifestBreakdown } from '../utils/rmaHelpers';
 
 /**
  * Generates pseudo-Code128 SVG Barcode pattern based on string input
@@ -297,11 +298,13 @@ export default function ThermalBoxLabelModal({
             {/* Product & SKU Grid (Single Item or Batch Manifest) */}
             {isManifest ? (
               <div className="border-b-2 border-black pb-1 text-[9px] space-y-1">
-                <div className="flex items-center justify-between font-black border-b border-black pb-0.5">
-                  <span className="uppercase text-[8px] bg-black text-white px-1">
+                <div className="flex items-center justify-between font-black border-b border-black pb-0.5 gap-1">
+                  <span className="uppercase text-[8px] bg-black text-white px-1 shrink-0">
                     MANIFEST: {totalItems} ITEMS
                   </span>
-                  <span className="font-mono text-[11px] font-black">{totalQuantity} UNITS TOTAL</span>
+                  <span className="font-mono text-[9.5px] font-black text-right">
+                    {manifestItems.length > 0 ? formatManifestBreakdown(manifestItems, false) : `${totalQuantity} pcs`}
+                  </span>
                 </div>
                 {storeBranch && (
                   <div className="text-[8.5px] font-bold text-black truncate">
@@ -312,7 +315,9 @@ export default function ThermalBoxLabelModal({
                   {manifestItems.slice(0, 4).map((it, idx) => (
                     <div key={idx} className="flex justify-between items-center border-b border-dashed border-slate-300 pb-0.5">
                       <span className="truncate pr-1">• {it.name || it.productName || it.barcode}</span>
-                      <span className="font-mono font-bold shrink-0">{it.quantity} {it.unit_name || it.unit || 'pc'}</span>
+                      <span className="font-mono font-bold shrink-0">
+                        {formatQuantityWithPackSize(it.quantity, it.unit_name || it.unit || 'pc', it.pieces_per_case || it.piecesPerCase)}
+                      </span>
                     </div>
                   ))}
                   {manifestItems.length > 4 && (
@@ -347,7 +352,7 @@ export default function ThermalBoxLabelModal({
                   <div className="mt-0.5 flex items-center justify-between">
                     <span className="text-[7.5px] font-bold">QTY:</span>
                     <span className="font-mono text-xs font-black text-black">
-                      {quantity} {unit}
+                      {formatQuantityWithPackSize(quantity, unit, report?.pieces_per_case || report?.piecesPerCase)}
                     </span>
                   </div>
                 </div>

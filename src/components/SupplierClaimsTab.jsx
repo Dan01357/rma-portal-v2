@@ -29,6 +29,7 @@ import {
   getReportManifestItems, 
   isManifestSubItem, 
   formatQuantityWithPackSize, 
+  formatManifestBreakdown,
   hasAssignedSku 
 } from '../utils/rmaHelpers';
 
@@ -1250,9 +1251,16 @@ export default function SupplierClaimsTab({
                           <div className="font-bold text-slate-900 dark:text-white truncate max-w-xs" title={res.name}>
                             {res.name}
                           </div>
-                          <div className="text-[10px] font-mono text-slate-400">
+                          <div className="text-[10px] font-mono text-slate-400 mt-0.5">
                             {isManifest ? (
-                              <span>Total: <strong className="text-slate-800 dark:text-slate-200 font-bold">{res.qty} units</strong> • Batch Manifest</span>
+                              <span className="inline-flex items-center gap-1.5 flex-wrap">
+                                <span className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 font-bold text-[10px] border border-purple-200 dark:border-purple-800">
+                                  📦 Manifest Items
+                                </span>
+                                <span className="text-slate-600 dark:text-slate-300 font-bold">
+                                  {formatManifestBreakdown(manifestChildren, true)}
+                                </span>
+                              </span>
                             ) : (
                               <span>Qty: <strong className="text-slate-800 dark:text-slate-200 font-bold">{formatQuantityWithPackSize(res.qty, r.unit_name, r.pieces_per_case || res.matchedProduct?.pieces_per_case)}</strong> • SKU: <strong className={res.code ? 'text-slate-600 dark:text-slate-300' : 'text-amber-600 dark:text-amber-400'}>{res.code || 'Unassigned'}</strong> • BC: {r.barcode}</span>
                             )}
@@ -1273,7 +1281,11 @@ export default function SupplierClaimsTab({
                         {/* Qty & Unit */}
                         <td className="p-3 text-right whitespace-nowrap font-mono">
                           <span className="px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-800 font-black text-amber-900 dark:text-amber-200 text-xs inline-flex items-center gap-1 shadow-2xs">
-                            <span>{formatQuantityWithPackSize(res.qty, r.unit_name, r.pieces_per_case || res.matchedProduct?.pieces_per_case)}</span>
+                            <span>
+                              {isManifest
+                                ? formatManifestBreakdown(manifestChildren, false)
+                                : formatQuantityWithPackSize(res.qty, r.unit_name, r.pieces_per_case || res.matchedProduct?.pieces_per_case)}
+                            </span>
                           </span>
                         </td>
 
@@ -1425,7 +1437,7 @@ export default function SupplierClaimsTab({
                                 </div>
                                 <div className="flex items-center gap-3">
                                   <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                                    Total manifest quantity: <strong className="text-slate-900 dark:text-white font-bold">{res.qty} units</strong>
+                                    Total manifest breakdown: <strong className="text-slate-900 dark:text-white font-bold">{formatManifestBreakdown(manifestChildren, true)}</strong>
                                   </span>
                                   <button
                                     type="button"

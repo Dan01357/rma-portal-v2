@@ -12,6 +12,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng, printBoxSticker } from '../utils/qrDownload';
+import { formatQuantityWithPackSize, formatManifestBreakdown } from '../utils/rmaHelpers';
 
 export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickAction }) {
   const [downloadingType, setDownloadingType] = useState(null); // 'qr' | 'label' | null
@@ -242,19 +243,11 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 py-1 border-b border-slate-200">
-                    <div>
-                      <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block">Total Items</span>
-                      <span className="font-mono font-black text-blue-700 text-xs sm:text-sm">
-                        {totalItems} Line Items
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block">Total Quantity</span>
-                      <span className="font-mono font-black text-slate-900 text-xs sm:text-sm">
-                        {totalQuantity} Units Total
-                      </span>
-                    </div>
+                  <div className="py-1 border-b border-slate-200">
+                    <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block">Manifest Breakdown</span>
+                    <span className="font-mono font-black text-blue-700 text-xs sm:text-sm">
+                      {manifestItems.length > 0 ? formatManifestBreakdown(manifestItems, true) : `${totalItems} Line Items`}
+                    </span>
                   </div>
 
                   {/* Summary of Items Included */}
@@ -272,7 +265,9 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
                             </div>
                           </div>
                           <div className="text-right shrink-0">
-                            <span className="font-black font-mono text-slate-900">{it.quantity} {it.unit_name || it.unit || 'pc'}</span>
+                            <span className="font-black font-mono text-slate-900">
+                              {formatQuantityWithPackSize(it.quantity, it.unit_name || it.unit || 'pc', it.pieces_per_case || it.piecesPerCase)}
+                            </span>
                             <div className="text-[9px] font-bold text-rose-600 truncate max-w-[90px]">{it.reason || 'Defective'}</div>
                           </div>
                         </div>
@@ -299,7 +294,7 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
                     <div>
                       <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block">Quantity</span>
                       <span className="font-mono font-black text-slate-900 text-xs">
-                        {quantity} {unit}
+                        {formatQuantityWithPackSize(quantity, unit, report?.pieces_per_case || report?.piecesPerCase)}
                       </span>
                     </div>
                     <div>

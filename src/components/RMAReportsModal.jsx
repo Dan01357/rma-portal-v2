@@ -686,9 +686,17 @@ export default function RMAReportsModal({
 
                         {/* 4. Barcode & SKU */}
                         <td className="py-3 px-3.5 font-mono">
-                          <div className="font-bold text-slate-800 dark:text-slate-200">{item.barcode}</div>
-                          {(item.code || matchedProduct?.code) && (
-                            <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.code || matchedProduct?.code}</div>
+                          {(item.is_parent || (Array.isArray(item.items) && item.items.length > 1) || String(item.name || '').toLowerCase().startsWith('batch return manifest')) ? (
+                            <span className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 font-bold text-[10px] border border-purple-200 dark:border-purple-800">
+                              📦 Manifest Items
+                            </span>
+                          ) : (
+                            <>
+                              <div className="font-bold text-slate-800 dark:text-slate-200">{item.barcode}</div>
+                              {(item.code || matchedProduct?.code) && (
+                                <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.code || matchedProduct?.code}</div>
+                              )}
+                            </>
                           )}
                         </td>
 
@@ -952,8 +960,16 @@ export default function RMAReportsModal({
                           {resolvedName}
                         </h4>
                         <div className="font-mono text-xs text-slate-500 dark:text-slate-400">
-                          Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
-                          {(item.code || matchedProduct?.code) && <span> • SKU: {item.code || matchedProduct?.code}</span>}
+                          {(item.is_parent || (Array.isArray(item.items) && item.items.length > 1) || String(item.name || '').toLowerCase().startsWith('batch return manifest')) ? (
+                            <span className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 font-bold text-[10px] border border-purple-200 dark:border-purple-800">
+                              📦 Manifest Items
+                            </span>
+                          ) : (
+                            <>
+                              Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
+                              {(item.code || matchedProduct?.code) && <span> • SKU: {item.code || matchedProduct?.code}</span>}
+                            </>
+                          )}
                         </div>
                       </div>
 

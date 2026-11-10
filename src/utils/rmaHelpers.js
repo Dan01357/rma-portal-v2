@@ -314,19 +314,59 @@ export function getCleanSku(skuOrCode, barcode) {
 
 /**
  * Format quantity and unit, appending pack size when unit is 'case' and pieces_per_case is available
- * Example: "6 case (24 pcs/cs = 144 pcs total)"
  */
 export function formatQuantityWithPackSize(quantity, unitName, piecesPerCase) {
   const qty = Number(quantity) || 1;
-  const unit = String(unitName || 'pc').trim();
+  const unit = String(unitName || 'pc').trim().toLowerCase();
   const pcs = Number(piecesPerCase || 0);
 
-  const isCase = unit.toLowerCase() === 'case' || unit.toLowerCase() === 'cases' || unit.toLowerCase() === 'cs';
-  if (isCase && pcs > 0) {
+  if ((unit === 'case' || unit === 'cases' || unit === 'cs') && pcs > 0) {
     const totalPcs = qty * pcs;
-    return `${qty} ${unit} (${pcs} pcs/cs = ${totalPcs} pcs total)`;
+    return `${qty} case${qty === 1 ? '' : 's'} (${totalPcs} pcs total)`;
   }
-  return `${qty} ${unit}`;
+  return `${qty} ${unitName || 'pc'}`;
+}
+
+/**
+ * Formats a multi-item manifest quantity breakdown by UOM without summing mixed units.
+ * e.g., "3 Line Items (2 pcs, 24 cases)" or "2 pcs, 24 cases"
+ */
+export function formatManifestBreakdown(items = [], includeLineCount = true) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return includeLineCount ? '0 Line Items' : '0 pcs';
+  }
+  let totalPcs = 0;
+  let totalCases = 0;
+  const otherUnits = {};
+
+  items.forEach(it => {
+    const q = Number(it?.quantity ?? it?.qty) || 1;
+    const rawUnit = String(it?.unit_name || it?.unit || 'pc').trim().toLowerCase();
+    if (rawUnit === 'case' || rawUnit === 'cases' || rawUnit === 'cs') {
+      totalCases += q;
+    } else if (rawUnit === 'pc' || rawUnit === 'pcs' || rawUnit === 'piece' || rawUnit === 'pieces' || !rawUnit) {
+      totalPcs += q;
+    } else {
+      otherUnits[rawUnit] = (otherUnits[rawUnit] || 0) + q;
+    }
+  });
+
+  const parts = [];
+  if (totalPcs > 0) {
+    parts.push(`${totalPcs} ${totalPcs === 1 ? 'pc' : 'pcs'}`);
+  }
+  if (totalCases > 0) {
+    parts.push(`${totalCases} ${totalCases === 1 ? 'case' : 'cases'}`);
+  }
+  Object.entries(otherUnits).forEach(([u, count]) => {
+    parts.push(`${count} ${u}`);
+  });
+
+  const breakdownStr = parts.join(', ') || '1 pc';
+  if (includeLineCount) {
+    return `${items.length} Line Item${items.length === 1 ? '' : 's'} (${breakdownStr})`;
+  }
+  return breakdownStr;
 }
 
 

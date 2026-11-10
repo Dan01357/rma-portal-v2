@@ -261,12 +261,6 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
       return;
     }
 
-    // Customer AE is strictly REQUIRED
-    if (!selectedAe || !selectedAe.email) {
-      setErrorNotice('Customer Account Executive (AE) is required. Please search and select an AE from the company employee directory.');
-      return;
-    }
-
     setIsLoading(true);
     setErrorNotice(null);
 
@@ -279,8 +273,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         });
       }
 
-      const isCaseUnit = (unitName || '').toLowerCase() === 'case';
-      const cleanPiecesPerCase = isCaseUnit ? (parseInt(piecesPerCase, 10) || null) : null;
+      const cleanPiecesPerCase = parseInt(piecesPerCase, 10) || null;
 
       const payload = {
         barcode: barcode.trim(),
@@ -293,8 +286,10 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         pieces_per_case: cleanPiecesPerCase,
         piecesPerCase: cleanPiecesPerCase,
         imageUrl: finalImageUrl || null,
-        aeName: selectedAe.name,
-        aeEmail: selectedAe.email,
+        aeName: selectedAe?.name || null,
+        aeEmail: selectedAe?.email || null,
+        ae_name: selectedAe?.name || null,
+        ae_email: selectedAe?.email || null,
         company: company
       };
 
@@ -504,11 +499,11 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
               </div>
             </div>
 
-            {/* CUSTOMER ACCOUNT EXECUTIVE (AE) SELECTOR - STRICTLY REQUIRED */}
+            {/* CUSTOMER ACCOUNT EXECUTIVE (AE) SELECTOR - OPTIONAL */}
             <div className="p-3.5 bg-blue-50/60 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 rounded-2xl space-y-2 relative">
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-black text-blue-950 dark:text-blue-300">
-                  Customer Account Executive (AE) * <span className="text-rose-500 font-bold">(Required)</span>
+                  Customer Account Executive (AE) <span className="text-slate-500 dark:text-slate-400 font-semibold">(Optional)</span>
                 </label>
                 <span className="text-[10px] text-blue-700 dark:text-blue-400 font-semibold">
                   Receives CC on report emails
@@ -528,16 +523,28 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                       </div>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedAe(null);
-                      setIsAeDropdownOpen(true);
-                    }}
-                    className="px-2.5 py-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-[11px] font-bold shrink-0 transition-colors"
-                  >
-                    Change AE
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedAe(null);
+                        setIsAeDropdownOpen(true);
+                      }}
+                      className="px-2.5 py-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-[11px] font-bold transition-colors"
+                    >
+                      Change AE
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedAe(null);
+                        setIsAeDropdownOpen(false);
+                      }}
+                      className="px-2 py-1 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/50 rounded-lg text-[11px] font-bold transition-colors"
+                    >
+                      Clear
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="relative">
@@ -659,25 +666,23 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
               </div>
             </div>
 
-            {/* Pieces Per Case (Pack Size) - when Unit is 'case' */}
-            {unitName === 'case' && (
-              <div className="p-3 bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 rounded-2xl space-y-1 animate-in fade-in">
-                <label className="block text-xs font-bold text-amber-900 dark:text-amber-200">
-                  Pieces per Case (Pack Size) *
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  value={piecesPerCase}
-                  onChange={(e) => setPiecesPerCase(e.target.value)}
-                  placeholder="e.g. 24"
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-600 shadow-2xs"
-                />
-                <p className="text-[10px] text-amber-700 dark:text-amber-400">
-                  Specifies how many individual pieces are inside 1 case (e.g. 6 cases × 24 pcs/cs = 144 pcs total).
-                </p>
-              </div>
-            )}
+            {/* Pieces Per Case (Pack Size) - Master Data */}
+            <div className="p-3 bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 rounded-2xl space-y-1 animate-in fade-in">
+              <label className="block text-xs font-bold text-amber-900 dark:text-amber-200">
+                Pieces per Case (Pack Size)
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={piecesPerCase}
+                onChange={(e) => setPiecesPerCase(e.target.value)}
+                placeholder="e.g. 24"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-600 shadow-2xs"
+              />
+              <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                Specifies how many individual pieces are inside 1 case (e.g. 6 cases × 24 pcs/cs = 144 pcs total).
+              </p>
+            </div>
 
             {/* Supplier */}
             <div>
