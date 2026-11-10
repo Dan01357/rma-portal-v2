@@ -94,6 +94,11 @@ If you need to know which items were scrapped (damaged beyond repair / expired) 
    \`\`\`
    This marks the ticket as **7- Scrapped / Disposed**.
 
+#### 3. Dual Logistics Streams & Batch Manifests:
+- **\`rma_type: "customer_inbound"\`**: Customer / branch store returns awaiting warehouse triage, restock, or Credit Memo issuance.
+- **\`rma_type: "supplier_outbound"\`**: Defective merchandise batched for outbound Return to Vendor (RTV) recovery and supplier debit claims.
+- **Multi-Item Batch Manifests**: Batched returns are represented with \`is_parent: true\`, \`items\` (JSONB breakdown of line items), \`total_items\`, and \`total_quantity\`. Child records link via \`parent_rma_id\`. Parent containers never require individual product SKUs.
+
 Click **Authorize** on the top right to test live endpoints directly from this interactive documentation.
       `,
       contact: {

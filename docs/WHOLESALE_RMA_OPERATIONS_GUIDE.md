@@ -477,7 +477,18 @@ Content-Type: application/json
 ```
 - Appends an audit log: `"ERP Scrap confirmed via API by [client.name]"`.
 
-### 6.5 Rate Limiting & Security Governance
+### 6.5 Multi-Item Manifest Data Model & Logistics Streams
+1. **Logistics Stream Segregation (`rma_type`)**:
+   - `customer_inbound`: Customer or store branch returns entering warehouse receiving for inspection and credit memo processing.
+   - `supplier_outbound`: Consolidated vendor chargeback batches being dispatched for Return to Vendor (RTV) recovery.
+2. **Multi-Item Batch Manifests**:
+   - When multiple items are submitted under a single return authorization number (e.g. `RMA-2026-0062-DBBY`), the parent container row is stored with `is_parent: true`, `items` (JSONB breakdown of all items), `total_items`, and `total_quantity`.
+   - Child items are linked via `parent_rma_id`. Parent manifest containers never have individual product SKUs assigned to them.
+   - Child rows inside `rma_reports` and `rma_items` are only generated for multi-item returns (`isBatch && items.length > 1`), strictly preventing duplicate rows on single-item returns.
+3. **Catalog Pack Size Storage**:
+   - Pack size / pieces per case is encoded into `products.brand_name` as `[Pcs/Cs:X]` (e.g., `Savemore [Pcs/Cs:24]`) to strictly prevent schema cache errors on databases where `products.pieces_per_case` is omitted. The API and client automatically normalize and decode this back into `pieces_per_case` numeric values.
+
+### 6.6 Rate Limiting & Security Governance
 * Default rate limit is **60 requests per minute** per key (configurable up to 300 req/min).
 * Rate limits are tracked in-memory with automatic `429 Too Many Requests` status codes and `Retry-After: 60` headers.
 * Key usage timestamps (`last_used_at`) update automatically on valid invocations.
@@ -607,21 +618,48 @@ To satisfy enterprise supply chain compliance (aligned with SAP ERP, Oracle SCM,
 
 To prevent unauthorized public access, link sharing across unauthorized parties, and bot spam, the 6-digit static PIN system has been decommissioned in favor of cryptographic single-store return tokens locked with Google Identity.
 
-### 11.1 Staff-Generated Customer RMA Invites
-Warehouse staff and customer account executives generate personalized return invitations directly from the Admin Hub via the **"🎫 Customer RMA Invites"** module:
-1. **Customer / Reporter Email**: (e.g. `daniloalvaro031717@gmail.com`) — strictly required.
-2. **Store / Branch Name**: (e.g. `Savemore Market Taguig`) — auto-fills into the customer return form.
-3. **Expiry Duration**: Configurable from 2 hours up to 7 days (defaults to 24 hours).
-4. **Token Generation**: Generates a high-entropy cryptographic token (`inv_[timestamp]_[random16]`) stored with `authorized_email`, `store_branch`, `expires_at`, and `status: 'active'`.
-5. **Distribution**: Staff can 1-click **"Copy Link"** or **"Send Link via Email"** (delivering a branded authorization notice via `/api/send-email`).
+### 11.1 Staff-Generated Customer & Supplier RMA Invites
+Warehouse staff and customer account executives generate personalized return invitations directly from the Admin Hub via the **"🎫 Generate RMA Invites"** module:
+1. **Logistics Stream Type**: 
+   - `Customer Inbound (Store Returns)`: Issued to retail store branches or wholesale customers.
+   - `Supplier Outbound (Vendor RTV)`: Issued to vendor logistics teams handling reverse pickup.
+2. **Authorized Google Email**: (e.g. `daniloalvaro031717@gmail.com`) — strictly required.
+3. **Store / Branch / Supplier Partner**: (e.g. `Savemore Market Taguig`) — automatically locked into the return form.
+4. **Flexible Expiry Duration**: Configurable with custom integer input and selectable units (`minutes`, `hours`, `days`), defaulting to 24 hours. Typing sanitizes cleanly without jumping.
+5. **Token Generation**: Generates a high-entropy cryptographic token (`inv_[timestamp]_[random16]`) stored in `public.rma_invites` with `authorized_email`, `stream_type`, `entity_name`, `expires_at`, and `status: 'active'`.
+6. **Distribution**: Staff can 1-click **"Copy Link"** or **"Send Link via Email"** (delivering a branded authorization notice via `/api/send-email`).
+7. **Pagination & Unrestricted Deletion**: Invites table is paginated to 10 records per page. Any invite record can be revoked or deleted directly with a safety confirmation dialog.
 
 ### 11.2 Google Identity Lock & Anti-Forwarding Protection
-When the customer opens their private link (`/intake?token=inv_...`):
+When the customer opens their private link (`/?token=inv_...`):
 - The portal displays a security lock screen showing the exact authorized recipient and a live remaining-time countdown.
 - Clicking **"[ 🔵 Continue with Google ]"** authenticates the user via Google OAuth (`supabase.auth.signInWithOAuth`).
 - **Cryptographic Account Verification**:
   - If the signed-in Google account matches `invite.authorized_email` (case-insensitive), access is granted immediately.
   - The return intake form auto-populates `Store / Branch` and locks `Reporter Information` with a verified Google Identity badge (`readOnly`).
   - If the link is forwarded to an unauthorized third party, or if the user signs in with an alternate Google account, the portal permanently blocks access with a 403 Forbidden screen: *"Access Denied — Identity Mismatch. Forwarding is prohibited."*
+- **Zero Admin Buttons on Public Screens**: Public and invited users are never shown any internal admin login buttons or sandbox setup instructions.
+
+### 11.3 Unbypassable Real-Time Revocation & Deletion Watchdog
+To prevent revoked or deleted links from continuing to submit reports:
+1. **Single Source of Truth (`public.rma_invites`)**:
+   When querying `validateInviteToken`, if `rma_invites` returns 0 rows (`data === null`), the token is immediately confirmed deleted and returns `404 NOT_FOUND`. It never falls back to `localStorage` to resurrect deleted tokens.
+2. **Instant Local Storage Purge**:
+   When an admin clicks **Revoke** or **Delete** in the Invites modal, any matching gate session (`rma_portal_gate_session`) is instantly wiped from `localStorage`.
+3. **Live Active Watchdog in `App.jsx`**:
+   - **Immediate Mount Check**: Validates the active session token against Supabase on startup.
+   - **4-Second Polling**: Actively polls `inviteService.validateInviteToken` in the background. If revoked or deleted by an admin on another screen, the portal locks within 4 seconds.
+   - **Focus & Visibility Watcher**: Re-verifies immediately whenever the user switches back to the portal tab.
+   - **Supabase Realtime Channel**: Subscribes to `postgres_changes` on `public.rma_invites` for instant lockout upon admin `DELETE` or `UPDATE (status: 'revoked')`.
+   - **Pre-Flight Form Submit Gate**: Before saving any report in `handleSubmitReport`, a pre-flight token validation is executed. Submissions on revoked or deleted links are hard-blocked.
+
+### 11.4 Live Public Portal Countdown Timer & Instant Expiry Lock
+Public intake users are kept fully aware of their session duration:
+1. **Top Navigation Bar**: Renders a live ticking pill (`⏱️ Link expires in: 1h 45m 22s`), with color transitions:
+   - 🟢 **Emerald**: Over 30 minutes remaining.
+   - 🟡 **Amber**: Under 30 minutes remaining.
+   - 🔴 **Pulsing Rose**: Under 5 minutes remaining.
+2. **Intake Form Header**: Renders an authorized return session banner showing the authorized store/vendor name, verified Google identity, and the live ticking clock.
+3. **Instant Expiry Lock**: When the countdown reaches `0s`, the session is purged from memory and `localStorage`, and the device is immediately locked with an amber *"Authorization Expired"* screen.
 
 

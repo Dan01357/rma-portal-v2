@@ -1155,8 +1155,58 @@ Each test scenario defines:
   * **Expected Behavior**:
     1. The mismatched Google session is immediately rejected with an unbypassable 403 Forbidden screen: *"Access Denied — Identity Mismatch. This private link was issued exclusively to daniloalvaro031717@gmail.com. You are signed in as anotheruser@gmail.com. Forwarding is prohibited."*
     2. Visiting `/` or `/intake` directly without token displays: *"Pingcon RMA Portal — Authorization Required. Please contact your assigned Pingcon representative to receive your store's personalized return link."*
-    3. Accessing a revoked or expired token displays: *"Invite Link Revoked"* or *"Invite Link Expired"*, blocking all intake submissions.
-    4. In QA test mode (`isTestMode: true`), clicking "⚡ Test Mode Sandbox Bypass" unlocks the portal for rapid QA testing without OAuth redirection.
+    3. Accessing a revoked or expired token displays: *"Authorization Revoked"* or *"Authorization Expired"*, blocking all intake submissions.
+    4. Public gatekeeper screens strictly display zero internal admin login buttons.
+
+---
+
+## Section 15: Batch RMA Reporting, Real-Time Link Revocation & Live Countdown Timer
+
+- [ ] **TC-BAT-01 (Multi-Item Batch RMA Submission without Schema Cache Error)**
+  * **Location**: Public Portal (`/`) -> Manifest Mode
+  * **Action**:
+    1. Scan or add 2 or more distinct products into the manifest (e.g., `14124` and `12414`).
+    2. Attach photos, set Defect Reason, and click "Submit Return Authorization".
+    3. Observe network payload and console output.
+  * **Expected Behavior**:
+    1. Submission completes with status 200 without `Could not find pieces_per_case column` errors.
+    2. Parent record is created with `is_parent: true`, `items` JSON array, `total_items: 2`, and `total_quantity: 2`.
+    3. In Admin Customer RMA Hub, expanding the batch drawer renders all manifest line items with barcode, SKU, quantity, and photo without showing `(0 Items)`.
+
+- [ ] **TC-CAT-02 (Catalog Product SKU Creation & Pack Size Resilience)**
+  * **Location**: Admin Portal -> Saved Products Tab / Assign SKU Modal (`ProductEditModal.jsx`)
+  * **Action**:
+    1. Click "Add Product" or click "Assign SKU" from an uncatalogued return item.
+    2. Fill in SKU Code (e.g. `SS1742P`), Product Name, Prices, and Pieces per Case (`24`).
+    3. Click "Save Product".
+  * **Expected Behavior**:
+    1. Product saves with HTTP 200 without throwing `column products.pieces_per_case does not exist`.
+    2. Pack size is safely preserved and decoded into `pieces_per_case: 24` across UI views.
+
+- [ ] **TC-INV-03 (Unbypassable Real-Time Revoke and Delete Watchdog)**
+  * **Location**: Admin Portal -> Generate RMA Invites Modal (`CustomerRMAInvitesModal.jsx`) & Public Portal (`App.jsx`)
+  * **Action**:
+    1. Authenticate an invite link in a browser tab.
+    2. In another tab or admin browser, open "Generate RMA Invites" and click **Revoke** or **Delete** on that invite.
+    3. Observe the user's portal tab.
+    4. Attempt to submit an RMA report under the revoked/deleted session.
+  * **Expected Behavior**:
+    1. Within 4 seconds (via background poll or Supabase Realtime channel), the portal detects the revoked/deleted state.
+    2. `rma_portal_gate_session` is immediately deleted from `localStorage`.
+    3. Active session state is wiped and the portal immediately locks with the dedicated 403 Forbidden screen (*"Authorization Revoked"* or *"Authorization Unavailable"*).
+    4. Form submission pre-flight check hard-blocks submission with an error toast.
+    5. Zero admin login buttons appear on any gatekeeper error screens.
+
+- [ ] **TC-INV-04 (Live Public Portal Countdown Timer & Instant Expiry Lock)**
+  * **Location**: Public Portal (`/`) with active invite session
+  * **Action**:
+    1. Open an active return link and observe the top navigation bar and intake form header.
+    2. Wait for the session duration to reach expiration (or test with a short duration invite).
+  * **Expected Behavior**:
+    1. Top navigation displays a live ticking countdown badge (`⏱️ Link expires in: 1h 45m 22s`).
+    2. Badge color is green when > 30m, amber when < 30m, and pulsing rose when < 5m.
+    3. Intake form displays an authorized return identity banner with branch name, verified Google identity, and the live ticking clock.
+    4. When countdown reaches 0s, session is automatically terminated and the portal locks with an amber *"Authorization Expired"* screen.
 
 ---
 
@@ -1177,4 +1227,5 @@ Each test scenario defines:
 | **Phase 11: Multi-Item Manifest & Polling** | Customer Hub & Quick Actions | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 12: SKU & Barcode Decoupling** | Product Engine & RMA Manifests | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 13: 1-Click Google Identity Lock** | Customer RMA Invites & OAuth Gate | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 14: Batch RMA & Realtime Revocation Watchdog** | Intake Portal & Gatekeeper Engine | `READY FOR TESTING` | *Lead QA Director* |
 

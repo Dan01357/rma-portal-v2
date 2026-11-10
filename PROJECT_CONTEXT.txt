@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-10T00:42:04.213Z
+Generated At: 2026-11-10T01:09:09.520Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -3405,8 +3405,58 @@ Each test scenario defines:
   * **Expected Behavior**:
     1. The mismatched Google session is immediately rejected with an unbypassable 403 Forbidden screen: *"Access Denied — Identity Mismatch. This private link was issued exclusively to daniloalvaro031717@gmail.com. You are signed in as anotheruser@gmail.com. Forwarding is prohibited."*
     2. Visiting `/` or `/intake` directly without token displays: *"Pingcon RMA Portal — Authorization Required. Please contact your assigned Pingcon representative to receive your store's personalized return link."*
-    3. Accessing a revoked or expired token displays: *"Invite Link Revoked"* or *"Invite Link Expired"*, blocking all intake submissions.
-    4. In QA test mode (`isTestMode: true`), clicking "⚡ Test Mode Sandbox Bypass" unlocks the portal for rapid QA testing without OAuth redirection.
+    3. Accessing a revoked or expired token displays: *"Authorization Revoked"* or *"Authorization Expired"*, blocking all intake submissions.
+    4. Public gatekeeper screens strictly display zero internal admin login buttons.
+
+---
+
+## Section 15: Batch RMA Reporting, Real-Time Link Revocation & Live Countdown Timer
+
+- [ ] **TC-BAT-01 (Multi-Item Batch RMA Submission without Schema Cache Error)**
+  * **Location**: Public Portal (`/`) -> Manifest Mode
+  * **Action**:
+    1. Scan or add 2 or more distinct products into the manifest (e.g., `14124` and `12414`).
+    2. Attach photos, set Defect Reason, and click "Submit Return Authorization".
+    3. Observe network payload and console output.
+  * **Expected Behavior**:
+    1. Submission completes with status 200 without `Could not find pieces_per_case column` errors.
+    2. Parent record is created with `is_parent: true`, `items` JSON array, `total_items: 2`, and `total_quantity: 2`.
+    3. In Admin Customer RMA Hub, expanding the batch drawer renders all manifest line items with barcode, SKU, quantity, and photo without showing `(0 Items)`.
+
+- [ ] **TC-CAT-02 (Catalog Product SKU Creation & Pack Size Resilience)**
+  * **Location**: Admin Portal -> Saved Products Tab / Assign SKU Modal (`ProductEditModal.jsx`)
+  * **Action**:
+    1. Click "Add Product" or click "Assign SKU" from an uncatalogued return item.
+    2. Fill in SKU Code (e.g. `SS1742P`), Product Name, Prices, and Pieces per Case (`24`).
+    3. Click "Save Product".
+  * **Expected Behavior**:
+    1. Product saves with HTTP 200 without throwing `column products.pieces_per_case does not exist`.
+    2. Pack size is safely preserved and decoded into `pieces_per_case: 24` across UI views.
+
+- [ ] **TC-INV-03 (Unbypassable Real-Time Revoke and Delete Watchdog)**
+  * **Location**: Admin Portal -> Generate RMA Invites Modal (`CustomerRMAInvitesModal.jsx`) & Public Portal (`App.jsx`)
+  * **Action**:
+    1. Authenticate an invite link in a browser tab.
+    2. In another tab or admin browser, open "Generate RMA Invites" and click **Revoke** or **Delete** on that invite.
+    3. Observe the user's portal tab.
+    4. Attempt to submit an RMA report under the revoked/deleted session.
+  * **Expected Behavior**:
+    1. Within 4 seconds (via background poll or Supabase Realtime channel), the portal detects the revoked/deleted state.
+    2. `rma_portal_gate_session` is immediately deleted from `localStorage`.
+    3. Active session state is wiped and the portal immediately locks with the dedicated 403 Forbidden screen (*"Authorization Revoked"* or *"Authorization Unavailable"*).
+    4. Form submission pre-flight check hard-blocks submission with an error toast.
+    5. Zero admin login buttons appear on any gatekeeper error screens.
+
+- [ ] **TC-INV-04 (Live Public Portal Countdown Timer & Instant Expiry Lock)**
+  * **Location**: Public Portal (`/`) with active invite session
+  * **Action**:
+    1. Open an active return link and observe the top navigation bar and intake form header.
+    2. Wait for the session duration to reach expiration (or test with a short duration invite).
+  * **Expected Behavior**:
+    1. Top navigation displays a live ticking countdown badge (`⏱️ Link expires in: 1h 45m 22s`).
+    2. Badge color is green when > 30m, amber when < 30m, and pulsing rose when < 5m.
+    3. Intake form displays an authorized return identity banner with branch name, verified Google identity, and the live ticking clock.
+    4. When countdown reaches 0s, session is automatically terminated and the portal locks with an amber *"Authorization Expired"* screen.
 
 ---
 
@@ -3427,6 +3477,7 @@ Each test scenario defines:
 | **Phase 11: Multi-Item Manifest & Polling** | Customer Hub & Quick Actions | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 12: SKU & Barcode Decoupling** | Product Engine & RMA Manifests | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 13: 1-Click Google Identity Lock** | Customer RMA Invites & OAuth Gate | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 14: Batch RMA & Realtime Revocation Watchdog** | Intake Portal & Gatekeeper Engine | `READY FOR TESTING` | *Lead QA Director* |
 
 
 --- END FILE: docs/MANUAL_QA_TESTING_CHECKLIST.md ---
@@ -3911,7 +3962,18 @@ Content-Type: application/json
 ```
 - Appends an audit log: `"ERP Scrap confirmed via API by [client.name]"`.
 
-### 6.5 Rate Limiting & Security Governance
+### 6.5 Multi-Item Manifest Data Model & Logistics Streams
+1. **Logistics Stream Segregation (`rma_type`)**:
+   - `customer_inbound`: Customer or store branch returns entering warehouse receiving for inspection and credit memo processing.
+   - `supplier_outbound`: Consolidated vendor chargeback batches being dispatched for Return to Vendor (RTV) recovery.
+2. **Multi-Item Batch Manifests**:
+   - When multiple items are submitted under a single return authorization number (e.g. `RMA-2026-0062-DBBY`), the parent container row is stored with `is_parent: true`, `items` (JSONB breakdown of all items), `total_items`, and `total_quantity`.
+   - Child items are linked via `parent_rma_id`. Parent manifest containers never have individual product SKUs assigned to them.
+   - Child rows inside `rma_reports` and `rma_items` are only generated for multi-item returns (`isBatch && items.length > 1`), strictly preventing duplicate rows on single-item returns.
+3. **Catalog Pack Size Storage**:
+   - Pack size / pieces per case is encoded into `products.brand_name` as `[Pcs/Cs:X]` (e.g., `Savemore [Pcs/Cs:24]`) to strictly prevent schema cache errors on databases where `products.pieces_per_case` is omitted. The API and client automatically normalize and decode this back into `pieces_per_case` numeric values.
+
+### 6.6 Rate Limiting & Security Governance
 * Default rate limit is **60 requests per minute** per key (configurable up to 300 req/min).
 * Rate limits are tracked in-memory with automatic `429 Too Many Requests` status codes and `Retry-After: 60` headers.
 * Key usage timestamps (`last_used_at`) update automatically on valid invocations.
@@ -4041,22 +4103,49 @@ To satisfy enterprise supply chain compliance (aligned with SAP ERP, Oracle SCM,
 
 To prevent unauthorized public access, link sharing across unauthorized parties, and bot spam, the 6-digit static PIN system has been decommissioned in favor of cryptographic single-store return tokens locked with Google Identity.
 
-### 11.1 Staff-Generated Customer RMA Invites
-Warehouse staff and customer account executives generate personalized return invitations directly from the Admin Hub via the **"🎫 Customer RMA Invites"** module:
-1. **Customer / Reporter Email**: (e.g. `daniloalvaro031717@gmail.com`) — strictly required.
-2. **Store / Branch Name**: (e.g. `Savemore Market Taguig`) — auto-fills into the customer return form.
-3. **Expiry Duration**: Configurable from 2 hours up to 7 days (defaults to 24 hours).
-4. **Token Generation**: Generates a high-entropy cryptographic token (`inv_[timestamp]_[random16]`) stored with `authorized_email`, `store_branch`, `expires_at`, and `status: 'active'`.
-5. **Distribution**: Staff can 1-click **"Copy Link"** or **"Send Link via Email"** (delivering a branded authorization notice via `/api/send-email`).
+### 11.1 Staff-Generated Customer & Supplier RMA Invites
+Warehouse staff and customer account executives generate personalized return invitations directly from the Admin Hub via the **"🎫 Generate RMA Invites"** module:
+1. **Logistics Stream Type**: 
+   - `Customer Inbound (Store Returns)`: Issued to retail store branches or wholesale customers.
+   - `Supplier Outbound (Vendor RTV)`: Issued to vendor logistics teams handling reverse pickup.
+2. **Authorized Google Email**: (e.g. `daniloalvaro031717@gmail.com`) — strictly required.
+3. **Store / Branch / Supplier Partner**: (e.g. `Savemore Market Taguig`) — automatically locked into the return form.
+4. **Flexible Expiry Duration**: Configurable with custom integer input and selectable units (`minutes`, `hours`, `days`), defaulting to 24 hours. Typing sanitizes cleanly without jumping.
+5. **Token Generation**: Generates a high-entropy cryptographic token (`inv_[timestamp]_[random16]`) stored in `public.rma_invites` with `authorized_email`, `stream_type`, `entity_name`, `expires_at`, and `status: 'active'`.
+6. **Distribution**: Staff can 1-click **"Copy Link"** or **"Send Link via Email"** (delivering a branded authorization notice via `/api/send-email`).
+7. **Pagination & Unrestricted Deletion**: Invites table is paginated to 10 records per page. Any invite record can be revoked or deleted directly with a safety confirmation dialog.
 
 ### 11.2 Google Identity Lock & Anti-Forwarding Protection
-When the customer opens their private link (`/intake?token=inv_...`):
+When the customer opens their private link (`/?token=inv_...`):
 - The portal displays a security lock screen showing the exact authorized recipient and a live remaining-time countdown.
 - Clicking **"[ 🔵 Continue with Google ]"** authenticates the user via Google OAuth (`supabase.auth.signInWithOAuth`).
 - **Cryptographic Account Verification**:
   - If the signed-in Google account matches `invite.authorized_email` (case-insensitive), access is granted immediately.
   - The return intake form auto-populates `Store / Branch` and locks `Reporter Information` with a verified Google Identity badge (`readOnly`).
   - If the link is forwarded to an unauthorized third party, or if the user signs in with an alternate Google account, the portal permanently blocks access with a 403 Forbidden screen: *"Access Denied — Identity Mismatch. Forwarding is prohibited."*
+- **Zero Admin Buttons on Public Screens**: Public and invited users are never shown any internal admin login buttons or sandbox setup instructions.
+
+### 11.3 Unbypassable Real-Time Revocation & Deletion Watchdog
+To prevent revoked or deleted links from continuing to submit reports:
+1. **Single Source of Truth (`public.rma_invites`)**:
+   When querying `validateInviteToken`, if `rma_invites` returns 0 rows (`data === null`), the token is immediately confirmed deleted and returns `404 NOT_FOUND`. It never falls back to `localStorage` to resurrect deleted tokens.
+2. **Instant Local Storage Purge**:
+   When an admin clicks **Revoke** or **Delete** in the Invites modal, any matching gate session (`rma_portal_gate_session`) is instantly wiped from `localStorage`.
+3. **Live Active Watchdog in `App.jsx`**:
+   - **Immediate Mount Check**: Validates the active session token against Supabase on startup.
+   - **4-Second Polling**: Actively polls `inviteService.validateInviteToken` in the background. If revoked or deleted by an admin on another screen, the portal locks within 4 seconds.
+   - **Focus & Visibility Watcher**: Re-verifies immediately whenever the user switches back to the portal tab.
+   - **Supabase Realtime Channel**: Subscribes to `postgres_changes` on `public.rma_invites` for instant lockout upon admin `DELETE` or `UPDATE (status: 'revoked')`.
+   - **Pre-Flight Form Submit Gate**: Before saving any report in `handleSubmitReport`, a pre-flight token validation is executed. Submissions on revoked or deleted links are hard-blocked.
+
+### 11.4 Live Public Portal Countdown Timer & Instant Expiry Lock
+Public intake users are kept fully aware of their session duration:
+1. **Top Navigation Bar**: Renders a live ticking pill (`⏱️ Link expires in: 1h 45m 22s`), with color transitions:
+   - 🟢 **Emerald**: Over 30 minutes remaining.
+   - 🟡 **Amber**: Under 30 minutes remaining.
+   - 🔴 **Pulsing Rose**: Under 5 minutes remaining.
+2. **Intake Form Header**: Renders an authorized return session banner showing the authorized store/vendor name, verified Google identity, and the live ticking clock.
+3. **Instant Expiry Lock**: When the countdown reaches `0s`, the session is purged from memory and `localStorage`, and the device is immediately locked with an amber *"Authorization Expired"* screen.
 
 
 
@@ -7761,6 +7850,11 @@ If you need to know which items were scrapped (damaged beyond repair / expired) 
    \`\`\`
    This marks the ticket as **7- Scrapped / Disposed**.
 
+#### 3. Dual Logistics Streams & Batch Manifests:
+- **\`rma_type: "customer_inbound"\`**: Customer / branch store returns awaiting warehouse triage, restock, or Credit Memo issuance.
+- **\`rma_type: "supplier_outbound"\`**: Defective merchandise batched for outbound Return to Vendor (RTV) recovery and supplier debit claims.
+- **Multi-Item Batch Manifests**: Batched returns are represented with \`is_parent: true\`, \`items\` (JSONB breakdown of line items), \`total_items\`, and \`total_quantity\`. Child records link via \`parent_rma_id\`. Parent containers never require individual product SKUs.
+
 Click **Authorize** on the top right to test live endpoints directly from this interactive documentation.
       `,
       contact: {
@@ -8381,6 +8475,11 @@ export const RMAReportSchema = z.object({
   po_number: z.string().nullable().optional().openapi({ example: 'PO-2026-4401' }),
   expiry_date: z.string().nullable().optional().openapi({ example: '2026-12-31' }),
   batch_lot_number: z.string().nullable().optional().openapi({ example: 'LOT-B42' }),
+  is_parent: z.boolean().default(false).openapi({ example: false, description: 'True if this report is a batch return manifest container' }),
+  parent_rma_id: z.number().int().nullable().optional().openapi({ example: null, description: 'Parent report ID if this is a line item inside a batch return manifest' }),
+  items: z.array(z.any()).default([]).openapi({ example: [], description: 'Line item breakdown objects for multi-item return manifests' }),
+  total_items: z.number().int().default(1).openapi({ example: 1, description: 'Total distinct items in manifest' }),
+  total_quantity: z.number().int().default(1).openapi({ example: 1, description: 'Summed quantity across all items in manifest' }),
   notes: z.string().nullable().optional().openapi({ example: 'Customer returned item with receipt' }),
   created_at: z.string().datetime().openapi({ example: '2026-10-26T14:30:00.000Z' })
 }).openapi('RMAReport');
@@ -8389,6 +8488,10 @@ export const CreateRMAReportSchema = z.object({
   barcode: z.string().min(1, 'Barcode is required').openapi({ example: '4800016644833' }),
   name: z.string().min(1, 'Product name is required').openapi({ example: 'Oishi Prawn Crackers 50g' }),
   rma_type: RMATypeEnum.optional().default('customer_inbound').openapi({ example: 'customer_inbound', description: 'Logistics type: customer_inbound (default) or supplier_outbound' }),
+  is_parent: z.boolean().optional().default(false).openapi({ example: false, description: 'True if submitting a multi-item batch return manifest' }),
+  items: z.array(z.any()).optional().default([]).openapi({ example: [], description: 'Array of item breakdown objects for batch returns' }),
+  total_items: z.number().int().optional().default(1).openapi({ example: 1 }),
+  total_quantity: z.number().int().optional().default(1).openapi({ example: 1 }),
   code: z.string().optional().openapi({ example: 'P2678P' }),
   quantity: z.number().int().min(1).default(1).openapi({ example: 2 }),
   supplier_name: z.string().optional().default('Savemore').openapi({ example: 'Liwayway Marketing' }),

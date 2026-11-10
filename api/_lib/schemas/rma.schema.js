@@ -68,6 +68,11 @@ export const RMAReportSchema = z.object({
   po_number: z.string().nullable().optional().openapi({ example: 'PO-2026-4401' }),
   expiry_date: z.string().nullable().optional().openapi({ example: '2026-12-31' }),
   batch_lot_number: z.string().nullable().optional().openapi({ example: 'LOT-B42' }),
+  is_parent: z.boolean().default(false).openapi({ example: false, description: 'True if this report is a batch return manifest container' }),
+  parent_rma_id: z.number().int().nullable().optional().openapi({ example: null, description: 'Parent report ID if this is a line item inside a batch return manifest' }),
+  items: z.array(z.any()).default([]).openapi({ example: [], description: 'Line item breakdown objects for multi-item return manifests' }),
+  total_items: z.number().int().default(1).openapi({ example: 1, description: 'Total distinct items in manifest' }),
+  total_quantity: z.number().int().default(1).openapi({ example: 1, description: 'Summed quantity across all items in manifest' }),
   notes: z.string().nullable().optional().openapi({ example: 'Customer returned item with receipt' }),
   created_at: z.string().datetime().openapi({ example: '2026-10-26T14:30:00.000Z' })
 }).openapi('RMAReport');
@@ -76,6 +81,10 @@ export const CreateRMAReportSchema = z.object({
   barcode: z.string().min(1, 'Barcode is required').openapi({ example: '4800016644833' }),
   name: z.string().min(1, 'Product name is required').openapi({ example: 'Oishi Prawn Crackers 50g' }),
   rma_type: RMATypeEnum.optional().default('customer_inbound').openapi({ example: 'customer_inbound', description: 'Logistics type: customer_inbound (default) or supplier_outbound' }),
+  is_parent: z.boolean().optional().default(false).openapi({ example: false, description: 'True if submitting a multi-item batch return manifest' }),
+  items: z.array(z.any()).optional().default([]).openapi({ example: [], description: 'Array of item breakdown objects for batch returns' }),
+  total_items: z.number().int().optional().default(1).openapi({ example: 1 }),
+  total_quantity: z.number().int().optional().default(1).openapi({ example: 1 }),
   code: z.string().optional().openapi({ example: 'P2678P' }),
   quantity: z.number().int().min(1).default(1).openapi({ example: 2 }),
   supplier_name: z.string().optional().default('Savemore').openapi({ example: 'Liwayway Marketing' }),
