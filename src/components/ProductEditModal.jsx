@@ -25,7 +25,7 @@ import SupplierInput from './SupplierInput';
 import ProductAutoSuggest from './ProductAutoSuggest';
 
 export default function ProductEditModal({ isOpen, onClose, product, onSaved, onDeleted, currentUser }) {
-  const isEditing = Boolean(product && product.id);
+  const isEditing = Boolean(product && product.id && (typeof product.id === 'number' || (/^\d+$/.test(String(product.id).trim()) && !String(product.id).startsWith('prod_'))));
   const isExistingBarcode = Boolean(product && product.barcode);
 
   const [name, setName] = useState('');

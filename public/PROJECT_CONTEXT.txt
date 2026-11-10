@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-10T03:25:37.006Z
+Generated At: 2026-11-10T04:43:41.990Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -9510,6 +9510,11 @@ export default function App() {
         const match = window.location.hash.match(/token=([^&]+)/);
         if (match && match[1]) urlToken = decodeURIComponent(match[1]);
       }
+      if (!urlToken && typeof window !== 'undefined') {
+        try {
+          urlToken = sessionStorage.getItem('rma_active_invite_token') || localStorage.getItem('rma_pending_oauth_token');
+        } catch {}
+      }
 
       // If an invite token is present in the address bar, enforce strict single-visit verification!
       // Do NOT auto-unlock using previous bypasses in localStorage.rma_portal_gate_session.
@@ -9728,6 +9733,11 @@ export default function App() {
       if (!urlToken && window.location.hash.includes('token=')) {
         const m = window.location.hash.match(/token=([^&]+)/);
         if (m && m[1]) urlToken = decodeURIComponent(m[1]);
+      }
+      if (!urlToken && typeof window !== 'undefined') {
+        try {
+          urlToken = sessionStorage.getItem('rma_active_invite_token') || localStorage.getItem('rma_pending_oauth_token');
+        } catch {}
       }
 
       if (urlToken) {
@@ -10141,19 +10151,9 @@ export default function App() {
     setIsCreditMemoModalOpen(true);
   };
 
-  // Physical Triage & Inspection Handler with Assign SKU Safeguard
+  // Physical Triage & Inspection Handler
   const handleInspectTriageForReport = (report) => {
     if (!report) return;
-    const isManifest = isBatchManifest(report, recentReportsList);
-    // For single-item returns, an official catalog SKU is required before physical triage
-    if (!isManifest && !hasAssignedSku(report, savedProductsList)) {
-      setCreditMemoWarningTarget({
-        item: report,
-        title: "Assign SKU Required First",
-        message: "Physical inspection and warehouse triage require an official catalog SKU / Item Code to be assigned first. Please click 'Assign SKU' to register the product in the catalog before triaging."
-      });
-      return;
-    }
     setQuickRmaNumber(report.rma_number);
     setIsQuickRmaModalOpen(true);
   };
@@ -15314,8 +15314,6 @@ export default function App() {
         isOpen={(() => {
           if (typeof window === 'undefined') return false;
           if (isAdminView) return false;
-          // Only users already authenticated as currentUser?.role === 'super_admin' can view "/" for testing
-          if (currentUser?.role === 'super_admin') return false;
 
           const urlParams = new URLSearchParams(window.location.search);
           let urlToken = urlParams.get('token');
@@ -15323,10 +15321,20 @@ export default function App() {
             const m = window.location.hash.match(/token=([^&]+)/);
             if (m && m[1]) urlToken = decodeURIComponent(m[1]);
           }
+          if (!urlToken) {
+            try {
+              urlToken = sessionStorage.getItem('rma_active_invite_token') || localStorage.getItem('rma_pending_oauth_token');
+            } catch {}
+          }
+
           // If visiting an invite link with a token, the Gatekeeper MUST be locked until this specific token is authenticated!
           if (urlToken) {
             return !gateSession || gateSession.token !== urlToken;
           }
+
+          // Only users already authenticated as currentUser?.role === 'super_admin' can view "/" without a token for testing
+          if (currentUser?.role === 'super_admin') return false;
+
           // Lock root URL (/): If anyone visits "/" directly without a "?token=", keep the portal locked with the Gatekeeper overlay
           return true;
         })()}
@@ -20735,7 +20743,7 @@ export default function GatekeeperPinModal({
 
     if (!t) {
       try {
-        t = sessionStorage.getItem('rma_active_invite_token') || sessionStorage.getItem('rma_pending_oauth_token');
+        t = sessionStorage.getItem('rma_active_invite_token') || sessionStorage.getItem('rma_pending_oauth_token') || localStorage.getItem('rma_pending_oauth_token');
       } catch {}
     }
 
@@ -20743,6 +20751,7 @@ export default function GatekeeperPinModal({
       try {
         sessionStorage.setItem('rma_active_invite_token', t);
         sessionStorage.setItem('rma_pending_oauth_token', t);
+        localStorage.setItem('rma_pending_oauth_token', t);
       } catch {}
     }
 
@@ -20789,13 +20798,20 @@ export default function GatekeeperPinModal({
 
           try {
             sessionStorage.removeItem('rma_pending_oauth_token');
+            localStorage.removeItem('rma_pending_oauth_token');
+            localStorage.removeItem('rma_oauth_in_progress');
             localStorage.setItem('rma_portal_gate_session', JSON.stringify(unlockedSession));
             localStorage.setItem('rma_reporter_contact', authorizedEmail);
             localStorage.setItem('rma_portal_verified_email', userEmail);
 
-            // Clean up OAuth tokens from URL hash for a clean address bar while strictly preserving search params
-            if (window.location.hash && window.location.hash.includes('access_token')) {
-              window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            // Clean up OAuth tokens from URL hash and ensure token query parameter is preserved
+            if (typeof window !== 'undefined' && window.location.hash && (window.location.hash.includes('access_token') || window.location.hash.includes('id_token'))) {
+              const cleanUrl = new URL(window.location.href);
+              cleanUrl.hash = '';
+              if (!cleanUrl.searchParams.get('token') && invite.token) {
+                cleanUrl.searchParams.set('token', invite.token);
+              }
+              window.history.replaceState(null, '', cleanUrl.pathname + cleanUrl.search);
             }
           } catch {}
 
@@ -20965,6 +20981,8 @@ export default function GatekeeperPinModal({
           sessionStorage.setItem('rma_active_invite_token', token);
           sessionStorage.setItem('rma_pending_oauth_token', token);
           sessionStorage.setItem('rma_oauth_in_progress', 'true');
+          localStorage.setItem('rma_pending_oauth_token', token);
+          localStorage.setItem('rma_oauth_in_progress', 'true');
         } catch {}
       }
 
@@ -25839,7 +25857,7 @@ import SupplierInput from './SupplierInput';
 import ProductAutoSuggest from './ProductAutoSuggest';
 
 export default function ProductEditModal({ isOpen, onClose, product, onSaved, onDeleted, currentUser }) {
-  const isEditing = Boolean(product && product.id);
+  const isEditing = Boolean(product && product.id && (typeof product.id === 'number' || (/^\d+$/.test(String(product.id).trim()) && !String(product.id).startsWith('prod_'))));
   const isExistingBarcode = Boolean(product && product.barcode);
 
   const [name, setName] = useState('');
@@ -28060,18 +28078,19 @@ export default function QuickRMAActionModal({
         console.warn('Notice updating rma_reports with manifest triage:', repErr.message);
       }
 
-      // 2. Update child rma_items records in Supabase
+      // 2. Update child rma_items records in Supabase if schema permits
       try {
         for (const item of manifestItems) {
-          await supabase
-            .from('rma_items')
-            .update({
-              condition_grade: item.condition_grade,
-              warehouse_location: (item.warehouse_location || '').trim().toUpperCase(),
-              disposition: item.disposition
-            })
-            .eq('rma_report_id', report.id)
-            .eq('barcode', item.barcode);
+          const itemUpdates = {};
+          if (item.sku) itemUpdates.sku = item.sku;
+          if (item.name) itemUpdates.name = item.name;
+          if (Object.keys(itemUpdates).length > 0) {
+            await supabase
+              .from('rma_items')
+              .update(itemUpdates)
+              .eq('rma_report_id', report.id)
+              .eq('barcode', item.barcode);
+          }
         }
       } catch (e) {
         console.warn('Notice updating rma_items table:', e?.message);
@@ -28268,7 +28287,7 @@ export default function QuickRMAActionModal({
         condition_grade: splitPart2Grade,
         disposition: splitPart2Disposition,
         warehouse_location: splitPart2Location ? splitPart2Location.trim().toUpperCase() : 'SCRAP-BIN',
-        status: 'received_at_dock',
+        status: computeAutomaticLifecycleStatus(splitPart2Disposition, false, null),
         reason: splitPart2Reason || report.reason || 'Damaged packaging / Defective units',
         explanation: `Split from ${report.rma_number} (${p2Qty} of ${totalQty} units). Disposition: ${splitPart2Disposition}`,
         parent_rma_id: report.id,
@@ -28317,9 +28336,7 @@ export default function QuickRMAActionModal({
       const parentUpdates = {
         quantity: p1Qty,
         total_quantity: p1Qty,
-        status: (report.status === 'pending_admin_details' || !report.status || report.status === 'pending')
-          ? 'received_at_dock'
-          : report.status,
+        status: computeAutomaticLifecycleStatus(splitPart1Disposition, false, report.notes),
         condition_grade: splitPart1Grade,
         disposition: splitPart1Disposition,
         warehouse_location: splitPart1Location ? splitPart1Location.trim().toUpperCase() : report.warehouse_location || null,
@@ -41150,9 +41167,17 @@ export const catalogService = {
     // Remove undefined values
     Object.keys(updates).forEach(key => updates[key] === undefined && delete updates[key]);
 
+    const isNumericId = id !== undefined && id !== null && (typeof id === 'number' || (/^\d+$/.test(String(id).trim()) && !String(id).startsWith('prod_')));
+    const cleanBarcode = String(barcode || '').trim();
+
     let query = supabase.from('products').update(updates);
-    if (id) query = query.eq('id', id);
-    else query = query.eq('barcode', barcode);
+    if (isNumericId) {
+      query = query.eq('id', Number(id));
+    } else if (cleanBarcode) {
+      query = query.eq('barcode', cleanBarcode);
+    } else {
+      throw new Error('Valid numeric product ID or barcode required for update.');
+    }
 
     let { data, error } = await query.select();
 
@@ -41162,8 +41187,8 @@ export const catalogService = {
       if (colMatch && colMatch[1] && colMatch[1] in updates) {
         delete updates[colMatch[1]];
         let retryQuery = supabase.from('products').update(updates);
-        if (id) retryQuery = retryQuery.eq('id', id);
-        else retryQuery = retryQuery.eq('barcode', barcode);
+        if (isNumericId) retryQuery = retryQuery.eq('id', Number(id));
+        else if (cleanBarcode) retryQuery = retryQuery.eq('barcode', cleanBarcode);
         const retryRes = await retryQuery.select();
         data = retryRes.data;
         error = retryRes.error;
@@ -41171,6 +41196,25 @@ export const catalogService = {
     }
 
     if (error) throw new Error(`Failed to update product: ${error.message}`);
+
+    // If update returned 0 rows because product wasn't in table yet, upsert via createProduct
+    if ((!data || data.length === 0) && cleanBarcode) {
+      return await this.createProduct({
+        barcode: cleanBarcode,
+        code,
+        name,
+        supplierName,
+        price,
+        priceWithVat,
+        brandName: resolvedBrand,
+        unitName,
+        pieces_per_case: resolvedPcs,
+        imageUrl,
+        aeName,
+        aeEmail,
+        company
+      });
+    }
 
     const updatedProd = data?.[0] ? {
       ...data[0],

@@ -905,9 +905,17 @@ export const catalogService = {
     // Remove undefined values
     Object.keys(updates).forEach(key => updates[key] === undefined && delete updates[key]);
 
+    const isNumericId = id !== undefined && id !== null && (typeof id === 'number' || (/^\d+$/.test(String(id).trim()) && !String(id).startsWith('prod_')));
+    const cleanBarcode = String(barcode || '').trim();
+
     let query = supabase.from('products').update(updates);
-    if (id) query = query.eq('id', id);
-    else query = query.eq('barcode', barcode);
+    if (isNumericId) {
+      query = query.eq('id', Number(id));
+    } else if (cleanBarcode) {
+      query = query.eq('barcode', cleanBarcode);
+    } else {
+      throw new Error('Valid numeric product ID or barcode required for update.');
+    }
 
     let { data, error } = await query.select();
 
@@ -917,8 +925,8 @@ export const catalogService = {
       if (colMatch && colMatch[1] && colMatch[1] in updates) {
         delete updates[colMatch[1]];
         let retryQuery = supabase.from('products').update(updates);
-        if (id) retryQuery = retryQuery.eq('id', id);
-        else retryQuery = retryQuery.eq('barcode', barcode);
+        if (isNumericId) retryQuery = retryQuery.eq('id', Number(id));
+        else if (cleanBarcode) retryQuery = retryQuery.eq('barcode', cleanBarcode);
         const retryRes = await retryQuery.select();
         data = retryRes.data;
         error = retryRes.error;
@@ -926,6 +934,25 @@ export const catalogService = {
     }
 
     if (error) throw new Error(`Failed to update product: ${error.message}`);
+
+    // If update returned 0 rows because product wasn't in table yet, upsert via createProduct
+    if ((!data || data.length === 0) && cleanBarcode) {
+      return await this.createProduct({
+        barcode: cleanBarcode,
+        code,
+        name,
+        supplierName,
+        price,
+        priceWithVat,
+        brandName: resolvedBrand,
+        unitName,
+        pieces_per_case: resolvedPcs,
+        imageUrl,
+        aeName,
+        aeEmail,
+        company
+      });
+    }
 
     const updatedProd = data?.[0] ? {
       ...data[0],

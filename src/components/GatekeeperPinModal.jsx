@@ -48,7 +48,7 @@ export default function GatekeeperPinModal({
 
     if (!t) {
       try {
-        t = sessionStorage.getItem('rma_active_invite_token') || sessionStorage.getItem('rma_pending_oauth_token');
+        t = sessionStorage.getItem('rma_active_invite_token') || sessionStorage.getItem('rma_pending_oauth_token') || localStorage.getItem('rma_pending_oauth_token');
       } catch {}
     }
 
@@ -56,6 +56,7 @@ export default function GatekeeperPinModal({
       try {
         sessionStorage.setItem('rma_active_invite_token', t);
         sessionStorage.setItem('rma_pending_oauth_token', t);
+        localStorage.setItem('rma_pending_oauth_token', t);
       } catch {}
     }
 
@@ -102,13 +103,20 @@ export default function GatekeeperPinModal({
 
           try {
             sessionStorage.removeItem('rma_pending_oauth_token');
+            localStorage.removeItem('rma_pending_oauth_token');
+            localStorage.removeItem('rma_oauth_in_progress');
             localStorage.setItem('rma_portal_gate_session', JSON.stringify(unlockedSession));
             localStorage.setItem('rma_reporter_contact', authorizedEmail);
             localStorage.setItem('rma_portal_verified_email', userEmail);
 
-            // Clean up OAuth tokens from URL hash for a clean address bar while strictly preserving search params
-            if (window.location.hash && window.location.hash.includes('access_token')) {
-              window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            // Clean up OAuth tokens from URL hash and ensure token query parameter is preserved
+            if (typeof window !== 'undefined' && window.location.hash && (window.location.hash.includes('access_token') || window.location.hash.includes('id_token'))) {
+              const cleanUrl = new URL(window.location.href);
+              cleanUrl.hash = '';
+              if (!cleanUrl.searchParams.get('token') && invite.token) {
+                cleanUrl.searchParams.set('token', invite.token);
+              }
+              window.history.replaceState(null, '', cleanUrl.pathname + cleanUrl.search);
             }
           } catch {}
 
@@ -278,6 +286,8 @@ export default function GatekeeperPinModal({
           sessionStorage.setItem('rma_active_invite_token', token);
           sessionStorage.setItem('rma_pending_oauth_token', token);
           sessionStorage.setItem('rma_oauth_in_progress', 'true');
+          localStorage.setItem('rma_pending_oauth_token', token);
+          localStorage.setItem('rma_oauth_in_progress', 'true');
         } catch {}
       }
 

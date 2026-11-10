@@ -438,18 +438,19 @@ export default function QuickRMAActionModal({
         console.warn('Notice updating rma_reports with manifest triage:', repErr.message);
       }
 
-      // 2. Update child rma_items records in Supabase
+      // 2. Update child rma_items records in Supabase if schema permits
       try {
         for (const item of manifestItems) {
-          await supabase
-            .from('rma_items')
-            .update({
-              condition_grade: item.condition_grade,
-              warehouse_location: (item.warehouse_location || '').trim().toUpperCase(),
-              disposition: item.disposition
-            })
-            .eq('rma_report_id', report.id)
-            .eq('barcode', item.barcode);
+          const itemUpdates = {};
+          if (item.sku) itemUpdates.sku = item.sku;
+          if (item.name) itemUpdates.name = item.name;
+          if (Object.keys(itemUpdates).length > 0) {
+            await supabase
+              .from('rma_items')
+              .update(itemUpdates)
+              .eq('rma_report_id', report.id)
+              .eq('barcode', item.barcode);
+          }
         }
       } catch (e) {
         console.warn('Notice updating rma_items table:', e?.message);
@@ -646,7 +647,7 @@ export default function QuickRMAActionModal({
         condition_grade: splitPart2Grade,
         disposition: splitPart2Disposition,
         warehouse_location: splitPart2Location ? splitPart2Location.trim().toUpperCase() : 'SCRAP-BIN',
-        status: 'received_at_dock',
+        status: computeAutomaticLifecycleStatus(splitPart2Disposition, false, null),
         reason: splitPart2Reason || report.reason || 'Damaged packaging / Defective units',
         explanation: `Split from ${report.rma_number} (${p2Qty} of ${totalQty} units). Disposition: ${splitPart2Disposition}`,
         parent_rma_id: report.id,
@@ -695,9 +696,7 @@ export default function QuickRMAActionModal({
       const parentUpdates = {
         quantity: p1Qty,
         total_quantity: p1Qty,
-        status: (report.status === 'pending_admin_details' || !report.status || report.status === 'pending')
-          ? 'received_at_dock'
-          : report.status,
+        status: computeAutomaticLifecycleStatus(splitPart1Disposition, false, report.notes),
         condition_grade: splitPart1Grade,
         disposition: splitPart1Disposition,
         warehouse_location: splitPart1Location ? splitPart1Location.trim().toUpperCase() : report.warehouse_location || null,

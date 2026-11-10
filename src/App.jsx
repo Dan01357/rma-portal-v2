@@ -284,6 +284,11 @@ export default function App() {
         const match = window.location.hash.match(/token=([^&]+)/);
         if (match && match[1]) urlToken = decodeURIComponent(match[1]);
       }
+      if (!urlToken && typeof window !== 'undefined') {
+        try {
+          urlToken = sessionStorage.getItem('rma_active_invite_token') || localStorage.getItem('rma_pending_oauth_token');
+        } catch {}
+      }
 
       // If an invite token is present in the address bar, enforce strict single-visit verification!
       // Do NOT auto-unlock using previous bypasses in localStorage.rma_portal_gate_session.
@@ -502,6 +507,11 @@ export default function App() {
       if (!urlToken && window.location.hash.includes('token=')) {
         const m = window.location.hash.match(/token=([^&]+)/);
         if (m && m[1]) urlToken = decodeURIComponent(m[1]);
+      }
+      if (!urlToken && typeof window !== 'undefined') {
+        try {
+          urlToken = sessionStorage.getItem('rma_active_invite_token') || localStorage.getItem('rma_pending_oauth_token');
+        } catch {}
       }
 
       if (urlToken) {
@@ -915,19 +925,9 @@ export default function App() {
     setIsCreditMemoModalOpen(true);
   };
 
-  // Physical Triage & Inspection Handler with Assign SKU Safeguard
+  // Physical Triage & Inspection Handler
   const handleInspectTriageForReport = (report) => {
     if (!report) return;
-    const isManifest = isBatchManifest(report, recentReportsList);
-    // For single-item returns, an official catalog SKU is required before physical triage
-    if (!isManifest && !hasAssignedSku(report, savedProductsList)) {
-      setCreditMemoWarningTarget({
-        item: report,
-        title: "Assign SKU Required First",
-        message: "Physical inspection and warehouse triage require an official catalog SKU / Item Code to be assigned first. Please click 'Assign SKU' to register the product in the catalog before triaging."
-      });
-      return;
-    }
     setQuickRmaNumber(report.rma_number);
     setIsQuickRmaModalOpen(true);
   };
@@ -6088,8 +6088,6 @@ export default function App() {
         isOpen={(() => {
           if (typeof window === 'undefined') return false;
           if (isAdminView) return false;
-          // Only users already authenticated as currentUser?.role === 'super_admin' can view "/" for testing
-          if (currentUser?.role === 'super_admin') return false;
 
           const urlParams = new URLSearchParams(window.location.search);
           let urlToken = urlParams.get('token');
@@ -6097,10 +6095,20 @@ export default function App() {
             const m = window.location.hash.match(/token=([^&]+)/);
             if (m && m[1]) urlToken = decodeURIComponent(m[1]);
           }
+          if (!urlToken) {
+            try {
+              urlToken = sessionStorage.getItem('rma_active_invite_token') || localStorage.getItem('rma_pending_oauth_token');
+            } catch {}
+          }
+
           // If visiting an invite link with a token, the Gatekeeper MUST be locked until this specific token is authenticated!
           if (urlToken) {
             return !gateSession || gateSession.token !== urlToken;
           }
+
+          // Only users already authenticated as currentUser?.role === 'super_admin' can view "/" without a token for testing
+          if (currentUser?.role === 'super_admin') return false;
+
           // Lock root URL (/): If anyone visits "/" directly without a "?token=", keep the portal locked with the Gatekeeper overlay
           return true;
         })()}
