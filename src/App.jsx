@@ -1350,22 +1350,124 @@ export default function App() {
     }
   };
 
+  const [coworkerQueueFilter, setCoworkerQueueFilter] = useState('all'); // 'all' | 'restock' | 'scrap'
+  const [updatingQueueId, setUpdatingQueueId] = useState(null);
+
   const resetReportsFilters = () => {
     setReportsSearchQuery('');
     setReportsReasonFilter('all');
     setReportsStatusFilter('all');
     setReportsDispositionFilter('all');
     setReportsConditionGradeFilter('all');
+    setCoworkerQueueFilter('all');
     setReportsDateFrom('');
     setReportsDateTo('');
     setReportsCurrentPage(1);
     setSelectedReportIds(new Set());
   };
 
+  // Helpers to check whether an item (or batch manifest) is in the pending Ready to Restock or Supplier Re-Order queue
+  const isItemReadyToRestock = React.useCallback((item, allReports = recentReportsList) => {
+    if (!item) return false;
+    const isManifestRow = !item.is_unpacked_manifest_item && isBatchManifest(item, allReports);
+    if (isManifestRow) {
+      const children = getReportManifestItems(item, allReports);
+      return children.some(c => {
+        const d = String(c?.disposition || '').toLowerCase();
+        const st = String(c?.status || '').toLowerCase();
+        return d.includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(st);
+      });
+    }
+    const disp = String(item.disposition || '').toLowerCase();
+    const st = String(item.status || '').toLowerCase();
+    return disp.includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(st);
+  }, [recentReportsList]);
+
+  const isItemReadyForSupplierReorder = React.useCallback((item, allReports = recentReportsList) => {
+    if (!item) return false;
+    const isManifestRow = !item.is_unpacked_manifest_item && isBatchManifest(item, allReports);
+    if (isManifestRow) {
+      const children = getReportManifestItems(item, allReports);
+      return children.some(c => {
+        const d = String(c?.disposition || '').toLowerCase();
+        const st = String(c?.status || '').toLowerCase();
+        return (d.includes('scrap') || d.includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(st);
+      });
+    }
+    const disp = String(item.disposition || '').toLowerCase();
+    const st = String(item.status || '').toLowerCase();
+    return (disp.includes('scrap') || disp.includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(st);
+  }, [recentReportsList]);
+
+  // 1-Click Coworker Action Handler: Mark as Stocked in WMS ('restocked') or Mark Re-ordered from Supplier ('scrapped')
+  const handleConfirmCoworkerAction = async (item, targetStatus) => {
+    if (!item || updatingQueueId) return;
+    const rowKey = item.id || item.rma_number;
+    setUpdatingQueueId(rowKey);
+    const cleanStatus = targetStatus === 'scrapped' ? 'scrapped' : 'restocked';
+    const actorName = currentUser?.name || (cleanStatus === 'restocked' ? 'Warehouse WMS Staff' : 'Purchasing Staff');
+
+    // Optimistic state update so the row status updates to 6- Restocked / 7- Scrapped immediately and vanishes from pending queue filter
+    setRecentReportsList(prev => prev.map(r => {
+      const matchesRow = (r.id && item.id && String(r.id) === String(item.id)) ||
+        (r.id && item.parent_rma_id && String(r.id) === String(item.parent_rma_id)) ||
+        (r.rma_number && r.rma_number === item.rma_number);
+      if (!matchesRow) return r;
+
+      let updatedItems = r.items;
+      if (Array.isArray(r.items) && r.items.length > 0) {
+        const targetBc = item.is_unpacked_manifest_item && item.barcode ? String(item.barcode).trim() : null;
+        updatedItems = r.items.map(c => {
+          const cBc = String(c.barcode || '').trim();
+          const cDisp = String(c.disposition || '').toLowerCase();
+          if ((targetBc && cBc === targetBc) || (!targetBc && ((cleanStatus === 'restocked' && cDisp.includes('restock')) || (cleanStatus === 'scrapped' && (cDisp.includes('scrap') || cDisp.includes('dispose')))))) {
+            return { ...c, status: cleanStatus };
+          }
+          return c;
+        });
+      }
+      return {
+        ...r,
+        status: cleanStatus,
+        items: updatedItems
+      };
+    }));
+
+    try {
+      await catalogService.confirmCoworkerQueueAction({
+        item,
+        targetStatus: cleanStatus,
+        warehouseLocation: item.warehouse_location || null,
+        actorName
+      });
+      showToast(
+        cleanStatus === 'restocked'
+          ? `✓ Marked ${item.rma_number} as 6- Restocked in WMS!`
+          : `✓ Marked ${item.rma_number} as 7- Scrapped / Disposed (Supplier Re-Order Confirmed)!`,
+        'success'
+      );
+      refreshAllData();
+    } catch (err) {
+      console.error('Failed to confirm coworker queue action:', err);
+      showToast(`Could not update status: ${err.message}`, 'error');
+      refreshAllData();
+    } finally {
+      setUpdatingQueueId(null);
+    }
+  };
+
   // Operational Segregation: Inbound Customer Returns vs Outbound Supplier Claims
   const customerInboundReports = React.useMemo(() => {
     return recentReportsList.filter(r => (r.rma_type === 'customer_inbound' || !r.rma_type) && !isManifestSubItem(r, recentReportsList));
   }, [recentReportsList]);
+
+  const readyToRestockReports = React.useMemo(() => {
+    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemReadyToRestock(r, recentReportsList));
+  }, [recentReportsList, isItemReadyToRestock]);
+
+  const supplierReorderReports = React.useMemo(() => {
+    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemReadyForSupplierReorder(r, recentReportsList));
+  }, [recentReportsList, isItemReadyForSupplierReorder]);
 
   const supplierOutboundReports = React.useMemo(() => {
     const unpacked = [];
@@ -1408,8 +1510,8 @@ export default function App() {
   const processedReports = React.useMemo(() => {
     const q = reportsSearchQuery.toLowerCase().trim();
     let list = recentReportsList.filter(item => {
-      // Isolate to Customer Inbound Returns (treat missing rma_type as customer_inbound for backward compatibility)
-      if (item.rma_type && item.rma_type !== 'customer_inbound') {
+      // Isolate to Customer Inbound Returns by default, unless a Coworker Inventory Queue ('restock' or 'scrap') is active
+      if (coworkerQueueFilter === 'all' && item.rma_type && item.rma_type !== 'customer_inbound') {
         return false;
       }
       // Omit child rows of manifest returns (which share identical rma_number with parent)
@@ -1490,6 +1592,13 @@ export default function App() {
       }
 
       // Date Range filters
+      // Coworker Inventory Workstation Quick-Filter ('restock' | 'scrap')
+      if (coworkerQueueFilter === 'restock') {
+        if (!isItemReadyToRestock(item, recentReportsList)) return false;
+      } else if (coworkerQueueFilter === 'scrap') {
+        if (!isItemReadyForSupplierReorder(item, recentReportsList)) return false;
+      }
+
       if (reportsDateFrom) {
         const itemDate = new Date(item.created_at || 0).toISOString().slice(0, 10);
         if (itemDate < reportsDateFrom) return false;
@@ -1577,6 +1686,9 @@ export default function App() {
     reportsStatusFilter,
     reportsDispositionFilter,
     reportsConditionGradeFilter,
+    coworkerQueueFilter,
+    isItemReadyToRestock,
+    isItemReadyForSupplierReorder,
     reportsDateFrom,
     reportsDateTo,
     reportsSortField,
@@ -1636,9 +1748,18 @@ export default function App() {
     checkApiConnections();
     captureAccurateGps();
 
-    // 1. Cross-tab & local event bus listener
+    // 1. Cross-tab & local event bus listener (rma_portal_sync_bus)
     const unsubscribeBus = catalogService.onDataChange((evt) => {
       console.log('[Realtime Event Bus] Event:', evt.type);
+      if (evt.payload?.report) {
+        const incoming = evt.payload.report;
+        setRecentReportsList(prev => prev.map(r => (
+          (r.id && incoming.id && String(r.id) === String(incoming.id)) ||
+          (r.rma_number && incoming.rma_number && r.rma_number === incoming.rma_number && !r.parent_rma_id)
+            ? { ...r, ...incoming }
+            : r
+        )));
+      }
       refreshAllData();
 
       if (evt.type === 'report-submitted') {
@@ -4017,6 +4138,86 @@ export default function App() {
               />
             )}
 
+            {/* COWORKER INVENTORY & PROCUREMENT WORKSTATION QUICK-ACTION VIEW FILTERS */}
+            {(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports' || adminActiveTab === 'supplier_claims') && (
+              <div className="bg-slate-900 dark:bg-slate-950 border border-slate-800 rounded-2xl p-3 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider shrink-0">
+                    WMS / ERP Sync
+                  </span>
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-black text-white tracking-tight">
+                      Coworker Inventory & Procurement Queues
+                    </h4>
+                    <p className="text-[11px] text-slate-400 truncate">
+                      Live workstation queues for Warehouse WMS restocking and Purchasing supplier re-orders.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (coworkerQueueFilter === 'restock' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')) {
+                        setCoworkerQueueFilter('all');
+                      } else {
+                        setCoworkerQueueFilter('restock');
+                        setReportsDispositionFilter('all');
+                        setReportsStatusFilter('all');
+                        setReportsCurrentPage(1);
+                        if (adminActiveTab === 'supplier_claims') {
+                          setAdminActiveTab('customer_reports');
+                        }
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+                      coworkerQueueFilter === 'restock' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-400/40'
+                        : 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-emerald-500/40'
+                    }`}
+                    title="Filter table to items triaged as Restock to Inventory whose status is not yet restocked"
+                  >
+                    <span>📦 Ready to Restock ({readyToRestockReports.length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (coworkerQueueFilter === 'scrap' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')) {
+                        setCoworkerQueueFilter('all');
+                      } else {
+                        setCoworkerQueueFilter('scrap');
+                        setReportsDispositionFilter('all');
+                        setReportsStatusFilter('all');
+                        setReportsCurrentPage(1);
+                        if (adminActiveTab === 'supplier_claims') {
+                          setAdminActiveTab('customer_reports');
+                        }
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+                      coworkerQueueFilter === 'scrap' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
+                        ? 'bg-amber-600 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
+                        : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/40'
+                    }`}
+                    title="Filter table to items triaged as Scrap / Dispose whose status is not yet scrapped"
+                  >
+                    <span>🔄 Supplier Re-Order ({supplierReorderReports.length})</span>
+                  </button>
+
+                  {coworkerQueueFilter !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => setCoworkerQueueFilter('all')}
+                      className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer"
+                    >
+                      Clear Queue Filter
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* TAB 2: CUSTOMER RMA HUB (INBOUND LOGISTICS) */}
             {(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports') && (
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 w-full min-w-0 box-border">
@@ -4207,7 +4408,7 @@ export default function App() {
                     </div>
 
                     {/* Reset Filters */}
-                    {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
+                    {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
                       <button
                         type="button"
                         onClick={resetReportsFilters}
@@ -4235,12 +4436,13 @@ export default function App() {
                         { id: 'Scrap / Dispose', label: '5- Scrap / Dispose' },
                         { id: 'Buffer Stock Exchange', label: '6- Buffer Exchange' }
                       ].map(chip => {
-                        const isActive = reportsDispositionFilter.toLowerCase() === chip.id.toLowerCase();
+                        const isActive = coworkerQueueFilter === 'all' && reportsDispositionFilter.toLowerCase() === chip.id.toLowerCase();
                         return (
                           <button
                             key={chip.id}
                             type="button"
                             onClick={() => {
+                              setCoworkerQueueFilter('all');
                               setReportsDispositionFilter(chip.id);
                               setReportsCurrentPage(1);
                             }}
@@ -4259,7 +4461,7 @@ export default function App() {
                   <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
                     <span>
                       Showing <strong className="text-slate-900 dark:text-white font-bold">{processedReports.length}</strong> of {recentReportsList.length} reports
-                      {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
+                      {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
                         <span className="text-blue-600 dark:text-blue-400 font-bold ml-1.5">• Filters active</span>
                       )}
                     </span>
@@ -4819,6 +5021,32 @@ export default function App() {
                                         <span>Inspect / Triage</span>
                                       </button>
 
+                                      {/* 1-Click Coworker WMS Restock Action */}
+                                      {isItemReadyToRestock(item, recentReportsList) && (
+                                        <button
+                                          type="button"
+                                          disabled={updatingQueueId === (item.id || item.rma_number)}
+                                          onClick={() => handleConfirmCoworkerAction(item, 'restocked')}
+                                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                          title="1-click confirm that this item has been stocked in WMS (updates status to 6- Restocked)"
+                                        >
+                                          <span>✓ Mark as Stocked in WMS</span>
+                                        </button>
+                                      )}
+
+                                      {/* 1-Click Coworker Supplier Re-Order Action */}
+                                      {isItemReadyForSupplierReorder(item, recentReportsList) && (
+                                        <button
+                                          type="button"
+                                          disabled={updatingQueueId === (item.id || item.rma_number)}
+                                          onClick={() => handleConfirmCoworkerAction(item, 'scrapped')}
+                                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                          title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
+                                        >
+                                          <span>✓ Mark Re-ordered from Supplier</span>
+                                        </button>
+                                      )}
+
                                       {/* Do NOT render Assign SKU on parent row if batch manifest */}
                                       {!isManifest && canEditProducts && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                                         <button
@@ -5105,7 +5333,29 @@ export default function App() {
                                                       </td>
                                                       {/* Actions: 170px */}
                                                       <td className="py-2 px-2 text-center w-[170px]">
-                                                        <div className="flex items-center justify-center gap-1 flex-nowrap">
+                                                        <div className="flex items-center justify-center gap-1 flex-wrap">
+                                                          {String(childDisposition || '').toLowerCase().includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(String(child.status || '').toLowerCase()) && (
+                                                            <button
+                                                              type="button"
+                                                              disabled={updatingQueueId === (childReportObject.id || item.rma_number)}
+                                                              onClick={() => handleConfirmCoworkerAction({ ...childReportObject, is_unpacked_manifest_item: true, warehouse_location: childLocation || item.warehouse_location }, 'restocked')}
+                                                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                                              title="1-click confirm stocked in WMS (updates status to 6- Restocked)"
+                                                            >
+                                                              <span>✓ Mark as Stocked in WMS</span>
+                                                            </button>
+                                                          )}
+                                                          {(String(childDisposition || '').toLowerCase().includes('scrap') || String(childDisposition || '').toLowerCase().includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(String(child.status || '').toLowerCase()) && (
+                                                            <button
+                                                              type="button"
+                                                              disabled={updatingQueueId === (childReportObject.id || item.rma_number)}
+                                                              onClick={() => handleConfirmCoworkerAction({ ...childReportObject, is_unpacked_manifest_item: true, warehouse_location: childLocation || item.warehouse_location }, 'scrapped')}
+                                                              className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                                              title="1-click confirm re-ordered from supplier (updates status to 7- Scrapped / Disposed)"
+                                                            >
+                                                              <span>✓ Mark Re-ordered from Supplier</span>
+                                                            </button>
+                                                          )}
                                                           {canEditProducts && (
                                                             <button
                                                               type="button"
@@ -5384,6 +5634,32 @@ export default function App() {
                                   <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
                                   <span>Triage</span>
                                 </button>
+
+                                {/* 1-Click Coworker WMS Restock Action */}
+                                {isItemReadyToRestock(item, recentReportsList) && (
+                                  <button
+                                    type="button"
+                                    disabled={updatingQueueId === (item.id || item.rma_number)}
+                                    onClick={() => handleConfirmCoworkerAction(item, 'restocked')}
+                                    className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                    title="1-click confirm that this item has been stocked in WMS (updates status to 6- Restocked)"
+                                  >
+                                    <span>✓ Mark as Stocked in WMS</span>
+                                  </button>
+                                )}
+
+                                {/* 1-Click Coworker Supplier Re-Order Action */}
+                                {isItemReadyForSupplierReorder(item, recentReportsList) && (
+                                  <button
+                                    type="button"
+                                    disabled={updatingQueueId === (item.id || item.rma_number)}
+                                    onClick={() => handleConfirmCoworkerAction(item, 'scrapped')}
+                                    className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                    title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
+                                  >
+                                    <span>✓ Mark Re-ordered from Supplier</span>
+                                  </button>
+                                )}
 
                                 {canEditProducts && !isManifest && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                                   <button

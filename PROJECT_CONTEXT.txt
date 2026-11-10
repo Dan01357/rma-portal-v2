@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-10T08:05:24.784Z
+Generated At: 2026-11-10T08:29:15.138Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -6234,7 +6234,7 @@ export default async function handler(req, res) {
   const client = await requireApiKey(req, res);
   if (!client) return; // Response already sent by middleware
 
-  // 2. GET: List RMA Reports with query filters
+  // 2. GET: List RMA Reports with query filters & dedicated coworker queues
   if (req.method === 'GET') {
     try {
       const { rma_type, status, barcode, search, disposition, condition_grade, warehouse_location, queue, is_parent, limit = '50', offset = '0' } = req.query;
@@ -6242,89 +6242,11 @@ export default async function handler(req, res) {
       const numLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
       const numOffset = Math.max(parseInt(offset, 10) || 0, 0);
 
-      let query = supabase
-        .from('rma_reports')
-        .select('*', { count: 'exact' });
-
-      // 1. Eliminate Double-Counting on Multi-Item Manifests:
-      // Filter out generic parent manifest containers (Batch Return Manifest...) so coworkers only receive
-      // individual line items with distinct SKUs, barcodes, quantities, and bin locations without double-counting.
-      // If a caller explicitly queries is_parent=true, return the parent manifest rows.
-      if (is_parent === 'true') {
-        query = query.eq('is_parent', true);
-      } else {
-        query = query
-          .or('is_parent.is.null,is_parent.eq.false')
-          .not('name', 'ilike', 'Batch Return Manifest%');
-      }
-
-      if (rma_type) {
-        query = query.eq('rma_type', rma_type);
-      }
-
-      // 2. Explicit Inventory Queues (queue=restock | queue=scrap)
-      if (queue) {
-        const cleanQueue = String(queue).trim().toLowerCase();
-        if (cleanQueue === 'restock') {
-          query = query.ilike('disposition', '%Restock%');
-          query = query.not('status', 'in', '("restocked","scrapped","disposed","closed","resolved","rejected","deleted")');
-        } else if (cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
-          query = query.or('disposition.ilike.%Scrap%,disposition.ilike.%Dispose%');
-          query = query.not('status', 'in', '("scrapped","disposed","restocked","closed","resolved","rejected","deleted")');
-        }
-      }
-
-      // 3. Status Filtering with Comprehensive Active Pending Support
-      if (status) {
-        const cleanStatus = status.trim().toLowerCase();
-        if (cleanStatus === 'pending' || cleanStatus === 'open') {
-          // Include all active pre-restock/pre-scrap statuses and exclude finalized
-          query = query
-            .in('status', ['pending', 'received_at_dock', 'logged', 'credit_memo_issued', 'under_inspection', 'pending_finance_approval'])
-            .not('status', 'in', '("restocked","scrapped","disposed","closed","resolved","rejected","deleted")');
-        } else if (cleanStatus === 'restocked') {
-          query = query.in('status', ['restocked', 'closed', 'resolved']);
-        } else if (cleanStatus === 'scrapped' || cleanStatus === 'disposed') {
-          query = query.in('status', ['scrapped', 'disposed']);
-        } else {
-          query = query.eq('status', status.trim());
-        }
-      }
-
-      // 4. Disposition Filtering
-      if (disposition) {
-        const cleanDisp = disposition.trim();
-        if (/restock/i.test(cleanDisp)) {
-          query = query.ilike('disposition', '%Restock%');
-          if (!status && !queue) {
-            query = query.not('status', 'in', '("restocked","scrapped","disposed","closed","resolved","rejected","deleted")');
-          }
-        } else if (/scrap|dispose/i.test(cleanDisp)) {
-          query = query.or('disposition.ilike.%Scrap%,disposition.ilike.%Dispose%');
-          if (!status && !queue) {
-            query = query.not('status', 'in', '("scrapped","disposed","restocked","closed","resolved","rejected","deleted")');
-          }
-        } else if (/rtv|return to vendor/i.test(cleanDisp)) {
-          query = query.or('disposition.ilike.%Return to Vendor%,disposition.ilike.%RTV%');
-        } else {
-          query = query.ilike('disposition', `%${cleanDisp}%`);
-        }
-      }
-      if (condition_grade) {
-        query = query.ilike('condition_grade', `%${condition_grade.trim()}%`);
-      }
-      if (warehouse_location) {
-        query = query.ilike('warehouse_location', `%${warehouse_location.trim()}%`);
-      }
-      if (search) {
-        query = query.or(`name.ilike.%${search}%,code.ilike.%${search}%,rma_number.ilike.%${search}%,reporter_name.ilike.%${search}%`);
-      }
-
-      query = query
-        .order('created_at', { ascending: false })
-        .range(numOffset, numOffset + numLimit - 1);
-
-      const { data, count, error } = await query;
+      // Fetch reports and catalog products for accurate SKU/location enrichment and manifest unpacking
+      const [{ data: rawReports, error }, { data: catalogProducts }] = await Promise.all([
+        supabase.from('rma_reports').select('*').order('created_at', { ascending: false }),
+        supabase.from('products').select('barcode, code, name, supplier_name, price, price_with_vat, pieces_per_case')
+      ]);
 
       if (error) {
         console.error('[API v1 RMA GET] Query error:', error);
@@ -6335,23 +6257,230 @@ export default async function handler(req, res) {
         });
       }
 
-      const enrichedData = (data || []).map(item => ({
-        ...item,
-        sku: (item.code && item.code !== item.barcode) ? item.code : (item.sku && item.sku !== item.barcode ? item.sku : null),
-        code: (item.code && item.code !== item.barcode) ? item.code : (item.sku && item.sku !== item.barcode ? item.sku : null),
-        supplier_name: item.supplier_name || 'Savemore',
-        price: Number(item.price_with_vat || item.price || 0),
-        warehouse_location: item.warehouse_location || null,
-        batch_lot_number: item.batch_lot_number || null
-      }));
+      const productByBarcode = new Map();
+      (catalogProducts || []).forEach(p => {
+        if (p && p.barcode) {
+          productByBarcode.set(String(p.barcode).trim(), p);
+        }
+      });
+
+      const allRows = Array.isArray(rawReports) ? rawReports : [];
+      const unpackedList = [];
+      const seenManifestLineKeys = new Set();
+
+      // If caller explicitly requests is_parent=true, only return parent manifest container rows
+      if (is_parent === 'true') {
+        allRows.forEach(r => {
+          if (r && r.is_parent === true) {
+            unpackedList.push(r);
+          }
+        });
+      } else {
+        // First pass: unpack parent batch manifests into individual line items with real SKUs, names, quantities, and warehouse_location
+        allRows.forEach(r => {
+          if (!r) return;
+          let parsedItems = [];
+          if (Array.isArray(r.items) && r.items.length > 0) {
+            parsedItems = r.items;
+          } else if (typeof r.items === 'string' && r.items.trim()) {
+            try {
+              const p = JSON.parse(r.items);
+              if (Array.isArray(p)) parsedItems = p;
+            } catch (e) {}
+          }
+
+          const isManifestParent = Boolean(
+            r.is_parent === true ||
+            parsedItems.length > 1 ||
+            String(r.name || '').toLowerCase().startsWith('batch return manifest')
+          );
+
+          if (isManifestParent) {
+            parsedItems.forEach((child, idx) => {
+              const cBarcode = String(child.barcode || '').trim();
+              const matchedProd = cBarcode ? productByBarcode.get(cBarcode) : null;
+              const rawSku = String(child.code || child.sku || matchedProd?.code || '').trim();
+              const validSku = (rawSku && rawSku !== cBarcode && !rawSku.toLowerCase().includes('awaiting')) ? rawSku : null;
+              const cName = (child.name || child.productName || matchedProd?.name || `Item #${idx + 1}`).trim();
+              const lineKey = `${r.rma_number}::${cBarcode || idx}::${idx}`;
+              seenManifestLineKeys.add(`${r.rma_number}::${cBarcode}`);
+
+              // Look up if there is also a separate child row in rma_reports for this barcode to merge latest status/location
+              const matchingChildRow = allRows.find(other => (
+                other &&
+                other.id !== r.id &&
+                !other.is_parent &&
+                other.rma_number === r.rma_number &&
+                String(other.barcode || '').trim() === cBarcode
+              ));
+
+              const effectiveStatus = child.status || matchingChildRow?.status || (
+                (r.status === 'restocked' || r.status === 'scrapped' || r.status === 'closed')
+                  ? r.status
+                  : 'under_inspection'
+              );
+              const effectiveDisposition = child.disposition || matchingChildRow?.disposition || r.disposition || '1- Pending Triage';
+              const effectiveLocation = child.warehouse_location || matchingChildRow?.warehouse_location || r.warehouse_location || null;
+
+              unpackedList.push({
+                ...r,
+                ...child,
+                id: matchingChildRow?.id || r.id,
+                manifest_item_id: child.id || lineKey,
+                parent_rma_id: r.id,
+                is_parent: false,
+                is_unpacked_manifest_item: true,
+                rma_number: r.rma_number,
+                barcode: cBarcode || r.barcode,
+                sku: validSku,
+                code: validSku,
+                name: cName,
+                quantity: Number(child.quantity || child.qty) || 1,
+                unit_name: child.unit_name || child.unit || r.unit_name || 'pc',
+                pieces_per_case: child.pieces_per_case || child.piecesPerCase || matchedProd?.pieces_per_case || null,
+                supplier_name: (child.supplier_name && child.supplier_name !== 'Pending Assignment')
+                  ? child.supplier_name
+                  : (matchedProd?.supplier_name || r.supplier_name || 'Pending Assignment'),
+                price: Number(child.price_with_vat || child.price || matchedProd?.price_with_vat || matchedProd?.price || 0),
+                condition_grade: child.condition_grade || matchingChildRow?.condition_grade || r.condition_grade || 'B - Damaged Packaging Only',
+                disposition: effectiveDisposition,
+                warehouse_location: effectiveLocation,
+                status: effectiveStatus,
+                items: undefined
+              });
+            });
+          }
+        });
+
+        // Second pass: add standalone single-item tickets (and any child rows not already unpacked from a parent's items array)
+        allRows.forEach(r => {
+          if (!r) return;
+          const isManifestParent = Boolean(
+            r.is_parent === true ||
+            (Array.isArray(r.items) && r.items.length > 1) ||
+            String(r.name || '').toLowerCase().startsWith('batch return manifest')
+          );
+          if (isManifestParent) return; // Never push generic parent manifest container
+
+          const rBarcode = String(r.barcode || '').trim();
+          const dedupKey = `${r.rma_number}::${rBarcode}`;
+          // Skip if already unpacked from parent manifest items array (prevents double-counting)
+          if (seenManifestLineKeys.has(dedupKey) && !/-[B-Z]$/i.test(String(r.rma_number || ''))) {
+            return;
+          }
+
+          const matchedProd = rBarcode ? productByBarcode.get(rBarcode) : null;
+          const rawSku = String(r.code || r.sku || matchedProd?.code || '').trim();
+          const validSku = (rawSku && rawSku !== rBarcode && !rawSku.toLowerCase().includes('awaiting')) ? rawSku : null;
+
+          unpackedList.push({
+            ...r,
+            sku: validSku,
+            code: validSku,
+            name: (r.name && !String(r.name).toLowerCase().includes('unidentified'))
+              ? r.name
+              : (matchedProd?.name || r.name),
+            supplier_name: (r.supplier_name && r.supplier_name !== 'Pending Assignment')
+              ? r.supplier_name
+              : (matchedProd?.supplier_name || r.supplier_name || 'Pending Assignment'),
+            price: Number(r.price_with_vat || r.price || matchedProd?.price_with_vat || matchedProd?.price || 0),
+            warehouse_location: r.warehouse_location || null,
+            batch_lot_number: r.batch_lot_number || null
+          });
+        });
+      }
+
+      // Apply filters on unpacked items
+      const FINALIZED_RESTOCK = new Set(['restocked', 'closed', 'resolved', 'scrapped', 'disposed', 'rejected', 'deleted']);
+      const FINALIZED_SCRAP = new Set(['scrapped', 'disposed', 'closed', 'resolved', 'restocked', 'rejected', 'deleted']);
+
+      const filtered = unpackedList.filter(item => {
+        if (rma_type && item.rma_type !== rma_type) return false;
+        if (barcode && String(item.barcode || '').trim() !== String(barcode).trim()) return false;
+
+        const itemDisp = String(item.disposition || '').toLowerCase();
+        const itemStatus = String(item.status || 'received_at_dock').toLowerCase().trim();
+
+        // Dedicated Coworker Queues (Subject 1)
+        if (queue) {
+          const cleanQueue = String(queue).trim().toLowerCase();
+          if (cleanQueue === 'restock') {
+            if (!itemDisp.includes('restock')) return false;
+            if (FINALIZED_RESTOCK.has(itemStatus)) return false;
+          } else if (cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
+            if (!itemDisp.includes('scrap') && !itemDisp.includes('dispose')) return false;
+            if (FINALIZED_SCRAP.has(itemStatus)) return false;
+          }
+        }
+
+        // Status filter
+        if (status) {
+          const cleanStatus = String(status).trim().toLowerCase();
+          if (cleanStatus === 'pending' || cleanStatus === 'open') {
+            if (FINALIZED_RESTOCK.has(itemStatus)) return false;
+          } else if (cleanStatus === 'restocked') {
+            if (!['restocked', 'closed', 'resolved'].includes(itemStatus)) return false;
+          } else if (cleanStatus === 'scrapped' || cleanStatus === 'disposed') {
+            if (!['scrapped', 'disposed'].includes(itemStatus)) return false;
+          } else if (itemStatus !== cleanStatus) {
+            return false;
+          }
+        }
+
+        // Disposition filter
+        if (disposition) {
+          const cleanDisp = String(disposition).trim().toLowerCase();
+          if (cleanDisp.includes('restock')) {
+            if (!itemDisp.includes('restock')) return false;
+            if (!status && !queue && FINALIZED_RESTOCK.has(itemStatus)) return false;
+          } else if (cleanDisp.includes('scrap') || cleanDisp.includes('dispose')) {
+            if (!itemDisp.includes('scrap') && !itemDisp.includes('dispose')) return false;
+            if (!status && !queue && FINALIZED_SCRAP.has(itemStatus)) return false;
+          } else if (cleanDisp.includes('rtv') || cleanDisp.includes('return to vendor')) {
+            if (!itemDisp.includes('rtv') && !itemDisp.includes('return to vendor') && !itemDisp.includes('vendor')) return false;
+          } else if (!itemDisp.includes(cleanDisp)) {
+            return false;
+          }
+        }
+
+        if (condition_grade) {
+          if (!String(item.condition_grade || '').toLowerCase().includes(String(condition_grade).trim().toLowerCase())) {
+            return false;
+          }
+        }
+
+        if (warehouse_location) {
+          if (!String(item.warehouse_location || '').toLowerCase().includes(String(warehouse_location).trim().toLowerCase())) {
+            return false;
+          }
+        }
+
+        if (search) {
+          const q = String(search).trim().toLowerCase();
+          const matches = (
+            String(item.name || '').toLowerCase().includes(q) ||
+            String(item.code || item.sku || '').toLowerCase().includes(q) ||
+            String(item.barcode || '').toLowerCase().includes(q) ||
+            String(item.rma_number || '').toLowerCase().includes(q) ||
+            String(item.reporter_name || '').toLowerCase().includes(q) ||
+            String(item.warehouse_location || '').toLowerCase().includes(q)
+          );
+          if (!matches) return false;
+        }
+
+        return true;
+      });
+
+      const paginatedData = filtered.slice(numOffset, numOffset + numLimit);
 
       return sendJson(res, 200, {
         success: true,
         client: client.name,
-        total: count || 0,
+        queue: queue || null,
+        total: filtered.length,
         limit: numLimit,
         offset: numOffset,
-        data: enrichedData
+        data: paginatedData
       });
     } catch (err) {
       console.error('[API v1 RMA GET] Server error:', err);
@@ -6594,9 +6723,9 @@ export default async function handler(req, res) {
       // Normalize status and disposition for coworker restock & scrap/re-order sync
       if (updateData.status) {
         const s = String(updateData.status).toLowerCase().trim();
-        if (s === 'restocked') {
+        if (s === 'restocked' || s === '6- restocked') {
           updateData.status = 'restocked';
-        } else if (s === 'scrapped' || s === 'disposed') {
+        } else if (s === 'scrapped' || s === 'disposed' || s === '7- scrapped / disposed') {
           updateData.status = 'scrapped';
         } else if (s === 'resolved' || s === 'closed') {
           // If disposition indicates scrap, normalize to scrapped; otherwise restocked
@@ -6607,6 +6736,10 @@ export default async function handler(req, res) {
             updateData.status = 'restocked';
           }
         }
+      }
+
+      if (updateData.warehouse_location) {
+        updateData.warehouse_location = String(updateData.warehouse_location).trim().toUpperCase();
       }
 
       if (updateData.disposition) {
@@ -6631,19 +6764,29 @@ export default async function handler(req, res) {
         return sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: `RMA report ${cleanId} not found.` });
       }
 
-      // Standardized Audit Trail Note
-      let auditNote = `RMA status updated to ${updateData.status || 'updated'} via API by ${client.name}`;
+      const actorName = String(body?.actor || body?.user || body?.updated_by || client.name || 'Coworker').trim();
+      const targetBarcode = body?.barcode ? String(body.barcode).trim() : null;
+
+      // Standardized Audit Trail Note (Subject 1)
+      let auditNote = `RMA status updated to ${updateData.status || 'updated'} by ${actorName}`;
       if (updateData.status === 'restocked') {
-        auditNote = `ERP Restock confirmed via API by ${client.name}`;
+        auditNote = `ERP Restock confirmed by ${actorName}`;
       } else if (updateData.status === 'scrapped') {
-        auditNote = `ERP Scrap confirmed via API by ${client.name}`;
+        auditNote = `Supplier Re-order confirmed by ${actorName}`;
       }
+
+      const lifecycleStageLabel = updateData.status === 'restocked'
+        ? '6- Restocked'
+        : updateData.status === 'scrapped'
+        ? '7- Scrapped / Disposed'
+        : undefined;
 
       const auditEntry = {
         timestamp: new Date().toISOString(),
-        stage: updateData.status === 'restocked' ? 'ERP_RESTOCK' : (updateData.status === 'scrapped' ? 'ERP_SCRAP' : 'API_PATCH'),
-        actor: `${client.name} (API)`,
+        stage: updateData.status === 'restocked' ? 'ERP_RESTOCK' : (updateData.status === 'scrapped' ? 'SUPPLIER_REORDER' : 'API_PATCH'),
+        actor: actorName,
         status: updateData.status,
+        lifecycle_stage: lifecycleStageLabel,
         warehouse_location: updateData.warehouse_location || undefined,
         note: auditNote
       };
@@ -6654,10 +6797,66 @@ export default async function handler(req, res) {
         const currentAudit = Array.isArray(row.audit_trail) ? [...row.audit_trail] : [];
         currentAudit.push(auditEntry);
 
-        const rowPayload = {
+        let rowPayload = {
           ...updateData,
           audit_trail: currentAudit
         };
+
+        // If this row is a parent batch manifest, also update its child items inside row.items
+        let parsedRowItems = [];
+        if (Array.isArray(row.items) && row.items.length > 0) {
+          parsedRowItems = [...row.items];
+        } else if (typeof row.items === 'string' && row.items.trim()) {
+          try {
+            const p = JSON.parse(row.items);
+            if (Array.isArray(p)) parsedRowItems = p;
+          } catch (e) {}
+        }
+
+        if (parsedRowItems.length > 0) {
+          parsedRowItems = parsedRowItems.map(it => {
+            const itBarcode = String(it.barcode || '').trim();
+            const itDisp = String(it.disposition || '').toLowerCase();
+            const matchesSpecificBarcode = targetBarcode && itBarcode === targetBarcode;
+            const matchesQueueDisposition = !targetBarcode && (
+              (updateData.status === 'restocked' && itDisp.includes('restock')) ||
+              (updateData.status === 'scrapped' && (itDisp.includes('scrap') || itDisp.includes('dispose'))) ||
+              (!updateData.status)
+            );
+
+            if (matchesSpecificBarcode || matchesQueueDisposition) {
+              return {
+                ...it,
+                status: updateData.status !== undefined ? updateData.status : it.status,
+                warehouse_location: updateData.warehouse_location !== undefined ? updateData.warehouse_location : it.warehouse_location,
+                disposition: updateData.disposition !== undefined ? updateData.disposition : it.disposition
+              };
+            }
+            return it;
+          });
+
+          // Recompute parent manifest lifecycle status dynamically
+          let restockCnt = 0;
+          let scrapCnt = 0;
+          let pendingCnt = 0;
+          parsedRowItems.forEach(it => {
+            const d = String(it.disposition || '').toLowerCase();
+            const st = String(it.status || '').toLowerCase();
+            if (st === 'restocked' || d.includes('restock')) restockCnt += 1;
+            else if (st === 'scrapped' || d.includes('scrap') || d.includes('dispose')) scrapCnt += 1;
+            else if (!d || d.includes('pending')) pendingCnt += 1;
+          });
+          if (restockCnt === parsedRowItems.length) {
+            rowPayload.status = 'restocked';
+          } else if (scrapCnt === parsedRowItems.length) {
+            rowPayload.status = 'scrapped';
+          } else if (pendingCnt === parsedRowItems.length) {
+            rowPayload.status = 'under_inspection';
+          } else {
+            rowPayload.status = 'partially_completed';
+          }
+          rowPayload.items = parsedRowItems;
+        }
 
         const { data: updatedRow, error: updateErr } = await supabase
           .from('rma_reports')
@@ -6669,7 +6868,16 @@ export default async function handler(req, res) {
         if (updateErr) {
           console.error(`[API v1 RMA PATCH] Error updating row ${row.id}:`, updateErr);
         } else if (updatedRow) {
-          updatedRows.push(updatedRow);
+          updatedRows.push({
+            ...updatedRow,
+            lifecycle_stage: updatedRow.status === 'restocked'
+              ? '6- Restocked'
+              : updatedRow.status === 'scrapped'
+              ? '7- Scrapped / Disposed'
+              : updatedRow.status === 'partially_completed'
+              ? 'Partially Completed'
+              : updatedRow.status
+          });
         }
 
         // If this row is a child item inside a parent manifest (has parent_rma_id):
@@ -10576,22 +10784,124 @@ export default function App() {
     }
   };
 
+  const [coworkerQueueFilter, setCoworkerQueueFilter] = useState('all'); // 'all' | 'restock' | 'scrap'
+  const [updatingQueueId, setUpdatingQueueId] = useState(null);
+
   const resetReportsFilters = () => {
     setReportsSearchQuery('');
     setReportsReasonFilter('all');
     setReportsStatusFilter('all');
     setReportsDispositionFilter('all');
     setReportsConditionGradeFilter('all');
+    setCoworkerQueueFilter('all');
     setReportsDateFrom('');
     setReportsDateTo('');
     setReportsCurrentPage(1);
     setSelectedReportIds(new Set());
   };
 
+  // Helpers to check whether an item (or batch manifest) is in the pending Ready to Restock or Supplier Re-Order queue
+  const isItemReadyToRestock = React.useCallback((item, allReports = recentReportsList) => {
+    if (!item) return false;
+    const isManifestRow = !item.is_unpacked_manifest_item && isBatchManifest(item, allReports);
+    if (isManifestRow) {
+      const children = getReportManifestItems(item, allReports);
+      return children.some(c => {
+        const d = String(c?.disposition || '').toLowerCase();
+        const st = String(c?.status || '').toLowerCase();
+        return d.includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(st);
+      });
+    }
+    const disp = String(item.disposition || '').toLowerCase();
+    const st = String(item.status || '').toLowerCase();
+    return disp.includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(st);
+  }, [recentReportsList]);
+
+  const isItemReadyForSupplierReorder = React.useCallback((item, allReports = recentReportsList) => {
+    if (!item) return false;
+    const isManifestRow = !item.is_unpacked_manifest_item && isBatchManifest(item, allReports);
+    if (isManifestRow) {
+      const children = getReportManifestItems(item, allReports);
+      return children.some(c => {
+        const d = String(c?.disposition || '').toLowerCase();
+        const st = String(c?.status || '').toLowerCase();
+        return (d.includes('scrap') || d.includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(st);
+      });
+    }
+    const disp = String(item.disposition || '').toLowerCase();
+    const st = String(item.status || '').toLowerCase();
+    return (disp.includes('scrap') || disp.includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(st);
+  }, [recentReportsList]);
+
+  // 1-Click Coworker Action Handler: Mark as Stocked in WMS ('restocked') or Mark Re-ordered from Supplier ('scrapped')
+  const handleConfirmCoworkerAction = async (item, targetStatus) => {
+    if (!item || updatingQueueId) return;
+    const rowKey = item.id || item.rma_number;
+    setUpdatingQueueId(rowKey);
+    const cleanStatus = targetStatus === 'scrapped' ? 'scrapped' : 'restocked';
+    const actorName = currentUser?.name || (cleanStatus === 'restocked' ? 'Warehouse WMS Staff' : 'Purchasing Staff');
+
+    // Optimistic state update so the row status updates to 6- Restocked / 7- Scrapped immediately and vanishes from pending queue filter
+    setRecentReportsList(prev => prev.map(r => {
+      const matchesRow = (r.id && item.id && String(r.id) === String(item.id)) ||
+        (r.id && item.parent_rma_id && String(r.id) === String(item.parent_rma_id)) ||
+        (r.rma_number && r.rma_number === item.rma_number);
+      if (!matchesRow) return r;
+
+      let updatedItems = r.items;
+      if (Array.isArray(r.items) && r.items.length > 0) {
+        const targetBc = item.is_unpacked_manifest_item && item.barcode ? String(item.barcode).trim() : null;
+        updatedItems = r.items.map(c => {
+          const cBc = String(c.barcode || '').trim();
+          const cDisp = String(c.disposition || '').toLowerCase();
+          if ((targetBc && cBc === targetBc) || (!targetBc && ((cleanStatus === 'restocked' && cDisp.includes('restock')) || (cleanStatus === 'scrapped' && (cDisp.includes('scrap') || cDisp.includes('dispose')))))) {
+            return { ...c, status: cleanStatus };
+          }
+          return c;
+        });
+      }
+      return {
+        ...r,
+        status: cleanStatus,
+        items: updatedItems
+      };
+    }));
+
+    try {
+      await catalogService.confirmCoworkerQueueAction({
+        item,
+        targetStatus: cleanStatus,
+        warehouseLocation: item.warehouse_location || null,
+        actorName
+      });
+      showToast(
+        cleanStatus === 'restocked'
+          ? `✓ Marked ${item.rma_number} as 6- Restocked in WMS!`
+          : `✓ Marked ${item.rma_number} as 7- Scrapped / Disposed (Supplier Re-Order Confirmed)!`,
+        'success'
+      );
+      refreshAllData();
+    } catch (err) {
+      console.error('Failed to confirm coworker queue action:', err);
+      showToast(`Could not update status: ${err.message}`, 'error');
+      refreshAllData();
+    } finally {
+      setUpdatingQueueId(null);
+    }
+  };
+
   // Operational Segregation: Inbound Customer Returns vs Outbound Supplier Claims
   const customerInboundReports = React.useMemo(() => {
     return recentReportsList.filter(r => (r.rma_type === 'customer_inbound' || !r.rma_type) && !isManifestSubItem(r, recentReportsList));
   }, [recentReportsList]);
+
+  const readyToRestockReports = React.useMemo(() => {
+    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemReadyToRestock(r, recentReportsList));
+  }, [recentReportsList, isItemReadyToRestock]);
+
+  const supplierReorderReports = React.useMemo(() => {
+    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemReadyForSupplierReorder(r, recentReportsList));
+  }, [recentReportsList, isItemReadyForSupplierReorder]);
 
   const supplierOutboundReports = React.useMemo(() => {
     const unpacked = [];
@@ -10634,8 +10944,8 @@ export default function App() {
   const processedReports = React.useMemo(() => {
     const q = reportsSearchQuery.toLowerCase().trim();
     let list = recentReportsList.filter(item => {
-      // Isolate to Customer Inbound Returns (treat missing rma_type as customer_inbound for backward compatibility)
-      if (item.rma_type && item.rma_type !== 'customer_inbound') {
+      // Isolate to Customer Inbound Returns by default, unless a Coworker Inventory Queue ('restock' or 'scrap') is active
+      if (coworkerQueueFilter === 'all' && item.rma_type && item.rma_type !== 'customer_inbound') {
         return false;
       }
       // Omit child rows of manifest returns (which share identical rma_number with parent)
@@ -10716,6 +11026,13 @@ export default function App() {
       }
 
       // Date Range filters
+      // Coworker Inventory Workstation Quick-Filter ('restock' | 'scrap')
+      if (coworkerQueueFilter === 'restock') {
+        if (!isItemReadyToRestock(item, recentReportsList)) return false;
+      } else if (coworkerQueueFilter === 'scrap') {
+        if (!isItemReadyForSupplierReorder(item, recentReportsList)) return false;
+      }
+
       if (reportsDateFrom) {
         const itemDate = new Date(item.created_at || 0).toISOString().slice(0, 10);
         if (itemDate < reportsDateFrom) return false;
@@ -10803,6 +11120,9 @@ export default function App() {
     reportsStatusFilter,
     reportsDispositionFilter,
     reportsConditionGradeFilter,
+    coworkerQueueFilter,
+    isItemReadyToRestock,
+    isItemReadyForSupplierReorder,
     reportsDateFrom,
     reportsDateTo,
     reportsSortField,
@@ -10862,9 +11182,18 @@ export default function App() {
     checkApiConnections();
     captureAccurateGps();
 
-    // 1. Cross-tab & local event bus listener
+    // 1. Cross-tab & local event bus listener (rma_portal_sync_bus)
     const unsubscribeBus = catalogService.onDataChange((evt) => {
       console.log('[Realtime Event Bus] Event:', evt.type);
+      if (evt.payload?.report) {
+        const incoming = evt.payload.report;
+        setRecentReportsList(prev => prev.map(r => (
+          (r.id && incoming.id && String(r.id) === String(incoming.id)) ||
+          (r.rma_number && incoming.rma_number && r.rma_number === incoming.rma_number && !r.parent_rma_id)
+            ? { ...r, ...incoming }
+            : r
+        )));
+      }
       refreshAllData();
 
       if (evt.type === 'report-submitted') {
@@ -13243,6 +13572,86 @@ export default function App() {
               />
             )}
 
+            {/* COWORKER INVENTORY & PROCUREMENT WORKSTATION QUICK-ACTION VIEW FILTERS */}
+            {(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports' || adminActiveTab === 'supplier_claims') && (
+              <div className="bg-slate-900 dark:bg-slate-950 border border-slate-800 rounded-2xl p-3 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider shrink-0">
+                    WMS / ERP Sync
+                  </span>
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-black text-white tracking-tight">
+                      Coworker Inventory & Procurement Queues
+                    </h4>
+                    <p className="text-[11px] text-slate-400 truncate">
+                      Live workstation queues for Warehouse WMS restocking and Purchasing supplier re-orders.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (coworkerQueueFilter === 'restock' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')) {
+                        setCoworkerQueueFilter('all');
+                      } else {
+                        setCoworkerQueueFilter('restock');
+                        setReportsDispositionFilter('all');
+                        setReportsStatusFilter('all');
+                        setReportsCurrentPage(1);
+                        if (adminActiveTab === 'supplier_claims') {
+                          setAdminActiveTab('customer_reports');
+                        }
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+                      coworkerQueueFilter === 'restock' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-400/40'
+                        : 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-emerald-500/40'
+                    }`}
+                    title="Filter table to items triaged as Restock to Inventory whose status is not yet restocked"
+                  >
+                    <span>📦 Ready to Restock ({readyToRestockReports.length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (coworkerQueueFilter === 'scrap' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')) {
+                        setCoworkerQueueFilter('all');
+                      } else {
+                        setCoworkerQueueFilter('scrap');
+                        setReportsDispositionFilter('all');
+                        setReportsStatusFilter('all');
+                        setReportsCurrentPage(1);
+                        if (adminActiveTab === 'supplier_claims') {
+                          setAdminActiveTab('customer_reports');
+                        }
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+                      coworkerQueueFilter === 'scrap' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
+                        ? 'bg-amber-600 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
+                        : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/40'
+                    }`}
+                    title="Filter table to items triaged as Scrap / Dispose whose status is not yet scrapped"
+                  >
+                    <span>🔄 Supplier Re-Order ({supplierReorderReports.length})</span>
+                  </button>
+
+                  {coworkerQueueFilter !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => setCoworkerQueueFilter('all')}
+                      className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer"
+                    >
+                      Clear Queue Filter
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* TAB 2: CUSTOMER RMA HUB (INBOUND LOGISTICS) */}
             {(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports') && (
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 w-full min-w-0 box-border">
@@ -13433,7 +13842,7 @@ export default function App() {
                     </div>
 
                     {/* Reset Filters */}
-                    {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
+                    {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
                       <button
                         type="button"
                         onClick={resetReportsFilters}
@@ -13461,12 +13870,13 @@ export default function App() {
                         { id: 'Scrap / Dispose', label: '5- Scrap / Dispose' },
                         { id: 'Buffer Stock Exchange', label: '6- Buffer Exchange' }
                       ].map(chip => {
-                        const isActive = reportsDispositionFilter.toLowerCase() === chip.id.toLowerCase();
+                        const isActive = coworkerQueueFilter === 'all' && reportsDispositionFilter.toLowerCase() === chip.id.toLowerCase();
                         return (
                           <button
                             key={chip.id}
                             type="button"
                             onClick={() => {
+                              setCoworkerQueueFilter('all');
                               setReportsDispositionFilter(chip.id);
                               setReportsCurrentPage(1);
                             }}
@@ -13485,7 +13895,7 @@ export default function App() {
                   <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
                     <span>
                       Showing <strong className="text-slate-900 dark:text-white font-bold">{processedReports.length}</strong> of {recentReportsList.length} reports
-                      {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
+                      {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
                         <span className="text-blue-600 dark:text-blue-400 font-bold ml-1.5">• Filters active</span>
                       )}
                     </span>
@@ -14045,6 +14455,32 @@ export default function App() {
                                         <span>Inspect / Triage</span>
                                       </button>
 
+                                      {/* 1-Click Coworker WMS Restock Action */}
+                                      {isItemReadyToRestock(item, recentReportsList) && (
+                                        <button
+                                          type="button"
+                                          disabled={updatingQueueId === (item.id || item.rma_number)}
+                                          onClick={() => handleConfirmCoworkerAction(item, 'restocked')}
+                                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                          title="1-click confirm that this item has been stocked in WMS (updates status to 6- Restocked)"
+                                        >
+                                          <span>✓ Mark as Stocked in WMS</span>
+                                        </button>
+                                      )}
+
+                                      {/* 1-Click Coworker Supplier Re-Order Action */}
+                                      {isItemReadyForSupplierReorder(item, recentReportsList) && (
+                                        <button
+                                          type="button"
+                                          disabled={updatingQueueId === (item.id || item.rma_number)}
+                                          onClick={() => handleConfirmCoworkerAction(item, 'scrapped')}
+                                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                          title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
+                                        >
+                                          <span>✓ Mark Re-ordered from Supplier</span>
+                                        </button>
+                                      )}
+
                                       {/* Do NOT render Assign SKU on parent row if batch manifest */}
                                       {!isManifest && canEditProducts && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                                         <button
@@ -14331,7 +14767,29 @@ export default function App() {
                                                       </td>
                                                       {/* Actions: 170px */}
                                                       <td className="py-2 px-2 text-center w-[170px]">
-                                                        <div className="flex items-center justify-center gap-1 flex-nowrap">
+                                                        <div className="flex items-center justify-center gap-1 flex-wrap">
+                                                          {String(childDisposition || '').toLowerCase().includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(String(child.status || '').toLowerCase()) && (
+                                                            <button
+                                                              type="button"
+                                                              disabled={updatingQueueId === (childReportObject.id || item.rma_number)}
+                                                              onClick={() => handleConfirmCoworkerAction({ ...childReportObject, is_unpacked_manifest_item: true, warehouse_location: childLocation || item.warehouse_location }, 'restocked')}
+                                                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                                              title="1-click confirm stocked in WMS (updates status to 6- Restocked)"
+                                                            >
+                                                              <span>✓ Mark as Stocked in WMS</span>
+                                                            </button>
+                                                          )}
+                                                          {(String(childDisposition || '').toLowerCase().includes('scrap') || String(childDisposition || '').toLowerCase().includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(String(child.status || '').toLowerCase()) && (
+                                                            <button
+                                                              type="button"
+                                                              disabled={updatingQueueId === (childReportObject.id || item.rma_number)}
+                                                              onClick={() => handleConfirmCoworkerAction({ ...childReportObject, is_unpacked_manifest_item: true, warehouse_location: childLocation || item.warehouse_location }, 'scrapped')}
+                                                              className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                                              title="1-click confirm re-ordered from supplier (updates status to 7- Scrapped / Disposed)"
+                                                            >
+                                                              <span>✓ Mark Re-ordered from Supplier</span>
+                                                            </button>
+                                                          )}
                                                           {canEditProducts && (
                                                             <button
                                                               type="button"
@@ -14610,6 +15068,32 @@ export default function App() {
                                   <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
                                   <span>Triage</span>
                                 </button>
+
+                                {/* 1-Click Coworker WMS Restock Action */}
+                                {isItemReadyToRestock(item, recentReportsList) && (
+                                  <button
+                                    type="button"
+                                    disabled={updatingQueueId === (item.id || item.rma_number)}
+                                    onClick={() => handleConfirmCoworkerAction(item, 'restocked')}
+                                    className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                    title="1-click confirm that this item has been stocked in WMS (updates status to 6- Restocked)"
+                                  >
+                                    <span>✓ Mark as Stocked in WMS</span>
+                                  </button>
+                                )}
+
+                                {/* 1-Click Coworker Supplier Re-Order Action */}
+                                {isItemReadyForSupplierReorder(item, recentReportsList) && (
+                                  <button
+                                    type="button"
+                                    disabled={updatingQueueId === (item.id || item.rma_number)}
+                                    onClick={() => handleConfirmCoworkerAction(item, 'scrapped')}
+                                    className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                    title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
+                                  >
+                                    <span>✓ Mark Re-ordered from Supplier</span>
+                                  </button>
+                                )}
 
                                 {canEditProducts && !isManifest && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                                   <button
@@ -28197,20 +28681,23 @@ function normalizeDispositionOption(disp) {
 export function computeAutomaticLifecycleStatus(disposition, hasCreditMemo = false, currentStatus = null) {
   if (hasCreditMemo) return 'credit_memo_issued';
   const disp = String(disposition || '').toLowerCase().trim();
+  const curr = String(currentStatus || '').toLowerCase().trim();
 
   if (
     disp.includes('restock') || 
     disp.includes('accepted replacement') || 
     disp.includes('replacement stock received')
   ) {
-    return 'restocked';
+    // Keep in 'under_inspection' (Ready to Restock queue) until confirmed in WMS/ERP, unless already marked 'restocked'
+    return curr === 'restocked' ? 'restocked' : 'under_inspection';
   }
   if (
     disp.includes('scrap') || 
     disp.includes('dispose') || 
     disp.includes('local destruction')
   ) {
-    return 'scrapped';
+    // Keep in 'under_inspection' (Supplier Re-Order / Scrap queue) until confirmed, unless already marked 'scrapped'
+    return (curr === 'scrapped' || curr === 'disposed') ? 'scrapped' : 'under_inspection';
   }
   if (disp.includes('buffer stock') || disp.includes('buffer replacement')) {
     return 'buffer_replacement_dispatched';
@@ -28498,6 +28985,13 @@ export default function QuickRMAActionModal({
           window.dispatchEvent(new CustomEvent('rma-data-changed', {
             detail: { type: 'triage-updated', reportId: cleanReport.id, rmaNumber: cleanReport.rma_number, report: cleanReport }
           }));
+          catalogService.notifyChange('triage-updated', {
+            reportId: cleanReport.id,
+            rmaNumber: cleanReport.rma_number,
+            disposition: cleanReport.disposition,
+            status: cleanReport.status,
+            report: cleanReport
+          });
         } catch {}
       }
     } catch (err) {
@@ -28605,6 +29099,12 @@ export default function QuickRMAActionModal({
       window.dispatchEvent(new CustomEvent('rma-data-changed', {
         detail: { type: 'manifest-triage-updated', report: updatedReportRow }
       }));
+      catalogService.notifyChange('manifest-triage-updated', {
+        reportId: updatedReportRow.id,
+        rmaNumber: updatedReportRow.rma_number,
+        status: updatedReportRow.status,
+        report: updatedReportRow
+      });
     } catch (err) {
       alert(`Error saving manifest triage: ${err.message}`);
     } finally {
@@ -42960,6 +43460,134 @@ export const catalogService = {
 
     this.notifyChange('report-updated', { report: data });
     return data;
+  },
+
+  /**
+   * Broadcasts real-time triage events over rma_portal_sync_bus when an item is triaged
+   * as 'Restock to Inventory' or 'Scrap / Dispose' so coworker tabs update live without refresh.
+   */
+  broadcastTriageEvent({ report, disposition, status }) {
+    this.notifyChange('triage-queue-updated', {
+      reportId: report?.id,
+      rmaNumber: report?.rma_number,
+      disposition: disposition || report?.disposition,
+      status: status || report?.status,
+      report
+    });
+  },
+
+  /**
+   * 1-Click Coworker Queue Action (Mark as Stocked in WMS -> 'restocked' | Mark Re-ordered from Supplier -> 'scrapped')
+   */
+  async confirmCoworkerQueueAction({ item, targetStatus, warehouseLocation = null, actorName = 'Warehouse Staff' }) {
+    if (!item || !targetStatus) throw new Error('Item and targetStatus are required.');
+    const cleanStatus = String(targetStatus).toLowerCase().trim() === 'scrapped' ? 'scrapped' : 'restocked';
+    const cleanActor = String(actorName || 'Warehouse Staff').trim();
+    const auditNote = cleanStatus === 'restocked'
+      ? `ERP Restock confirmed by ${cleanActor}`
+      : `Supplier Re-order confirmed by ${cleanActor}`;
+
+    const auditEntry = {
+      timestamp: new Date().toISOString(),
+      stage: cleanStatus === 'restocked' ? 'ERP_RESTOCK' : 'SUPPLIER_REORDER',
+      actor: cleanActor,
+      status: cleanStatus,
+      warehouse_location: warehouseLocation || item.warehouse_location || undefined,
+      note: auditNote
+    };
+
+    const targetId = item.parent_rma_id || item.id;
+    const targetRma = item.rma_number;
+
+    // Fetch existing row from Supabase
+    let fetchQuery = supabase.from('rma_reports').select('*');
+    if (targetId && /^\d+$/.test(String(targetId))) {
+      fetchQuery = fetchQuery.eq('id', Number(targetId));
+    } else if (targetRma) {
+      fetchQuery = fetchQuery.eq('rma_number', targetRma);
+    }
+
+    const { data: rows, error: fetchErr } = await fetchQuery;
+    if (fetchErr) throw fetchErr;
+    const primaryRow = Array.isArray(rows) && rows.length > 0 ? rows[0] : item;
+
+    const currentAudit = Array.isArray(primaryRow?.audit_trail) ? [...primaryRow.audit_trail] : [];
+    currentAudit.push(auditEntry);
+
+    const updates = {
+      status: cleanStatus,
+      audit_trail: currentAudit
+    };
+    if (warehouseLocation) {
+      updates.warehouse_location = String(warehouseLocation).trim().toUpperCase();
+    }
+
+    // If primaryRow is a batch manifest, also update matching child items in primaryRow.items
+    let parsedItems = [];
+    if (Array.isArray(primaryRow?.items) && primaryRow.items.length > 0) {
+      parsedItems = [...primaryRow.items];
+    } else if (typeof primaryRow?.items === 'string' && primaryRow.items.trim()) {
+      try {
+        const p = JSON.parse(primaryRow.items);
+        if (Array.isArray(p)) parsedItems = p;
+      } catch (e) {}
+    }
+
+    if (parsedItems.length > 0) {
+      const targetBarcode = item.is_unpacked_manifest_item && item.barcode ? String(item.barcode).trim() : null;
+      parsedItems = parsedItems.map(child => {
+        const cBarcode = String(child.barcode || '').trim();
+        const cDisp = String(child.disposition || '').toLowerCase();
+        const matchesSpecific = targetBarcode && cBarcode === targetBarcode;
+        const matchesDisp = !targetBarcode && (
+          (cleanStatus === 'restocked' && cDisp.includes('restock')) ||
+          (cleanStatus === 'scrapped' && (cDisp.includes('scrap') || cDisp.includes('dispose')))
+        );
+        if (matchesSpecific || matchesDisp) {
+          return {
+            ...child,
+            status: cleanStatus,
+            warehouse_location: warehouseLocation ? String(warehouseLocation).trim().toUpperCase() : child.warehouse_location
+          };
+        }
+        return child;
+      });
+      updates.items = parsedItems;
+
+      // Recompute parent manifest status if only a subset of items were updated
+      const allRestocked = parsedItems.every(c => String(c.status || '').toLowerCase() === 'restocked');
+      const allScrapped = parsedItems.every(c => String(c.status || '').toLowerCase() === 'scrapped');
+      if (allRestocked) {
+        updates.status = 'restocked';
+      } else if (allScrapped) {
+        updates.status = 'scrapped';
+      } else if (targetBarcode) {
+        updates.status = 'partially_completed';
+      }
+    }
+
+    let updateQuery = supabase.from('rma_reports').update(updates);
+    if (primaryRow?.id && /^\d+$/.test(String(primaryRow.id))) {
+      updateQuery = updateQuery.eq('id', Number(primaryRow.id));
+    } else if (targetRma) {
+      updateQuery = updateQuery.eq('rma_number', targetRma);
+    }
+
+    const { data: updatedData, error: updateErr } = await updateQuery.select('*');
+    if (updateErr) throw updateErr;
+    const updatedReport = Array.isArray(updatedData) && updatedData.length > 0
+      ? updatedData[0]
+      : { ...primaryRow, ...updates };
+
+    // Broadcast real-time event across all open tabs via rma_portal_sync_bus
+    this.notifyChange('coworker-queue-updated', {
+      reportId: updatedReport.id,
+      rmaNumber: updatedReport.rma_number,
+      status: cleanStatus,
+      report: updatedReport
+    });
+
+    return updatedReport;
   },
 
   /**

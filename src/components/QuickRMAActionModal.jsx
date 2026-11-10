@@ -87,20 +87,23 @@ function normalizeDispositionOption(disp) {
 export function computeAutomaticLifecycleStatus(disposition, hasCreditMemo = false, currentStatus = null) {
   if (hasCreditMemo) return 'credit_memo_issued';
   const disp = String(disposition || '').toLowerCase().trim();
+  const curr = String(currentStatus || '').toLowerCase().trim();
 
   if (
     disp.includes('restock') || 
     disp.includes('accepted replacement') || 
     disp.includes('replacement stock received')
   ) {
-    return 'restocked';
+    // Keep in 'under_inspection' (Ready to Restock queue) until confirmed in WMS/ERP, unless already marked 'restocked'
+    return curr === 'restocked' ? 'restocked' : 'under_inspection';
   }
   if (
     disp.includes('scrap') || 
     disp.includes('dispose') || 
     disp.includes('local destruction')
   ) {
-    return 'scrapped';
+    // Keep in 'under_inspection' (Supplier Re-Order / Scrap queue) until confirmed, unless already marked 'scrapped'
+    return (curr === 'scrapped' || curr === 'disposed') ? 'scrapped' : 'under_inspection';
   }
   if (disp.includes('buffer stock') || disp.includes('buffer replacement')) {
     return 'buffer_replacement_dispatched';
@@ -388,6 +391,13 @@ export default function QuickRMAActionModal({
           window.dispatchEvent(new CustomEvent('rma-data-changed', {
             detail: { type: 'triage-updated', reportId: cleanReport.id, rmaNumber: cleanReport.rma_number, report: cleanReport }
           }));
+          catalogService.notifyChange('triage-updated', {
+            reportId: cleanReport.id,
+            rmaNumber: cleanReport.rma_number,
+            disposition: cleanReport.disposition,
+            status: cleanReport.status,
+            report: cleanReport
+          });
         } catch {}
       }
     } catch (err) {
@@ -495,6 +505,12 @@ export default function QuickRMAActionModal({
       window.dispatchEvent(new CustomEvent('rma-data-changed', {
         detail: { type: 'manifest-triage-updated', report: updatedReportRow }
       }));
+      catalogService.notifyChange('manifest-triage-updated', {
+        reportId: updatedReportRow.id,
+        rmaNumber: updatedReportRow.rma_number,
+        status: updatedReportRow.status,
+        report: updatedReportRow
+      });
     } catch (err) {
       alert(`Error saving manifest triage: ${err.message}`);
     } finally {

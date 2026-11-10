@@ -81,9 +81,9 @@ export default async function handler(req, res) {
       // Normalize status and disposition for coworker restock & scrap/re-order sync
       if (updateData.status) {
         const s = String(updateData.status).toLowerCase().trim();
-        if (s === 'restocked') {
+        if (s === 'restocked' || s === '6- restocked') {
           updateData.status = 'restocked';
-        } else if (s === 'scrapped' || s === 'disposed') {
+        } else if (s === 'scrapped' || s === 'disposed' || s === '7- scrapped / disposed') {
           updateData.status = 'scrapped';
         } else if (s === 'resolved' || s === 'closed') {
           // If disposition indicates scrap, normalize to scrapped; otherwise restocked
@@ -94,6 +94,10 @@ export default async function handler(req, res) {
             updateData.status = 'restocked';
           }
         }
+      }
+
+      if (updateData.warehouse_location) {
+        updateData.warehouse_location = String(updateData.warehouse_location).trim().toUpperCase();
       }
 
       if (updateData.disposition) {
@@ -118,19 +122,29 @@ export default async function handler(req, res) {
         return sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: `RMA report ${cleanId} not found.` });
       }
 
-      // Standardized Audit Trail Note
-      let auditNote = `RMA status updated to ${updateData.status || 'updated'} via API by ${client.name}`;
+      const actorName = String(body?.actor || body?.user || body?.updated_by || client.name || 'Coworker').trim();
+      const targetBarcode = body?.barcode ? String(body.barcode).trim() : null;
+
+      // Standardized Audit Trail Note (Subject 1)
+      let auditNote = `RMA status updated to ${updateData.status || 'updated'} by ${actorName}`;
       if (updateData.status === 'restocked') {
-        auditNote = `ERP Restock confirmed via API by ${client.name}`;
+        auditNote = `ERP Restock confirmed by ${actorName}`;
       } else if (updateData.status === 'scrapped') {
-        auditNote = `ERP Scrap confirmed via API by ${client.name}`;
+        auditNote = `Supplier Re-order confirmed by ${actorName}`;
       }
+
+      const lifecycleStageLabel = updateData.status === 'restocked'
+        ? '6- Restocked'
+        : updateData.status === 'scrapped'
+        ? '7- Scrapped / Disposed'
+        : undefined;
 
       const auditEntry = {
         timestamp: new Date().toISOString(),
-        stage: updateData.status === 'restocked' ? 'ERP_RESTOCK' : (updateData.status === 'scrapped' ? 'ERP_SCRAP' : 'API_PATCH'),
-        actor: `${client.name} (API)`,
+        stage: updateData.status === 'restocked' ? 'ERP_RESTOCK' : (updateData.status === 'scrapped' ? 'SUPPLIER_REORDER' : 'API_PATCH'),
+        actor: actorName,
         status: updateData.status,
+        lifecycle_stage: lifecycleStageLabel,
         warehouse_location: updateData.warehouse_location || undefined,
         note: auditNote
       };
@@ -141,10 +155,66 @@ export default async function handler(req, res) {
         const currentAudit = Array.isArray(row.audit_trail) ? [...row.audit_trail] : [];
         currentAudit.push(auditEntry);
 
-        const rowPayload = {
+        let rowPayload = {
           ...updateData,
           audit_trail: currentAudit
         };
+
+        // If this row is a parent batch manifest, also update its child items inside row.items
+        let parsedRowItems = [];
+        if (Array.isArray(row.items) && row.items.length > 0) {
+          parsedRowItems = [...row.items];
+        } else if (typeof row.items === 'string' && row.items.trim()) {
+          try {
+            const p = JSON.parse(row.items);
+            if (Array.isArray(p)) parsedRowItems = p;
+          } catch (e) {}
+        }
+
+        if (parsedRowItems.length > 0) {
+          parsedRowItems = parsedRowItems.map(it => {
+            const itBarcode = String(it.barcode || '').trim();
+            const itDisp = String(it.disposition || '').toLowerCase();
+            const matchesSpecificBarcode = targetBarcode && itBarcode === targetBarcode;
+            const matchesQueueDisposition = !targetBarcode && (
+              (updateData.status === 'restocked' && itDisp.includes('restock')) ||
+              (updateData.status === 'scrapped' && (itDisp.includes('scrap') || itDisp.includes('dispose'))) ||
+              (!updateData.status)
+            );
+
+            if (matchesSpecificBarcode || matchesQueueDisposition) {
+              return {
+                ...it,
+                status: updateData.status !== undefined ? updateData.status : it.status,
+                warehouse_location: updateData.warehouse_location !== undefined ? updateData.warehouse_location : it.warehouse_location,
+                disposition: updateData.disposition !== undefined ? updateData.disposition : it.disposition
+              };
+            }
+            return it;
+          });
+
+          // Recompute parent manifest lifecycle status dynamically
+          let restockCnt = 0;
+          let scrapCnt = 0;
+          let pendingCnt = 0;
+          parsedRowItems.forEach(it => {
+            const d = String(it.disposition || '').toLowerCase();
+            const st = String(it.status || '').toLowerCase();
+            if (st === 'restocked' || d.includes('restock')) restockCnt += 1;
+            else if (st === 'scrapped' || d.includes('scrap') || d.includes('dispose')) scrapCnt += 1;
+            else if (!d || d.includes('pending')) pendingCnt += 1;
+          });
+          if (restockCnt === parsedRowItems.length) {
+            rowPayload.status = 'restocked';
+          } else if (scrapCnt === parsedRowItems.length) {
+            rowPayload.status = 'scrapped';
+          } else if (pendingCnt === parsedRowItems.length) {
+            rowPayload.status = 'under_inspection';
+          } else {
+            rowPayload.status = 'partially_completed';
+          }
+          rowPayload.items = parsedRowItems;
+        }
 
         const { data: updatedRow, error: updateErr } = await supabase
           .from('rma_reports')
@@ -156,7 +226,16 @@ export default async function handler(req, res) {
         if (updateErr) {
           console.error(`[API v1 RMA PATCH] Error updating row ${row.id}:`, updateErr);
         } else if (updatedRow) {
-          updatedRows.push(updatedRow);
+          updatedRows.push({
+            ...updatedRow,
+            lifecycle_stage: updatedRow.status === 'restocked'
+              ? '6- Restocked'
+              : updatedRow.status === 'scrapped'
+              ? '7- Scrapped / Disposed'
+              : updatedRow.status === 'partially_completed'
+              ? 'Partially Completed'
+              : updatedRow.status
+          });
         }
 
         // If this row is a child item inside a parent manifest (has parent_rma_id):

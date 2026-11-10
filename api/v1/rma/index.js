@@ -12,7 +12,7 @@ export default async function handler(req, res) {
   const client = await requireApiKey(req, res);
   if (!client) return; // Response already sent by middleware
 
-  // 2. GET: List RMA Reports with query filters
+  // 2. GET: List RMA Reports with query filters & dedicated coworker queues
   if (req.method === 'GET') {
     try {
       const { rma_type, status, barcode, search, disposition, condition_grade, warehouse_location, queue, is_parent, limit = '50', offset = '0' } = req.query;
@@ -20,89 +20,11 @@ export default async function handler(req, res) {
       const numLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
       const numOffset = Math.max(parseInt(offset, 10) || 0, 0);
 
-      let query = supabase
-        .from('rma_reports')
-        .select('*', { count: 'exact' });
-
-      // 1. Eliminate Double-Counting on Multi-Item Manifests:
-      // Filter out generic parent manifest containers (Batch Return Manifest...) so coworkers only receive
-      // individual line items with distinct SKUs, barcodes, quantities, and bin locations without double-counting.
-      // If a caller explicitly queries is_parent=true, return the parent manifest rows.
-      if (is_parent === 'true') {
-        query = query.eq('is_parent', true);
-      } else {
-        query = query
-          .or('is_parent.is.null,is_parent.eq.false')
-          .not('name', 'ilike', 'Batch Return Manifest%');
-      }
-
-      if (rma_type) {
-        query = query.eq('rma_type', rma_type);
-      }
-
-      // 2. Explicit Inventory Queues (queue=restock | queue=scrap)
-      if (queue) {
-        const cleanQueue = String(queue).trim().toLowerCase();
-        if (cleanQueue === 'restock') {
-          query = query.ilike('disposition', '%Restock%');
-          query = query.not('status', 'in', '("restocked","scrapped","disposed","closed","resolved","rejected","deleted")');
-        } else if (cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
-          query = query.or('disposition.ilike.%Scrap%,disposition.ilike.%Dispose%');
-          query = query.not('status', 'in', '("scrapped","disposed","restocked","closed","resolved","rejected","deleted")');
-        }
-      }
-
-      // 3. Status Filtering with Comprehensive Active Pending Support
-      if (status) {
-        const cleanStatus = status.trim().toLowerCase();
-        if (cleanStatus === 'pending' || cleanStatus === 'open') {
-          // Include all active pre-restock/pre-scrap statuses and exclude finalized
-          query = query
-            .in('status', ['pending', 'received_at_dock', 'logged', 'credit_memo_issued', 'under_inspection', 'pending_finance_approval'])
-            .not('status', 'in', '("restocked","scrapped","disposed","closed","resolved","rejected","deleted")');
-        } else if (cleanStatus === 'restocked') {
-          query = query.in('status', ['restocked', 'closed', 'resolved']);
-        } else if (cleanStatus === 'scrapped' || cleanStatus === 'disposed') {
-          query = query.in('status', ['scrapped', 'disposed']);
-        } else {
-          query = query.eq('status', status.trim());
-        }
-      }
-
-      // 4. Disposition Filtering
-      if (disposition) {
-        const cleanDisp = disposition.trim();
-        if (/restock/i.test(cleanDisp)) {
-          query = query.ilike('disposition', '%Restock%');
-          if (!status && !queue) {
-            query = query.not('status', 'in', '("restocked","scrapped","disposed","closed","resolved","rejected","deleted")');
-          }
-        } else if (/scrap|dispose/i.test(cleanDisp)) {
-          query = query.or('disposition.ilike.%Scrap%,disposition.ilike.%Dispose%');
-          if (!status && !queue) {
-            query = query.not('status', 'in', '("scrapped","disposed","restocked","closed","resolved","rejected","deleted")');
-          }
-        } else if (/rtv|return to vendor/i.test(cleanDisp)) {
-          query = query.or('disposition.ilike.%Return to Vendor%,disposition.ilike.%RTV%');
-        } else {
-          query = query.ilike('disposition', `%${cleanDisp}%`);
-        }
-      }
-      if (condition_grade) {
-        query = query.ilike('condition_grade', `%${condition_grade.trim()}%`);
-      }
-      if (warehouse_location) {
-        query = query.ilike('warehouse_location', `%${warehouse_location.trim()}%`);
-      }
-      if (search) {
-        query = query.or(`name.ilike.%${search}%,code.ilike.%${search}%,rma_number.ilike.%${search}%,reporter_name.ilike.%${search}%`);
-      }
-
-      query = query
-        .order('created_at', { ascending: false })
-        .range(numOffset, numOffset + numLimit - 1);
-
-      const { data, count, error } = await query;
+      // Fetch reports and catalog products for accurate SKU/location enrichment and manifest unpacking
+      const [{ data: rawReports, error }, { data: catalogProducts }] = await Promise.all([
+        supabase.from('rma_reports').select('*').order('created_at', { ascending: false }),
+        supabase.from('products').select('barcode, code, name, supplier_name, price, price_with_vat, pieces_per_case')
+      ]);
 
       if (error) {
         console.error('[API v1 RMA GET] Query error:', error);
@@ -113,23 +35,230 @@ export default async function handler(req, res) {
         });
       }
 
-      const enrichedData = (data || []).map(item => ({
-        ...item,
-        sku: (item.code && item.code !== item.barcode) ? item.code : (item.sku && item.sku !== item.barcode ? item.sku : null),
-        code: (item.code && item.code !== item.barcode) ? item.code : (item.sku && item.sku !== item.barcode ? item.sku : null),
-        supplier_name: item.supplier_name || 'Savemore',
-        price: Number(item.price_with_vat || item.price || 0),
-        warehouse_location: item.warehouse_location || null,
-        batch_lot_number: item.batch_lot_number || null
-      }));
+      const productByBarcode = new Map();
+      (catalogProducts || []).forEach(p => {
+        if (p && p.barcode) {
+          productByBarcode.set(String(p.barcode).trim(), p);
+        }
+      });
+
+      const allRows = Array.isArray(rawReports) ? rawReports : [];
+      const unpackedList = [];
+      const seenManifestLineKeys = new Set();
+
+      // If caller explicitly requests is_parent=true, only return parent manifest container rows
+      if (is_parent === 'true') {
+        allRows.forEach(r => {
+          if (r && r.is_parent === true) {
+            unpackedList.push(r);
+          }
+        });
+      } else {
+        // First pass: unpack parent batch manifests into individual line items with real SKUs, names, quantities, and warehouse_location
+        allRows.forEach(r => {
+          if (!r) return;
+          let parsedItems = [];
+          if (Array.isArray(r.items) && r.items.length > 0) {
+            parsedItems = r.items;
+          } else if (typeof r.items === 'string' && r.items.trim()) {
+            try {
+              const p = JSON.parse(r.items);
+              if (Array.isArray(p)) parsedItems = p;
+            } catch (e) {}
+          }
+
+          const isManifestParent = Boolean(
+            r.is_parent === true ||
+            parsedItems.length > 1 ||
+            String(r.name || '').toLowerCase().startsWith('batch return manifest')
+          );
+
+          if (isManifestParent) {
+            parsedItems.forEach((child, idx) => {
+              const cBarcode = String(child.barcode || '').trim();
+              const matchedProd = cBarcode ? productByBarcode.get(cBarcode) : null;
+              const rawSku = String(child.code || child.sku || matchedProd?.code || '').trim();
+              const validSku = (rawSku && rawSku !== cBarcode && !rawSku.toLowerCase().includes('awaiting')) ? rawSku : null;
+              const cName = (child.name || child.productName || matchedProd?.name || `Item #${idx + 1}`).trim();
+              const lineKey = `${r.rma_number}::${cBarcode || idx}::${idx}`;
+              seenManifestLineKeys.add(`${r.rma_number}::${cBarcode}`);
+
+              // Look up if there is also a separate child row in rma_reports for this barcode to merge latest status/location
+              const matchingChildRow = allRows.find(other => (
+                other &&
+                other.id !== r.id &&
+                !other.is_parent &&
+                other.rma_number === r.rma_number &&
+                String(other.barcode || '').trim() === cBarcode
+              ));
+
+              const effectiveStatus = child.status || matchingChildRow?.status || (
+                (r.status === 'restocked' || r.status === 'scrapped' || r.status === 'closed')
+                  ? r.status
+                  : 'under_inspection'
+              );
+              const effectiveDisposition = child.disposition || matchingChildRow?.disposition || r.disposition || '1- Pending Triage';
+              const effectiveLocation = child.warehouse_location || matchingChildRow?.warehouse_location || r.warehouse_location || null;
+
+              unpackedList.push({
+                ...r,
+                ...child,
+                id: matchingChildRow?.id || r.id,
+                manifest_item_id: child.id || lineKey,
+                parent_rma_id: r.id,
+                is_parent: false,
+                is_unpacked_manifest_item: true,
+                rma_number: r.rma_number,
+                barcode: cBarcode || r.barcode,
+                sku: validSku,
+                code: validSku,
+                name: cName,
+                quantity: Number(child.quantity || child.qty) || 1,
+                unit_name: child.unit_name || child.unit || r.unit_name || 'pc',
+                pieces_per_case: child.pieces_per_case || child.piecesPerCase || matchedProd?.pieces_per_case || null,
+                supplier_name: (child.supplier_name && child.supplier_name !== 'Pending Assignment')
+                  ? child.supplier_name
+                  : (matchedProd?.supplier_name || r.supplier_name || 'Pending Assignment'),
+                price: Number(child.price_with_vat || child.price || matchedProd?.price_with_vat || matchedProd?.price || 0),
+                condition_grade: child.condition_grade || matchingChildRow?.condition_grade || r.condition_grade || 'B - Damaged Packaging Only',
+                disposition: effectiveDisposition,
+                warehouse_location: effectiveLocation,
+                status: effectiveStatus,
+                items: undefined
+              });
+            });
+          }
+        });
+
+        // Second pass: add standalone single-item tickets (and any child rows not already unpacked from a parent's items array)
+        allRows.forEach(r => {
+          if (!r) return;
+          const isManifestParent = Boolean(
+            r.is_parent === true ||
+            (Array.isArray(r.items) && r.items.length > 1) ||
+            String(r.name || '').toLowerCase().startsWith('batch return manifest')
+          );
+          if (isManifestParent) return; // Never push generic parent manifest container
+
+          const rBarcode = String(r.barcode || '').trim();
+          const dedupKey = `${r.rma_number}::${rBarcode}`;
+          // Skip if already unpacked from parent manifest items array (prevents double-counting)
+          if (seenManifestLineKeys.has(dedupKey) && !/-[B-Z]$/i.test(String(r.rma_number || ''))) {
+            return;
+          }
+
+          const matchedProd = rBarcode ? productByBarcode.get(rBarcode) : null;
+          const rawSku = String(r.code || r.sku || matchedProd?.code || '').trim();
+          const validSku = (rawSku && rawSku !== rBarcode && !rawSku.toLowerCase().includes('awaiting')) ? rawSku : null;
+
+          unpackedList.push({
+            ...r,
+            sku: validSku,
+            code: validSku,
+            name: (r.name && !String(r.name).toLowerCase().includes('unidentified'))
+              ? r.name
+              : (matchedProd?.name || r.name),
+            supplier_name: (r.supplier_name && r.supplier_name !== 'Pending Assignment')
+              ? r.supplier_name
+              : (matchedProd?.supplier_name || r.supplier_name || 'Pending Assignment'),
+            price: Number(r.price_with_vat || r.price || matchedProd?.price_with_vat || matchedProd?.price || 0),
+            warehouse_location: r.warehouse_location || null,
+            batch_lot_number: r.batch_lot_number || null
+          });
+        });
+      }
+
+      // Apply filters on unpacked items
+      const FINALIZED_RESTOCK = new Set(['restocked', 'closed', 'resolved', 'scrapped', 'disposed', 'rejected', 'deleted']);
+      const FINALIZED_SCRAP = new Set(['scrapped', 'disposed', 'closed', 'resolved', 'restocked', 'rejected', 'deleted']);
+
+      const filtered = unpackedList.filter(item => {
+        if (rma_type && item.rma_type !== rma_type) return false;
+        if (barcode && String(item.barcode || '').trim() !== String(barcode).trim()) return false;
+
+        const itemDisp = String(item.disposition || '').toLowerCase();
+        const itemStatus = String(item.status || 'received_at_dock').toLowerCase().trim();
+
+        // Dedicated Coworker Queues (Subject 1)
+        if (queue) {
+          const cleanQueue = String(queue).trim().toLowerCase();
+          if (cleanQueue === 'restock') {
+            if (!itemDisp.includes('restock')) return false;
+            if (FINALIZED_RESTOCK.has(itemStatus)) return false;
+          } else if (cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
+            if (!itemDisp.includes('scrap') && !itemDisp.includes('dispose')) return false;
+            if (FINALIZED_SCRAP.has(itemStatus)) return false;
+          }
+        }
+
+        // Status filter
+        if (status) {
+          const cleanStatus = String(status).trim().toLowerCase();
+          if (cleanStatus === 'pending' || cleanStatus === 'open') {
+            if (FINALIZED_RESTOCK.has(itemStatus)) return false;
+          } else if (cleanStatus === 'restocked') {
+            if (!['restocked', 'closed', 'resolved'].includes(itemStatus)) return false;
+          } else if (cleanStatus === 'scrapped' || cleanStatus === 'disposed') {
+            if (!['scrapped', 'disposed'].includes(itemStatus)) return false;
+          } else if (itemStatus !== cleanStatus) {
+            return false;
+          }
+        }
+
+        // Disposition filter
+        if (disposition) {
+          const cleanDisp = String(disposition).trim().toLowerCase();
+          if (cleanDisp.includes('restock')) {
+            if (!itemDisp.includes('restock')) return false;
+            if (!status && !queue && FINALIZED_RESTOCK.has(itemStatus)) return false;
+          } else if (cleanDisp.includes('scrap') || cleanDisp.includes('dispose')) {
+            if (!itemDisp.includes('scrap') && !itemDisp.includes('dispose')) return false;
+            if (!status && !queue && FINALIZED_SCRAP.has(itemStatus)) return false;
+          } else if (cleanDisp.includes('rtv') || cleanDisp.includes('return to vendor')) {
+            if (!itemDisp.includes('rtv') && !itemDisp.includes('return to vendor') && !itemDisp.includes('vendor')) return false;
+          } else if (!itemDisp.includes(cleanDisp)) {
+            return false;
+          }
+        }
+
+        if (condition_grade) {
+          if (!String(item.condition_grade || '').toLowerCase().includes(String(condition_grade).trim().toLowerCase())) {
+            return false;
+          }
+        }
+
+        if (warehouse_location) {
+          if (!String(item.warehouse_location || '').toLowerCase().includes(String(warehouse_location).trim().toLowerCase())) {
+            return false;
+          }
+        }
+
+        if (search) {
+          const q = String(search).trim().toLowerCase();
+          const matches = (
+            String(item.name || '').toLowerCase().includes(q) ||
+            String(item.code || item.sku || '').toLowerCase().includes(q) ||
+            String(item.barcode || '').toLowerCase().includes(q) ||
+            String(item.rma_number || '').toLowerCase().includes(q) ||
+            String(item.reporter_name || '').toLowerCase().includes(q) ||
+            String(item.warehouse_location || '').toLowerCase().includes(q)
+          );
+          if (!matches) return false;
+        }
+
+        return true;
+      });
+
+      const paginatedData = filtered.slice(numOffset, numOffset + numLimit);
 
       return sendJson(res, 200, {
         success: true,
         client: client.name,
-        total: count || 0,
+        queue: queue || null,
+        total: filtered.length,
         limit: numLimit,
         offset: numOffset,
-        data: enrichedData
+        data: paginatedData
       });
     } catch (err) {
       console.error('[API v1 RMA GET] Server error:', err);
