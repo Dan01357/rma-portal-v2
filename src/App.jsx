@@ -1927,8 +1927,8 @@ export default function App() {
       quantity: submitQty,
       unit_name: finalUnit,
       unit: finalUnit,
-      supplier_name: detectedProduct?.supplier_name || 'Savemore',
-      supplier: detectedProduct?.supplier_name || 'Savemore',
+      supplier_name: (detectedProduct?.supplier_name && detectedProduct.supplier_name !== 'Savemore') ? detectedProduct.supplier_name : (detectedProduct?.supplier_name || 'Pending Assignment'),
+      supplier: (detectedProduct?.supplier_name && detectedProduct.supplier_name !== 'Savemore') ? detectedProduct.supplier_name : (detectedProduct?.supplier_name || 'Pending Assignment'),
       price: Number(detectedProduct?.price || 0),
       price_with_vat: Number(detectedProduct?.price_with_vat || detectedProduct?.priceWithVat || detectedProduct?.price || 0),
       reason: selectedReason,
@@ -2023,8 +2023,8 @@ export default function App() {
         quantity: submitQty,
         unit_name: finalUnit,
         unit: finalUnit,
-        supplier_name: detectedProduct?.supplier_name || 'Savemore',
-        supplier: detectedProduct?.supplier_name || 'Savemore',
+        supplier_name: (detectedProduct?.supplier_name && detectedProduct.supplier_name !== 'Savemore') ? detectedProduct.supplier_name : (detectedProduct?.supplier_name || 'Pending Assignment'),
+        supplier: (detectedProduct?.supplier_name && detectedProduct.supplier_name !== 'Savemore') ? detectedProduct.supplier_name : (detectedProduct?.supplier_name || 'Pending Assignment'),
         price: Number(detectedProduct?.price || 0),
         price_with_vat: Number(detectedProduct?.price_with_vat || detectedProduct?.priceWithVat || detectedProduct?.price || 0),
         reason: selectedReason,
@@ -2096,8 +2096,8 @@ export default function App() {
       is_parent: isBatchManifestTicket,
       store_branch: resolvedBranch,
       store: resolvedBranch,
-      supplier_name: itemsToSubmit[0]?.supplier_name || 'Warehouse',
-      supplier: itemsToSubmit[0]?.supplier_name || 'Warehouse',
+      supplier_name: (itemsToSubmit[0]?.supplier_name && itemsToSubmit[0].supplier_name !== 'Warehouse' && itemsToSubmit[0].supplier_name !== 'Savemore') ? itemsToSubmit[0].supplier_name : (itemsToSubmit[0]?.supplier_name || 'Pending Assignment'),
+      supplier: (itemsToSubmit[0]?.supplier_name && itemsToSubmit[0].supplier_name !== 'Warehouse' && itemsToSubmit[0].supplier_name !== 'Savemore') ? itemsToSubmit[0].supplier_name : (itemsToSubmit[0]?.supplier_name || 'Pending Assignment'),
       reason: primaryReason,
       reporter_name: reporterName || 'Staff',
       reporter_contact: effectiveContact,
@@ -2247,6 +2247,7 @@ export default function App() {
           dr_number: capturedDrNumber,
           po_number: capturedPoNumber,
           invoice_dr_number: capturedInvoiceDrNumber,
+          supplier_name: (capturedItems[0]?.supplier_name && capturedItems[0].supplier_name !== 'Warehouse' && capturedItems[0].supplier_name !== 'Savemore') ? capturedItems[0].supplier_name : (capturedItems[0]?.supplier_name || 'Pending Assignment'),
           store_branch: capturedStoreBranch,
           expiry_date: capturedItems[0]?.expiry_date || null,
           batch_lot_number: capturedBatchLotNumber,
@@ -2568,7 +2569,7 @@ export default function App() {
                         await downloadBoxStickerPng({
                           svgElementOrId: 'filed-report-qr-svg',
                           rmaNumber: submitSuccessReport.rmaNumber,
-                          supplier: submitSuccessReport.supplier || submitSuccessReport.supplier_name || 'Warehouse',
+                          supplier: submitSuccessReport.supplier || submitSuccessReport.supplier_name || 'Pending Assignment',
                           itemName: submitSuccessReport.productName || submitSuccessReport.name || 'Returned Merchandise',
                           barcode: submitSuccessReport.barcode,
                           sku: submitSuccessReport.sku || submitSuccessReport.code || '',
@@ -4429,6 +4430,11 @@ export default function App() {
                                         </button>
                                       )}
                                     </div>
+                                    {((item.supplier_name && item.supplier_name !== 'Pending Assignment') || (matchedProduct?.supplier_name && matchedProduct.supplier_name !== 'Pending Assignment')) && (
+                                      <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate mt-0.5">
+                                        Vendor: <span className="font-semibold text-slate-700 dark:text-slate-300">{item.supplier_name || matchedProduct?.supplier_name}</span>
+                                      </div>
+                                    )}
                                     {(item.batch_lot_number || item.expiry_date) && (
                                       <div className="flex items-center gap-1.5 flex-wrap mt-0.5 font-normal">
                                         {item.batch_lot_number && (
@@ -6049,6 +6055,14 @@ export default function App() {
               const rmaMatch = r && r.rma_number && updated.rma_number && String(r.rma_number) === String(updated.rma_number) && !r.parent_rma_id;
               if (idMatch || rmaMatch) {
                 return { ...r, ...updated };
+              }
+              // Also synchronize child sub-items if parent manifest's supplier was updated
+              if (updated.id && r && r.parent_rma_id && String(r.parent_rma_id) === String(updated.id)) {
+                return {
+                  ...r,
+                  supplier_name: updated.supplier_name || r.supplier_name,
+                  supplier: updated.supplier || r.supplier
+                };
               }
               return r;
             }));

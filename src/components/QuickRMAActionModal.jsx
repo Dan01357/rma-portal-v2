@@ -35,7 +35,8 @@ import {
   Plus,
   Minus,
   ArrowRightLeft,
-  Info
+  Info,
+  FileText
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
@@ -167,8 +168,11 @@ export default function QuickRMAActionModal({
   const [splitSuccessMessage, setSplitSuccessMessage] = useState('');
   const [isClosingHandover, setIsClosingHandover] = useState(false);
 
-  // Official Logistics Paperwork (DR / Invoice / PO) & AI Overrides
+  // Official Logistics Paperwork (SI / DR / PO), Supplier & Metadata Overrides
+  const [adminSiNumber, setAdminSiNumber] = useState('');
   const [adminDrNumber, setAdminDrNumber] = useState('');
+  const [adminPoNumber, setAdminPoNumber] = useState('');
+  const [adminSupplierName, setAdminSupplierName] = useState('');
   const [adminStoreBranch, setAdminStoreBranch] = useState('');
   const [adminExpiryDate, setAdminExpiryDate] = useState('');
   const [adminBatchLot, setAdminBatchLot] = useState('');
@@ -946,14 +950,38 @@ export default function QuickRMAActionModal({
     }
   }, [isOpen, rmaNumber, recentReportsList]);
 
+  // Extract unique known suppliers for suggestion autocomplete
+  const knownSuppliers = useMemo(() => {
+    const set = new Set();
+    (savedProductsList || []).forEach(p => {
+      const s = (p.supplier_name || p.supplierName || '').trim();
+      if (s && s !== 'Pending Assignment' && s !== 'Unassigned' && s !== 'Warehouse') {
+        set.add(s);
+      }
+    });
+    (recentReportsList || []).forEach(r => {
+      const s = (r.supplier_name || '').trim();
+      if (s && s !== 'Pending Assignment' && s !== 'Unassigned' && s !== 'Warehouse') {
+        set.add(s);
+      }
+    });
+    return Array.from(set).sort();
+  }, [savedProductsList, recentReportsList]);
+
   // Synchronize AI-extracted or existing paperwork document details whenever report changes
   useEffect(() => {
-    setAdminDrNumber(report?.invoice_dr_number || report?.ai_document_metadata?.invoice_dr_number || '');
-    setAdminStoreBranch(report?.store_branch || report?.ai_document_metadata?.store_branch || '');
-    setAdminExpiryDate(report?.expiry_date || '');
-    setAdminBatchLot(report?.batch_lot_number || '');
-    setIsEditingAiDetails(false);
-  }, [report?.id, report?.invoice_dr_number, report?.store_branch, report?.expiry_date, report?.batch_lot_number]);
+    if (report) {
+      const meta = report.ai_document_metadata || {};
+      setAdminSiNumber(report.si_number || meta.si_number || '');
+      setAdminDrNumber(report.dr_number || report.invoice_dr_number || meta.dr_number || meta.invoice_dr_number || '');
+      setAdminPoNumber(report.po_number || meta.po_number || '');
+      setAdminSupplierName(report.supplier_name && report.supplier_name !== 'Pending Assignment' ? report.supplier_name : (meta.vendor_name || ''));
+      setAdminStoreBranch(report.store_branch || meta.store_branch || '');
+      setAdminExpiryDate(report.expiry_date || '');
+      setAdminBatchLot(report.batch_lot_number || '');
+      setIsEditingAiDetails(false);
+    }
+  }, [report?.id, report?.si_number, report?.dr_number, report?.po_number, report?.invoice_dr_number, report?.supplier_name, report?.store_branch, report?.expiry_date, report?.batch_lot_number]);
 
   // Step 1: Request OTP for authorized company admin
   const handleRequestOtp = async (e) => {
@@ -1061,32 +1089,95 @@ export default function QuickRMAActionModal({
     if (!report?.id) return;
     setIsSavingAiDetails(true);
     try {
+      const cleanSi = adminSiNumber.trim();
+      const cleanDr = adminDrNumber.trim();
+      const cleanPo = adminPoNumber.trim();
+      const primaryDoc = cleanDr || cleanSi || cleanPo || null;
+      const cleanBranch = adminStoreBranch.trim();
+      const cleanSupplier = adminSupplierName.trim();
+      const cleanLot = adminBatchLot.trim();
+      const cleanExpiry = adminExpiryDate || null;
+
+      // 1. Prepare updates for main rma_reports row
+      const updates = {
+        si_number: cleanSi || null,
+        dr_number: cleanDr || null,
+        po_number: cleanPo || null,
+        invoice_dr_number: primaryDoc,
+        store_branch: cleanBranch || null,
+        expiry_date: cleanExpiry,
+        batch_lot_number: cleanLot || null
+      };
+
+      if (cleanSupplier) {
+        updates.supplier_name = cleanSupplier;
+      }
+
+      // If multi-item batch manifest, also update child items inside the manifest JSON
+      let updatedItems = report.items;
+      if (Array.isArray(report.items) && report.items.length > 0) {
+        updatedItems = report.items.map(it => ({
+          ...it,
+          ...(cleanSupplier ? { supplier_name: cleanSupplier } : {}),
+          ...(cleanExpiry ? { expiry_date: cleanExpiry } : {})
+        }));
+        updates.items = updatedItems;
+      }
+
       const { error } = await supabase
         .from('rma_reports')
-        .update({
-          invoice_dr_number: adminDrNumber.trim() || null,
-          store_branch: adminStoreBranch.trim() || null,
-          expiry_date: adminExpiryDate || null,
-          batch_lot_number: adminBatchLot.trim() || null
-        })
+        .update(updates)
         .eq('id', report.id);
 
-      if (error) throw error;
-      report.invoice_dr_number = adminDrNumber.trim();
-      report.store_branch = adminStoreBranch.trim();
-      report.expiry_date = adminExpiryDate || null;
-      report.batch_lot_number = adminBatchLot.trim() || null;
-      setIsEditingAiDetails(false);
-      onReportUpdated && onReportUpdated({
+      if (error) {
+        console.warn('Initial update failed, falling back to core columns:', error.message);
+        const fallback = { ...updates };
+        if (error.message.includes('si_number')) delete fallback.si_number;
+        if (error.message.includes('dr_number')) delete fallback.dr_number;
+        if (error.message.includes('po_number')) delete fallback.po_number;
+        const { error: fbErr } = await supabase.from('rma_reports').update(fallback).eq('id', report.id);
+        if (fbErr) throw fbErr;
+      }
+
+      // 2. Also update child records in rma_reports table for this parent
+      if (report.id && cleanSupplier) {
+        try {
+          await supabase
+            .from('rma_reports')
+            .update({ supplier_name: cleanSupplier })
+            .eq('parent_rma_id', report.id);
+        } catch { }
+      }
+
+      // 3. Optimistically update local report state
+      const updatedReport = {
         ...report,
-        invoice_dr_number: adminDrNumber.trim(),
-        store_branch: adminStoreBranch.trim(),
-        expiry_date: adminExpiryDate || null,
-        batch_lot_number: adminBatchLot.trim() || null
-      });
+        si_number: cleanSi || null,
+        dr_number: cleanDr || null,
+        po_number: cleanPo || null,
+        invoice_dr_number: primaryDoc,
+        store_branch: cleanBranch || null,
+        store: cleanBranch || null,
+        supplier_name: cleanSupplier || report.supplier_name || 'Pending Assignment',
+        supplier: cleanSupplier || report.supplier_name || 'Pending Assignment',
+        expiry_date: cleanExpiry,
+        batch_lot_number: cleanLot || null,
+        ...(updatedItems ? { items: updatedItems } : {})
+      };
+
+      setReport(updatedReport);
+      setIsEditingAiDetails(false);
+
+      // 4. Trigger instant parent refresh across Customer Hub & Supplier Hub
+      if (typeof onRefresh === 'function') {
+        onRefresh(updatedReport);
+      }
+      if (typeof onReportUpdated === 'function') {
+        onReportUpdated(updatedReport);
+      }
     } catch (e) {
-      console.error('Failed to update AI details:', e);
-      alert('Failed to save updated DR/Branch details.');
+      console.error('Failed to update commercial document and AI details:', e);
+      alert('Failed to save updated commercial documents: ' + (e?.message || e));
     } finally {
       setIsSavingAiDetails(false);
     }
@@ -1500,14 +1591,23 @@ export default function QuickRMAActionModal({
                 </div>
               )}
 
-              {/* Official Logistics Paperwork & AI Verification Details */}
-              {(paperworkList.length > 0 || report.invoice_dr_number || report.store_branch || aiMetadata) && (
+              {/* Official Logistics Paperwork & Document Details */}
+              {(paperworkList.length > 0 || report.invoice_dr_number || report.si_number || report.dr_number || report.po_number || report.store_branch || report.supplier_name || aiMetadata || isEditingAiDetails) && (
                 <div className="pt-2.5 border-t border-slate-200 dark:border-slate-700 space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
                       <span className="px-2 py-0.5 rounded-lg text-[10px] font-black uppercase bg-violet-100 dark:bg-violet-950/60 text-violet-800 dark:text-violet-300 border border-violet-200 dark:border-violet-800 flex items-center gap-1">
-                        <Sparkles className="w-3 h-3" />
-                        AI Verified {aiMetadata?.document_type || 'Paperwork'}
+                        {aiMetadata ? (
+                          <>
+                            <Sparkles className="w-3 h-3 text-violet-600 dark:text-violet-400" />
+                            <span>AI Verified {aiMetadata?.document_type || 'Paperwork'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <FileText className="w-3 h-3 text-violet-600 dark:text-violet-400" />
+                            <span>Commercial Logistics Paperwork</span>
+                          </>
+                        )}
                       </span>
                       {aiMetadata?.confidence && (
                         <span className="text-[10px] font-mono font-bold text-slate-400">
@@ -1519,9 +1619,10 @@ export default function QuickRMAActionModal({
                     <button
                       type="button"
                       onClick={() => setIsEditingAiDetails(!isEditingAiDetails)}
-                      className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                      className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
                     >
-                      {isEditingAiDetails ? 'Cancel Edit' : 'Edit DR# / Branch'}
+                      <Edit3 className="w-3 h-3" />
+                      <span>{isEditingAiDetails ? 'Cancel Edit' : 'Edit Details & Documents'}</span>
                     </button>
                   </div>
 
@@ -1549,23 +1650,36 @@ export default function QuickRMAActionModal({
                       </div>
                     )}
 
-                    <div className="flex-1 min-w-0 text-xs space-y-0.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-slate-400 text-[10px] uppercase font-bold">Documents:</span>
-                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${report.si_number ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'}`}>
-                          SI: {report.si_number || 'N/A'}
+                    <div className="flex-1 min-w-0 text-xs space-y-1">
+                      {/* Commercial Document Badges (SI#, DR#, PO#) */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-slate-400 text-[10px] uppercase font-bold shrink-0">Documents:</span>
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-bold ${
+                          (adminSiNumber || report.si_number)
+                            ? 'bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'
+                        }`}>
+                          Sales Invoice (SI) #: {adminSiNumber || report.si_number || 'N/A'}
                         </span>
-                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${(report.dr_number || (!report.si_number && adminDrNumber)) ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 border border-violet-200 dark:border-violet-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'}`}>
-                          DR: {report.dr_number || (!report.si_number && !report.po_number && adminDrNumber ? adminDrNumber : 'N/A')}
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-bold ${
+                          (adminDrNumber || report.dr_number)
+                            ? 'bg-violet-100 dark:bg-violet-950/70 text-violet-800 dark:text-violet-200 border border-violet-200 dark:border-violet-800'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'
+                        }`}>
+                          Delivery Receipt (DR) #: {adminDrNumber || report.dr_number || 'N/A'}
                         </span>
-                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${report.po_number ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'}`}>
-                          PO: {report.po_number || 'N/A'}
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-bold ${
+                          (adminPoNumber || report.po_number)
+                            ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'
+                        }`}>
+                          Purchase Order (PO) #: {adminPoNumber || report.po_number || 'N/A'}
                         </span>
-                        {(report.dr_number || report.si_number || report.po_number || adminDrNumber) && (
+                        {(adminDrNumber || report.dr_number || adminSiNumber || report.si_number || adminPoNumber || report.po_number) && (
                           <button
                             type="button"
                             onClick={() => {
-                              const docNum = report.dr_number || report.si_number || report.po_number || adminDrNumber;
+                              const docNum = adminDrNumber || report.dr_number || adminSiNumber || report.si_number || adminPoNumber || report.po_number;
                               navigator.clipboard.writeText(docNum);
                               setCopyDrSuccess(true);
                               setTimeout(() => setCopyDrSuccess(false), 2000);
@@ -1578,59 +1692,114 @@ export default function QuickRMAActionModal({
                           </button>
                         )}
                       </div>
-                      {(adminStoreBranch || report.store_branch) && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-400 text-[10px] uppercase font-bold">Store Branch:</span>
-                          <strong className="text-slate-800 dark:text-slate-200 truncate">{adminStoreBranch || report.store_branch}</strong>
+
+                      {/* Vendor, Store Branch, Batch/Lot, Expiry Metadata */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 text-[11px]">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold">Supplier / Vendor:</span>
+                          <strong className={`truncate ${adminSupplierName || report.supplier_name ? 'text-slate-800 dark:text-slate-200' : 'text-amber-600 dark:text-amber-400'}`}>
+                            {adminSupplierName || report.supplier_name || 'Pending Assignment'}
+                          </strong>
                         </div>
-                      )}
-                      {(adminBatchLot || report.batch_lot_number) && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-400 text-[10px] uppercase font-bold">Batch / Lot #:</span>
-                          <strong className="font-mono text-amber-700 dark:text-amber-300 font-bold">{adminBatchLot || report.batch_lot_number}</strong>
-                        </div>
-                      )}
-                      {(adminExpiryDate || report.expiry_date) && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-400 text-[10px] uppercase font-bold">Expiry Date:</span>
-                          <strong className="text-rose-600 dark:text-rose-400 font-bold">{adminExpiryDate || report.expiry_date}</strong>
-                        </div>
-                      )}
-                      {aiMetadata?.vendor_name && (
-                        <div className="text-[10px] text-slate-500 truncate">
-                          Vendor: <span className="font-semibold text-slate-700 dark:text-slate-300">{aiMetadata.vendor_name}</span>
-                        </div>
-                      )}
+                        {(adminStoreBranch || report.store_branch) && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-slate-400 text-[10px] uppercase font-bold">Store Branch:</span>
+                            <strong className="text-slate-800 dark:text-slate-200 truncate">{adminStoreBranch || report.store_branch}</strong>
+                          </div>
+                        )}
+                        {(adminBatchLot || report.batch_lot_number) && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-slate-400 text-[10px] uppercase font-bold">Batch / Lot #:</span>
+                            <strong className="font-mono text-amber-700 dark:text-amber-300 font-bold">{adminBatchLot || report.batch_lot_number}</strong>
+                          </div>
+                        )}
+                        {(adminExpiryDate || report.expiry_date) && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-slate-400 text-[10px] uppercase font-bold">Expiry Date:</span>
+                            <strong className="text-rose-600 dark:text-rose-400 font-bold">{adminExpiryDate || report.expiry_date}</strong>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
 
                   {/* Manual Override Editor for Admin */}
                   {isEditingAiDetails && (
-                    <div className="p-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl space-y-2 animate-in fade-in">
-                      <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                        Manual Override (Edit handwritten or OCR misread values):
+                    <div className="p-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl space-y-3 animate-in fade-in">
+                      <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <Edit3 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                        <span>Edit Commercial Documents & Paperwork Metadata:</span>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <div>
-                          <label className="text-[10px] font-bold text-slate-400 block mb-0.5">DR / Invoice #</label>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Sales Invoice (SI) #</label>
                           <input
                             type="text"
-                            value={adminDrNumber}
-                            onChange={(e) => setAdminDrNumber(e.target.value)}
+                            value={adminSiNumber}
+                            onChange={(e) => setAdminSiNumber(e.target.value)}
+                            placeholder="e.g. SI-2026-8819"
                             className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Store Branch</label>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Delivery Receipt (DR) #</label>
+                          <input
+                            type="text"
+                            value={adminDrNumber}
+                            onChange={(e) => setAdminDrNumber(e.target.value)}
+                            placeholder="e.g. DR-44120"
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Purchase Order (PO) #</label>
+                          <input
+                            type="text"
+                            value={adminPoNumber}
+                            onChange={(e) => setAdminPoNumber(e.target.value)}
+                            placeholder="e.g. PO-99120"
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier / Master Vendor</label>
+                          <input
+                            type="text"
+                            list="admin-supplier-suggestions"
+                            value={adminSupplierName}
+                            onChange={(e) => setAdminSupplierName(e.target.value)}
+                            placeholder="e.g. Mondelez, Liwayway, URC..."
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                          />
+                          <datalist id="admin-supplier-suggestions">
+                            {knownSuppliers.map(s => (
+                              <option key={s} value={s} />
+                            ))}
+                          </datalist>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Store / Branch Location</label>
                           <input
                             type="text"
                             value={adminStoreBranch}
                             onChange={(e) => setAdminStoreBranch(e.target.value)}
+                            placeholder="e.g. Savemore Market - Nagtahan"
                             className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Batch / Lot #</label>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Product Expiry Date</label>
+                          <input
+                            type="date"
+                            value={adminExpiryDate}
+                            onChange={(e) => setAdminExpiryDate(e.target.value)}
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Batch / Lot #</label>
                           <input
                             type="text"
                             value={adminBatchLot}
@@ -1639,24 +1808,25 @@ export default function QuickRMAActionModal({
                             className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
                           />
                         </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Product Expiry Date</label>
-                          <input
-                            type="date"
-                            value={adminExpiryDate}
-                            onChange={(e) => setAdminExpiryDate(e.target.value)}
-                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
-                          />
-                        </div>
                       </div>
-                      <button
-                        type="button"
-                        disabled={isSavingAiDetails}
-                        onClick={handleSaveAiDetails}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
-                      >
-                        {isSavingAiDetails ? 'Saving...' : 'Save Updated Details'}
-                      </button>
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={isSavingAiDetails}
+                          onClick={handleSaveAiDetails}
+                          className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                        >
+                          {isSavingAiDetails && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                          <span>{isSavingAiDetails ? 'Saving...' : 'Save Updated Details'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingAiDetails(false)}
+                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

@@ -164,45 +164,8 @@ export default function SupplierClaimsTab({
     return () => { isMounted = false; };
   }, [reportsList]);
 
-  // Extract unique suppliers from reports & catalog
-  const suppliers = useMemo(() => {
-    const set = new Set();
-    reportsList.forEach(r => {
-      if (r.is_parent || (r.name && String(r.name).toLowerCase().startsWith('batch return manifest'))) return;
-      const res = resolveReportProduct(r);
-      const sup = res.supplier?.trim();
-      if (sup && sup !== 'Pending Assignment' && sup !== 'Unassigned' && sup !== 'Warehouse') {
-        set.add(sup);
-      }
-    });
-
-    (savedProductsList || []).forEach(p => {
-      const sup = (p.supplier_name || p.supplierName || '').trim();
-      if (sup && sup !== 'Pending Assignment' && sup !== 'Unassigned' && sup !== 'Warehouse') {
-        set.add(sup);
-      }
-    });
-
-    return ['All', ...Array.from(set).sort()];
-  }, [reportsList, savedProductsList]);
-
-  // Reset pagination on filter or sort change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [selectedSupplier, dispositionFilter, searchTerm, sortField, sortDirection]);
-
-  // Handle column sorting
-  const handleSort = (field) => {
-    if (sortField === field) {
-      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
-  };
-
-  // Filter & sort reports suitable for Supplier Outbound / RTV
-  const rtvCandidates = useMemo(() => {
+  // Filter & dedup all reports suitable for Supplier Outbound / RTV
+  const allRtvItems = useMemo(() => {
     const rawItems = [];
 
     reportsList.forEach(r => {
@@ -250,8 +213,62 @@ export default function SupplierClaimsTab({
       }
     });
 
+    return dedupedItems;
+  }, [reportsList]);
+
+  // Count candidate items for each supplier in real-time
+  const supplierCounts = useMemo(() => {
+    const counts = { All: allRtvItems.length };
+    allRtvItems.forEach(r => {
+      const res = resolveReportProduct(r);
+      const sup = res.supplier?.trim();
+      if (sup) {
+        counts[sup] = (counts[sup] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [allRtvItems]);
+
+  // Extract unique suppliers from RTV candidate reports & catalog
+  const suppliers = useMemo(() => {
+    const set = new Set();
+    allRtvItems.forEach(r => {
+      const res = resolveReportProduct(r);
+      const sup = res.supplier?.trim();
+      if (sup && sup !== 'Pending Assignment' && sup !== 'Unassigned' && sup !== 'Warehouse') {
+        set.add(sup);
+      }
+    });
+
+    (savedProductsList || []).forEach(p => {
+      const sup = (p.supplier_name || p.supplierName || '').trim();
+      if (sup && sup !== 'Pending Assignment' && sup !== 'Unassigned' && sup !== 'Warehouse') {
+        set.add(sup);
+      }
+    });
+
+    return ['All', ...Array.from(set).sort()];
+  }, [allRtvItems, savedProductsList]);
+
+  // Reset pagination on filter or sort change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedSupplier, dispositionFilter, searchTerm, sortField, sortDirection]);
+
+  // Handle column sorting
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Filter & sort reports suitable for Supplier Outbound / RTV
+  const rtvCandidates = useMemo(() => {
     // Filter by Supplier, Disposition, and Search
-    let list = dedupedItems.filter(r => {
+    let list = allRtvItems.filter(r => {
       const res = resolveReportProduct(r);
 
       const matchesSupplier = selectedSupplier === 'All' || 
@@ -272,7 +289,11 @@ export default function SupplierClaimsTab({
         res.code?.toLowerCase().includes(q) ||
         res.supplier?.toLowerCase().includes(q) ||
         r.warehouse_location?.toLowerCase().includes(q) ||
-        r.batch_lot_number?.toLowerCase().includes(q);
+        r.batch_lot_number?.toLowerCase().includes(q) ||
+        r.si_number?.toLowerCase().includes(q) ||
+        r.dr_number?.toLowerCase().includes(q) ||
+        r.po_number?.toLowerCase().includes(q) ||
+        r.invoice_dr_number?.toLowerCase().includes(q);
 
       return matchesSupplier && matchesDisposition && matchesSearch;
     });
@@ -765,11 +786,14 @@ export default function SupplierClaimsTab({
                 className="w-full md:w-auto px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-600 cursor-pointer shadow-2xs md:max-w-[200px] truncate box-border"
                 title="Filter by Supplier / Vendor"
               >
-                {suppliers.map(sup => (
-                  <option key={sup} value={sup}>
-                    {sup === 'All' ? 'All Suppliers' : sup}
-                  </option>
-                ))}
+                {suppliers.map(sup => {
+                  const count = supplierCounts[sup] || 0;
+                  return (
+                    <option key={sup} value={sup}>
+                      {sup === 'All' ? `All Suppliers (${allRtvItems.length})` : `${sup} (${count})`}
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
@@ -1154,6 +1178,30 @@ export default function SupplierClaimsTab({
                               </a>
                             )}
                           </div>
+                          {(r.si_number || r.dr_number || r.po_number || r.invoice_dr_number) && (
+                            <div className="flex items-center gap-1 flex-wrap mt-1 text-[9px] font-mono leading-tight">
+                              {r.si_number && (
+                                <span className="px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold">
+                                  SI: {r.si_number}
+                                </span>
+                              )}
+                              {r.dr_number && (
+                                <span className="px-1.5 py-0.2 rounded bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-bold">
+                                  DR: {r.dr_number}
+                                </span>
+                              )}
+                              {r.po_number && (
+                                <span className="px-1.5 py-0.2 rounded bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold">
+                                  PO: {r.po_number}
+                                </span>
+                              )}
+                              {!r.si_number && !r.dr_number && !r.po_number && r.invoice_dr_number && (
+                                <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-bold">
+                                  Doc: {r.invoice_dr_number}
+                                </span>
+                              )}
+                            </div>
+                          )}
                           {isManifest && (
                             <div className="mt-1">
                               <button
