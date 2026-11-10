@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-10T01:09:09.520Z
+Generated At: 2026-11-10T03:25:37.006Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -9283,7 +9283,8 @@ import {
   Calendar,
   Building,
   Truck,
-  Ticket
+  Ticket,
+  Clock
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
@@ -9332,18 +9333,17 @@ const DEFECT_REASONS = [
  * Manifest line-item children share the identical rma_number with their parent and should be collapsed into the parent ticket.
  * Split tickets (e.g. -B, -C) have their own distinct RMA number and are standalone tickets.
  */
-function isManifestSubItem(item, allReports) {
+export function isManifestSubItem(item, allReports = []) {
   if (!item) return false;
-  // 1. Any item that has parent_rma_id populated is strictly a child item of a manifest
-  if (item.parent_rma_id !== null && item.parent_rma_id !== undefined && String(item.parent_rma_id).trim() !== '') {
-    return true;
+  // Standalone split tickets (e.g. -B, -C, -D) must ALWAYS be visible in the table
+  if (/-(?:B|C|D|E)$/i.test(String(item.rma_number || ''))) {
+    return false;
   }
-  // 2. If an item shares rma_number with a parent batch manifest, but is NOT the parent container itself
+  // Only collapse child items that share the EXACT same rma_number as an existing parent manifest container
   if (Array.isArray(allReports) && item.rma_number) {
     const parent = allReports.find(p => (
-      p &&
-      p.rma_number === item.rma_number &&
-      (p.is_parent === true || (Array.isArray(p.items) && p.items.length > 0) || String(p.name || '').toLowerCase().startsWith('batch return manifest'))
+      p && p.rma_number === item.rma_number &&
+      (p.is_parent === true || String(p.name || '').toLowerCase().startsWith('batch return manifest'))
     ));
     if (parent && String(parent.id) !== String(item.id)) {
       return true;
@@ -9511,21 +9511,18 @@ export default function App() {
         if (match && match[1]) urlToken = decodeURIComponent(match[1]);
       }
 
+      // If an invite token is present in the address bar, enforce strict single-visit verification!
+      // Do NOT auto-unlock using previous bypasses in localStorage.rma_portal_gate_session.
+      if (urlToken) {
+        return null;
+      }
+
       const raw = localStorage.getItem('rma_portal_gate_session');
       if (raw) {
         const parsed = JSON.parse(raw);
-        // If an invite token is present in the address bar, the existing session MUST have been authenticated for this exact token!
-        if (urlToken && parsed?.token !== urlToken) {
-          localStorage.removeItem('rma_portal_gate_session');
-          return null;
-        }
         if (parsed?.expires_at && new Date(parsed.expires_at).getTime() > Date.now()) {
           return parsed;
         }
-      }
-      // If visiting an invite link without an exact matching validated session, return null so gatekeeper stays locked
-      if (urlToken) {
-        return null;
       }
     } catch { }
     const slug = getIntakeSlugFromUrl();
@@ -9734,21 +9731,8 @@ export default function App() {
       }
 
       if (urlToken) {
-        try {
-          const raw = localStorage.getItem('rma_portal_gate_session');
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (parsed?.token === urlToken && parsed?.expires_at && new Date(parsed.expires_at).getTime() > Date.now()) {
-              setGateSession(parsed);
-            } else {
-              setGateSession(null);
-            }
-          } else {
-            setGateSession(null);
-          }
-        } catch {
-          setGateSession(null);
-        }
+        // Enforce strict single-visit verification: do not auto-unlock from localStorage when visiting with a token parameter
+        setGateSession(null);
       } else {
         setGateSession(accessKeyService.getActiveSession(newSlug));
       }
@@ -18938,6 +18922,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   const [streamFilter, setStreamFilter] = useState('all'); // 'all' | 'customer_inbound' | 'supplier_outbound'
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [deletingToken, setDeletingToken] = useState(null);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedInvite, setGeneratedInvite] = useState(null);
@@ -19067,8 +19052,10 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       return;
     }
 
+    const tokenKey = inv.token || inv.id;
+    setDeletingToken(tokenKey);
     try {
-      await inviteService.deleteInvite(inv.token || inv.id);
+      await inviteService.deleteInvite(tokenKey);
       showToast('Invite record deleted successfully.');
       loadInvites();
       if (generatedInvite?.token === inv.token) {
@@ -19076,6 +19063,8 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       }
     } catch (err) {
       alert(`Failed to delete invite: ${err.message}`);
+    } finally {
+      setDeletingToken(null);
     }
   };
 
@@ -19630,11 +19619,16 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                               )}
                               <button
                                 type="button"
+                                disabled={deletingToken === (inv.token || inv.id)}
                                 onClick={() => handleDelete(inv)}
-                                className="p-1.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
+                                className="p-1.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
                                 title="Delete Invite Record"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                {deletingToken === (inv.token || inv.id) ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-rose-500" />
+                                ) : (
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                )}
                               </button>
                             </div>
                           </td>
@@ -20859,7 +20853,15 @@ export default function GatekeeperPinModal({
 
     const checkToken = async () => {
       try {
-        const res = await inviteService.validateInviteToken(token);
+        let res = await inviteService.validateInviteToken(token);
+        // Fix false "Link Expired / Authorization Unavailable":
+        // If token was just generated, re-fetch from Supabase after 600ms to eliminate replication race conditions
+        if (!res?.valid && res?.error === 'NOT_FOUND') {
+          await new Promise(r => setTimeout(r, 600));
+          if (!isMounted) return;
+          res = await inviteService.validateInviteToken(token);
+        }
+
         if (!isMounted) return;
         hasValidatedRef.current = true;
         validatedTokenRef.current = token;
@@ -20872,8 +20874,18 @@ export default function GatekeeperPinModal({
             sessionStorage.setItem('rma_pending_oauth_token', token);
           } catch {}
 
-          // Check if user is already authenticated via Supabase Google OAuth
-          await verifyIdentityWithSupabase(res.invite);
+          // Only verify identity automatically if actively returning from OAuth redirect or magic link
+          const isReturningFromOAuth = typeof window !== 'undefined' && (
+            window.location.hash.includes('access_token') ||
+            window.location.hash.includes('id_token') ||
+            new URLSearchParams(window.location.search).has('code') ||
+            sessionStorage.getItem('rma_oauth_in_progress') === 'true'
+          );
+
+          if (isReturningFromOAuth) {
+            try { sessionStorage.removeItem('rma_oauth_in_progress'); } catch {}
+            await verifyIdentityWithSupabase(res.invite);
+          }
         }
       } catch {
         if (isMounted) setIsValidatingToken(false);
@@ -20904,8 +20916,16 @@ export default function GatekeeperPinModal({
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (identityMismatch) return;
-      if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && session?.user) {
+      const isOAuthInProgress = typeof window !== 'undefined' && sessionStorage.getItem('rma_oauth_in_progress') === 'true';
+      const hasAuthHash = typeof window !== 'undefined' && (
+        window.location.hash.includes('access_token') ||
+        window.location.hash.includes('id_token') ||
+        window.location.search.includes('code=')
+      );
+
+      if ((event === 'SIGNED_IN' || ((event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && (isOAuthInProgress || hasAuthHash))) && session?.user) {
         if (validationResult?.valid && validationResult?.invite) {
+          try { sessionStorage.removeItem('rma_oauth_in_progress'); } catch {}
           await verifyIdentityWithSupabase(validationResult.invite, session.user);
         }
       }
@@ -20944,6 +20964,7 @@ export default function GatekeeperPinModal({
         try {
           sessionStorage.setItem('rma_active_invite_token', token);
           sessionStorage.setItem('rma_pending_oauth_token', token);
+          sessionStorage.setItem('rma_oauth_in_progress', 'true');
         } catch {}
       }
 
@@ -20990,6 +21011,9 @@ export default function GatekeeperPinModal({
     setIsSendingMagicLink(true);
     setOauthError(null);
     try {
+      try {
+        sessionStorage.setItem('rma_oauth_in_progress', 'true');
+      } catch {}
       const currentUrl = window.location.href;
       const targetEmail = validationResult.invite.authorized_email.toLowerCase().trim();
       const { error } = await supabase.auth.signInWithOtp({
@@ -29434,29 +29458,25 @@ export default function QuickRMAActionModal({
                     {(() => {
                       const isMultiItemManifest = Boolean(report?.is_parent || manifestItems.length > 1 || (Array.isArray(report?.items) && report.items.length > 1) || (typeof report?.name === 'string' && report.name.toLowerCase().startsWith('batch return manifest')));
                       if (Number(report?.quantity) <= 1) return null;
-                      if (isMultiItemManifest) {
-                        return (
-                          <button
-                            type="button"
-                            disabled
-                            className="px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-60 shadow-none shrink-0"
-                            title="Multi-item manifest: Each product's disposition is triaged individually in the line items below."
-                          >
-                            <Scissors className="w-3.5 h-3.5 text-slate-400" />
-                            <span>Split Qty</span>
-                          </button>
-                        );
-                      }
                       return (
                         <button
                           type="button"
+                          disabled={!isSkuAssigned || isMultiItemManifest}
                           onClick={() => setIsSplitting(prev => !prev)}
-                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0 ${
-                            isSplitting
-                              ? 'bg-blue-700 text-white dark:bg-blue-600'
-                              : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800'
+                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors ${
+                            !isSkuAssigned || isMultiItemManifest
+                              ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed opacity-60 shadow-none'
+                              : isSplitting
+                              ? 'bg-blue-700 text-white'
+                              : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 dark:bg-blue-950 dark:text-blue-300'
                           }`}
-                          title="Split quantity into partial restock / scrap"
+                          title={
+                            !isSkuAssigned
+                              ? "Cannot split: Please assign an official catalog SKU first."
+                              : isMultiItemManifest
+                              ? "Multi-item manifest: Triage each line item individually below."
+                              : "Split quantity into partial restock / scrap"
+                          }
                         >
                           <Scissors className="w-3.5 h-3.5" />
                           <span>{isSplitting ? 'Close Split' : `Split Qty (${report?.quantity})`}</span>
@@ -43081,27 +43101,21 @@ export const inviteService = {
         .eq('token', cleanToken)
         .maybeSingle();
 
-      if (!error) {
+      if (!error && data) {
         checkedTableSuccessfully = true;
-        if (data) {
-          invite = {
-            ...data,
-            stream_type: data.stream_type || 'customer_inbound',
-            entity_name: data.entity_name || data.store_branch || '',
-            store_branch: data.store_branch || data.entity_name || ''
-          };
-        } else {
-          // Table exists and query completed with 0 rows:
-          // Token is DELETED or completely invalid. DO NOT fall back to localStorage to resurrect deleted tokens!
-          return { valid: false, error: 'NOT_FOUND' };
-        }
+        invite = {
+          ...data,
+          stream_type: data.stream_type || 'customer_inbound',
+          entity_name: data.entity_name || data.store_branch || '',
+          store_branch: data.store_branch || data.entity_name || ''
+        };
       }
     } catch {
       // Table may be unreachable
     }
 
-    // 2. Only check fallback rma_settings if the primary table query threw an error
-    if (!checkedTableSuccessfully) {
+    // 2. Secondary check against rma_settings (handles replication lag or single-store setups)
+    if (!invite) {
       try {
         const { data, error } = await supabase
           .from('rma_settings')
@@ -47506,16 +47520,15 @@ export function isBatchManifest(report, allReports = []) {
  */
 export function isManifestSubItem(item, allReports = []) {
   if (!item) return false;
-  // 1. Any item that has parent_rma_id populated is strictly a child item of a manifest
-  if (item.parent_rma_id !== null && item.parent_rma_id !== undefined && String(item.parent_rma_id).trim() !== '') {
-    return true;
+  // Standalone split tickets (e.g. -B, -C, -D) must ALWAYS be visible in the table
+  if (/-(?:B|C|D|E)$/i.test(String(item.rma_number || ''))) {
+    return false;
   }
-  // 2. If an item shares rma_number with a parent batch manifest, but is NOT the parent container itself
+  // Only collapse child items that share the EXACT same rma_number as an existing parent manifest container
   if (Array.isArray(allReports) && item.rma_number) {
     const parent = allReports.find(p => (
-      p &&
-      p.rma_number === item.rma_number &&
-      (p.is_parent === true || (Array.isArray(p.items) && p.items.length > 0) || String(p.name || '').toLowerCase().startsWith('batch return manifest'))
+      p && p.rma_number === item.rma_number &&
+      (p.is_parent === true || String(p.name || '').toLowerCase().startsWith('batch return manifest'))
     ));
     if (parent && String(parent.id) !== String(item.id)) {
       return true;

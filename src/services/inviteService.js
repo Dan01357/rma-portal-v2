@@ -268,27 +268,21 @@ export const inviteService = {
         .eq('token', cleanToken)
         .maybeSingle();
 
-      if (!error) {
+      if (!error && data) {
         checkedTableSuccessfully = true;
-        if (data) {
-          invite = {
-            ...data,
-            stream_type: data.stream_type || 'customer_inbound',
-            entity_name: data.entity_name || data.store_branch || '',
-            store_branch: data.store_branch || data.entity_name || ''
-          };
-        } else {
-          // Table exists and query completed with 0 rows:
-          // Token is DELETED or completely invalid. DO NOT fall back to localStorage to resurrect deleted tokens!
-          return { valid: false, error: 'NOT_FOUND' };
-        }
+        invite = {
+          ...data,
+          stream_type: data.stream_type || 'customer_inbound',
+          entity_name: data.entity_name || data.store_branch || '',
+          store_branch: data.store_branch || data.entity_name || ''
+        };
       }
     } catch {
       // Table may be unreachable
     }
 
-    // 2. Only check fallback rma_settings if the primary table query threw an error
-    if (!checkedTableSuccessfully) {
+    // 2. Secondary check against rma_settings (handles replication lag or single-store setups)
+    if (!invite) {
       try {
         const { data, error } = await supabase
           .from('rma_settings')

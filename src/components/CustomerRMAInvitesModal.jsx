@@ -50,6 +50,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   const [streamFilter, setStreamFilter] = useState('all'); // 'all' | 'customer_inbound' | 'supplier_outbound'
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [deletingToken, setDeletingToken] = useState(null);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedInvite, setGeneratedInvite] = useState(null);
@@ -179,8 +180,10 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       return;
     }
 
+    const tokenKey = inv.token || inv.id;
+    setDeletingToken(tokenKey);
     try {
-      await inviteService.deleteInvite(inv.token || inv.id);
+      await inviteService.deleteInvite(tokenKey);
       showToast('Invite record deleted successfully.');
       loadInvites();
       if (generatedInvite?.token === inv.token) {
@@ -188,6 +191,8 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       }
     } catch (err) {
       alert(`Failed to delete invite: ${err.message}`);
+    } finally {
+      setDeletingToken(null);
     }
   };
 
@@ -742,11 +747,16 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                               )}
                               <button
                                 type="button"
+                                disabled={deletingToken === (inv.token || inv.id)}
                                 onClick={() => handleDelete(inv)}
-                                className="p-1.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
+                                className="p-1.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
                                 title="Delete Invite Record"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                {deletingToken === (inv.token || inv.id) ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-rose-500" />
+                                ) : (
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                )}
                               </button>
                             </div>
                           </td>

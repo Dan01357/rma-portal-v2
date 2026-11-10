@@ -1836,29 +1836,25 @@ export default function QuickRMAActionModal({
                     {(() => {
                       const isMultiItemManifest = Boolean(report?.is_parent || manifestItems.length > 1 || (Array.isArray(report?.items) && report.items.length > 1) || (typeof report?.name === 'string' && report.name.toLowerCase().startsWith('batch return manifest')));
                       if (Number(report?.quantity) <= 1) return null;
-                      if (isMultiItemManifest) {
-                        return (
-                          <button
-                            type="button"
-                            disabled
-                            className="px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 cursor-not-allowed opacity-60 shadow-none shrink-0"
-                            title="Multi-item manifest: Each product's disposition is triaged individually in the line items below."
-                          >
-                            <Scissors className="w-3.5 h-3.5 text-slate-400" />
-                            <span>Split Qty</span>
-                          </button>
-                        );
-                      }
                       return (
                         <button
                           type="button"
+                          disabled={!isSkuAssigned || isMultiItemManifest}
                           onClick={() => setIsSplitting(prev => !prev)}
-                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0 ${
-                            isSplitting
-                              ? 'bg-blue-700 text-white dark:bg-blue-600'
-                              : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800'
+                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors ${
+                            !isSkuAssigned || isMultiItemManifest
+                              ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed opacity-60 shadow-none'
+                              : isSplitting
+                              ? 'bg-blue-700 text-white'
+                              : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 dark:bg-blue-950 dark:text-blue-300'
                           }`}
-                          title="Split quantity into partial restock / scrap"
+                          title={
+                            !isSkuAssigned
+                              ? "Cannot split: Please assign an official catalog SKU first."
+                              : isMultiItemManifest
+                              ? "Multi-item manifest: Triage each line item individually below."
+                              : "Split quantity into partial restock / scrap"
+                          }
                         >
                           <Scissors className="w-3.5 h-3.5" />
                           <span>{isSplitting ? 'Close Split' : `Split Qty (${report?.quantity})`}</span>

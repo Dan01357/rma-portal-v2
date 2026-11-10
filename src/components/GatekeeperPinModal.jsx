@@ -166,7 +166,15 @@ export default function GatekeeperPinModal({
 
     const checkToken = async () => {
       try {
-        const res = await inviteService.validateInviteToken(token);
+        let res = await inviteService.validateInviteToken(token);
+        // Fix false "Link Expired / Authorization Unavailable":
+        // If token was just generated, re-fetch from Supabase after 600ms to eliminate replication race conditions
+        if (!res?.valid && res?.error === 'NOT_FOUND') {
+          await new Promise(r => setTimeout(r, 600));
+          if (!isMounted) return;
+          res = await inviteService.validateInviteToken(token);
+        }
+
         if (!isMounted) return;
         hasValidatedRef.current = true;
         validatedTokenRef.current = token;
@@ -179,8 +187,18 @@ export default function GatekeeperPinModal({
             sessionStorage.setItem('rma_pending_oauth_token', token);
           } catch {}
 
-          // Check if user is already authenticated via Supabase Google OAuth
-          await verifyIdentityWithSupabase(res.invite);
+          // Only verify identity automatically if actively returning from OAuth redirect or magic link
+          const isReturningFromOAuth = typeof window !== 'undefined' && (
+            window.location.hash.includes('access_token') ||
+            window.location.hash.includes('id_token') ||
+            new URLSearchParams(window.location.search).has('code') ||
+            sessionStorage.getItem('rma_oauth_in_progress') === 'true'
+          );
+
+          if (isReturningFromOAuth) {
+            try { sessionStorage.removeItem('rma_oauth_in_progress'); } catch {}
+            await verifyIdentityWithSupabase(res.invite);
+          }
         }
       } catch {
         if (isMounted) setIsValidatingToken(false);
@@ -211,8 +229,16 @@ export default function GatekeeperPinModal({
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (identityMismatch) return;
-      if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && session?.user) {
+      const isOAuthInProgress = typeof window !== 'undefined' && sessionStorage.getItem('rma_oauth_in_progress') === 'true';
+      const hasAuthHash = typeof window !== 'undefined' && (
+        window.location.hash.includes('access_token') ||
+        window.location.hash.includes('id_token') ||
+        window.location.search.includes('code=')
+      );
+
+      if ((event === 'SIGNED_IN' || ((event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && (isOAuthInProgress || hasAuthHash))) && session?.user) {
         if (validationResult?.valid && validationResult?.invite) {
+          try { sessionStorage.removeItem('rma_oauth_in_progress'); } catch {}
           await verifyIdentityWithSupabase(validationResult.invite, session.user);
         }
       }
@@ -251,6 +277,7 @@ export default function GatekeeperPinModal({
         try {
           sessionStorage.setItem('rma_active_invite_token', token);
           sessionStorage.setItem('rma_pending_oauth_token', token);
+          sessionStorage.setItem('rma_oauth_in_progress', 'true');
         } catch {}
       }
 
@@ -297,6 +324,9 @@ export default function GatekeeperPinModal({
     setIsSendingMagicLink(true);
     setOauthError(null);
     try {
+      try {
+        sessionStorage.setItem('rma_oauth_in_progress', 'true');
+      } catch {}
       const currentUrl = window.location.href;
       const targetEmail = validationResult.invite.authorized_email.toLowerCase().trim();
       const { error } = await supabase.auth.signInWithOtp({

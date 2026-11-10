@@ -57,7 +57,8 @@ import {
   Calendar,
   Building,
   Truck,
-  Ticket
+  Ticket,
+  Clock
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
@@ -106,18 +107,17 @@ const DEFECT_REASONS = [
  * Manifest line-item children share the identical rma_number with their parent and should be collapsed into the parent ticket.
  * Split tickets (e.g. -B, -C) have their own distinct RMA number and are standalone tickets.
  */
-function isManifestSubItem(item, allReports) {
+export function isManifestSubItem(item, allReports = []) {
   if (!item) return false;
-  // 1. Any item that has parent_rma_id populated is strictly a child item of a manifest
-  if (item.parent_rma_id !== null && item.parent_rma_id !== undefined && String(item.parent_rma_id).trim() !== '') {
-    return true;
+  // Standalone split tickets (e.g. -B, -C, -D) must ALWAYS be visible in the table
+  if (/-(?:B|C|D|E)$/i.test(String(item.rma_number || ''))) {
+    return false;
   }
-  // 2. If an item shares rma_number with a parent batch manifest, but is NOT the parent container itself
+  // Only collapse child items that share the EXACT same rma_number as an existing parent manifest container
   if (Array.isArray(allReports) && item.rma_number) {
     const parent = allReports.find(p => (
-      p &&
-      p.rma_number === item.rma_number &&
-      (p.is_parent === true || (Array.isArray(p.items) && p.items.length > 0) || String(p.name || '').toLowerCase().startsWith('batch return manifest'))
+      p && p.rma_number === item.rma_number &&
+      (p.is_parent === true || String(p.name || '').toLowerCase().startsWith('batch return manifest'))
     ));
     if (parent && String(parent.id) !== String(item.id)) {
       return true;
@@ -285,21 +285,18 @@ export default function App() {
         if (match && match[1]) urlToken = decodeURIComponent(match[1]);
       }
 
+      // If an invite token is present in the address bar, enforce strict single-visit verification!
+      // Do NOT auto-unlock using previous bypasses in localStorage.rma_portal_gate_session.
+      if (urlToken) {
+        return null;
+      }
+
       const raw = localStorage.getItem('rma_portal_gate_session');
       if (raw) {
         const parsed = JSON.parse(raw);
-        // If an invite token is present in the address bar, the existing session MUST have been authenticated for this exact token!
-        if (urlToken && parsed?.token !== urlToken) {
-          localStorage.removeItem('rma_portal_gate_session');
-          return null;
-        }
         if (parsed?.expires_at && new Date(parsed.expires_at).getTime() > Date.now()) {
           return parsed;
         }
-      }
-      // If visiting an invite link without an exact matching validated session, return null so gatekeeper stays locked
-      if (urlToken) {
-        return null;
       }
     } catch { }
     const slug = getIntakeSlugFromUrl();
@@ -508,21 +505,8 @@ export default function App() {
       }
 
       if (urlToken) {
-        try {
-          const raw = localStorage.getItem('rma_portal_gate_session');
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (parsed?.token === urlToken && parsed?.expires_at && new Date(parsed.expires_at).getTime() > Date.now()) {
-              setGateSession(parsed);
-            } else {
-              setGateSession(null);
-            }
-          } else {
-            setGateSession(null);
-          }
-        } catch {
-          setGateSession(null);
-        }
+        // Enforce strict single-visit verification: do not auto-unlock from localStorage when visiting with a token parameter
+        setGateSession(null);
       } else {
         setGateSession(accessKeyService.getActiveSession(newSlug));
       }

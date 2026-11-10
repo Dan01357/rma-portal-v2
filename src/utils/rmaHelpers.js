@@ -282,16 +282,15 @@ export function isBatchManifest(report, allReports = []) {
  */
 export function isManifestSubItem(item, allReports = []) {
   if (!item) return false;
-  // 1. Any item that has parent_rma_id populated is strictly a child item of a manifest
-  if (item.parent_rma_id !== null && item.parent_rma_id !== undefined && String(item.parent_rma_id).trim() !== '') {
-    return true;
+  // Standalone split tickets (e.g. -B, -C, -D) must ALWAYS be visible in the table
+  if (/-(?:B|C|D|E)$/i.test(String(item.rma_number || ''))) {
+    return false;
   }
-  // 2. If an item shares rma_number with a parent batch manifest, but is NOT the parent container itself
+  // Only collapse child items that share the EXACT same rma_number as an existing parent manifest container
   if (Array.isArray(allReports) && item.rma_number) {
     const parent = allReports.find(p => (
-      p &&
-      p.rma_number === item.rma_number &&
-      (p.is_parent === true || (Array.isArray(p.items) && p.items.length > 0) || String(p.name || '').toLowerCase().startsWith('batch return manifest'))
+      p && p.rma_number === item.rma_number &&
+      (p.is_parent === true || String(p.name || '').toLowerCase().startsWith('batch return manifest'))
     ));
     if (parent && String(parent.id) !== String(item.id)) {
       return true;
