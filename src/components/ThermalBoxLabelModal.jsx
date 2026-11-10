@@ -138,9 +138,16 @@ export default function ThermalBoxLabelModal({
         pageMargin: '0.25in',
         scale: 1.0,
         customStyles: `
+          html, body, .isolated-print-sheet {
+            page-break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-inside: avoid !important;
+            break-after: avoid !important;
+          }
           #thermal-label-mount {
             width: 100% !important;
             max-width: 175mm !important;
+            max-height: 5.2in !important;
             min-height: auto !important;
             border: 2.5px solid #000000 !important;
             border-radius: 8px !important;
@@ -148,15 +155,43 @@ export default function ThermalBoxLabelModal({
             margin: 0 auto !important;
             box-sizing: border-box !important;
             page-break-inside: avoid !important;
+            page-break-after: avoid !important;
             break-inside: avoid !important;
+            break-after: avoid !important;
+            overflow: hidden !important;
           }
         `
       },
       '4x6': {
         pageSize: '4in 6in',
-        pageMargin: '0.08in',
-        scale: 0.82,
+        pageMargin: '0.06in',
+        scale: 0.80,
         customStyles: `
+          @page {
+            size: 4in 6in;
+            margin: 0.06in;
+          }
+          html, body {
+            max-height: 5.2in !important;
+            height: auto !important;
+            overflow: hidden !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            page-break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-inside: avoid !important;
+            break-after: avoid !important;
+          }
+          .isolated-print-sheet {
+            max-height: 5.2in !important;
+            padding: 0 !important;
+            margin: 0 auto !important;
+            overflow: hidden !important;
+            page-break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-inside: avoid !important;
+            break-after: avoid !important;
+          }
           #thermal-label-mount {
             width: 3.35in !important;
             max-width: 3.35in !important;
@@ -174,18 +209,28 @@ export default function ThermalBoxLabelModal({
           }
           #thermal-label-mount * {
             page-break-inside: avoid !important;
+            page-break-after: avoid !important;
             break-inside: avoid !important;
+            break-after: avoid !important;
           }
         `
       },
       '3x3': {
         pageSize: '3in 3in',
         pageMargin: '0.06in',
-        scale: 0.82,
+        scale: 0.80,
         customStyles: `
+          html, body, .isolated-print-sheet {
+            page-break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-inside: avoid !important;
+            break-after: avoid !important;
+            overflow: hidden !important;
+          }
           #thermal-label-mount {
             width: 2.3in !important;
             max-width: 2.3in !important;
+            max-height: 2.8in !important;
             min-height: auto !important;
             border: 2px solid #000000 !important;
             border-radius: 6px !important;
@@ -193,18 +238,29 @@ export default function ThermalBoxLabelModal({
             margin: 0 auto !important;
             box-sizing: border-box !important;
             page-break-inside: avoid !important;
+            page-break-after: avoid !important;
             break-inside: avoid !important;
+            break-after: avoid !important;
+            overflow: hidden !important;
           }
         `
       },
       '2x2': {
         pageSize: '2in 2in',
         pageMargin: '0.04in',
-        scale: 0.70,
+        scale: 0.68,
         customStyles: `
+          html, body, .isolated-print-sheet {
+            page-break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-inside: avoid !important;
+            break-after: avoid !important;
+            overflow: hidden !important;
+          }
           #thermal-label-mount {
             width: 1.55in !important;
             max-width: 1.55in !important;
+            max-height: 1.85in !important;
             min-height: auto !important;
             border: 1.5px solid #000000 !important;
             border-radius: 4px !important;
@@ -212,7 +268,10 @@ export default function ThermalBoxLabelModal({
             margin: 0 auto !important;
             box-sizing: border-box !important;
             page-break-inside: avoid !important;
+            page-break-after: avoid !important;
             break-inside: avoid !important;
+            break-after: avoid !important;
+            overflow: hidden !important;
           }
         `
       }
@@ -264,7 +323,14 @@ export default function ThermalBoxLabelModal({
           <div
             id="thermal-label-mount"
             ref={printAreaRef}
-            className="shrink-0 w-full max-w-[340px] p-3 bg-white text-black border-2 border-black rounded-lg shadow-md font-sans space-y-1.5 select-none"
+            style={{
+              maxHeight: '5.2in',
+              pageBreakInside: 'avoid',
+              pageBreakAfter: 'avoid',
+              breakInside: 'avoid',
+              breakAfter: 'avoid'
+            }}
+            className="shrink-0 w-full max-w-[340px] p-3 bg-white text-black border-2 border-black rounded-lg shadow-md font-sans space-y-1.5 select-none overflow-hidden"
           >
             {/* Top Header */}
             <div className="border-b-2 border-black pb-1 flex items-center justify-between">

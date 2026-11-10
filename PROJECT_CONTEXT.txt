@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-10T07:18:38.318Z
+Generated At: 2026-11-10T08:05:24.784Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -9317,7 +9317,7 @@ import { inviteService, formatRemainingCountdown } from './services/inviteServic
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest, formatQuantityWithPackSize, formatManifestBreakdown } from './utils/rmaHelpers';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest, formatQuantityWithPackSize, formatManifestBreakdown, resolveBatchManifestLifecycle } from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
   '1- Damaged Box / Crushed Packaging',
@@ -9375,6 +9375,8 @@ function formatLifecycleStage(status) {
     case 'scrapped':
     case 'disposed':
       return { label: '7- Scrapped / Disposed', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+    case 'partially_completed':
+      return { label: 'Partially Completed', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-300 dark:border-purple-800' };
     case 'closed':
     case 'resolved':
       return { label: 'Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
@@ -10592,7 +10594,40 @@ export default function App() {
   }, [recentReportsList]);
 
   const supplierOutboundReports = React.useMemo(() => {
-    return recentReportsList.filter(r => (r.rma_type === 'supplier_outbound' || (r.disposition && (r.disposition.toLowerCase().includes('rtv') || r.disposition.toLowerCase().includes('vendor')))) && !isManifestSubItem(r, recentReportsList));
+    const unpacked = [];
+    recentReportsList.forEach(r => {
+      if (isManifestSubItem(r, recentReportsList)) return;
+      const isExplicitSupplierOutbound = r.rma_type === 'supplier_outbound';
+      const disp = String(r.disposition || '').toLowerCase();
+      const isManifest = isBatchManifest(r, recentReportsList);
+      const manifestChildren = isManifest ? getReportManifestItems(r, recentReportsList) : [];
+      const hasRtvChild = manifestChildren.some(c => {
+        const cDisp = String(c.disposition || '').toLowerCase();
+        return c.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+      });
+
+      if (!isExplicitSupplierOutbound && !hasRtvChild) {
+        if (disp.includes('restock') || disp.includes('scrap') || disp.includes('quarantine') || disp.includes('buffer') || disp.includes('pending triage')) {
+          return;
+        }
+        const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor');
+        if (!isRtvDisposition) return;
+      }
+
+      if (isManifest && manifestChildren.length > 0) {
+        manifestChildren.forEach((child, cIdx) => {
+          const cDisp = String(child.disposition || '').toLowerCase();
+          if (cDisp.includes('restock') || cDisp.includes('scrap') || cDisp.includes('quarantine') || cDisp.includes('buffer')) return;
+          const isParentRtvOrSupplier = isExplicitSupplierOutbound || disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor');
+          const isChildRtvOrSupplier = child.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+          if (!isParentRtvOrSupplier && !isChildRtvOrSupplier) return;
+          unpacked.push({ ...r, ...child, id: child.id || `${r.id}_${cIdx}` });
+        });
+        return;
+      }
+      unpacked.push(r);
+    });
+    return unpacked;
   }, [recentReportsList]);
 
   // Filter and sort return reports - strictly isolated to Customer Inbound Returns
@@ -13902,19 +13937,22 @@ export default function App() {
 
                                   {/* 8. Lifecycle Stage */}
                                   <td className="py-3 px-3 text-center whitespace-nowrap">
-                                    {isManifest ? (
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          toggleManifestExpand(manifestKey);
-                                        }}
-                                        className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1 hover:bg-purple-200 cursor-pointer shadow-2xs"
-                                        title="Click to view child line items in drawer"
-                                      >
-                                        <span>📦 Multi-Item Status (See Drawer)</span>
-                                      </button>
-                                    ) : (() => {
+                                    {isManifest ? (() => {
+                                      const dynStage = resolveBatchManifestLifecycle(item, recentReportsList);
+                                      return (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleManifestExpand(manifestKey);
+                                          }}
+                                          className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border inline-flex items-center gap-1 hover:opacity-90 cursor-pointer shadow-2xs ${dynStage.color}`}
+                                          title="Dynamically resolved from child item dispositions (click to open drawer)"
+                                        >
+                                          <span>{dynStage.label}</span>
+                                        </button>
+                                      );
+                                    })() : (() => {
                                       const stageInfo = formatLifecycleStage(item.status);
                                       return (
                                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-block shadow-2xs ${stageInfo.color}`}>
@@ -14489,20 +14527,37 @@ export default function App() {
                                   >
                                     <QrCode className="w-3.5 h-3.5" />
                                   </button>
-                                  {isManifest && (
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleManifestExpand(manifestKey)}
-                                      className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 shadow-2xs cursor-pointer ${isManifestExpanded
-                                          ? 'bg-purple-600 text-white border border-purple-700'
-                                          : 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800'
-                                        }`}
-                                      title={isManifestExpanded ? "Collapse Manifest Items" : "Expand Manifest Items"}
-                                    >
-                                      <span>📦 Manifest ({manifestChildren.length})</span>
-                                      <ChevronDown className={`w-2.5 h-2.5 transform transition-transform ${isManifestExpanded ? 'rotate-180' : ''}`} />
-                                    </button>
-                                  )}
+                                  {isManifest ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleManifestExpand(manifestKey)}
+                                        className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 shadow-2xs cursor-pointer ${isManifestExpanded
+                                            ? 'bg-purple-600 text-white border border-purple-700'
+                                            : 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800'
+                                          }`}
+                                        title={isManifestExpanded ? "Collapse Manifest Items" : "Expand Manifest Items"}
+                                      >
+                                        <span>📦 Manifest ({manifestChildren.length})</span>
+                                        <ChevronDown className={`w-2.5 h-2.5 transform transition-transform ${isManifestExpanded ? 'rotate-180' : ''}`} />
+                                      </button>
+                                      {(() => {
+                                        const dynStage = resolveBatchManifestLifecycle(item, recentReportsList);
+                                        return (
+                                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider border inline-flex items-center gap-0.5 shadow-2xs ${dynStage.color}`}>
+                                            {dynStage.label}
+                                          </span>
+                                        );
+                                      })()}
+                                    </>
+                                  ) : (() => {
+                                    const stageInfo = formatLifecycleStage(item.status);
+                                    return (
+                                      <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider border inline-flex items-center gap-0.5 shadow-2xs ${stageInfo.color}`}>
+                                        {stageInfo.label}
+                                      </span>
+                                    );
+                                  })()}
                                   {isSplitChildTicket(item) ? (
                                     <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
                                       <span>✂️ Part 2</span>
@@ -18769,11 +18824,15 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
       elementId: 'credit-memo-voucher-print-root',
       documentTitle: docTitle,
       pageSize: 'portrait',
-      pageMargin: '0.35in',
+      pageMargin: '0.4in',
       customStyles: `
+        @page {
+          size: A4 portrait;
+          margin: 10mm;
+        }
         #credit-memo-voucher-print-root {
           width: 100% !important;
-          max-width: 195mm !important;
+          max-width: 190mm !important;
           margin: 0 auto !important;
           padding: 0 !important;
           box-shadow: none !important;
@@ -18783,6 +18842,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
           max-height: none !important;
           height: auto !important;
           overflow: visible !important;
+          box-sizing: border-box !important;
         }
         #credit-memo-voucher-print-root > div {
           max-height: none !important;
@@ -18794,14 +18854,16 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
           break-after: page !important;
           page-break-inside: avoid !important;
           break-inside: avoid !important;
-          padding: 12px 16px !important;
+          padding: 16px 20px !important;
           background: #ffffff !important;
-          border: none !important;
+          border: 1.5px solid #0f172a !important;
+          border-radius: 6px !important;
+          box-sizing: border-box !important;
           box-shadow: none !important;
         }
         .voucher-sheet:last-child {
-          page-break-after: auto !important;
-          break-after: auto !important;
+          page-break-after: avoid !important;
+          break-after: avoid !important;
         }
         .print-hidden, .print\\:hidden, .bottom-sheet-handle,
         #credit-memo-voucher-print-root .print\\:hidden,
@@ -28089,7 +28151,8 @@ import {
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku } from '../utils/rmaHelpers';
+import { supplierClaimService } from '../services/supplierClaimService';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, resolveBatchManifestLifecycle } from '../utils/rmaHelpers';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -28467,10 +28530,15 @@ export default function QuickRMAActionModal({
         note: `Manifest line-item triage completed for ${manifestItems.length} items by ${inspectorName}`
       });
 
-      // 1. Update items in parent report
+      // 1. Dynamically compute parent lifecycle status from child item dispositions (Subject 3)
+      const dynamicParentLifecycle = resolveBatchManifestLifecycle({ ...report, items: manifestItems });
+      setRmaStatus(dynamicParentLifecycle.status);
+
+      // 2. Update items and dynamic status in parent report
       const updatedReportRow = {
         ...report,
         items: manifestItems,
+        status: dynamicParentLifecycle.status,
         inspected_by: inspectorName,
         inspected_at: new Date().toISOString(),
         audit_trail: existingAudit
@@ -28480,6 +28548,7 @@ export default function QuickRMAActionModal({
         .from('rma_reports')
         .update({
           items: manifestItems,
+          status: dynamicParentLifecycle.status,
           inspected_by: inspectorName,
           inspected_at: new Date().toISOString(),
           audit_trail: existingAudit
@@ -30079,15 +30148,74 @@ export default function QuickRMAActionModal({
                       );
                     })()}
 
-                    {!isSupplierStream && (
+                    {!isSupplierStream ? (
                       <button
                         type="button"
                         onClick={() => setIsBufferSlipOpen(true)}
                         className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
-                        title="Print Buffer Stock Replacement Dispatch Slip / Gate Pass"
+                        title="Print Buffer Stock Replacement Slip"
                       >
                         <Truck className="w-3.5 h-3.5 text-indigo-200" />
-                        <span>Buffer Slip</span>
+                        <span>Buffer Stock Replacement Slip</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const win = window.open('', '_blank');
+                          if (win) {
+                            win.document.write(`
+                              <html>
+                                <head>
+                                  <title>Vendor RTV Gate Pass - ${report?.rma_number}</title>
+                                  <style>
+                                    @page { size: A4 portrait; margin: 12mm; }
+                                    body { font-family: Arial, sans-serif; padding: 18px; color: #111; border: 1.5px solid #000; border-radius: 6px; box-sizing: border-box; }
+                                    h2 { margin: 0 0 6px 0; font-size: 18px; }
+                                    table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
+                                    th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+                                    th { background: #f1f5f9; }
+                                    .header { border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; }
+                                  </style>
+                                </head>
+                                <body>
+                                  <div class="header">
+                                    <div>
+                                      <h2>PINGCON MARKETING - VENDOR RTV GATE PASS</h2>
+                                      <div>Outbound RTV Reference: <strong>${report?.rma_number}</strong></div>
+                                      <div>Vendor / Counterparty: <strong>${adminSupplierName || report?.supplier_name || report?.supplier || 'Master Vendor'}</strong></div>
+                                    </div>
+                                    <div style="text-align: right;">
+                                      <div>Date: <strong>${new Date().toLocaleDateString()}</strong></div>
+                                      <div>Bin Location: <strong>${warehouseLocation || report?.warehouse_location || 'DOCK'}</strong></div>
+                                    </div>
+                                  </div>
+                                  <p style="font-size: 12px;">Authorizes physical release of defective / RTV merchandise from warehouse dock to vendor representative.</p>
+                                  <table>
+                                    <tr><th>Item Description</th><th>Barcode / SKU</th><th>Qty & Unit</th><th>Disposition</th></tr>
+                                    <tr>
+                                      <td>${report?.name || 'Product'}</td>
+                                      <td>${report?.code || report?.sku || report?.barcode || 'N/A'}</td>
+                                      <td>${itemQty} ${report?.unit_name || 'pc'}</td>
+                                      <td>${disposition || 'Return to Vendor (RTV)'}</td>
+                                    </tr>
+                                  </table>
+                                  <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 12px;">
+                                    <div>Warehouse Guard / Released By: _______________________</div>
+                                    <div>Vendor Driver Signature & Plate #: _______________________</div>
+                                  </div>
+                                  <script>window.print();</script>
+                                </body>
+                              </html>
+                            `);
+                            win.document.close();
+                          }
+                        }}
+                        className="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
+                        title="Print Official Vendor RTV Gate Pass"
+                      >
+                        <Truck className="w-3.5 h-3.5 text-purple-200" />
+                        <span>Vendor RTV Gate Pass</span>
                       </button>
                     )}
 
@@ -30103,8 +30231,8 @@ export default function QuickRMAActionModal({
                   </div>
                 </div>
 
-                {/* Double-Compensation Safety Warning (Credit Memo already issued) */}
-                {hasLinkedCreditMemo && (
+                {/* Double-Compensation Safety Warning (Credit Memo already issued - Customer Inbound Only) */}
+                {!isSupplierStream && hasLinkedCreditMemo && (
                   <div className="p-3 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-xl text-amber-900 dark:text-amber-200 text-xs font-semibold flex items-center gap-2.5 shadow-2xs">
                     <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                     <span>⚠️ Note: A Finance Credit Memo was already issued for this return. Only dispatch buffer stock if physical replacement is also authorized.</span>
@@ -30511,7 +30639,7 @@ export default function QuickRMAActionModal({
                 {manifestItems.length > 1 ? (
                   /* MULTI-ITEM MANIFEST LINE-ITEM LEVEL TRIAGE */
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between pb-1 border-b border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-200 dark:border-slate-800 flex-wrap gap-2">
                       <div>
                         <div className="font-black text-xs text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
                           <Package className="w-4 h-4 text-blue-600 dark:text-blue-400" />
@@ -30521,9 +30649,19 @@ export default function QuickRMAActionModal({
                           Assign condition grade, rack/bin location, and disposition for each line item individually.
                         </p>
                       </div>
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                        {manifestItems.length} Products
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {(() => {
+                          const dynStage = resolveBatchManifestLifecycle({ ...report, items: manifestItems });
+                          return (
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border uppercase tracking-wider shadow-2xs ${dynStage.color}`} title="Dynamically computed Parent Manifest Lifecycle Status">
+                              Stage: {dynStage.label}
+                            </span>
+                          );
+                        })()}
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                          {manifestItems.length} Products
+                        </span>
+                      </div>
                     </div>
 
                     {/* Helpful Multi-Item Manifest Triage Note */}
@@ -30823,7 +30961,7 @@ export default function QuickRMAActionModal({
                 )}
               </div>
 
-              {/* ENTERPRISE ACTION 2: FINANCE CREDIT MEMO vs SUPPLIER DEBIT CLAIM */}
+              {/* ENTERPRISE ACTION 2: STRICT DOCUMENT RULES MATRIX (Customer Credit Memo vs Supplier Debit Claim Note) */}
               {isSupplierStream ? (
                 <div className="p-4 bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/60 rounded-2xl shadow-xs space-y-3">
                   <div className="flex items-start justify-between gap-2">
@@ -30833,7 +30971,7 @@ export default function QuickRMAActionModal({
                       </div>
                       <div>
                         <h5 className="text-xs font-black text-slate-900 dark:text-white">
-                          Supplier Debit Claim / AP Deduction
+                          Supplier Debit Claim Note
                         </h5>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
                           Total Vendor Claim: ₱{totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({itemQty} unit{itemQty > 1 ? 's' : ''})
@@ -30849,7 +30987,7 @@ export default function QuickRMAActionModal({
                   <div className="p-3 bg-white/80 dark:bg-slate-900/80 rounded-xl border border-purple-100 dark:border-purple-900/40 text-xs space-y-1.5">
                     <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
                       <span>Vendor / Master Supplier:</span>
-                      <strong className="text-slate-900 dark:text-white font-mono">{report?.supplier || report?.vendor || 'Master Supplier'}</strong>
+                      <strong className="text-slate-900 dark:text-white font-mono">{adminSupplierName || report?.supplier_name || report?.supplier || report?.vendor || 'Master Supplier'}</strong>
                     </div>
                     <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
                       <span>RTV Outbound Reference:</span>
@@ -30861,17 +30999,39 @@ export default function QuickRMAActionModal({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 pt-0.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-0.5">
                     <button
                       type="button"
-                      onClick={() => {
-                        if (onPrintThermalLabel) onPrintThermalLabel(report);
-                        else setIsThermalLabelOpen(true);
+                      onClick={async () => {
+                        try {
+                          const claims = await supplierClaimService.getClaims();
+                          const claimNumber = supplierClaimService.generateRtvId(claims || []);
+                          const supplierName = (adminSupplierName || report?.supplier_name || report?.supplier || 'Master Supplier').trim();
+                          const generatedBy = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
+                          const newClaim = {
+                            claimNumber,
+                            claim_number: claimNumber,
+                            supplierName,
+                            supplier_name: supplierName,
+                            createdAt: new Date().toISOString(),
+                            created_at: new Date().toISOString(),
+                            generatedBy,
+                            generated_by: generatedBy,
+                            items: [{ ...report, supplier_name: supplierName, quantity: itemQty, price: Number(report?.price_with_vat || report?.price || 0) }],
+                            totalQuantity: itemQty,
+                            totalClaimAmount: totalClaimValue
+                          };
+                          await supplierClaimService.saveClaim(newClaim);
+                          if (onRefresh) onRefresh(report);
+                          alert(`Supplier Debit Claim Note (${claimNumber}) generated and saved for ${supplierName}!`);
+                        } catch (e) {
+                          console.warn('Debit claim creation notice:', e);
+                        }
                       }}
                       className="py-2.5 px-3 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
                     >
-                      <Printer className="w-3.5 h-3.5" />
-                      <span>Print RTV Label</span>
+                      <Receipt className="w-3.5 h-3.5" />
+                      <span>+ Debit Claim</span>
                     </button>
 
                     <button
@@ -30884,18 +31044,20 @@ export default function QuickRMAActionModal({
                               <head>
                                 <title>Supplier Debit Claim - ${report?.rma_number}</title>
                                 <style>
-                                  body { font-family: monospace; padding: 24px; color: #111; }
+                                  @page { size: A4 portrait; margin: 12mm; }
+                                  body { font-family: Arial, sans-serif; padding: 20px; color: #111; border: 1.5px solid #000; border-radius: 6px; box-sizing: border-box; }
                                   h2 { margin: 0 0 8px 0; }
-                                  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-                                  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-                                  .header { border-bottom: 2px solid #333; padding-bottom: 12px; margin-bottom: 16px; }
+                                  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }
+                                  th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+                                  th { background: #f1f5f9; }
+                                  .header { border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 16px; }
                                 </style>
                               </head>
                               <body>
                                 <div class="header">
-                                  <h2>PINGCON MARKETING - SUPPLIER DEBIT MEMORANDUM</h2>
+                                  <h2>PINGCON MARKETING - SUPPLIER DEBIT CLAIM VOUCHER</h2>
                                   <div>RTV Reference: <strong>${report?.rma_number}</strong></div>
-                                  <div>Supplier: <strong>${report?.supplier || 'Master Vendor'}</strong></div>
+                                  <div>Supplier: <strong>${adminSupplierName || report?.supplier_name || report?.supplier || 'Master Vendor'}</strong></div>
                                   <div>Date: <strong>${new Date().toLocaleDateString()}</strong></div>
                                 </div>
                                 <p>This document authorizes Accounts Payable deduction / supplier debit for return to vendor claim.</p>
@@ -30905,11 +31067,11 @@ export default function QuickRMAActionModal({
                                     <td>${report?.name || 'Product'}</td>
                                     <td>${report?.code || report?.sku || report?.barcode || 'N/A'}</td>
                                     <td>${itemQty}</td>
-                                    <td>₱${Number(report?.price || 0).toFixed(2)}</td>
+                                    <td>₱${Number(report?.price_with_vat || report?.price || 0).toFixed(2)}</td>
                                     <td><strong>₱${totalClaimValue.toFixed(2)}</strong></td>
                                   </tr>
                                 </table>
-                                <div style="margin-top: 30px; display: flex; justify-content: space-between;">
+                                <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 12px;">
                                   <div>Authorized by: _______________________</div>
                                   <div>Vendor Received by: _______________________</div>
                                 </div>
@@ -30922,8 +31084,66 @@ export default function QuickRMAActionModal({
                       }}
                       className="py-2.5 px-3 bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 dark:hover:bg-purple-900/70 text-purple-900 dark:text-purple-200 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                     >
-                      <Receipt className="w-3.5 h-3.5 text-purple-700 dark:text-purple-300" />
+                      <Printer className="w-3.5 h-3.5 text-purple-700 dark:text-purple-300" />
                       <span>Print Debit Voucher</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const win = window.open('', '_blank');
+                        if (win) {
+                          win.document.write(`
+                            <html>
+                              <head>
+                                <title>Vendor RTV Gate Pass - ${report?.rma_number}</title>
+                                <style>
+                                  @page { size: A4 portrait; margin: 12mm; }
+                                  body { font-family: Arial, sans-serif; padding: 18px; color: #111; border: 1.5px solid #000; border-radius: 6px; box-sizing: border-box; }
+                                  h2 { margin: 0 0 6px 0; font-size: 18px; }
+                                  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
+                                  th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+                                  th { background: #f1f5f9; }
+                                  .header { border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; }
+                                </style>
+                              </head>
+                              <body>
+                                <div class="header">
+                                  <div>
+                                    <h2>PINGCON MARKETING - VENDOR RTV GATE PASS</h2>
+                                    <div>Outbound RTV Reference: <strong>${report?.rma_number}</strong></div>
+                                    <div>Vendor / Counterparty: <strong>${adminSupplierName || report?.supplier_name || report?.supplier || 'Master Vendor'}</strong></div>
+                                  </div>
+                                  <div style="text-align: right;">
+                                    <div>Date: <strong>${new Date().toLocaleDateString()}</strong></div>
+                                    <div>Bin Location: <strong>${warehouseLocation || report?.warehouse_location || 'DOCK'}</strong></div>
+                                  </div>
+                                </div>
+                                <p style="font-size: 12px;">Authorizes physical release of defective / RTV merchandise from warehouse dock to vendor representative.</p>
+                                <table>
+                                  <tr><th>Item Description</th><th>Barcode / SKU</th><th>Qty & Unit</th><th>Disposition</th></tr>
+                                  <tr>
+                                    <td>${report?.name || 'Product'}</td>
+                                    <td>${report?.code || report?.sku || report?.barcode || 'N/A'}</td>
+                                    <td>${itemQty} ${report?.unit_name || 'pc'}</td>
+                                    <td>${disposition || 'Return to Vendor (RTV)'}</td>
+                                  </tr>
+                                </table>
+                                <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 12px;">
+                                  <div>Warehouse Guard / Released By: _______________________</div>
+                                  <div>Vendor Driver Signature & Plate #: _______________________</div>
+                                </div>
+                                <script>window.print();</script>
+                              </body>
+                            </html>
+                          `);
+                          win.document.close();
+                        }
+                      }}
+                      className="py-2.5 px-3 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Truck className="w-3.5 h-3.5 text-purple-300" />
+                      <span>Vendor RTV Gate Pass</span>
                     </button>
                   </div>
                 </div>
@@ -30936,7 +31156,7 @@ export default function QuickRMAActionModal({
                       </div>
                       <div>
                         <h5 className="text-xs font-black text-slate-900 dark:text-white">
-                          {existingMemo ? `Credit Memo: ${existingMemo.credit_memo_number}` : 'Finance Credit Memorandum'}
+                          {existingMemo ? `Customer Credit Memo: ${existingMemo.credit_memo_number}` : 'Customer Credit Memo'}
                         </h5>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
                           {existingMemo
@@ -30992,41 +31212,52 @@ export default function QuickRMAActionModal({
                       </span>
                     </div>
                   ) : !existingMemo ? (
-                    <button
-                      type="button"
-                      disabled={!canIssueCreditMemo}
-                      onClick={() => {
-                        if (canIssueCreditMemo && onOpenCreditMemo && report) {
-                          onOpenCreditMemo(report);
-                        }
-                      }}
-                      className={`w-full py-2.5 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all ${
-                        canIssueCreditMemo
-                          ? 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white cursor-pointer'
-                          : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
-                      }`}
-                    >
-                      {canIssueCreditMemo ? (
-                        <>
-                          <Receipt className="w-4 h-4" />
-                          <span>+ Issue Credit Memo</span>
-                        </>
-                      ) : (
-                        <>
-                          <Lock className="w-4 h-4 text-amber-500" />
-                          <span>Locked: Super Admin Approval Required</span>
-                        </>
-                      )}
-                    </button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        disabled={!canIssueCreditMemo}
+                        onClick={() => {
+                          if (canIssueCreditMemo && onOpenCreditMemo && report) {
+                            onOpenCreditMemo(report);
+                          }
+                        }}
+                        className={`py-2.5 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all ${
+                          canIssueCreditMemo
+                            ? 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white cursor-pointer'
+                            : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
+                        }`}
+                      >
+                        {canIssueCreditMemo ? (
+                          <>
+                            <Receipt className="w-4 h-4" />
+                            <span>+ Issue Credit Memo</span>
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="w-4 h-4 text-amber-500" />
+                            <span>Locked: Super Admin Approval Required</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsBufferSlipOpen(true)}
+                        className="py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                      >
+                        <Truck className="w-4 h-4 text-indigo-200" />
+                        <span>Buffer Stock Replacement Slip</span>
+                      </button>
+                    </div>
                   ) : (
-                    <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                       <button
                         type="button"
                         onClick={() => onViewCreditMemoVoucher && onViewCreditMemoVoucher(existingMemo)}
                         className="py-2 px-3 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                       >
                         <Printer className="w-3.5 h-3.5" />
-                        <span>Print CM Voucher</span>
+                        <span>CM Voucher</span>
                       </button>
 
                       <button
@@ -31036,6 +31267,15 @@ export default function QuickRMAActionModal({
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                         <span>Edit CM</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsBufferSlipOpen(true)}
+                        className="py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Truck className="w-3.5 h-3.5 text-indigo-200" />
+                        <span>Buffer Stock Replacement Slip</span>
                       </button>
                     </div>
                   )}
@@ -35784,7 +36024,7 @@ export default function SupplierClaimsTab({
       };
     }
 
-    const isManifest = isBatchManifest(r, reportsList);
+    const isManifest = !r.is_unpacked_manifest_item && isBatchManifest(r, reportsList);
     if (isManifest) {
       const children = getReportManifestItems(r, reportsList);
       const totalUnits = children.reduce((sum, c) => sum + (Number(c.quantity || c.qty) || 1), 0) || Number(r.quantity) || 1;
@@ -35893,11 +36133,82 @@ export default function SupplierClaimsTab({
         }
       }
 
-      // Do NOT unpack batch manifests into separate flat rows; keep parent container intact for drawer view
+      // Subject 1: When a report is a batch manifest (is_parent === true or items.length > 1):
+      // DO NOT push the parent manifest container row with ₱0.00 into the table.
+      // Instead, unpack each manifest child line item into its own individual table row.
+      if (isManifest && manifestChildren.length > 0) {
+        manifestChildren.forEach((child, cIdx) => {
+          const cDisp = String(child.disposition || '').toLowerCase();
+          // Exclude child items explicitly triaged to non-RTV outcomes
+          if (cDisp.includes('restock') || cDisp.includes('scrap') || cDisp.includes('quarantine') || cDisp.includes('buffer')) {
+            return;
+          }
+          // If the parent manifest wasn't explicitly supplier_outbound or RTV, require the child itself to be RTV
+          const isParentRtvOrSupplier = isExplicitSupplierOutbound || disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor');
+          const isChildRtvOrSupplier = child.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+          if (!isParentRtvOrSupplier && !isChildRtvOrSupplier) {
+            return;
+          }
+
+          const childBarcode = String(child.barcode || '').trim();
+          const matchedChild = childBarcode
+            ? (savedProductsList || []).find(p => p.barcode && String(p.barcode).trim() === childBarcode)
+            : null;
+          const childRawSku = String(child.code || child.sku || matchedChild?.code || matchedChild?.sku || '').trim();
+          const isChildSkuValid = Boolean(
+            childRawSku &&
+            childRawSku !== childBarcode &&
+            !childRawSku.toLowerCase().includes('awaiting') &&
+            !childRawSku.toLowerCase().includes('unidentified')
+          );
+          const childName = (child.name || child.productName || matchedChild?.name || `Item #${cIdx + 1}`).trim();
+          const childQty = Number(child.quantity || child.qty) || 1;
+          const childUnit = child.unit_name || child.unit || r.unit_name || 'pc';
+          const childPrice = Number(child.price_with_vat || child.price || matchedChild?.price_with_vat || matchedChild?.price || 0);
+          const rawChildSupplier = String(child.supplier_name || '').trim();
+          const isChildVendorPending = !rawChildSupplier || rawChildSupplier.toLowerCase().includes('pending') || rawChildSupplier.toLowerCase().includes('unassigned') || rawChildSupplier.toLowerCase() === 'warehouse';
+          const resolvedChildSupplier = !isChildVendorPending
+            ? rawChildSupplier
+            : (matchedChild?.supplier_name || (r.supplier_name && !String(r.supplier_name).toLowerCase().includes('pending') && String(r.supplier_name).toLowerCase() !== 'warehouse' ? r.supplier_name : 'Pending Assignment'));
+          const childPhotos = (Array.isArray(child.photos) && child.photos.length > 0)
+            ? child.photos
+            : (Array.isArray(r.photos) ? r.photos : []);
+
+          rawItems.push({
+            ...r,
+            ...child,
+            id: child.id || `${r.id || r.rma_number}_item_${cIdx}_${childBarcode || cIdx}`,
+            parent_rma_id: r.id,
+            is_parent: false,
+            is_unpacked_manifest_item: true,
+            manifest_line_index: cIdx,
+            manifest_total_lines: manifestChildren.length,
+            items: [],
+            total_items: 1,
+            rma_number: r.rma_number,
+            barcode: childBarcode,
+            code: isChildSkuValid ? childRawSku : '',
+            sku: isChildSkuValid ? childRawSku : '',
+            name: childName,
+            quantity: childQty,
+            unit_name: childUnit,
+            pieces_per_case: child.pieces_per_case || child.piecesPerCase || matchedChild?.pieces_per_case || null,
+            price: childPrice,
+            price_with_vat: childPrice,
+            supplier_name: resolvedChildSupplier,
+            warehouse_location: child.warehouse_location || r.warehouse_location || 'DOCK',
+            disposition: child.disposition || r.disposition || '3- Return to Vendor (RTV)',
+            reason: child.reason || r.reason || 'Damaged',
+            photos: childPhotos
+          });
+        });
+        return;
+      }
+
       rawItems.push(r);
     });
 
-    // Eliminate duplicate rows: ensure each unique RMA ticket appears exactly once
+    // Eliminate duplicate rows: ensure each unique RMA ticket / unpacked line item appears exactly once
     const dedupedItems = [];
     const seenKeys = new Set();
     rawItems.forEach(item => {
@@ -35909,7 +36220,7 @@ export default function SupplierClaimsTab({
     });
 
     return dedupedItems;
-  }, [reportsList]);
+  }, [reportsList, savedProductsList]);
 
   // Count candidate items for each supplier in real-time
   const supplierCounts = useMemo(() => {
@@ -36134,9 +36445,15 @@ export default function SupplierClaimsTab({
     if (!report) return null;
     const rma = report.rma_number;
     
-    // 1. Search in saved claims items
+    // 1. Search in saved claims items (match barcode too for unpacked manifest items)
     const found = savedClaims.find(c => 
-      Array.isArray(c.items) && c.items.some(i => i.rma_number === rma)
+      Array.isArray(c.items) && c.items.some(i => {
+        if (i.rma_number !== rma) return false;
+        if (report.is_unpacked_manifest_item && report.barcode && i.barcode) {
+          return String(i.barcode).trim() === String(report.barcode).trim();
+        }
+        return true;
+      })
     );
     if (found) return found;
 
@@ -36380,16 +36697,25 @@ export default function SupplierClaimsTab({
         elementId: 'rtv-voucher-mount',
         documentTitle: `Supplier_Debit_Claim_${existingClaim.claimNumber || existingClaim.claim_number || 'Voucher'}`,
         pageSize: 'portrait',
-        pageMargin: '0.35in',
+        pageMargin: '0.4in',
         customStyles: `
+          @page {
+            size: A4 portrait;
+            margin: 10mm;
+          }
           #rtv-voucher-mount {
             width: 100% !important;
-            max-width: 195mm !important;
+            max-width: 190mm !important;
             margin: 0 auto !important;
-            padding: 0 !important;
+            padding: 16px !important;
+            border: 1.5px solid #000000 !important;
+            border-radius: 6px !important;
+            box-sizing: border-box !important;
             box-shadow: none !important;
             background: #ffffff !important;
             color: #000000 !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
           #rtv-voucher-mount input {
             border: none !important;
@@ -36417,16 +36743,25 @@ export default function SupplierClaimsTab({
       elementId: 'rtv-voucher-mount',
       documentTitle: `Supplier_Debit_Claim_${activeClaimBatch.claimNumber || activeClaimBatch.claim_number || 'Voucher'}`,
       pageSize: 'portrait',
-      pageMargin: '0.35in',
+      pageMargin: '0.4in',
       customStyles: `
+        @page {
+          size: A4 portrait;
+          margin: 10mm;
+        }
         #rtv-voucher-mount {
           width: 100% !important;
-          max-width: 195mm !important;
+          max-width: 190mm !important;
           margin: 0 auto !important;
-          padding: 0 !important;
+          padding: 16px !important;
+          border: 1.5px solid #000000 !important;
+          border-radius: 6px !important;
+          box-sizing: border-box !important;
           box-shadow: none !important;
           background: #ffffff !important;
           color: #000000 !important;
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
         }
         #rtv-voucher-mount input {
           border: none !important;
@@ -36788,7 +37123,7 @@ export default function SupplierClaimsTab({
                   const res = resolveReportProduct(r);
                   const photos = getPhotos(r);
                   const existingClaim = getClaimForReport(r);
-                  const isManifest = isBatchManifest(r, reportsList);
+                  const isManifest = !r.is_unpacked_manifest_item && isBatchManifest(r, reportsList);
                   const manifestChildren = isManifest ? getReportManifestItems(r, reportsList) : [];
                   const manifestKey = r.id || r.rma_number;
                   const isManifestExpanded = expandedManifestIds.has(manifestKey);
@@ -36895,6 +37230,13 @@ export default function SupplierClaimsTab({
                                   Doc: {r.invoice_dr_number}
                                 </span>
                               )}
+                            </div>
+                          )}
+                          {r.is_unpacked_manifest_item && (
+                            <div className="mt-1">
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-0.5 shadow-2xs">
+                                <span>📦 Manifest Line #{(r.manifest_line_index || 0) + 1}{r.manifest_total_lines ? ` of ${r.manifest_total_lines}` : ''}</span>
+                              </span>
                             </div>
                           )}
                           {isManifest && (
@@ -37100,7 +37442,7 @@ export default function SupplierClaimsTab({
                             {canDeleteReports && onRequestDeleteReport && (
                               <button
                                 type="button"
-                                onClick={() => onRequestDeleteReport(r.id, r.rma_number, r)}
+                                onClick={() => onRequestDeleteReport(r.parent_rma_id || r.id, r.rma_number, r)}
                                 className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
                                 title={`Delete RMA #${r.rma_number} and remove stored proof photos`}
                               >
@@ -37908,9 +38250,16 @@ export default function ThermalBoxLabelModal({
         pageMargin: '0.25in',
         scale: 1.0,
         customStyles: `
+          html, body, .isolated-print-sheet {
+            page-break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-inside: avoid !important;
+            break-after: avoid !important;
+          }
           #thermal-label-mount {
             width: 100% !important;
             max-width: 175mm !important;
+            max-height: 5.2in !important;
             min-height: auto !important;
             border: 2.5px solid #000000 !important;
             border-radius: 8px !important;
@@ -37918,15 +38267,43 @@ export default function ThermalBoxLabelModal({
             margin: 0 auto !important;
             box-sizing: border-box !important;
             page-break-inside: avoid !important;
+            page-break-after: avoid !important;
             break-inside: avoid !important;
+            break-after: avoid !important;
+            overflow: hidden !important;
           }
         `
       },
       '4x6': {
         pageSize: '4in 6in',
-        pageMargin: '0.08in',
-        scale: 0.82,
+        pageMargin: '0.06in',
+        scale: 0.80,
         customStyles: `
+          @page {
+            size: 4in 6in;
+            margin: 0.06in;
+          }
+          html, body {
+            max-height: 5.2in !important;
+            height: auto !important;
+            overflow: hidden !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            page-break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-inside: avoid !important;
+            break-after: avoid !important;
+          }
+          .isolated-print-sheet {
+            max-height: 5.2in !important;
+            padding: 0 !important;
+            margin: 0 auto !important;
+            overflow: hidden !important;
+            page-break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-inside: avoid !important;
+            break-after: avoid !important;
+          }
           #thermal-label-mount {
             width: 3.35in !important;
             max-width: 3.35in !important;
@@ -37944,18 +38321,28 @@ export default function ThermalBoxLabelModal({
           }
           #thermal-label-mount * {
             page-break-inside: avoid !important;
+            page-break-after: avoid !important;
             break-inside: avoid !important;
+            break-after: avoid !important;
           }
         `
       },
       '3x3': {
         pageSize: '3in 3in',
         pageMargin: '0.06in',
-        scale: 0.82,
+        scale: 0.80,
         customStyles: `
+          html, body, .isolated-print-sheet {
+            page-break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-inside: avoid !important;
+            break-after: avoid !important;
+            overflow: hidden !important;
+          }
           #thermal-label-mount {
             width: 2.3in !important;
             max-width: 2.3in !important;
+            max-height: 2.8in !important;
             min-height: auto !important;
             border: 2px solid #000000 !important;
             border-radius: 6px !important;
@@ -37963,18 +38350,29 @@ export default function ThermalBoxLabelModal({
             margin: 0 auto !important;
             box-sizing: border-box !important;
             page-break-inside: avoid !important;
+            page-break-after: avoid !important;
             break-inside: avoid !important;
+            break-after: avoid !important;
+            overflow: hidden !important;
           }
         `
       },
       '2x2': {
         pageSize: '2in 2in',
         pageMargin: '0.04in',
-        scale: 0.70,
+        scale: 0.68,
         customStyles: `
+          html, body, .isolated-print-sheet {
+            page-break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-inside: avoid !important;
+            break-after: avoid !important;
+            overflow: hidden !important;
+          }
           #thermal-label-mount {
             width: 1.55in !important;
             max-width: 1.55in !important;
+            max-height: 1.85in !important;
             min-height: auto !important;
             border: 1.5px solid #000000 !important;
             border-radius: 4px !important;
@@ -37982,7 +38380,10 @@ export default function ThermalBoxLabelModal({
             margin: 0 auto !important;
             box-sizing: border-box !important;
             page-break-inside: avoid !important;
+            page-break-after: avoid !important;
             break-inside: avoid !important;
+            break-after: avoid !important;
+            overflow: hidden !important;
           }
         `
       }
@@ -38034,7 +38435,14 @@ export default function ThermalBoxLabelModal({
           <div
             id="thermal-label-mount"
             ref={printAreaRef}
-            className="shrink-0 w-full max-w-[340px] p-3 bg-white text-black border-2 border-black rounded-lg shadow-md font-sans space-y-1.5 select-none"
+            style={{
+              maxHeight: '5.2in',
+              pageBreakInside: 'avoid',
+              pageBreakAfter: 'avoid',
+              breakInside: 'avoid',
+              breakAfter: 'avoid'
+            }}
+            className="shrink-0 w-full max-w-[340px] p-3 bg-white text-black border-2 border-black rounded-lg shadow-md font-sans space-y-1.5 select-none overflow-hidden"
           >
             {/* Top Header */}
             <div className="border-b-2 border-black pb-1 flex items-center justify-between">
@@ -48470,6 +48878,81 @@ export function formatManifestBreakdown(items = [], includeLineCount = true) {
   }
   return breakdownStr;
 }
+
+/**
+ * Dynamically resolves parent batch manifest lifecycle status from child line item dispositions.
+ * - All child items 'Restock to Inventory' -> '6- Restocked' (status: 'restocked')
+ * - All child items 'Scrap / Dispose' -> '7- Scrapped / Disposed' (status: 'scrapped')
+ * - Child items have mixed completed dispositions -> 'Partially Completed' (status: 'partially_completed')
+ * - Child items are pending inspection -> '3- Under Inspection' (status: 'under_inspection')
+ */
+export function resolveBatchManifestLifecycle(report, allReports = []) {
+  const items = getReportManifestItems(report, allReports);
+  if (!Array.isArray(items) || items.length === 0) {
+    return {
+      status: 'under_inspection',
+      label: '3- Under Inspection',
+      color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+    };
+  }
+
+  let restockCount = 0;
+  let scrapCount = 0;
+  let pendingCount = 0;
+  let otherCompletedCount = 0;
+
+  items.forEach(child => {
+    const disp = String(child?.disposition || '').toLowerCase().trim();
+    const st = String(child?.status || '').toLowerCase().trim();
+
+    if (disp.includes('restock') || disp.includes('replacement stock received') || st === 'restocked') {
+      restockCount += 1;
+    } else if (disp.includes('scrap') || disp.includes('dispose') || st === 'scrapped' || st === 'disposed') {
+      scrapCount += 1;
+    } else if (
+      (!disp || disp.includes('pending triage') || disp.includes('pending vendor pickup') || disp === 'pending') &&
+      st !== 'credit_memo_issued' &&
+      st !== 'buffer_replacement_dispatched'
+    ) {
+      pendingCount += 1;
+    } else {
+      otherCompletedCount += 1;
+    }
+  });
+
+  const total = items.length;
+
+  if (restockCount === total) {
+    return {
+      status: 'restocked',
+      label: '6- Restocked',
+      color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800'
+    };
+  }
+
+  if (scrapCount === total) {
+    return {
+      status: 'scrapped',
+      label: '7- Scrapped / Disposed',
+      color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+    };
+  }
+
+  if (pendingCount === total) {
+    return {
+      status: 'under_inspection',
+      label: '3- Under Inspection',
+      color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+    };
+  }
+
+  return {
+    status: 'partially_completed',
+    label: 'Partially Completed',
+    color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-300 dark:border-purple-800'
+  };
+}
+
 
 
 

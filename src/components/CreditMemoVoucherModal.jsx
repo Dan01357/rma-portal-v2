@@ -21,11 +21,15 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
       elementId: 'credit-memo-voucher-print-root',
       documentTitle: docTitle,
       pageSize: 'portrait',
-      pageMargin: '0.35in',
+      pageMargin: '0.4in',
       customStyles: `
+        @page {
+          size: A4 portrait;
+          margin: 10mm;
+        }
         #credit-memo-voucher-print-root {
           width: 100% !important;
-          max-width: 195mm !important;
+          max-width: 190mm !important;
           margin: 0 auto !important;
           padding: 0 !important;
           box-shadow: none !important;
@@ -35,6 +39,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
           max-height: none !important;
           height: auto !important;
           overflow: visible !important;
+          box-sizing: border-box !important;
         }
         #credit-memo-voucher-print-root > div {
           max-height: none !important;
@@ -46,14 +51,16 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
           break-after: page !important;
           page-break-inside: avoid !important;
           break-inside: avoid !important;
-          padding: 12px 16px !important;
+          padding: 16px 20px !important;
           background: #ffffff !important;
-          border: none !important;
+          border: 1.5px solid #0f172a !important;
+          border-radius: 6px !important;
+          box-sizing: border-box !important;
           box-shadow: none !important;
         }
         .voucher-sheet:last-child {
-          page-break-after: auto !important;
-          break-after: auto !important;
+          page-break-after: avoid !important;
+          break-after: avoid !important;
         }
         .print-hidden, .print\\:hidden, .bottom-sheet-handle,
         #credit-memo-voucher-print-root .print\\:hidden,

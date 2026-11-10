@@ -91,7 +91,7 @@ import { inviteService, formatRemainingCountdown } from './services/inviteServic
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest, formatQuantityWithPackSize, formatManifestBreakdown } from './utils/rmaHelpers';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest, formatQuantityWithPackSize, formatManifestBreakdown, resolveBatchManifestLifecycle } from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
   '1- Damaged Box / Crushed Packaging',
@@ -149,6 +149,8 @@ function formatLifecycleStage(status) {
     case 'scrapped':
     case 'disposed':
       return { label: '7- Scrapped / Disposed', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+    case 'partially_completed':
+      return { label: 'Partially Completed', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-300 dark:border-purple-800' };
     case 'closed':
     case 'resolved':
       return { label: 'Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
@@ -1366,7 +1368,40 @@ export default function App() {
   }, [recentReportsList]);
 
   const supplierOutboundReports = React.useMemo(() => {
-    return recentReportsList.filter(r => (r.rma_type === 'supplier_outbound' || (r.disposition && (r.disposition.toLowerCase().includes('rtv') || r.disposition.toLowerCase().includes('vendor')))) && !isManifestSubItem(r, recentReportsList));
+    const unpacked = [];
+    recentReportsList.forEach(r => {
+      if (isManifestSubItem(r, recentReportsList)) return;
+      const isExplicitSupplierOutbound = r.rma_type === 'supplier_outbound';
+      const disp = String(r.disposition || '').toLowerCase();
+      const isManifest = isBatchManifest(r, recentReportsList);
+      const manifestChildren = isManifest ? getReportManifestItems(r, recentReportsList) : [];
+      const hasRtvChild = manifestChildren.some(c => {
+        const cDisp = String(c.disposition || '').toLowerCase();
+        return c.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+      });
+
+      if (!isExplicitSupplierOutbound && !hasRtvChild) {
+        if (disp.includes('restock') || disp.includes('scrap') || disp.includes('quarantine') || disp.includes('buffer') || disp.includes('pending triage')) {
+          return;
+        }
+        const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor');
+        if (!isRtvDisposition) return;
+      }
+
+      if (isManifest && manifestChildren.length > 0) {
+        manifestChildren.forEach((child, cIdx) => {
+          const cDisp = String(child.disposition || '').toLowerCase();
+          if (cDisp.includes('restock') || cDisp.includes('scrap') || cDisp.includes('quarantine') || cDisp.includes('buffer')) return;
+          const isParentRtvOrSupplier = isExplicitSupplierOutbound || disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor');
+          const isChildRtvOrSupplier = child.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+          if (!isParentRtvOrSupplier && !isChildRtvOrSupplier) return;
+          unpacked.push({ ...r, ...child, id: child.id || `${r.id}_${cIdx}` });
+        });
+        return;
+      }
+      unpacked.push(r);
+    });
+    return unpacked;
   }, [recentReportsList]);
 
   // Filter and sort return reports - strictly isolated to Customer Inbound Returns
@@ -4676,19 +4711,22 @@ export default function App() {
 
                                   {/* 8. Lifecycle Stage */}
                                   <td className="py-3 px-3 text-center whitespace-nowrap">
-                                    {isManifest ? (
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          toggleManifestExpand(manifestKey);
-                                        }}
-                                        className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1 hover:bg-purple-200 cursor-pointer shadow-2xs"
-                                        title="Click to view child line items in drawer"
-                                      >
-                                        <span>📦 Multi-Item Status (See Drawer)</span>
-                                      </button>
-                                    ) : (() => {
+                                    {isManifest ? (() => {
+                                      const dynStage = resolveBatchManifestLifecycle(item, recentReportsList);
+                                      return (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleManifestExpand(manifestKey);
+                                          }}
+                                          className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border inline-flex items-center gap-1 hover:opacity-90 cursor-pointer shadow-2xs ${dynStage.color}`}
+                                          title="Dynamically resolved from child item dispositions (click to open drawer)"
+                                        >
+                                          <span>{dynStage.label}</span>
+                                        </button>
+                                      );
+                                    })() : (() => {
                                       const stageInfo = formatLifecycleStage(item.status);
                                       return (
                                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-block shadow-2xs ${stageInfo.color}`}>
@@ -5263,20 +5301,37 @@ export default function App() {
                                   >
                                     <QrCode className="w-3.5 h-3.5" />
                                   </button>
-                                  {isManifest && (
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleManifestExpand(manifestKey)}
-                                      className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 shadow-2xs cursor-pointer ${isManifestExpanded
-                                          ? 'bg-purple-600 text-white border border-purple-700'
-                                          : 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800'
-                                        }`}
-                                      title={isManifestExpanded ? "Collapse Manifest Items" : "Expand Manifest Items"}
-                                    >
-                                      <span>📦 Manifest ({manifestChildren.length})</span>
-                                      <ChevronDown className={`w-2.5 h-2.5 transform transition-transform ${isManifestExpanded ? 'rotate-180' : ''}`} />
-                                    </button>
-                                  )}
+                                  {isManifest ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleManifestExpand(manifestKey)}
+                                        className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 shadow-2xs cursor-pointer ${isManifestExpanded
+                                            ? 'bg-purple-600 text-white border border-purple-700'
+                                            : 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800'
+                                          }`}
+                                        title={isManifestExpanded ? "Collapse Manifest Items" : "Expand Manifest Items"}
+                                      >
+                                        <span>📦 Manifest ({manifestChildren.length})</span>
+                                        <ChevronDown className={`w-2.5 h-2.5 transform transition-transform ${isManifestExpanded ? 'rotate-180' : ''}`} />
+                                      </button>
+                                      {(() => {
+                                        const dynStage = resolveBatchManifestLifecycle(item, recentReportsList);
+                                        return (
+                                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider border inline-flex items-center gap-0.5 shadow-2xs ${dynStage.color}`}>
+                                            {dynStage.label}
+                                          </span>
+                                        );
+                                      })()}
+                                    </>
+                                  ) : (() => {
+                                    const stageInfo = formatLifecycleStage(item.status);
+                                    return (
+                                      <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider border inline-flex items-center gap-0.5 shadow-2xs ${stageInfo.color}`}>
+                                        {stageInfo.label}
+                                      </span>
+                                    );
+                                  })()}
                                   {isSplitChildTicket(item) ? (
                                     <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
                                       <span>✂️ Part 2</span>

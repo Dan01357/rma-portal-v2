@@ -369,6 +369,81 @@ export function formatManifestBreakdown(items = [], includeLineCount = true) {
   return breakdownStr;
 }
 
+/**
+ * Dynamically resolves parent batch manifest lifecycle status from child line item dispositions.
+ * - All child items 'Restock to Inventory' -> '6- Restocked' (status: 'restocked')
+ * - All child items 'Scrap / Dispose' -> '7- Scrapped / Disposed' (status: 'scrapped')
+ * - Child items have mixed completed dispositions -> 'Partially Completed' (status: 'partially_completed')
+ * - Child items are pending inspection -> '3- Under Inspection' (status: 'under_inspection')
+ */
+export function resolveBatchManifestLifecycle(report, allReports = []) {
+  const items = getReportManifestItems(report, allReports);
+  if (!Array.isArray(items) || items.length === 0) {
+    return {
+      status: 'under_inspection',
+      label: '3- Under Inspection',
+      color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+    };
+  }
+
+  let restockCount = 0;
+  let scrapCount = 0;
+  let pendingCount = 0;
+  let otherCompletedCount = 0;
+
+  items.forEach(child => {
+    const disp = String(child?.disposition || '').toLowerCase().trim();
+    const st = String(child?.status || '').toLowerCase().trim();
+
+    if (disp.includes('restock') || disp.includes('replacement stock received') || st === 'restocked') {
+      restockCount += 1;
+    } else if (disp.includes('scrap') || disp.includes('dispose') || st === 'scrapped' || st === 'disposed') {
+      scrapCount += 1;
+    } else if (
+      (!disp || disp.includes('pending triage') || disp.includes('pending vendor pickup') || disp === 'pending') &&
+      st !== 'credit_memo_issued' &&
+      st !== 'buffer_replacement_dispatched'
+    ) {
+      pendingCount += 1;
+    } else {
+      otherCompletedCount += 1;
+    }
+  });
+
+  const total = items.length;
+
+  if (restockCount === total) {
+    return {
+      status: 'restocked',
+      label: '6- Restocked',
+      color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800'
+    };
+  }
+
+  if (scrapCount === total) {
+    return {
+      status: 'scrapped',
+      label: '7- Scrapped / Disposed',
+      color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+    };
+  }
+
+  if (pendingCount === total) {
+    return {
+      status: 'under_inspection',
+      label: '3- Under Inspection',
+      color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+    };
+  }
+
+  return {
+    status: 'partially_completed',
+    label: 'Partially Completed',
+    color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-300 dark:border-purple-800'
+  };
+}
+
+
 
 
 

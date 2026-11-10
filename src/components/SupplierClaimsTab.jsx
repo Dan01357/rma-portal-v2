@@ -90,7 +90,7 @@ export default function SupplierClaimsTab({
       };
     }
 
-    const isManifest = isBatchManifest(r, reportsList);
+    const isManifest = !r.is_unpacked_manifest_item && isBatchManifest(r, reportsList);
     if (isManifest) {
       const children = getReportManifestItems(r, reportsList);
       const totalUnits = children.reduce((sum, c) => sum + (Number(c.quantity || c.qty) || 1), 0) || Number(r.quantity) || 1;
@@ -199,11 +199,82 @@ export default function SupplierClaimsTab({
         }
       }
 
-      // Do NOT unpack batch manifests into separate flat rows; keep parent container intact for drawer view
+      // Subject 1: When a report is a batch manifest (is_parent === true or items.length > 1):
+      // DO NOT push the parent manifest container row with ₱0.00 into the table.
+      // Instead, unpack each manifest child line item into its own individual table row.
+      if (isManifest && manifestChildren.length > 0) {
+        manifestChildren.forEach((child, cIdx) => {
+          const cDisp = String(child.disposition || '').toLowerCase();
+          // Exclude child items explicitly triaged to non-RTV outcomes
+          if (cDisp.includes('restock') || cDisp.includes('scrap') || cDisp.includes('quarantine') || cDisp.includes('buffer')) {
+            return;
+          }
+          // If the parent manifest wasn't explicitly supplier_outbound or RTV, require the child itself to be RTV
+          const isParentRtvOrSupplier = isExplicitSupplierOutbound || disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor');
+          const isChildRtvOrSupplier = child.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+          if (!isParentRtvOrSupplier && !isChildRtvOrSupplier) {
+            return;
+          }
+
+          const childBarcode = String(child.barcode || '').trim();
+          const matchedChild = childBarcode
+            ? (savedProductsList || []).find(p => p.barcode && String(p.barcode).trim() === childBarcode)
+            : null;
+          const childRawSku = String(child.code || child.sku || matchedChild?.code || matchedChild?.sku || '').trim();
+          const isChildSkuValid = Boolean(
+            childRawSku &&
+            childRawSku !== childBarcode &&
+            !childRawSku.toLowerCase().includes('awaiting') &&
+            !childRawSku.toLowerCase().includes('unidentified')
+          );
+          const childName = (child.name || child.productName || matchedChild?.name || `Item #${cIdx + 1}`).trim();
+          const childQty = Number(child.quantity || child.qty) || 1;
+          const childUnit = child.unit_name || child.unit || r.unit_name || 'pc';
+          const childPrice = Number(child.price_with_vat || child.price || matchedChild?.price_with_vat || matchedChild?.price || 0);
+          const rawChildSupplier = String(child.supplier_name || '').trim();
+          const isChildVendorPending = !rawChildSupplier || rawChildSupplier.toLowerCase().includes('pending') || rawChildSupplier.toLowerCase().includes('unassigned') || rawChildSupplier.toLowerCase() === 'warehouse';
+          const resolvedChildSupplier = !isChildVendorPending
+            ? rawChildSupplier
+            : (matchedChild?.supplier_name || (r.supplier_name && !String(r.supplier_name).toLowerCase().includes('pending') && String(r.supplier_name).toLowerCase() !== 'warehouse' ? r.supplier_name : 'Pending Assignment'));
+          const childPhotos = (Array.isArray(child.photos) && child.photos.length > 0)
+            ? child.photos
+            : (Array.isArray(r.photos) ? r.photos : []);
+
+          rawItems.push({
+            ...r,
+            ...child,
+            id: child.id || `${r.id || r.rma_number}_item_${cIdx}_${childBarcode || cIdx}`,
+            parent_rma_id: r.id,
+            is_parent: false,
+            is_unpacked_manifest_item: true,
+            manifest_line_index: cIdx,
+            manifest_total_lines: manifestChildren.length,
+            items: [],
+            total_items: 1,
+            rma_number: r.rma_number,
+            barcode: childBarcode,
+            code: isChildSkuValid ? childRawSku : '',
+            sku: isChildSkuValid ? childRawSku : '',
+            name: childName,
+            quantity: childQty,
+            unit_name: childUnit,
+            pieces_per_case: child.pieces_per_case || child.piecesPerCase || matchedChild?.pieces_per_case || null,
+            price: childPrice,
+            price_with_vat: childPrice,
+            supplier_name: resolvedChildSupplier,
+            warehouse_location: child.warehouse_location || r.warehouse_location || 'DOCK',
+            disposition: child.disposition || r.disposition || '3- Return to Vendor (RTV)',
+            reason: child.reason || r.reason || 'Damaged',
+            photos: childPhotos
+          });
+        });
+        return;
+      }
+
       rawItems.push(r);
     });
 
-    // Eliminate duplicate rows: ensure each unique RMA ticket appears exactly once
+    // Eliminate duplicate rows: ensure each unique RMA ticket / unpacked line item appears exactly once
     const dedupedItems = [];
     const seenKeys = new Set();
     rawItems.forEach(item => {
@@ -215,7 +286,7 @@ export default function SupplierClaimsTab({
     });
 
     return dedupedItems;
-  }, [reportsList]);
+  }, [reportsList, savedProductsList]);
 
   // Count candidate items for each supplier in real-time
   const supplierCounts = useMemo(() => {
@@ -440,9 +511,15 @@ export default function SupplierClaimsTab({
     if (!report) return null;
     const rma = report.rma_number;
     
-    // 1. Search in saved claims items
+    // 1. Search in saved claims items (match barcode too for unpacked manifest items)
     const found = savedClaims.find(c => 
-      Array.isArray(c.items) && c.items.some(i => i.rma_number === rma)
+      Array.isArray(c.items) && c.items.some(i => {
+        if (i.rma_number !== rma) return false;
+        if (report.is_unpacked_manifest_item && report.barcode && i.barcode) {
+          return String(i.barcode).trim() === String(report.barcode).trim();
+        }
+        return true;
+      })
     );
     if (found) return found;
 
@@ -686,16 +763,25 @@ export default function SupplierClaimsTab({
         elementId: 'rtv-voucher-mount',
         documentTitle: `Supplier_Debit_Claim_${existingClaim.claimNumber || existingClaim.claim_number || 'Voucher'}`,
         pageSize: 'portrait',
-        pageMargin: '0.35in',
+        pageMargin: '0.4in',
         customStyles: `
+          @page {
+            size: A4 portrait;
+            margin: 10mm;
+          }
           #rtv-voucher-mount {
             width: 100% !important;
-            max-width: 195mm !important;
+            max-width: 190mm !important;
             margin: 0 auto !important;
-            padding: 0 !important;
+            padding: 16px !important;
+            border: 1.5px solid #000000 !important;
+            border-radius: 6px !important;
+            box-sizing: border-box !important;
             box-shadow: none !important;
             background: #ffffff !important;
             color: #000000 !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
           #rtv-voucher-mount input {
             border: none !important;
@@ -723,16 +809,25 @@ export default function SupplierClaimsTab({
       elementId: 'rtv-voucher-mount',
       documentTitle: `Supplier_Debit_Claim_${activeClaimBatch.claimNumber || activeClaimBatch.claim_number || 'Voucher'}`,
       pageSize: 'portrait',
-      pageMargin: '0.35in',
+      pageMargin: '0.4in',
       customStyles: `
+        @page {
+          size: A4 portrait;
+          margin: 10mm;
+        }
         #rtv-voucher-mount {
           width: 100% !important;
-          max-width: 195mm !important;
+          max-width: 190mm !important;
           margin: 0 auto !important;
-          padding: 0 !important;
+          padding: 16px !important;
+          border: 1.5px solid #000000 !important;
+          border-radius: 6px !important;
+          box-sizing: border-box !important;
           box-shadow: none !important;
           background: #ffffff !important;
           color: #000000 !important;
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
         }
         #rtv-voucher-mount input {
           border: none !important;
@@ -1094,7 +1189,7 @@ export default function SupplierClaimsTab({
                   const res = resolveReportProduct(r);
                   const photos = getPhotos(r);
                   const existingClaim = getClaimForReport(r);
-                  const isManifest = isBatchManifest(r, reportsList);
+                  const isManifest = !r.is_unpacked_manifest_item && isBatchManifest(r, reportsList);
                   const manifestChildren = isManifest ? getReportManifestItems(r, reportsList) : [];
                   const manifestKey = r.id || r.rma_number;
                   const isManifestExpanded = expandedManifestIds.has(manifestKey);
@@ -1201,6 +1296,13 @@ export default function SupplierClaimsTab({
                                   Doc: {r.invoice_dr_number}
                                 </span>
                               )}
+                            </div>
+                          )}
+                          {r.is_unpacked_manifest_item && (
+                            <div className="mt-1">
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-0.5 shadow-2xs">
+                                <span>📦 Manifest Line #{(r.manifest_line_index || 0) + 1}{r.manifest_total_lines ? ` of ${r.manifest_total_lines}` : ''}</span>
+                              </span>
                             </div>
                           )}
                           {isManifest && (
@@ -1406,7 +1508,7 @@ export default function SupplierClaimsTab({
                             {canDeleteReports && onRequestDeleteReport && (
                               <button
                                 type="button"
-                                onClick={() => onRequestDeleteReport(r.id, r.rma_number, r)}
+                                onClick={() => onRequestDeleteReport(r.parent_rma_id || r.id, r.rma_number, r)}
                                 className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
                                 title={`Delete RMA #${r.rma_number} and remove stored proof photos`}
                               >

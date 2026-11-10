@@ -41,7 +41,8 @@ import {
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku } from '../utils/rmaHelpers';
+import { supplierClaimService } from '../services/supplierClaimService';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, resolveBatchManifestLifecycle } from '../utils/rmaHelpers';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -419,10 +420,15 @@ export default function QuickRMAActionModal({
         note: `Manifest line-item triage completed for ${manifestItems.length} items by ${inspectorName}`
       });
 
-      // 1. Update items in parent report
+      // 1. Dynamically compute parent lifecycle status from child item dispositions (Subject 3)
+      const dynamicParentLifecycle = resolveBatchManifestLifecycle({ ...report, items: manifestItems });
+      setRmaStatus(dynamicParentLifecycle.status);
+
+      // 2. Update items and dynamic status in parent report
       const updatedReportRow = {
         ...report,
         items: manifestItems,
+        status: dynamicParentLifecycle.status,
         inspected_by: inspectorName,
         inspected_at: new Date().toISOString(),
         audit_trail: existingAudit
@@ -432,6 +438,7 @@ export default function QuickRMAActionModal({
         .from('rma_reports')
         .update({
           items: manifestItems,
+          status: dynamicParentLifecycle.status,
           inspected_by: inspectorName,
           inspected_at: new Date().toISOString(),
           audit_trail: existingAudit
@@ -2031,15 +2038,74 @@ export default function QuickRMAActionModal({
                       );
                     })()}
 
-                    {!isSupplierStream && (
+                    {!isSupplierStream ? (
                       <button
                         type="button"
                         onClick={() => setIsBufferSlipOpen(true)}
                         className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
-                        title="Print Buffer Stock Replacement Dispatch Slip / Gate Pass"
+                        title="Print Buffer Stock Replacement Slip"
                       >
                         <Truck className="w-3.5 h-3.5 text-indigo-200" />
-                        <span>Buffer Slip</span>
+                        <span>Buffer Stock Replacement Slip</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const win = window.open('', '_blank');
+                          if (win) {
+                            win.document.write(`
+                              <html>
+                                <head>
+                                  <title>Vendor RTV Gate Pass - ${report?.rma_number}</title>
+                                  <style>
+                                    @page { size: A4 portrait; margin: 12mm; }
+                                    body { font-family: Arial, sans-serif; padding: 18px; color: #111; border: 1.5px solid #000; border-radius: 6px; box-sizing: border-box; }
+                                    h2 { margin: 0 0 6px 0; font-size: 18px; }
+                                    table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
+                                    th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+                                    th { background: #f1f5f9; }
+                                    .header { border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; }
+                                  </style>
+                                </head>
+                                <body>
+                                  <div class="header">
+                                    <div>
+                                      <h2>PINGCON MARKETING - VENDOR RTV GATE PASS</h2>
+                                      <div>Outbound RTV Reference: <strong>${report?.rma_number}</strong></div>
+                                      <div>Vendor / Counterparty: <strong>${adminSupplierName || report?.supplier_name || report?.supplier || 'Master Vendor'}</strong></div>
+                                    </div>
+                                    <div style="text-align: right;">
+                                      <div>Date: <strong>${new Date().toLocaleDateString()}</strong></div>
+                                      <div>Bin Location: <strong>${warehouseLocation || report?.warehouse_location || 'DOCK'}</strong></div>
+                                    </div>
+                                  </div>
+                                  <p style="font-size: 12px;">Authorizes physical release of defective / RTV merchandise from warehouse dock to vendor representative.</p>
+                                  <table>
+                                    <tr><th>Item Description</th><th>Barcode / SKU</th><th>Qty & Unit</th><th>Disposition</th></tr>
+                                    <tr>
+                                      <td>${report?.name || 'Product'}</td>
+                                      <td>${report?.code || report?.sku || report?.barcode || 'N/A'}</td>
+                                      <td>${itemQty} ${report?.unit_name || 'pc'}</td>
+                                      <td>${disposition || 'Return to Vendor (RTV)'}</td>
+                                    </tr>
+                                  </table>
+                                  <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 12px;">
+                                    <div>Warehouse Guard / Released By: _______________________</div>
+                                    <div>Vendor Driver Signature & Plate #: _______________________</div>
+                                  </div>
+                                  <script>window.print();</script>
+                                </body>
+                              </html>
+                            `);
+                            win.document.close();
+                          }
+                        }}
+                        className="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
+                        title="Print Official Vendor RTV Gate Pass"
+                      >
+                        <Truck className="w-3.5 h-3.5 text-purple-200" />
+                        <span>Vendor RTV Gate Pass</span>
                       </button>
                     )}
 
@@ -2055,8 +2121,8 @@ export default function QuickRMAActionModal({
                   </div>
                 </div>
 
-                {/* Double-Compensation Safety Warning (Credit Memo already issued) */}
-                {hasLinkedCreditMemo && (
+                {/* Double-Compensation Safety Warning (Credit Memo already issued - Customer Inbound Only) */}
+                {!isSupplierStream && hasLinkedCreditMemo && (
                   <div className="p-3 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-xl text-amber-900 dark:text-amber-200 text-xs font-semibold flex items-center gap-2.5 shadow-2xs">
                     <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                     <span>⚠️ Note: A Finance Credit Memo was already issued for this return. Only dispatch buffer stock if physical replacement is also authorized.</span>
@@ -2463,7 +2529,7 @@ export default function QuickRMAActionModal({
                 {manifestItems.length > 1 ? (
                   /* MULTI-ITEM MANIFEST LINE-ITEM LEVEL TRIAGE */
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between pb-1 border-b border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-200 dark:border-slate-800 flex-wrap gap-2">
                       <div>
                         <div className="font-black text-xs text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
                           <Package className="w-4 h-4 text-blue-600 dark:text-blue-400" />
@@ -2473,9 +2539,19 @@ export default function QuickRMAActionModal({
                           Assign condition grade, rack/bin location, and disposition for each line item individually.
                         </p>
                       </div>
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                        {manifestItems.length} Products
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {(() => {
+                          const dynStage = resolveBatchManifestLifecycle({ ...report, items: manifestItems });
+                          return (
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border uppercase tracking-wider shadow-2xs ${dynStage.color}`} title="Dynamically computed Parent Manifest Lifecycle Status">
+                              Stage: {dynStage.label}
+                            </span>
+                          );
+                        })()}
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                          {manifestItems.length} Products
+                        </span>
+                      </div>
                     </div>
 
                     {/* Helpful Multi-Item Manifest Triage Note */}
@@ -2775,7 +2851,7 @@ export default function QuickRMAActionModal({
                 )}
               </div>
 
-              {/* ENTERPRISE ACTION 2: FINANCE CREDIT MEMO vs SUPPLIER DEBIT CLAIM */}
+              {/* ENTERPRISE ACTION 2: STRICT DOCUMENT RULES MATRIX (Customer Credit Memo vs Supplier Debit Claim Note) */}
               {isSupplierStream ? (
                 <div className="p-4 bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/60 rounded-2xl shadow-xs space-y-3">
                   <div className="flex items-start justify-between gap-2">
@@ -2785,7 +2861,7 @@ export default function QuickRMAActionModal({
                       </div>
                       <div>
                         <h5 className="text-xs font-black text-slate-900 dark:text-white">
-                          Supplier Debit Claim / AP Deduction
+                          Supplier Debit Claim Note
                         </h5>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
                           Total Vendor Claim: ₱{totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({itemQty} unit{itemQty > 1 ? 's' : ''})
@@ -2801,7 +2877,7 @@ export default function QuickRMAActionModal({
                   <div className="p-3 bg-white/80 dark:bg-slate-900/80 rounded-xl border border-purple-100 dark:border-purple-900/40 text-xs space-y-1.5">
                     <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
                       <span>Vendor / Master Supplier:</span>
-                      <strong className="text-slate-900 dark:text-white font-mono">{report?.supplier || report?.vendor || 'Master Supplier'}</strong>
+                      <strong className="text-slate-900 dark:text-white font-mono">{adminSupplierName || report?.supplier_name || report?.supplier || report?.vendor || 'Master Supplier'}</strong>
                     </div>
                     <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
                       <span>RTV Outbound Reference:</span>
@@ -2813,17 +2889,39 @@ export default function QuickRMAActionModal({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 pt-0.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-0.5">
                     <button
                       type="button"
-                      onClick={() => {
-                        if (onPrintThermalLabel) onPrintThermalLabel(report);
-                        else setIsThermalLabelOpen(true);
+                      onClick={async () => {
+                        try {
+                          const claims = await supplierClaimService.getClaims();
+                          const claimNumber = supplierClaimService.generateRtvId(claims || []);
+                          const supplierName = (adminSupplierName || report?.supplier_name || report?.supplier || 'Master Supplier').trim();
+                          const generatedBy = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
+                          const newClaim = {
+                            claimNumber,
+                            claim_number: claimNumber,
+                            supplierName,
+                            supplier_name: supplierName,
+                            createdAt: new Date().toISOString(),
+                            created_at: new Date().toISOString(),
+                            generatedBy,
+                            generated_by: generatedBy,
+                            items: [{ ...report, supplier_name: supplierName, quantity: itemQty, price: Number(report?.price_with_vat || report?.price || 0) }],
+                            totalQuantity: itemQty,
+                            totalClaimAmount: totalClaimValue
+                          };
+                          await supplierClaimService.saveClaim(newClaim);
+                          if (onRefresh) onRefresh(report);
+                          alert(`Supplier Debit Claim Note (${claimNumber}) generated and saved for ${supplierName}!`);
+                        } catch (e) {
+                          console.warn('Debit claim creation notice:', e);
+                        }
                       }}
                       className="py-2.5 px-3 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
                     >
-                      <Printer className="w-3.5 h-3.5" />
-                      <span>Print RTV Label</span>
+                      <Receipt className="w-3.5 h-3.5" />
+                      <span>+ Debit Claim</span>
                     </button>
 
                     <button
@@ -2836,18 +2934,20 @@ export default function QuickRMAActionModal({
                               <head>
                                 <title>Supplier Debit Claim - ${report?.rma_number}</title>
                                 <style>
-                                  body { font-family: monospace; padding: 24px; color: #111; }
+                                  @page { size: A4 portrait; margin: 12mm; }
+                                  body { font-family: Arial, sans-serif; padding: 20px; color: #111; border: 1.5px solid #000; border-radius: 6px; box-sizing: border-box; }
                                   h2 { margin: 0 0 8px 0; }
-                                  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-                                  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-                                  .header { border-bottom: 2px solid #333; padding-bottom: 12px; margin-bottom: 16px; }
+                                  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }
+                                  th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+                                  th { background: #f1f5f9; }
+                                  .header { border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 16px; }
                                 </style>
                               </head>
                               <body>
                                 <div class="header">
-                                  <h2>PINGCON MARKETING - SUPPLIER DEBIT MEMORANDUM</h2>
+                                  <h2>PINGCON MARKETING - SUPPLIER DEBIT CLAIM VOUCHER</h2>
                                   <div>RTV Reference: <strong>${report?.rma_number}</strong></div>
-                                  <div>Supplier: <strong>${report?.supplier || 'Master Vendor'}</strong></div>
+                                  <div>Supplier: <strong>${adminSupplierName || report?.supplier_name || report?.supplier || 'Master Vendor'}</strong></div>
                                   <div>Date: <strong>${new Date().toLocaleDateString()}</strong></div>
                                 </div>
                                 <p>This document authorizes Accounts Payable deduction / supplier debit for return to vendor claim.</p>
@@ -2857,11 +2957,11 @@ export default function QuickRMAActionModal({
                                     <td>${report?.name || 'Product'}</td>
                                     <td>${report?.code || report?.sku || report?.barcode || 'N/A'}</td>
                                     <td>${itemQty}</td>
-                                    <td>₱${Number(report?.price || 0).toFixed(2)}</td>
+                                    <td>₱${Number(report?.price_with_vat || report?.price || 0).toFixed(2)}</td>
                                     <td><strong>₱${totalClaimValue.toFixed(2)}</strong></td>
                                   </tr>
                                 </table>
-                                <div style="margin-top: 30px; display: flex; justify-content: space-between;">
+                                <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 12px;">
                                   <div>Authorized by: _______________________</div>
                                   <div>Vendor Received by: _______________________</div>
                                 </div>
@@ -2874,8 +2974,66 @@ export default function QuickRMAActionModal({
                       }}
                       className="py-2.5 px-3 bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 dark:hover:bg-purple-900/70 text-purple-900 dark:text-purple-200 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                     >
-                      <Receipt className="w-3.5 h-3.5 text-purple-700 dark:text-purple-300" />
+                      <Printer className="w-3.5 h-3.5 text-purple-700 dark:text-purple-300" />
                       <span>Print Debit Voucher</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const win = window.open('', '_blank');
+                        if (win) {
+                          win.document.write(`
+                            <html>
+                              <head>
+                                <title>Vendor RTV Gate Pass - ${report?.rma_number}</title>
+                                <style>
+                                  @page { size: A4 portrait; margin: 12mm; }
+                                  body { font-family: Arial, sans-serif; padding: 18px; color: #111; border: 1.5px solid #000; border-radius: 6px; box-sizing: border-box; }
+                                  h2 { margin: 0 0 6px 0; font-size: 18px; }
+                                  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
+                                  th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+                                  th { background: #f1f5f9; }
+                                  .header { border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; }
+                                </style>
+                              </head>
+                              <body>
+                                <div class="header">
+                                  <div>
+                                    <h2>PINGCON MARKETING - VENDOR RTV GATE PASS</h2>
+                                    <div>Outbound RTV Reference: <strong>${report?.rma_number}</strong></div>
+                                    <div>Vendor / Counterparty: <strong>${adminSupplierName || report?.supplier_name || report?.supplier || 'Master Vendor'}</strong></div>
+                                  </div>
+                                  <div style="text-align: right;">
+                                    <div>Date: <strong>${new Date().toLocaleDateString()}</strong></div>
+                                    <div>Bin Location: <strong>${warehouseLocation || report?.warehouse_location || 'DOCK'}</strong></div>
+                                  </div>
+                                </div>
+                                <p style="font-size: 12px;">Authorizes physical release of defective / RTV merchandise from warehouse dock to vendor representative.</p>
+                                <table>
+                                  <tr><th>Item Description</th><th>Barcode / SKU</th><th>Qty & Unit</th><th>Disposition</th></tr>
+                                  <tr>
+                                    <td>${report?.name || 'Product'}</td>
+                                    <td>${report?.code || report?.sku || report?.barcode || 'N/A'}</td>
+                                    <td>${itemQty} ${report?.unit_name || 'pc'}</td>
+                                    <td>${disposition || 'Return to Vendor (RTV)'}</td>
+                                  </tr>
+                                </table>
+                                <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 12px;">
+                                  <div>Warehouse Guard / Released By: _______________________</div>
+                                  <div>Vendor Driver Signature & Plate #: _______________________</div>
+                                </div>
+                                <script>window.print();</script>
+                              </body>
+                            </html>
+                          `);
+                          win.document.close();
+                        }
+                      }}
+                      className="py-2.5 px-3 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Truck className="w-3.5 h-3.5 text-purple-300" />
+                      <span>Vendor RTV Gate Pass</span>
                     </button>
                   </div>
                 </div>
@@ -2888,7 +3046,7 @@ export default function QuickRMAActionModal({
                       </div>
                       <div>
                         <h5 className="text-xs font-black text-slate-900 dark:text-white">
-                          {existingMemo ? `Credit Memo: ${existingMemo.credit_memo_number}` : 'Finance Credit Memorandum'}
+                          {existingMemo ? `Customer Credit Memo: ${existingMemo.credit_memo_number}` : 'Customer Credit Memo'}
                         </h5>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
                           {existingMemo
@@ -2944,41 +3102,52 @@ export default function QuickRMAActionModal({
                       </span>
                     </div>
                   ) : !existingMemo ? (
-                    <button
-                      type="button"
-                      disabled={!canIssueCreditMemo}
-                      onClick={() => {
-                        if (canIssueCreditMemo && onOpenCreditMemo && report) {
-                          onOpenCreditMemo(report);
-                        }
-                      }}
-                      className={`w-full py-2.5 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all ${
-                        canIssueCreditMemo
-                          ? 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white cursor-pointer'
-                          : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
-                      }`}
-                    >
-                      {canIssueCreditMemo ? (
-                        <>
-                          <Receipt className="w-4 h-4" />
-                          <span>+ Issue Credit Memo</span>
-                        </>
-                      ) : (
-                        <>
-                          <Lock className="w-4 h-4 text-amber-500" />
-                          <span>Locked: Super Admin Approval Required</span>
-                        </>
-                      )}
-                    </button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        disabled={!canIssueCreditMemo}
+                        onClick={() => {
+                          if (canIssueCreditMemo && onOpenCreditMemo && report) {
+                            onOpenCreditMemo(report);
+                          }
+                        }}
+                        className={`py-2.5 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all ${
+                          canIssueCreditMemo
+                            ? 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white cursor-pointer'
+                            : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
+                        }`}
+                      >
+                        {canIssueCreditMemo ? (
+                          <>
+                            <Receipt className="w-4 h-4" />
+                            <span>+ Issue Credit Memo</span>
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="w-4 h-4 text-amber-500" />
+                            <span>Locked: Super Admin Approval Required</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsBufferSlipOpen(true)}
+                        className="py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                      >
+                        <Truck className="w-4 h-4 text-indigo-200" />
+                        <span>Buffer Stock Replacement Slip</span>
+                      </button>
+                    </div>
                   ) : (
-                    <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                       <button
                         type="button"
                         onClick={() => onViewCreditMemoVoucher && onViewCreditMemoVoucher(existingMemo)}
                         className="py-2 px-3 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                       >
                         <Printer className="w-3.5 h-3.5" />
-                        <span>Print CM Voucher</span>
+                        <span>CM Voucher</span>
                       </button>
 
                       <button
@@ -2988,6 +3157,15 @@ export default function QuickRMAActionModal({
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                         <span>Edit CM</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsBufferSlipOpen(true)}
+                        className="py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Truck className="w-3.5 h-3.5 text-indigo-200" />
+                        <span>Buffer Stock Replacement Slip</span>
                       </button>
                     </div>
                   )}
