@@ -1182,6 +1182,7 @@ export const catalogService = {
   async submitReport({ 
     rmaNumber: explicitRmaNumber = null,
     rma_type = 'customer_inbound',
+    rmaType = null,
     barcode, 
     name = null,
     productName = null,
@@ -1322,9 +1323,11 @@ export const catalogService = {
     // Filter GPS: Only save if accuracy is <= 150 meters
     const isAccurateGps = gps && gps.latitude && gps.accuracy && Number(gps.accuracy) <= 150;
 
+    const effectiveRmaType = (rma_type === 'supplier_outbound' || rmaType === 'supplier_outbound') ? 'supplier_outbound' : 'customer_inbound';
+
     const reportRow = {
       rma_number: rmaNumber,
-      rma_type: rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound',
+      rma_type: effectiveRmaType,
       barcode: finalBarcode,
       code: isBatch ? null : (isKnown ? ((resolvedProduct.code && resolvedProduct.code !== finalBarcode) ? resolvedProduct.code : (resolvedProduct.sku && resolvedProduct.sku !== finalBarcode ? resolvedProduct.sku : null)) : (hasItems && items[0]?.code ? items[0].code : null)),
       name: effectiveName,
@@ -1365,7 +1368,7 @@ export const catalogService = {
       ae_email: isKnown ? (resolvedProduct.ae_email || resolvedProduct.aeEmail || null) : null,
       company: isKnown ? (resolvedProduct.company || null) : null,
       condition_grade: 'B - Damaged Packaging Only',
-      disposition: (rma_type === 'supplier_outbound' || rmaType === 'supplier_outbound') ? '3- Return to Vendor (RTV)' : 'Pending Triage',
+      disposition: effectiveRmaType === 'supplier_outbound' ? '3- Return to Vendor (RTV)' : 'Pending Triage',
       warehouse_location: null,
       inspected_by: null,
       inspected_at: null,

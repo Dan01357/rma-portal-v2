@@ -338,39 +338,14 @@ export default function App() {
   const [quickRmaNumber, setQuickRmaNumber] = useState(null);
   const [pendingQuickRmaNumber, setPendingQuickRmaNumber] = useState(null);
   const [isCustomerInvitesModalOpen, setIsCustomerInvitesModalOpen] = useState(false);
+  const [viewingExplanationModal, setViewingExplanationModal] = useState(null);
 
   // 1-Click Google Identity Lock Gatekeeper Session
   const [intakeSlug, setIntakeSlug] = useState(() => getIntakeSlugFromUrl());
   const [gateSession, setGateSession] = useState(() => {
-    try {
-      const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-      let urlToken = urlParams ? urlParams.get('token') : null;
-      if (!urlToken && typeof window !== 'undefined' && window.location.hash.includes('token=')) {
-        const match = window.location.hash.match(/token=([^&]+)/);
-        if (match && match[1]) urlToken = decodeURIComponent(match[1]);
-      }
-      if (!urlToken && typeof window !== 'undefined') {
-        try {
-          urlToken = sessionStorage.getItem('rma_active_invite_token') || localStorage.getItem('rma_pending_oauth_token');
-        } catch {}
-      }
-
-      // If an invite token is present in the address bar, enforce strict single-visit verification!
-      // Do NOT auto-unlock using previous bypasses in localStorage.rma_portal_gate_session.
-      if (urlToken) {
-        return null;
-      }
-
-      const raw = localStorage.getItem('rma_portal_gate_session');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed?.expires_at && new Date(parsed.expires_at).getTime() > Date.now()) {
-          return parsed;
-        }
-      }
-    } catch { }
-    const slug = getIntakeSlugFromUrl();
-    return accessKeyService.getActiveSession(slug);
+    // Never auto-unlock the public portal from stale localStorage sessions.
+    // Visitors with ?token= must authenticate that token; visitors without ?token= must be logged in as super_admin.
+    return null;
   });
 
   // Live ticking countdown state for public return session
@@ -2227,36 +2202,27 @@ export default function App() {
   const handleSubmitReport = async (e) => {
     e.preventDefault();
 
-    // 0. Gatekeeper Check: Block return if station device is locked out or session expired
-    if (!isAdminView && !currentUser) {
-      if (!gateSession) {
-        showToast('This station is locked. Please enter PIN to resume.', 'warning');
+    // 0. Gatekeeper Check: Block return unless user is an authenticated Super Admin OR has a verified Invite Token session
+    if (!isAdminView && currentUser?.role !== 'super_admin') {
+      if (!gateSession || !gateSession.token) {
+        showToast('Access restricted. Only authorized invite links or Super Admins can submit from the public portal.', 'error');
         return;
       }
-      if (gateSession.token) {
-        const check = await inviteService.validateInviteToken(gateSession.token);
-        if (!check.valid) {
-          try {
-            localStorage.removeItem('rma_portal_gate_session');
-          } catch { }
-          setGateSession(null);
-          showToast(
-            check.error === 'REVOKED'
-              ? 'Submission blocked: Your return authorization has been revoked by Pingcon Operations.'
-              : check.error === 'EXPIRED'
-              ? 'Submission blocked: Your return authorization link has expired.'
-              : 'Submission blocked: Your return authorization link is invalid or deleted.',
-            'error'
-          );
-          return;
-        }
-      } else {
-        const active = accessKeyService.getActiveSession(intakeSlug || gateSession?.slug);
-        if (!active) {
-          showToast('Your return session has expired. You cannot submit this report.', 'error');
-          setGateSession(null);
-          return;
-        }
+      const check = await inviteService.validateInviteToken(gateSession.token);
+      if (!check.valid) {
+        try {
+          localStorage.removeItem('rma_portal_gate_session');
+        } catch { }
+        setGateSession(null);
+        showToast(
+          check.error === 'REVOKED'
+            ? 'Submission blocked: Your return authorization has been revoked by Pingcon Operations.'
+            : check.error === 'EXPIRED'
+            ? 'Submission blocked: Your return authorization link has expired.'
+            : 'Submission blocked: Your return authorization link is invalid or deleted.',
+          'error'
+        );
+        return;
       }
     }
 
@@ -2317,14 +2283,14 @@ export default function App() {
 
     const inviteEntity = inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch);
     const resolvedBranch = storeBranch.trim() || inviteEntity || 'Direct Return';
-    const isTestSupplierOutbound = Boolean(isTestMode && testModeStreamType === 'supplier_outbound');
+    const isSuperAdminSupplierOutbound = Boolean(currentUser?.role === 'super_admin' && !gateSession && testModeStreamType === 'supplier_outbound');
     const resolvedSupplierFromPortal =
       (itemsToSubmit[0]?.supplier_name &&
         itemsToSubmit[0].supplier_name !== 'Warehouse' &&
         itemsToSubmit[0].supplier_name !== 'Savemore' &&
         itemsToSubmit[0].supplier_name !== 'Pending Assignment')
         ? itemsToSubmit[0].supplier_name
-        : ((gateSession?.stream_type === 'supplier_outbound' || isTestSupplierOutbound) && (storeBranch.trim() || inviteEntity))
+        : ((gateSession?.stream_type === 'supplier_outbound' || isSuperAdminSupplierOutbound) && (storeBranch.trim() || inviteEntity))
           ? (storeBranch.trim() || inviteEntity)
           : (itemsToSubmit[0]?.supplier_name || 'Pending Assignment');
 
@@ -2334,8 +2300,8 @@ export default function App() {
       localStorage.setItem('rma_reporter_contact', effectiveContact);
     } catch { }
 
-    // 2. Determine RMA Type based on station Gatekeeper profile or Super Admin Test Mode selector
-    const determinedRmaType = (isTestSupplierOutbound || gateSession?.stream_type === 'supplier_outbound' || gateSession?.type === 'internal_warehouse')
+    // 2. Determine RMA Type based on station Gatekeeper profile or Super Admin stream selector (works whether Test Mode is ON or OFF)
+    const determinedRmaType = (isSuperAdminSupplierOutbound || gateSession?.stream_type === 'supplier_outbound' || gateSession?.type === 'internal_warehouse')
       ? 'supplier_outbound'
       : 'customer_inbound';
 
@@ -2349,10 +2315,13 @@ export default function App() {
     const primaryBarcode = isBatchManifestTicket ? rmaNumber : (itemsToSubmit[0]?.barcode || rmaNumber);
     const primaryName = isBatchManifestTicket ? `Batch Return Manifest (${itemsToSubmit.length} items)` : itemsToSubmit[0].name;
     const primaryReason = isBatchManifestTicket ? `Multi-Item Defect (${itemsToSubmit.length} items)` : itemsToSubmit[0].reason;
+    const primaryExplanation = isBatchManifestTicket
+      ? (itemsToSubmit.map(it => (it.explanation || '').trim()).filter(Boolean).join(' | ') || null)
+      : ((itemsToSubmit[0]?.explanation || '').trim() || null);
     const primaryDocNumber = cleanDr || cleanSi || cleanPo || invoiceDrNumber.trim() || null;
 
     // 4. Show success screen with full report details for QR sticker generation INSTANTLY!
-    setSubmitSuccessReport({
+    const optimisticReportPayload = {
       rma_number: rmaNumber,
       rmaNumber: rmaNumber,
       rma_type: determinedRmaType,
@@ -2372,6 +2341,9 @@ export default function App() {
       supplier_name: resolvedSupplierFromPortal,
       supplier: resolvedSupplierFromPortal,
       reason: primaryReason,
+      explanation: primaryExplanation,
+      disposition: determinedRmaType === 'supplier_outbound' ? '3- Return to Vendor (RTV)' : 'Pending Triage',
+      status: 'pending',
       reporter_name: reporterName || 'Staff',
       reporter_contact: effectiveContact,
       si_number: cleanSi || null,
@@ -2386,7 +2358,10 @@ export default function App() {
       paperworkCount: paperworkPhotos.length,
       hasGps: gpsLocation.isAccurate,
       created_at: new Date().toISOString()
-    });
+    };
+
+    setSubmitSuccessReport(optimisticReportPayload);
+    setRecentReportsList(prev => [optimisticReportPayload, ...prev.filter(r => r.rma_number !== rmaNumber)]);
 
     // 5. Reset form fields immediately so UI is completely responsive
     const capturedItems = [...itemsToSubmit];
@@ -2514,6 +2489,7 @@ export default function App() {
           reporterName: capturedReporterName,
           reporterContact: capturedReporterContact,
           reason: primaryReason,
+          explanation: primaryExplanation,
           photos: allUploadedDamagedUrls.length > 0 ? allUploadedDamagedUrls : ['https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800&auto=format&fit=crop&q=80'],
           paperwork_photos: uploadedPaperworkUrls,
           si_number: capturedSiNumber,
@@ -2538,14 +2514,15 @@ export default function App() {
         }, 100);
       } catch (err) {
         console.error('Background report sync error:', err);
+        showToast(`Database sync warning: ${err.message || 'Could not sync report to database'}`, 'error');
       }
     })();
   };
 
   return (
     <div className="min-h-dvh w-full max-w-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans p-3 sm:p-6 lg:p-8 pt-safe pb-safe transition-colors duration-200 overflow-x-hidden box-border">
-      {/* Dynamic container width: clean mobile intake for public reporter, spacious SaaS for admin */}
-      <div id="app-main-view-container" className={`${isAdminView ? 'w-full max-w-7xl' : 'w-full max-w-xl'} mx-auto space-y-4 sm:space-y-6 transition-all duration-300 min-w-0 box-border`}>
+      {/* Dynamic container width: spacious layout for public reporter (max-w-2xl) and SaaS dashboard for admin */}
+      <div id="app-main-view-container" className={`${isAdminView ? 'w-full max-w-7xl' : 'w-full max-w-2xl'} mx-auto space-y-4 sm:space-y-6 transition-all duration-300 min-w-0 box-border`}>
 
         {/* ================================================================= */}
         {/* 1. PUBLIC REPORTER PORTAL (Accessible at '/' or default)          */}
@@ -2617,7 +2594,7 @@ export default function App() {
             </div>
 
 
-            {/* Super Admin Status & Sandbox Control Banner on Public Portal:
+            {/* Super Admin Status, Test Mode & Destination Hub Control Banner on Public Portal:
                 Only displayed if the active user is an authenticated Super Admin.
                 Must NEVER render for users accessing via an invite token. */}
             {currentUser?.role === 'super_admin' && !(() => {
@@ -2625,88 +2602,97 @@ export default function App() {
               const p = new URLSearchParams(window.location.search);
               return p.has('token') || Boolean(gateSession);
             })() && (
-              <div className={`p-3 sm:p-3.5 rounded-2xl border transition-all text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${isTestMode
+              <div className={`p-4 sm:p-5 rounded-3xl border transition-all text-xs space-y-3.5 shadow-xs ${isTestMode
                 ? 'bg-amber-500/10 dark:bg-amber-950/40 border-amber-500/40 text-amber-900 dark:text-amber-200'
                 : 'bg-emerald-500/10 dark:bg-emerald-950/40 border-emerald-500/40 text-emerald-900 dark:text-emerald-200'
                 }`}>
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className={`p-2 rounded-xl shrink-0 shadow-xs ${isTestMode ? 'bg-amber-500 text-slate-950 font-black' : 'bg-emerald-600 text-white'
-                    }`}>
-                    {isTestMode ? <FlaskConical className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
-                  </div>
-                  <div className="min-w-0 space-y-0.5">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <strong className="font-black text-xs">
-                        {isTestMode ? '🧪 Super Admin Sandbox Active' : '🟢 Live Delivery Mode Active'}
-                      </strong>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white/70 dark:bg-slate-900/70 border border-current/20 font-bold">
-                        {currentUser.name || 'Danilo Alvaro (Super Admin)'}
-                      </span>
+                {/* Row 1: Identity & Mode Controls */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+                    <div className={`p-2.5 rounded-2xl shrink-0 shadow-xs ${isTestMode ? 'bg-amber-500 text-slate-950 font-black' : 'bg-emerald-600 text-white'
+                      }`}>
+                      {isTestMode ? <FlaskConical className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
                     </div>
-                    <p className="text-[11px] opacity-85 leading-snug">
-                      {isTestMode
-                        ? 'Test emails routed safely to finance2@keysysincorporated.com'
-                        : 'Official return reports will be sent directly to supplier & Assigned AEs'}
-                    </p>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <strong className="font-black text-xs sm:text-sm">
+                          {isTestMode ? '🧪 Super Admin Sandbox Active' : '🟢 Live Delivery Mode Active'}
+                        </strong>
+                        <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-white/80 dark:bg-slate-900/80 border border-current/20 font-bold whitespace-nowrap">
+                          {currentUser.name || 'Danilo Alvaro (Super Admin)'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] opacity-85 leading-relaxed">
+                        {isTestMode
+                          ? 'Test emails routed safely to finance2@keysysincorporated.com • Reports saved to database.'
+                          : 'Official return reports saved to database & sent directly to supplier & Assigned AEs.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 self-stretch sm:self-center justify-end">
+                    <button
+                      type="button"
+                      onClick={toggleTestMode}
+                      className={`touch-target px-3.5 py-2 rounded-xl font-black text-xs transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 whitespace-nowrap ${isTestMode
+                        ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
+                        : 'bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700'
+                        }`}
+                      title="Toggle Test / Sandbox Mode"
+                    >
+                      {isTestMode ? <ToggleRight className="w-4 h-4 text-slate-950" /> : <ToggleLeft className="w-4 h-4 text-slate-400" />}
+                      <span>{isTestMode ? 'Test Mode: ON' : 'Test Mode: OFF'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => navigateTo('/admin')}
+                      className="touch-target px-3.5 py-2 rounded-xl text-xs font-bold bg-white/90 hover:bg-white dark:bg-slate-800/90 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 shadow-2xs transition-all cursor-pointer active:scale-95 flex items-center gap-1 whitespace-nowrap"
+                      title="Return to Admin Dashboard"
+                    >
+                      <span>Admin Portal</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 self-stretch sm:self-center justify-end shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-current/10">
-                  <button
-                    type="button"
-                    onClick={toggleTestMode}
-                    className={`touch-target px-3 py-1.5 rounded-xl font-black text-xs transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 ${isTestMode
-                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
-                      : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700'
-                      }`}
-                    title="Toggle Test / Sandbox Mode"
-                  >
-                    {isTestMode ? <ToggleRight className="w-4 h-4 text-slate-950" /> : <ToggleLeft className="w-4 h-4 text-slate-400" />}
-                    <span>{isTestMode ? 'Test Mode: ON' : 'Test Mode: OFF'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => navigateTo('/admin')}
-                    className="touch-target px-3 py-1.5 rounded-xl text-xs font-bold bg-white/80 hover:bg-white dark:bg-slate-800/90 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 shadow-2xs transition-all cursor-pointer active:scale-95 flex items-center gap-1"
-                    title="Return to Admin Dashboard"
-                  >
-                    <span>Admin Portal</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {isTestMode && (
-                  <div className="w-full pt-2 mt-1 border-t border-amber-300/70 dark:border-amber-800/70 flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-900 dark:text-amber-300">
-                      Test Stream Destination:
+                {/* Row 2: Report Destination Hub Selector (Always available for Super Admin whether Test Mode is ON or OFF) */}
+                <div className={`pt-3 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
+                  isTestMode ? 'border-amber-400/40 dark:border-amber-800/60' : 'border-emerald-400/40 dark:border-emerald-800/60'
+                }`}>
+                  <div className="space-y-0.5">
+                    <span className="text-[11px] font-black uppercase tracking-wider block">
+                      Report Destination Hub:
                     </span>
-                    <div className="inline-flex items-center p-1 rounded-xl bg-amber-100/80 dark:bg-slate-900 border border-amber-300 dark:border-amber-800 gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setTestModeStreamType('customer_inbound')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
-                          testModeStreamType === 'customer_inbound'
-                            ? 'bg-blue-600 text-white shadow-xs'
-                            : 'text-slate-700 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-800'
-                        }`}
-                      >
-                        📥 Test Customer Inbound
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setTestModeStreamType('supplier_outbound')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
-                          testModeStreamType === 'supplier_outbound'
-                            ? 'bg-purple-600 text-white shadow-xs'
-                            : 'text-slate-700 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-800'
-                        }`}
-                      >
-                        📤 Test Supplier Outbound (RTV)
-                      </button>
-                    </div>
+                    <span className="text-[10px] opacity-80 block">
+                      Choose whether this return goes to Customer RMA Hub or Supplier RTV Hub
+                    </span>
                   </div>
-                )}
+                  <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-white/80 dark:bg-slate-900/90 border border-current/20 sm:w-auto w-full shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setTestModeStreamType('customer_inbound')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                        testModeStreamType === 'customer_inbound'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <span>📥 Customer RMA Hub</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTestModeStreamType('supplier_outbound')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                        testModeStreamType === 'supplier_outbound'
+                          ? 'bg-purple-600 text-white shadow-sm'
+                          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <span>📤 Supplier RTV Hub</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -3193,13 +3179,30 @@ export default function App() {
                       </div>
                     )}
 
-                    <input
-                      type="text"
-                      value={explanation}
-                      onChange={(e) => setExplanation(e.target.value)}
-                      placeholder="Optional details / explanation for this item..."
-                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs"
-                    />
+                    <div className="space-y-1 pt-1">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="font-bold text-slate-600 dark:text-slate-400">
+                          Optional Explanation / Notes
+                        </span>
+                        <span className={`font-mono font-bold ${
+                          explanation.length >= 250
+                            ? 'text-rose-600 dark:text-rose-400'
+                            : explanation.length >= 200
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-slate-400 dark:text-slate-500'
+                        }`}>
+                          {explanation.length}/250 chars
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        maxLength={250}
+                        value={explanation}
+                        onChange={(e) => setExplanation(e.target.value.slice(0, 250))}
+                        placeholder="Optional details / explanation for this item (max 250 chars)..."
+                        className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs"
+                      />
+                    </div>
                   </div>
 
                   {/* Optional Damaged Product Photo for this line item */}
@@ -4861,11 +4864,45 @@ export default function App() {
                                     </span>
                                   </td>
 
-                                  {/* 6. Reason */}
-                                  <td className="py-3 px-3.5">
-                                    <span className="px-2 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[10px] inline-block">
-                                      {item.reason || 'Damaged'}
-                                    </span>
+                                  {/* 6. Reason & Truncated Reporter Explanation */}
+                                  <td className="py-3 px-3.5 max-w-[180px]">
+                                    <div className="space-y-1">
+                                      <span className="px-2 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[10px] inline-block">
+                                        {item.reason || 'Damaged'}
+                                      </span>
+                                      {(() => {
+                                        const rawNote = String(
+                                          item.explanation ||
+                                          item.notes ||
+                                          (!isManifest && item.items?.[0]?.explanation ? item.items[0].explanation : '') ||
+                                          ''
+                                        ).trim();
+                                        if (!rawNote) return null;
+                                        return (
+                                          <div className="flex items-center gap-1 max-w-[165px]">
+                                            <button
+                                              type="button"
+                                              onClick={() => setViewingExplanationModal({
+                                                rmaNumber: item.rma_number,
+                                                productName: resolvedName,
+                                                reason: item.reason || 'Damaged',
+                                                explanation: rawNote,
+                                                reporter: item.reporter_name || item.reported_by || 'Staff'
+                                              })}
+                                              className="group text-left flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-100/90 hover:bg-blue-50 dark:bg-slate-800/80 dark:hover:bg-blue-950/60 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors cursor-pointer max-w-full"
+                                              title="Click to read full reporter explanation"
+                                            >
+                                              <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[110px]">
+                                                "{rawNote}"
+                                              </span>
+                                              <span className="text-[9px] font-black text-blue-600 dark:text-blue-400 shrink-0 group-hover:underline">
+                                                Read
+                                              </span>
+                                            </button>
+                                          </div>
+                                        );
+                                      })()}
+                                    </div>
                                   </td>
 
                                   {/* 7. Customer Branch & Reporter */}
@@ -5329,6 +5366,31 @@ export default function App() {
                                                               {childDisposition}
                                                             </span>
                                                           </div>
+                                                          {(() => {
+                                                            const childNote = String(child.explanation || child.notes || '').trim();
+                                                            if (!childNote) return null;
+                                                            return (
+                                                              <button
+                                                                type="button"
+                                                                onClick={() => setViewingExplanationModal({
+                                                                  rmaNumber: item.rma_number,
+                                                                  productName: childName,
+                                                                  reason: childReason,
+                                                                  explanation: childNote,
+                                                                  reporter: item.reporter_name || item.reported_by || 'Staff'
+                                                                })}
+                                                                className="group text-left flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 hover:bg-blue-50 dark:bg-slate-800 dark:hover:bg-blue-950/60 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer max-w-[160px]"
+                                                                title="Click to read full explanation"
+                                                              >
+                                                                <span className="text-[9.5px] text-slate-600 dark:text-slate-300 italic truncate max-w-[110px]">
+                                                                  "{childNote}"
+                                                                </span>
+                                                                <span className="text-[9px] font-black text-blue-600 dark:text-blue-400 shrink-0 group-hover:underline">
+                                                                  Read
+                                                                </span>
+                                                              </button>
+                                                            );
+                                                          })()}
                                                         </div>
                                                       </td>
                                                       {/* Actions: 170px */}
@@ -5746,10 +5808,41 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* Reporter Details */}
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
-                              <span>Reported by: <strong className="text-slate-800 dark:text-slate-200">{item.reporter_name || item.reported_by}</strong></span>
-                              <span className="font-mono text-slate-600 dark:text-slate-400">{item.reporter_contact || ''}</span>
+                            {/* Reporter Details & Truncated Explanation */}
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200/60 dark:border-slate-700/60 space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span>Reported by: <strong className="text-slate-800 dark:text-slate-200">{item.reporter_name || item.reported_by}</strong></span>
+                                <span className="font-mono text-slate-600 dark:text-slate-400">{item.reporter_contact || ''}</span>
+                              </div>
+                              {(() => {
+                                const rawNote = String(
+                                  item.explanation ||
+                                  item.notes ||
+                                  (!isManifest && item.items?.[0]?.explanation ? item.items[0].explanation : '') ||
+                                  ''
+                                ).trim();
+                                if (!rawNote) return null;
+                                return (
+                                  <div className="flex items-center justify-between gap-2 bg-white/80 dark:bg-slate-900/60 px-2.5 py-1 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
+                                    <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate">
+                                      Note: "{rawNote}"
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setViewingExplanationModal({
+                                        rmaNumber: item.rma_number,
+                                        productName: resolvedName,
+                                        reason: item.reason || 'Damaged',
+                                        explanation: rawNote,
+                                        reporter: item.reporter_name || item.reported_by || 'Staff'
+                                      })}
+                                      className="text-[10px] font-black text-blue-600 dark:text-blue-400 hover:underline shrink-0 cursor-pointer"
+                                    >
+                                      Read Full
+                                    </button>
+                                  </div>
+                                );
+                              })()}
                             </div>
 
                             {/* Enterprise Logistics Badges (Store Branch, DR#, Batch/Lot, Expiry) */}
@@ -6066,6 +6159,7 @@ export default function App() {
                   setIsQuickRmaModalOpen(true);
                 }}
                 onPrintLabel={(report) => setThermalPrintReport(report)}
+                onViewExplanation={(info) => setViewingExplanationModal(info)}
                 savedProductsList={savedProductsList}
               />
             )}
@@ -6648,10 +6742,10 @@ export default function App() {
             return !gateSession || gateSession.token !== urlToken;
           }
 
-          // Only users already authenticated as currentUser?.role === 'super_admin' can view "/" without a token for testing
-          if (currentUser?.role === 'super_admin' && window.location.pathname === '/') return false;
+          // Strictly allow direct public portal access without a "?token=" ONLY if authenticated as Super Admin
+          if (currentUser?.role === 'super_admin') return false;
 
-          // Lock root URL (/): If anyone visits "/" directly without a "?token=", keep the portal locked with the Gatekeeper overlay
+          // Lock public portal for everyone else (non-super-admins, regular staff, or unauthenticated visitors without a token)
           return true;
         })()}
         currentSlug={intakeSlug}
@@ -6693,6 +6787,65 @@ export default function App() {
           report={thermalPrintReport}
           currentUser={currentUser}
         />
+      )}
+
+      {/* Full Reporter Explanation / Notes Viewer Modal */}
+      {viewingExplanationModal && (
+        <div
+          className="fixed inset-0 z-[110] bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+          onClick={() => setViewingExplanationModal(null)}
+        >
+          <div
+            className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-4 animate-in zoom-in-95"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 font-mono font-black text-[11px] border border-blue-200 dark:border-blue-800">
+                    {viewingExplanationModal.rmaNumber || 'RMA Report'}
+                  </span>
+                  {viewingExplanationModal.reason && (
+                    <span className="px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 font-bold text-[10px] border border-rose-200 dark:border-rose-800">
+                      {viewingExplanationModal.reason}
+                    </span>
+                  )}
+                </div>
+                <h4 className="text-sm font-black text-slate-900 dark:text-white leading-snug">
+                  {viewingExplanationModal.productName || 'Returned Item'}
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingExplanationModal(null)}
+                className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer shrink-0"
+                title="Close explanation"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-1.5">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 block">
+                Full Reporter Explanation / Notes:
+              </span>
+              <p className="text-xs text-slate-800 dark:text-slate-100 leading-relaxed whitespace-pre-wrap break-words font-medium">
+                {viewingExplanationModal.explanation}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
+              <span>Reported by: <strong className="text-slate-700 dark:text-slate-300">{viewingExplanationModal.reporter || 'Staff'}</strong></span>
+              <button
+                type="button"
+                onClick={() => setViewingExplanationModal(null)}
+                className="px-4 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-blue-600 dark:hover:bg-blue-500 text-white font-bold text-xs transition-colors cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

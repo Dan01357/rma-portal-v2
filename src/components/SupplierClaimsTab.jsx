@@ -44,6 +44,7 @@ export default function SupplierClaimsTab({
   onEditProductFromReport,
   onOpenQuickAction,
   onPrintLabel,
+  onViewExplanation,
   savedProductsList = []
 }) {
   const [selectedSupplier, setSelectedSupplier] = useState('All');
@@ -265,6 +266,7 @@ export default function SupplierClaimsTab({
             warehouse_location: child.warehouse_location || r.warehouse_location || 'DOCK',
             disposition: child.disposition || r.disposition || '3- Return to Vendor (RTV)',
             reason: child.reason || r.reason || 'Damaged',
+            explanation: child.explanation || child.notes || r.explanation || null,
             photos: childPhotos
           });
         });
@@ -1369,15 +1371,54 @@ export default function SupplierClaimsTab({
                           </div>
                         </td>
 
-                        {/* Triage Disposition */}
-                        <td className="p-3">
-                          <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${
-                            r.disposition === 'Return to Vendor (RTV)' || (r.disposition && r.disposition.includes('Vendor'))
-                              ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800'
-                              : 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                          }`}>
-                            {r.disposition || '1 - Pending Vendor Pickup'}
-                          </span>
+                        {/* Triage Disposition & Truncated Reporter Explanation */}
+                        <td className="p-3 max-w-[190px]">
+                          <div className="space-y-1">
+                            <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${
+                              r.disposition === 'Return to Vendor (RTV)' || (r.disposition && r.disposition.includes('Vendor'))
+                                ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800'
+                                : 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                            }`}>
+                              {r.disposition || '1 - Pending Vendor Pickup'}
+                            </span>
+                            {r.reason && (
+                              <div className="text-[10px] text-rose-600 dark:text-rose-400 font-semibold truncate max-w-[175px]" title={r.reason}>
+                                {r.reason}
+                              </div>
+                            )}
+                            {(() => {
+                              const rawNote = String(
+                                r.explanation ||
+                                r.notes ||
+                                (!isManifest && r.items?.[0]?.explanation ? r.items[0].explanation : '') ||
+                                ''
+                              ).trim();
+                              if (!rawNote) return null;
+                              return (
+                                <div className="flex items-center gap-1 max-w-[175px]" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={() => onViewExplanation && onViewExplanation({
+                                      rmaNumber: r.rma_number,
+                                      productName: res.name,
+                                      reason: r.reason || 'Damaged',
+                                      explanation: rawNote,
+                                      reporter: r.reporter_name || r.reported_by || 'Staff'
+                                    })}
+                                    className="group text-left flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-100/90 hover:bg-amber-50 dark:bg-slate-800/80 dark:hover:bg-amber-950/60 border border-slate-200 dark:border-slate-700 hover:border-amber-300 dark:hover:border-amber-700 transition-colors cursor-pointer max-w-full"
+                                    title="Click to read full reporter explanation"
+                                  >
+                                    <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[120px]">
+                                      "{rawNote}"
+                                    </span>
+                                    <span className="text-[9px] font-black text-amber-600 dark:text-amber-400 shrink-0 group-hover:underline">
+                                      Read
+                                    </span>
+                                  </button>
+                                </div>
+                              );
+                            })()}
+                          </div>
                         </td>
 
                         {/* Qty & Unit */}
