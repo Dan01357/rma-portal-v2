@@ -1373,6 +1373,104 @@ Each test scenario defines:
 
 ---
 
+## Section 17: Video Audit 9 Bug Fixes, UI Simplification & Constraint Safety
+
+### 17.0 PostgreSQL Check Constraint & Status Enum Protection
+- [ ] **TC-BUGFIX-01 (Zero 400 Bad Request on Status Mutation)**
+  * **Location**: Customer Hub, Supplier Hub, Quick Action Modal (`QuickRMAActionModal.jsx`), Catalog Service (`confirmCoworkerQueueAction`), and REST API (`PATCH /api/v1/rma/:id`)
+  * **Action**:
+    1. Click `[ ✓ Restocked in WMS ]` on a restock candidate.
+    2. Click `[ ✓ PO Placed ]` on a re-order candidate.
+    3. Click `[ ✓ Written Off ]` on a scrap item.
+    4. Send `PATCH /api/v1/rma/{id}` with `{"status": "restocked"}` or `{"status": "scrapped"}`.
+  * **Expected Behavior**:
+    1. ZERO PostgreSQL `400 Bad Request` or `rma_reports_status_check` errors in browser console or Supabase logs.
+    2. Database column `status` is safely stored as `'resolved'`.
+    3. Operational outcome is recorded in `ai_document_metadata.workflow_resolution = 'restocked' | 'reordered' | 'scrapped_no_reorder'`.
+    4. UI badge reflects lifecycle stage: `6- Restocked` (emerald), `7- Re-Ordered (PO Placed)` (emerald/amber), or `7- Scrapped / Written Off` (slate/rose).
+
+### 17.1 UI Streamlining: Elimination of Duplicate Filter Rows & Stray Characters
+- [ ] **TC-BUGFIX-02 (Single Dark Navy Workstation Bar with 3 Scoped Buttons)**
+  * **Location**: Customer RMA Hub (`src/App.jsx`) and Supplier RTV Hub (`src/components/SupplierClaimsTab.jsx`)
+  * **Action**: Observe the top workstation toolbar in both tabs.
+  * **Expected Behavior**:
+    1. The redundant secondary row of 6 pill filter buttons is completely removed from both tabs.
+    2. The top dark navy bar contains exactly 3 operational workstation buttons:
+       - `[ 📦 Ready to Restock (N) ]`
+       - `[ 🔄 Supplier Re-Order (N) ]`
+       - `[ 🚫 No Re-Order / Write-Off (N) ]`
+       - `[ ✕ Clear Queue Filter ]` (appears dynamically when any queue filter is active).
+    3. When a filter is selected, it highlights with a bold glowing border and filtering the table beneath it.
+
+- [ ] **TC-BUGFIX-03 (Strict Hub Scope for Button Counts)**
+  * **Location**: Customer RMA Hub vs. Supplier RTV Hub
+  * **Action**: Note the counts on the 3 dark navy buttons in Customer Hub, then switch to Supplier RTV Hub and observe the counts.
+  * **Expected Behavior**:
+    1. In Customer Hub, counts calculate ONLY customer inbound items (`rma_type: 'customer_inbound'`).
+    2. In Supplier Hub, counts calculate ONLY supplier outbound items (`rma_type: 'supplier_outbound'`).
+    3. No cross-stream count leakage occurs.
+
+- [ ] **TC-BUGFIX-04 (Zero Stray Dollar Signs in Headers & Tabs)**
+  * **Location**: Supplier Claims Tab (`SupplierClaimsTab.jsx`)
+  * **Action**: Inspect all tab headers, table headers, and badges.
+  * **Expected Behavior**:
+    1. Header reads cleanly: `All Returns (N)` (e.g. `All Returns (4)`).
+    2. No literal `$4` or `${queueCounts.all}` artifacts appear.
+
+### 17.2 RMA Stream Isolation & Clean Notes / Explanations
+- [ ] **TC-BUGFIX-05 (Strict RMA Type Isolation Under Active Filter)**
+  * **Location**: Customer RMA Hub (`src/App.jsx`)
+  * **Action**: Click `[ 🔄 Supplier Re-Order ]` or `[ 🚫 No Re-Order / Write-Off ]` in Customer Hub.
+  * **Expected Behavior**:
+    1. Table filters to customer returns flagged for re-order or write-off.
+    2. ZERO supplier outbound items (`rma_type: 'supplier_outbound'`) appear in Customer Hub.
+    3. Strict filter guard `if (item.rma_type === 'supplier_outbound') return false;` guarantees complete isolation.
+
+- [ ] **TC-BUGFIX-06 (Clean Notes & Stripping of Raw Bracket Tags)**
+  * **Location**: Customer Hub Table, Supplier Hub Table, and "Read Whole Explanation" Modal
+  * **Action**: Open an RMA ticket that previously had `[REORDER: NO]`, `[HOLD REASON: ...]`, or `[REJECTED: ...]`.
+  * **Expected Behavior**:
+    1. The bracket tags are cleanly stripped by `cleanExplanationText()`.
+    2. Table and card note previews display clean human text without ugly brackets.
+    3. The full explanation modal (`viewingExplanationModal`) renders readable text with zero bracket junk.
+    4. Saving triage stores `needs_reorder: boolean` inside `ai_document_metadata` instead of prepending bracket strings to `notes`.
+
+### 17.3 Stream-Specific Triage Cards & Rejection Boundaries
+- [ ] **TC-BUGFIX-07 (Supplier Card #4 vs Customer Card #6 Boundaries)**
+  * **Location**: Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**:
+    1. Open an RMA in Supplier RTV stream. Select Card #4 (`5 - Claim Rejected by Vendor`).
+    2. Open an RMA in Customer stream. Select Card #6 (`8- Rejected / Return to Customer`).
+  * **Expected Behavior**:
+    1. In Supplier Stream (Card #4): The red Customer Rejection Box (`CUSTOMER REJECTION REASON *`) is **NEVER SHOWN**. Instead, the Purchasing Replenishment Switch (`[ 🔄 Re-Order: YES ]` vs `[ 🚫 Re-Order: NO ]`) is displayed, and the rack location defaults to `SCRAP-BIN`.
+    2. In Customer Stream (Card #6): The red Customer Rejection Box (`CUSTOMER REJECTION REASON *`, Store Gate Pass, AE Alert) is displayed properly.
+
+- [ ] **TC-BUGFIX-08 (Clean Layer Icon & Header Prefix)**
+  * **Location**: Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**: Inspect the section header above the operational action cards.
+  * **Expected Behavior**:
+    1. Corrupted `??` character is replaced with `<Layers className="w-3.5 h-3.5" />`.
+    2. Text reads: `Supplier RTV Physical Actions (5 Cards)` or `Customer RMA Physical Actions (6 Cards)`.
+
+- [ ] **TC-BUGFIX-09 (Stream Switch Default Disposition & Status Sync)**
+  * **Location**: Quick RMA Action Modal -> Stream Toggle (`customer_inbound` <-> `supplier_outbound`)
+  * **Action**: Switch an item from Supplier Outbound to Customer Inbound.
+  * **Expected Behavior**:
+    1. `disposition` immediately updates to `'2- Restock to Inventory'`.
+    2. `status` immediately updates to `'under_inspection'`.
+    3. Triage can be completed without manual resetting.
+
+- [ ] **TC-BUGFIX-10 (No Re-Order / Write-Off Filter Coverage)**
+  * **Location**: Dark Navy Bar -> `[ 🚫 No Re-Order / Write-Off ]`
+  * **Action**:
+    1. In Quick Action Modal, set any loss disposition (Scrap, RTV, Buffer Swap, Vendor Rejected) and toggle `Re-Order: NO`. Save triage.
+    2. In the hub, click `[ 🚫 No Re-Order / Write-Off ]`.
+  * **Expected Behavior**:
+    1. The item appears in the `No Re-Order / Write-Off` filtered view.
+    2. Coworkers can audit the write-off and click `[ ✓ Written Off ]` to resolve it.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -1393,4 +1491,5 @@ Each test scenario defines:
 | **Phase 14: Batch RMA & Realtime Revocation Watchdog** | Intake Portal & Gatekeeper Engine | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 15: 4-Pillar Action System & Financial Hold Safety Guard** | Quick Action Modal & Accounting | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 16: Coworker Inventory & Re-order Queues** | REST API & Queue Strip | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 17: Video Audit 9 Bug Fixes & UI Streamlining** | Workstation Bar & Action Cards | `READY FOR TESTING` | *Lead QA Director* |
 

@@ -207,18 +207,19 @@ export default async function handler(req, res) {
           if (cleanQueue === 'restock') {
             const isRestockDisp = itemDisp.includes('restock') || itemDisp.includes('replacement stock received');
             if (!isRestockDisp) return false;
-            if (FINALIZED_RESTOCK.has(itemStatus)) return false;
+            if (FINALIZED_RESTOCK.has(itemStatus) || item.ai_document_metadata?.workflow_resolution) return false;
           } else if (cleanQueue === 'reorder' || cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
-            const isLossDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('reorder') || itemDisp.includes('rtv') || itemDisp.includes('vendor') || itemDisp.includes('buffer') || itemDisp.includes('claim rejected by vendor');
+            const isLossDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('reorder') || itemDisp.includes('rtv') || itemDisp.includes('vendor') || itemDisp.includes('buffer') || itemDisp.includes('claim rejected by vendor') || itemDisp.includes('pending vendor pickup');
             const isExcluded = itemDisp.includes('restock') || itemDisp.includes('replacement stock received') || itemDisp.includes('quarantine') || itemDisp.includes('hold') || itemStatus === 'rejected' || itemDisp.includes('8- rejected');
             if (!isLossDisp || isExcluded) return false;
             if (needsReorderFlag === false) return false;
-            if (FINALIZED_SCRAP.has(itemStatus)) return false;
+            if (FINALIZED_SCRAP.has(itemStatus) || item.ai_document_metadata?.workflow_resolution) return false;
           } else if (cleanQueue === 'scrap_no_reorder') {
-            const isScrapDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('claim rejected by vendor');
-            if (!isScrapDisp) return false;
+            const isLossDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('reorder') || itemDisp.includes('rtv') || itemDisp.includes('vendor') || itemDisp.includes('buffer') || itemDisp.includes('claim rejected by vendor') || itemDisp.includes('pending vendor pickup');
+            const isExcluded = itemDisp.includes('restock') || itemDisp.includes('replacement stock received') || itemDisp.includes('quarantine') || itemDisp.includes('hold') || itemStatus === 'rejected' || itemDisp.includes('8- rejected');
+            if (!isLossDisp || isExcluded) return false;
             if (needsReorderFlag !== false) return false;
-            if (FINALIZED_SCRAP.has(itemStatus)) return false;
+            if (FINALIZED_SCRAP.has(itemStatus) || item.ai_document_metadata?.workflow_resolution) return false;
           } else if (cleanQueue === 'rtv_debit' || cleanQueue === 'rtv') {
             const isRtv = itemDisp.includes('rtv') || itemDisp.includes('return to vendor') || itemDisp.includes('vendor') || item.rma_type === 'supplier_outbound';
             if (!isRtv) return false;

@@ -79,12 +79,16 @@ export default async function handler(req, res) {
       }
 
       // Normalize status and disposition for coworker restock, scrap/re-order, RTV & hold sync
+      let requestedWorkflowResolution = null;
       if (updateData.status) {
         const s = String(updateData.status).toLowerCase().trim();
         if (s === 'restocked' || s === '6- restocked') {
-          updateData.status = 'restocked';
-        } else if (s === 'scrapped' || s === 'disposed' || s === '7- scrapped / disposed') {
-          updateData.status = 'scrapped';
+          updateData.status = 'resolved';
+          requestedWorkflowResolution = 'restocked';
+        } else if (s === 'scrapped' || s === 'disposed' || s === '7- scrapped / disposed' || s === 'reordered') {
+          updateData.status = 'resolved';
+          const explicitNoReorder = body?.needs_reorder === false;
+          requestedWorkflowResolution = explicitNoReorder ? 'scrapped_no_reorder' : 'reordered';
         } else if (s === 'vendor_claimed' || s === '3- vendor claimed' || s === 'vendor_claim') {
           updateData.status = 'vendor_claimed';
           if (!updateData.disposition) updateData.disposition = '3- Return to Vendor (RTV)';
@@ -94,12 +98,13 @@ export default async function handler(req, res) {
         } else if (s === 'rejected' || s === '8- rejected' || s === 'claim_rejected') {
           updateData.status = 'rejected';
         } else if (s === 'resolved' || s === 'closed') {
-          // If disposition indicates scrap, normalize to scrapped; otherwise restocked
+          updateData.status = 'resolved';
           const d = String(updateData.disposition || '').toLowerCase();
+          const explicitNoReorder = body?.needs_reorder === false;
           if (d.includes('scrap') || d.includes('dispose')) {
-            updateData.status = 'scrapped';
+            requestedWorkflowResolution = explicitNoReorder ? 'scrapped_no_reorder' : 'reordered';
           } else {
-            updateData.status = 'restocked';
+            requestedWorkflowResolution = 'restocked';
           }
         }
       }
@@ -142,10 +147,12 @@ export default async function handler(req, res) {
 
       // Standardized Audit Trail Note for 4 Operational Actions
       let auditNote = `RMA status updated to ${updateData.status || 'updated'} by ${actorName}`;
-      if (updateData.status === 'restocked') {
+      if (requestedWorkflowResolution === 'restocked') {
         auditNote = `ERP Restock confirmed by ${actorName}`;
-      } else if (updateData.status === 'scrapped') {
+      } else if (requestedWorkflowResolution === 'reordered') {
         auditNote = `Supplier Re-order confirmed by ${actorName}`;
+      } else if (requestedWorkflowResolution === 'scrapped_no_reorder') {
+        auditNote = `Scrap written off by ${actorName}`;
       } else if (updateData.status === 'vendor_claimed') {
         auditNote = `Vendor RTV claim confirmed by ${actorName}`;
       } else if (updateData.status === 'quarantine' || (updateData.disposition && updateData.disposition.includes('Quarantine'))) {
@@ -154,10 +161,12 @@ export default async function handler(req, res) {
         auditNote = `Hold released by ${actorName}`;
       }
 
-      const lifecycleStageLabel = updateData.status === 'restocked'
+      const lifecycleStageLabel = requestedWorkflowResolution === 'restocked'
         ? '6- Restocked'
-        : updateData.status === 'scrapped'
-        ? '7- Scrapped / Disposed'
+        : requestedWorkflowResolution === 'reordered'
+        ? '7- Re-Ordered (PO Placed)'
+        : requestedWorkflowResolution === 'scrapped_no_reorder'
+        ? '7- Scrapped / Written Off'
         : updateData.status === 'vendor_claimed'
         ? '3- Vendor Claimed'
         : (updateData.status === 'quarantine' || updateData.disposition?.includes('Quarantine'))
@@ -166,7 +175,7 @@ export default async function handler(req, res) {
 
       const auditEntry = {
         timestamp: new Date().toISOString(),
-        stage: updateData.status === 'restocked' ? 'ERP_RESTOCK' : (updateData.status === 'scrapped' ? 'SUPPLIER_REORDER' : (updateData.status === 'vendor_claimed' ? 'VENDOR_RTV' : ((updateData.status === 'quarantine' || updateData.disposition?.includes('Quarantine')) ? 'HOLD_QUARANTINE' : 'API_PATCH'))),
+        stage: requestedWorkflowResolution === 'restocked' ? 'ERP_RESTOCK' : (requestedWorkflowResolution === 'reordered' ? 'SUPPLIER_REORDER' : (requestedWorkflowResolution === 'scrapped_no_reorder' ? 'SCRAP_DISPOSAL' : (updateData.status === 'vendor_claimed' ? 'VENDOR_RTV' : ((updateData.status === 'quarantine' || updateData.disposition?.includes('Quarantine')) ? 'HOLD_QUARANTINE' : 'API_PATCH')))),
         actor: actorName,
         status: updateData.status,
         lifecycle_stage: lifecycleStageLabel,
@@ -191,23 +200,21 @@ export default async function handler(req, res) {
           ...currentMeta,
           ...(explicitNeedsReorder !== undefined ? { needs_reorder: explicitNeedsReorder } : {}),
           ...(explicitHoldReason ? { hold_reason: explicitHoldReason } : {}),
-          ...(explicitRejectionReason ? { rejection_reason: explicitRejectionReason } : {})
+          ...(explicitRejectionReason ? { rejection_reason: explicitRejectionReason } : {}),
+          ...(requestedWorkflowResolution ? {
+            workflow_resolution: requestedWorkflowResolution,
+            resolved_at: new Date().toISOString(),
+            resolved_by: actorName
+          } : {})
         };
 
-        // Append operational tags into notes safely
+        // Clean operational tags from notes (avoid raw internal tags showing to customers)
         let updatedNotes = row.notes || '';
-        if (explicitNeedsReorder !== undefined) {
-          updatedNotes = updatedNotes.replace(/\[REORDER:\s*(YES|NO)\]/gi, '').trim();
-          updatedNotes = `${updatedNotes} [REORDER: ${explicitNeedsReorder ? 'YES' : 'NO'}]`.trim();
-        }
-        if (explicitHoldReason) {
-          updatedNotes = updatedNotes.replace(/\[HOLD REASON:\s*[^\]]+\]/gi, '').trim();
-          updatedNotes = `${updatedNotes} [HOLD REASON: ${explicitHoldReason}]`.trim();
-        }
-        if (explicitRejectionReason) {
-          updatedNotes = updatedNotes.replace(/\[REJECTED:\s*[^\]]+\]/gi, '').trim();
-          updatedNotes = `${updatedNotes} [REJECTED: ${explicitRejectionReason}]`.trim();
-        }
+        updatedNotes = updatedNotes
+          .replace(/\[REORDER:\s*(YES|NO)\]/gi, '')
+          .replace(/\[HOLD REASON:\s*[^\]]+\]/gi, '')
+          .replace(/\[REJECTED:\s*[^\]]+\]/gi, '')
+          .trim();
 
         let rowPayload = {
           ...updateData,
@@ -242,8 +249,8 @@ export default async function handler(req, res) {
             const itDisp = String(it.disposition || '').toLowerCase();
             const matchesSpecificBarcode = targetBarcode && itBarcode === targetBarcode;
             const matchesQueueDisposition = !targetBarcode && (
-              (updateData.status === 'restocked' && itDisp.includes('restock')) ||
-              (updateData.status === 'scrapped' && (itDisp.includes('scrap') || itDisp.includes('dispose'))) ||
+              (requestedWorkflowResolution === 'restocked' && itDisp.includes('restock')) ||
+              (requestedWorkflowResolution && (itDisp.includes('scrap') || itDisp.includes('dispose'))) ||
               (updateData.status === 'vendor_claimed' && (itDisp.includes('rtv') || itDisp.includes('vendor'))) ||
               (updateData.status === 'quarantine' && (itDisp.includes('quarantine') || itDisp.includes('hold'))) ||
               (!updateData.status)
@@ -253,6 +260,7 @@ export default async function handler(req, res) {
               return {
                 ...it,
                 status: updateData.status !== undefined ? updateData.status : it.status,
+                workflow_resolution: requestedWorkflowResolution || it.workflow_resolution,
                 warehouse_location: updateData.warehouse_location !== undefined ? updateData.warehouse_location : it.warehouse_location,
                 disposition: updateData.disposition !== undefined ? updateData.disposition : it.disposition
               };
@@ -267,14 +275,19 @@ export default async function handler(req, res) {
           parsedRowItems.forEach(it => {
             const d = String(it.disposition || '').toLowerCase();
             const st = String(it.status || '').toLowerCase();
-            if (st === 'restocked' || d.includes('restock')) restockCnt += 1;
+            const res = it.workflow_resolution;
+            if (st === 'resolved' && res === 'restocked') restockCnt += 1;
+            else if (st === 'resolved' && (res === 'reordered' || res === 'scrapped_no_reorder')) scrapCnt += 1;
+            else if (st === 'restocked' || d.includes('restock')) restockCnt += 1;
             else if (st === 'scrapped' || d.includes('scrap') || d.includes('dispose')) scrapCnt += 1;
             else if (!d || d.includes('pending')) pendingCnt += 1;
           });
           if (restockCnt === parsedRowItems.length) {
-            rowPayload.status = 'restocked';
+            rowPayload.status = 'resolved';
+            updatedMeta.workflow_resolution = 'restocked';
           } else if (scrapCnt === parsedRowItems.length) {
-            rowPayload.status = 'scrapped';
+            rowPayload.status = 'resolved';
+            updatedMeta.workflow_resolution = explicitNeedsReorder === false ? 'scrapped_no_reorder' : 'reordered';
           } else if (pendingCnt === parsedRowItems.length) {
             rowPayload.status = 'under_inspection';
           } else {

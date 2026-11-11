@@ -1568,7 +1568,7 @@ export const catalogService = {
   /**
    * Reclassify RMA Type between 'customer_inbound' and 'supplier_outbound'
    */
-  async updateRMAType(id, rma_type, disposition = null) {
+  async updateRMAType(id, rma_type, disposition = null, status = null) {
     const cleanType = rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
     const cleanId = String(id).trim();
     const isNum = /^\d+$/.test(cleanId);
@@ -1576,6 +1576,9 @@ export const catalogService = {
     const updates = { rma_type: cleanType };
     if (disposition) {
       updates.disposition = disposition;
+    }
+    if (status) {
+      updates.status = status;
     }
 
     // 1. Fetch current record to resolve id, rma_number, and child items
@@ -1664,15 +1667,18 @@ export const catalogService = {
     const cleanActor = String(actorName || 'Warehouse Staff').trim();
 
     let stage = 'SUPPLIER_REORDER';
+    let workflowResolution = 'reordered';
     let auditNote = `Supplier Re-order PO confirmed by ${cleanActor}`;
     if (cleanStatus === 'restocked') {
       stage = 'ERP_RESTOCK';
+      workflowResolution = 'restocked';
       auditNote = `ERP Restock confirmed by ${cleanActor}`;
     } else {
       const notes = String(item?.notes || '');
       const isExplicitNoReorder = item?.needs_reorder === false || item?.ai_document_metadata?.needs_reorder === false || notes.includes('[REORDER: NO]');
       if (isExplicitNoReorder) {
         stage = 'SCRAP_DISPOSAL';
+        workflowResolution = 'scrapped_no_reorder';
         auditNote = `Scrap written off by ${cleanActor}`;
       }
     }
@@ -1681,7 +1687,8 @@ export const catalogService = {
       timestamp: new Date().toISOString(),
       stage,
       actor: cleanActor,
-      status: cleanStatus,
+      status: 'resolved',
+      workflow_resolution: workflowResolution,
       warehouse_location: warehouseLocation || item.warehouse_location || undefined,
       note: auditNote
     };
@@ -1704,9 +1711,17 @@ export const catalogService = {
     const currentAudit = Array.isArray(primaryRow?.audit_trail) ? [...primaryRow.audit_trail] : [];
     currentAudit.push(auditEntry);
 
+    const updatedMeta = {
+      ...((primaryRow?.ai_document_metadata && typeof primaryRow.ai_document_metadata === 'object') ? primaryRow.ai_document_metadata : {}),
+      workflow_resolution: workflowResolution,
+      resolved_at: new Date().toISOString(),
+      resolved_by: cleanActor
+    };
+
     const updates = {
-      status: cleanStatus,
-      audit_trail: currentAudit
+      status: 'resolved', // STRICT DB CONSTRAINT: Always use valid DB check constraint enum 'resolved'
+      audit_trail: currentAudit,
+      ai_document_metadata: updatedMeta
     };
     if (warehouseLocation) {
       updates.warehouse_location = String(warehouseLocation).trim().toUpperCase();
@@ -1736,7 +1751,8 @@ export const catalogService = {
         if (matchesSpecific || matchesDisp) {
           return {
             ...child,
-            status: cleanStatus,
+            status: 'resolved',
+            workflow_resolution: workflowResolution,
             warehouse_location: warehouseLocation ? String(warehouseLocation).trim().toUpperCase() : child.warehouse_location
           };
         }
@@ -1744,15 +1760,12 @@ export const catalogService = {
       });
       updates.items = parsedItems;
 
-      // Recompute parent manifest status if only a subset of items were updated
-      const allRestocked = parsedItems.every(c => String(c.status || '').toLowerCase() === 'restocked');
-      const allScrapped = parsedItems.every(c => String(c.status || '').toLowerCase() === 'scrapped');
-      if (allRestocked) {
-        updates.status = 'restocked';
-      } else if (allScrapped) {
-        updates.status = 'scrapped';
+      // Recompute parent manifest status
+      const allResolved = parsedItems.every(c => c.status === 'resolved' || ['restocked', 'scrapped', 'closed', 'resolved'].includes(String(c.status || '').toLowerCase()));
+      if (allResolved) {
+        updates.status = 'resolved';
       } else if (targetBarcode) {
-        updates.status = 'partially_completed';
+        updates.status = 'under_inspection';
       }
     }
 
@@ -1773,7 +1786,8 @@ export const catalogService = {
     this.notifyChange('coworker-queue-updated', {
       reportId: updatedReport.id,
       rmaNumber: updatedReport.rma_number,
-      status: cleanStatus,
+      status: 'resolved',
+      workflow_resolution: workflowResolution,
       report: updatedReport
     });
 

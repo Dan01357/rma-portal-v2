@@ -99,7 +99,9 @@ import {
   isItemReorderNeeded,
   isItemScrappedNoReorder,
   isItemOnHold,
-  isItemRejected
+  isItemRejected,
+  cleanExplanationText,
+  formatLifecycleStage as formatLifecycleStageHelper
 } from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
@@ -136,45 +138,10 @@ export function isManifestSubItem(item, allReports = []) {
 }
 
 /**
- * Universal Lifecycle Stage Formatter & Color Resolver
+ * Universal Lifecycle Stage Formatter & Color Resolver supporting 4-Pillar Resolutions
  */
-function formatLifecycleStage(status) {
-  if (!status) return { label: '2- Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
-  const s = String(status).toLowerCase();
-  switch (s) {
-    case 'draft':
-      return { label: '1- Draft / Intake', color: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
-    case 'pending':
-    case 'received_at_dock':
-      return { label: '2- Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
-    case 'under_inspection':
-      return { label: '3- Under Inspection', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800' };
-    case 'pending_finance_approval':
-      return { label: '4- Pending Finance Approval', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
-    case 'credit_memo_issued':
-      return { label: '5- Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
-    case 'restocked':
-      return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
-    case 'scrapped':
-    case 'disposed':
-      return { label: '7- Scrapped / Disposed', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
-    case 'partially_completed':
-      return { label: 'Partially Completed', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-300 dark:border-purple-800' };
-    case 'closed':
-    case 'resolved':
-      return { label: 'Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
-    case 'buffer_replacement_dispatched':
-    case 'buffer_dispatched':
-      return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
-    case 'rejected':
-      return { label: '8- Rejected / Invalid Claim', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
-    case 'vendor_claimed':
-      return { label: 'RTV Claimed', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' };
-    case 'pending_admin_details':
-      return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
-    default:
-      return { label: s.replace(/_/g, ' '), color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300' };
-  }
+function formatLifecycleStage(status, item = null) {
+  return formatLifecycleStageHelper(status, item);
 }
 
 /**
@@ -1534,12 +1501,32 @@ export default function App() {
     return unpacked;
   }, [recentReportsList]);
 
+  // Hub-scoped Coworker Inventory & Procurement Queues
+  const activeHubReports = React.useMemo(() => {
+    if (adminActiveTab === 'supplier_claims') {
+      return supplierOutboundReports;
+    }
+    return customerInboundReports;
+  }, [adminActiveTab, supplierOutboundReports, customerInboundReports]);
+
+  const hubReadyToRestockCount = React.useMemo(() => {
+    return activeHubReports.filter(r => isItemReadyToRestock(r, recentReportsList)).length;
+  }, [activeHubReports, recentReportsList]);
+
+  const hubReorderNeededCount = React.useMemo(() => {
+    return activeHubReports.filter(r => isItemReorderNeeded(r, recentReportsList)).length;
+  }, [activeHubReports, recentReportsList]);
+
+  const hubScrappedNoReorderCount = React.useMemo(() => {
+    return activeHubReports.filter(r => isItemScrappedNoReorder(r, recentReportsList)).length;
+  }, [activeHubReports, recentReportsList]);
+
   // Filter and sort return reports - strictly isolated to Customer Inbound Returns
   const processedReports = React.useMemo(() => {
     const q = reportsSearchQuery.toLowerCase().trim();
     let list = recentReportsList.filter(item => {
-      // Isolate to Customer Inbound Returns by default, unless a Coworker Inventory Queue ('restock' or 'scrap') is active
-      if (coworkerQueueFilter === 'all' && item.rma_type && item.rma_type !== 'customer_inbound') {
+      // Customer RMA Hub strictly isolates to Customer Inbound Returns at ALL times
+      if (item.rma_type === 'supplier_outbound') {
         return false;
       }
       // Omit child rows of manifest returns (which share identical rma_number with parent)
@@ -4220,57 +4207,58 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (coworkerQueueFilter === 'restock' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')) {
-                        setCoworkerQueueFilter('all');
-                      } else {
-                        setCoworkerQueueFilter('restock');
-                        setReportsDispositionFilter('all');
-                        setReportsStatusFilter('all');
-                        setReportsCurrentPage(1);
-                        if (adminActiveTab === 'supplier_claims') {
-                          setAdminActiveTab('customer_reports');
-                        }
-                      }
+                      setCoworkerQueueFilter(coworkerQueueFilter === 'restock' ? 'all' : 'restock');
+                      setReportsCurrentPage(1);
                     }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                      coworkerQueueFilter === 'restock' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
+                      coworkerQueueFilter === 'restock'
                         ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-400/40'
                         : 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-emerald-500/40'
                     }`}
-                    title="Filter table to items triaged as Restock to Inventory whose status is not yet restocked"
+                    title="Filter table to items triaged as Restock to Inventory or Replacement Received"
                   >
-                    <span>📦 Ready to Restock ({readyToRestockReports.length})</span>
+                    <span>📦 Ready to Restock ({hubReadyToRestockCount})</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => {
-                      if ((coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')) {
-                        setCoworkerQueueFilter('all');
-                      } else {
-                        setCoworkerQueueFilter('reorder');
-                        setReportsDispositionFilter('all');
-                        setReportsStatusFilter('all');
-                        setReportsCurrentPage(1);
-                        if (adminActiveTab === 'supplier_claims') {
-                          setAdminActiveTab('customer_reports');
-                        }
-                      }
+                      setCoworkerQueueFilter(coworkerQueueFilter === 'reorder' ? 'all' : 'reorder');
+                      setReportsCurrentPage(1);
                     }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                      (coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
+                      coworkerQueueFilter === 'reorder'
                         ? 'bg-amber-600 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
                         : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/40'
                     }`}
-                    title="Filter table to items flagged for Supplier Re-Order whose purchase order is not yet placed"
+                    title="Filter table to items flagged for Supplier Replacement PO re-order"
                   >
-                    <span>🔄 Supplier Re-Order ({reorderNeededReports.length})</span>
+                    <span>🔄 Supplier Re-Order ({hubReorderNeededCount})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCoworkerQueueFilter(coworkerQueueFilter === 'scrap_no_reorder' ? 'all' : 'scrap_no_reorder');
+                      setReportsCurrentPage(1);
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+                      coworkerQueueFilter === 'scrap_no_reorder'
+                        ? 'bg-rose-700 text-white border-rose-600 shadow-sm ring-2 ring-rose-400/40'
+                        : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-rose-500/40'
+                    }`}
+                    title="Filter table to items marked as Scrap / Write-Off without supplier re-order"
+                  >
+                    <span>🚫 No Re-Order / Write-Off ({hubScrappedNoReorderCount})</span>
                   </button>
 
                   {coworkerQueueFilter !== 'all' && (
                     <button
                       type="button"
-                      onClick={() => setCoworkerQueueFilter('all')}
+                      onClick={() => {
+                        setCoworkerQueueFilter('all');
+                        setReportsCurrentPage(1);
+                      }}
                       className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer"
                     >
                       Clear Queue Filter
@@ -4357,111 +4345,6 @@ export default function App() {
 
                 {/* Filter / Search & Sort Controls Toolbar */}
                 <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 sm:p-3.5 space-y-2.5 w-full min-w-0 box-border">
-                  {/* Top Queue Filter Strip (Subject 2.1) */}
-                  <div className="flex flex-wrap items-center gap-1.5 pb-2.5 border-b border-slate-200 dark:border-slate-700/80">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCoworkerQueueFilter('all');
-                        setReportsCurrentPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                        coworkerQueueFilter === 'all'
-                          ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
-                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      All ({customerInboundReports.length})
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCoworkerQueueFilter(coworkerQueueFilter === 'restock' ? 'all' : 'restock');
-                        setReportsCurrentPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                        coworkerQueueFilter === 'restock'
-                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-400/40'
-                          : 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50'
-                      }`}
-                    >
-                      <span>🟢 Ready to Restock ({readyToRestockReports.length})</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCoworkerQueueFilter((coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') ? 'all' : 'reorder');
-                        setReportsCurrentPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                        coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap'
-                          ? 'bg-rose-600 text-white border-rose-500 shadow-sm ring-2 ring-rose-400/40'
-                          : 'bg-white dark:bg-slate-900 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 hover:bg-rose-50'
-                      }`}
-                    >
-                      <span>🔄 Re-order Needed ({reorderNeededReports.length})</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCoworkerQueueFilter(coworkerQueueFilter === 'scrap_no_reorder' ? 'all' : 'scrap_no_reorder');
-                        setReportsCurrentPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                        coworkerQueueFilter === 'scrap_no_reorder'
-                          ? 'bg-slate-700 text-white border-slate-600 shadow-sm ring-2 ring-slate-400/40'
-                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      <span>🗑️ Scrapped — No Re-Order ({scrappedNoReorderReports.length})</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCoworkerQueueFilter((coworkerQueueFilter === 'hold' || coworkerQueueFilter === 'quarantine') ? 'all' : 'hold');
-                        setReportsCurrentPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                        coworkerQueueFilter === 'hold' || coworkerQueueFilter === 'quarantine'
-                          ? 'bg-amber-500 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
-                          : 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-50'
-                      }`}
-                    >
-                      <span>🟡 On Hold ({onHoldReports.length})</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCoworkerQueueFilter(coworkerQueueFilter === 'rejected' ? 'all' : 'rejected');
-                        setReportsCurrentPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                        coworkerQueueFilter === 'rejected'
-                          ? 'bg-rose-950 text-rose-200 border-rose-800 shadow-sm ring-2 ring-rose-500/40'
-                          : 'bg-white dark:bg-slate-900 text-rose-900 dark:text-rose-400 border-rose-300 dark:border-rose-900 hover:bg-rose-50'
-                      }`}
-                    >
-                      <span>⚫ Rejected Claims ({rejectedReports.length})</span>
-                    </button>
-
-                    {coworkerQueueFilter !== 'all' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCoworkerQueueFilter('all');
-                          setReportsCurrentPage(1);
-                        }}
-                        className="px-2.5 py-1 text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 underline cursor-pointer"
-                      >
-                        Reset Queue
-                      </button>
-                    )}
-                  </div>
 
                   {/* Search Input: Full width row */}
                   <div className="relative w-full min-w-0">
@@ -5006,7 +4889,8 @@ export default function App() {
                                           (!isManifest && item.items?.[0]?.explanation ? item.items[0].explanation : '') ||
                                           ''
                                         ).trim();
-                                        if (!rawNote) return null;
+                                        const cleanNote = cleanExplanationText(rawNote);
+                                        if (!cleanNote) return null;
                                         return (
                                           <div className="flex items-center gap-1 max-w-[165px]">
                                             <button
@@ -5015,14 +4899,14 @@ export default function App() {
                                                 rmaNumber: item.rma_number,
                                                 productName: resolvedName,
                                                 reason: item.reason || 'Damaged',
-                                                explanation: rawNote,
+                                                explanation: cleanNote,
                                                 reporter: item.reporter_name || item.reported_by || 'Staff'
                                               })}
                                               className="group text-left flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-100/90 hover:bg-blue-50 dark:bg-slate-800/80 dark:hover:bg-blue-950/60 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors cursor-pointer max-w-full"
                                               title="Click to read full reporter explanation"
                                             >
                                               <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[110px]">
-                                                "{rawNote}"
+                                                "{cleanNote}"
                                               </span>
                                               <span className="text-[9px] font-black text-blue-600 dark:text-blue-400 shrink-0 group-hover:underline">
                                                 Read
@@ -6026,11 +5910,12 @@ export default function App() {
                                   (!isManifest && item.items?.[0]?.explanation ? item.items[0].explanation : '') ||
                                   ''
                                 ).trim();
-                                if (!rawNote) return null;
+                                const cleanNote = cleanExplanationText(rawNote);
+                                if (!cleanNote) return null;
                                 return (
                                   <div className="flex items-center justify-between gap-2 bg-white/80 dark:bg-slate-900/60 px-2.5 py-1 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
                                     <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate">
-                                      Note: "{rawNote}"
+                                      Note: "{cleanNote}"
                                     </span>
                                     <button
                                       type="button"
@@ -6038,7 +5923,7 @@ export default function App() {
                                         rmaNumber: item.rma_number,
                                         productName: resolvedName,
                                         reason: item.reason || 'Damaged',
-                                        explanation: rawNote,
+                                        explanation: cleanNote,
                                         reporter: item.reporter_name || item.reported_by || 'Staff'
                                       })}
                                       className="text-[10px] font-black text-blue-600 dark:text-blue-400 hover:underline shrink-0 cursor-pointer"
@@ -6366,6 +6251,7 @@ export default function App() {
                 onPrintLabel={(report) => setThermalPrintReport(report)}
                 onViewExplanation={(info) => setViewingExplanationModal(info)}
                 savedProductsList={savedProductsList}
+                coworkerQueueFilter={coworkerQueueFilter}
               />
             )}
 
@@ -7035,7 +6921,7 @@ export default function App() {
                 Full Reporter Explanation / Notes:
               </span>
               <p className="text-xs text-slate-800 dark:text-slate-100 leading-relaxed whitespace-pre-wrap break-words font-medium">
-                {viewingExplanationModal.explanation}
+                {cleanExplanationText(viewingExplanationModal.explanation)}
               </p>
             </div>
 

@@ -43,8 +43,7 @@ import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
 import { supplierClaimService } from '../services/supplierClaimService';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, resolveBatchManifestLifecycle } from '../utils/rmaHelpers';
-import { getItemNeedsReorder } from '../utils/rmaHelpers';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, resolveBatchManifestLifecycle, getItemNeedsReorder, cleanExplanationText } from '../utils/rmaHelpers';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -161,16 +160,20 @@ export default function QuickRMAActionModal({
     report?.status === 'hold'
   );
 
-  const isRejected = Boolean(
-    (disposition && (disposition.toLowerCase().includes('rejected') || disposition.toLowerCase().includes('8- rejected'))) ||
-    (report?.disposition && (String(report.disposition).toLowerCase().includes('rejected') || String(report.disposition).toLowerCase().includes('8- rejected'))) ||
-    report?.status === 'rejected'
+  const isCustomerRejected = Boolean(
+    !isSupplierStream && (
+      (disposition && (disposition.toLowerCase().includes('rejected / return to customer') || disposition.toLowerCase().includes('8- rejected') || (disposition.toLowerCase().includes('rejected') && !disposition.toLowerCase().includes('claim rejected by vendor')))) ||
+      (report?.disposition && (String(report.disposition).toLowerCase().includes('rejected / return to customer') || String(report.disposition).toLowerCase().includes('8- rejected') || (String(report.disposition).toLowerCase().includes('rejected') && !String(report.disposition).toLowerCase().includes('claim rejected by vendor')))) ||
+      report?.status === 'rejected'
+    )
   );
 
   const isVendorRejectedClaim = Boolean(
     (disposition && disposition.toLowerCase().includes('claim rejected by vendor')) ||
     (report?.disposition && String(report.disposition).toLowerCase().includes('claim rejected by vendor'))
   );
+
+  const isRejected = isCustomerRejected || isVendorRejectedClaim;
 
   const printRejectedGatePass = () => {
     const win = window.open('', '_blank');
@@ -279,24 +282,30 @@ export default function QuickRMAActionModal({
         currentDisp === '1- Pending Triage' ||
         currentDisp === '1 - Pending Triage';
 
-      // Automatically update disposition when switching streams
-      const targetDisposition = (newType === 'supplier_outbound' && isPendingTriage)
-        ? 'Return to Vendor (RTV)'
-        : (newType === 'customer_inbound' && (currentDisp.includes('Pending Vendor Pickup') || currentDisp.includes('Return to Vendor'))
-            ? '1- Pending Triage'
-            : (report.disposition || '1- Pending Triage'));
+      // Automatically update disposition and status when switching streams
+      let targetDisposition;
+      let targetStatus;
+      if (newType === 'customer_inbound') {
+        targetDisposition = '2- Restock to Inventory';
+        targetStatus = 'under_inspection';
+      } else {
+        targetDisposition = '1 - Pending Vendor Pickup';
+        targetStatus = 'vendor_claimed';
+      }
 
       // Optimistic update
       const updatedReport = { 
         ...report, 
         rma_type: newType,
-        disposition: targetDisposition
+        disposition: targetDisposition,
+        status: targetStatus
       };
       setReport(updatedReport);
       setDisposition(targetDisposition);
+      setRmaStatus(targetStatus);
 
       const cleanId = report.id || report.rma_number;
-      const savedData = await catalogService.updateRMAType(cleanId, newType, targetDisposition);
+      const savedData = await catalogService.updateRMAType(cleanId, newType, targetDisposition, targetStatus);
       const finalReport = { ...updatedReport, ...(savedData || {}) };
       setReport(finalReport);
 
@@ -517,22 +526,8 @@ export default function QuickRMAActionModal({
         rejection_reason: isRejectAction ? rejectionReason.trim() : undefined
       };
 
-      let updatedNotes = report.notes || '';
-      updatedNotes = updatedNotes
-        .replace(/\[REORDER:\s*(YES|NO)\]/gi, '')
-        .replace(/\[HOLD REASON:\s*[^\]]+\]/gi, '')
-        .replace(/\[REJECTED:\s*[^\]]+\]/gi, '')
-        .trim();
-
-      if (isHoldAction) {
-        updatedNotes = `${updatedNotes} [HOLD REASON: ${holdReason.trim()}]`.trim();
-      } else if (isRejectAction) {
-        updatedNotes = `${updatedNotes} [REJECTED: ${rejectionReason.trim()}] [REORDER: NO]`.trim();
-      } else if (isRestockAction) {
-        updatedNotes = `${updatedNotes} [REORDER: NO]`.trim();
-      } else {
-        updatedNotes = `${updatedNotes} [REORDER: ${effectiveNeedsReorder ? 'YES' : 'NO'}]`.trim();
-      }
+      // Clean notes of internal bracket tags (operational state is safely tracked in ai_document_metadata & audit_trail)
+      const updatedNotes = cleanExplanationText(report.notes || '') || null;
 
       const updates = {
         condition_grade: conditionGrade,
@@ -2995,7 +2990,8 @@ export default function QuickRMAActionModal({
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <label className="text-[10px] uppercase font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5 tracking-wide">
-                              <span>${isSupplierStream ? 'Supplier RTV Physical Actions (5 Cards)' : 'Customer RMA Physical Actions (6 Cards)'}</span>
+                              <Layers className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                              <span>{isSupplierStream ? 'Supplier RTV Physical Actions (5 Cards)' : 'Customer RMA Physical Actions (6 Cards)'}</span>
                             </label>
                             {isOnHold && (
                               <button
@@ -3372,7 +3368,7 @@ export default function QuickRMAActionModal({
                         })()}
 
                         {/* Customer Rejection Reason Input & Gate Pass */}
-                        {isRejected && (
+                        {isCustomerRejected && (
                           <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-700 rounded-xl space-y-2 animate-in fade-in">
                             <div className="flex items-center justify-between">
                               <label className="text-[10px] uppercase font-bold text-rose-900 dark:text-rose-300 flex items-center gap-1">

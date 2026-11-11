@@ -28,44 +28,7 @@ import {
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import { exportRMAReportsToCSV } from '../utils/exportCsv';
-
-/**
- * Universal Lifecycle Stage Formatter & Color Resolver
- */
-function formatLifecycleStage(status) {
-  if (!status) return { label: 'Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
-  const s = String(status).toLowerCase();
-  switch (s) {
-    case 'draft':
-      return { label: 'Draft / Intake', color: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
-    case 'pending':
-    case 'received_at_dock':
-      return { label: 'Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
-    case 'under_inspection':
-      return { label: 'Under Inspection', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800' };
-    case 'pending_finance_approval':
-      return { label: 'Pending Finance', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
-    case 'credit_memo_issued':
-      return { label: 'Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
-    case 'restocked':
-      return { label: 'Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
-    case 'scrapped':
-    case 'disposed':
-      return { label: 'Scrapped / Disposed', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
-    case 'closed':
-    case 'resolved':
-      return { label: 'Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
-    case 'buffer_replacement_dispatched':
-    case 'buffer_dispatched':
-      return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
-    case 'rejected':
-      return { label: 'Rejected / Invalid', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
-    case 'pending_admin_details':
-      return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
-    default:
-      return { label: s.replace(/_/g, ' '), color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300' };
-  }
-}
+import { formatLifecycleStage } from '../utils/rmaHelpers';
 
 export default function RMAReportsModal({ 
   isOpen, 
@@ -727,7 +690,7 @@ export default function RMAReportsModal({
                         {/* 8. Lifecycle Stage */}
                         <td className="py-3 px-3 text-center whitespace-nowrap">
                           {(() => {
-                            const stageInfo = formatLifecycleStage(item.status);
+                            const stageInfo = formatLifecycleStage(item.status, item);
                             return (
                               <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-block shadow-2xs ${stageInfo.color}`}>
                                 {stageInfo.label}

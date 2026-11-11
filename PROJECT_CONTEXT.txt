@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-11T06:13:09.298Z
+Generated At: 2026-11-11T07:28:02.401Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -3623,6 +3623,104 @@ Each test scenario defines:
 
 ---
 
+## Section 17: Video Audit 9 Bug Fixes, UI Simplification & Constraint Safety
+
+### 17.0 PostgreSQL Check Constraint & Status Enum Protection
+- [ ] **TC-BUGFIX-01 (Zero 400 Bad Request on Status Mutation)**
+  * **Location**: Customer Hub, Supplier Hub, Quick Action Modal (`QuickRMAActionModal.jsx`), Catalog Service (`confirmCoworkerQueueAction`), and REST API (`PATCH /api/v1/rma/:id`)
+  * **Action**:
+    1. Click `[ ✓ Restocked in WMS ]` on a restock candidate.
+    2. Click `[ ✓ PO Placed ]` on a re-order candidate.
+    3. Click `[ ✓ Written Off ]` on a scrap item.
+    4. Send `PATCH /api/v1/rma/{id}` with `{"status": "restocked"}` or `{"status": "scrapped"}`.
+  * **Expected Behavior**:
+    1. ZERO PostgreSQL `400 Bad Request` or `rma_reports_status_check` errors in browser console or Supabase logs.
+    2. Database column `status` is safely stored as `'resolved'`.
+    3. Operational outcome is recorded in `ai_document_metadata.workflow_resolution = 'restocked' | 'reordered' | 'scrapped_no_reorder'`.
+    4. UI badge reflects lifecycle stage: `6- Restocked` (emerald), `7- Re-Ordered (PO Placed)` (emerald/amber), or `7- Scrapped / Written Off` (slate/rose).
+
+### 17.1 UI Streamlining: Elimination of Duplicate Filter Rows & Stray Characters
+- [ ] **TC-BUGFIX-02 (Single Dark Navy Workstation Bar with 3 Scoped Buttons)**
+  * **Location**: Customer RMA Hub (`src/App.jsx`) and Supplier RTV Hub (`src/components/SupplierClaimsTab.jsx`)
+  * **Action**: Observe the top workstation toolbar in both tabs.
+  * **Expected Behavior**:
+    1. The redundant secondary row of 6 pill filter buttons is completely removed from both tabs.
+    2. The top dark navy bar contains exactly 3 operational workstation buttons:
+       - `[ 📦 Ready to Restock (N) ]`
+       - `[ 🔄 Supplier Re-Order (N) ]`
+       - `[ 🚫 No Re-Order / Write-Off (N) ]`
+       - `[ ✕ Clear Queue Filter ]` (appears dynamically when any queue filter is active).
+    3. When a filter is selected, it highlights with a bold glowing border and filtering the table beneath it.
+
+- [ ] **TC-BUGFIX-03 (Strict Hub Scope for Button Counts)**
+  * **Location**: Customer RMA Hub vs. Supplier RTV Hub
+  * **Action**: Note the counts on the 3 dark navy buttons in Customer Hub, then switch to Supplier RTV Hub and observe the counts.
+  * **Expected Behavior**:
+    1. In Customer Hub, counts calculate ONLY customer inbound items (`rma_type: 'customer_inbound'`).
+    2. In Supplier Hub, counts calculate ONLY supplier outbound items (`rma_type: 'supplier_outbound'`).
+    3. No cross-stream count leakage occurs.
+
+- [ ] **TC-BUGFIX-04 (Zero Stray Dollar Signs in Headers & Tabs)**
+  * **Location**: Supplier Claims Tab (`SupplierClaimsTab.jsx`)
+  * **Action**: Inspect all tab headers, table headers, and badges.
+  * **Expected Behavior**:
+    1. Header reads cleanly: `All Returns (N)` (e.g. `All Returns (4)`).
+    2. No literal `$4` or `${queueCounts.all}` artifacts appear.
+
+### 17.2 RMA Stream Isolation & Clean Notes / Explanations
+- [ ] **TC-BUGFIX-05 (Strict RMA Type Isolation Under Active Filter)**
+  * **Location**: Customer RMA Hub (`src/App.jsx`)
+  * **Action**: Click `[ 🔄 Supplier Re-Order ]` or `[ 🚫 No Re-Order / Write-Off ]` in Customer Hub.
+  * **Expected Behavior**:
+    1. Table filters to customer returns flagged for re-order or write-off.
+    2. ZERO supplier outbound items (`rma_type: 'supplier_outbound'`) appear in Customer Hub.
+    3. Strict filter guard `if (item.rma_type === 'supplier_outbound') return false;` guarantees complete isolation.
+
+- [ ] **TC-BUGFIX-06 (Clean Notes & Stripping of Raw Bracket Tags)**
+  * **Location**: Customer Hub Table, Supplier Hub Table, and "Read Whole Explanation" Modal
+  * **Action**: Open an RMA ticket that previously had `[REORDER: NO]`, `[HOLD REASON: ...]`, or `[REJECTED: ...]`.
+  * **Expected Behavior**:
+    1. The bracket tags are cleanly stripped by `cleanExplanationText()`.
+    2. Table and card note previews display clean human text without ugly brackets.
+    3. The full explanation modal (`viewingExplanationModal`) renders readable text with zero bracket junk.
+    4. Saving triage stores `needs_reorder: boolean` inside `ai_document_metadata` instead of prepending bracket strings to `notes`.
+
+### 17.3 Stream-Specific Triage Cards & Rejection Boundaries
+- [ ] **TC-BUGFIX-07 (Supplier Card #4 vs Customer Card #6 Boundaries)**
+  * **Location**: Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**:
+    1. Open an RMA in Supplier RTV stream. Select Card #4 (`5 - Claim Rejected by Vendor`).
+    2. Open an RMA in Customer stream. Select Card #6 (`8- Rejected / Return to Customer`).
+  * **Expected Behavior**:
+    1. In Supplier Stream (Card #4): The red Customer Rejection Box (`CUSTOMER REJECTION REASON *`) is **NEVER SHOWN**. Instead, the Purchasing Replenishment Switch (`[ 🔄 Re-Order: YES ]` vs `[ 🚫 Re-Order: NO ]`) is displayed, and the rack location defaults to `SCRAP-BIN`.
+    2. In Customer Stream (Card #6): The red Customer Rejection Box (`CUSTOMER REJECTION REASON *`, Store Gate Pass, AE Alert) is displayed properly.
+
+- [ ] **TC-BUGFIX-08 (Clean Layer Icon & Header Prefix)**
+  * **Location**: Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**: Inspect the section header above the operational action cards.
+  * **Expected Behavior**:
+    1. Corrupted `??` character is replaced with `<Layers className="w-3.5 h-3.5" />`.
+    2. Text reads: `Supplier RTV Physical Actions (5 Cards)` or `Customer RMA Physical Actions (6 Cards)`.
+
+- [ ] **TC-BUGFIX-09 (Stream Switch Default Disposition & Status Sync)**
+  * **Location**: Quick RMA Action Modal -> Stream Toggle (`customer_inbound` <-> `supplier_outbound`)
+  * **Action**: Switch an item from Supplier Outbound to Customer Inbound.
+  * **Expected Behavior**:
+    1. `disposition` immediately updates to `'2- Restock to Inventory'`.
+    2. `status` immediately updates to `'under_inspection'`.
+    3. Triage can be completed without manual resetting.
+
+- [ ] **TC-BUGFIX-10 (No Re-Order / Write-Off Filter Coverage)**
+  * **Location**: Dark Navy Bar -> `[ 🚫 No Re-Order / Write-Off ]`
+  * **Action**:
+    1. In Quick Action Modal, set any loss disposition (Scrap, RTV, Buffer Swap, Vendor Rejected) and toggle `Re-Order: NO`. Save triage.
+    2. In the hub, click `[ 🚫 No Re-Order / Write-Off ]`.
+  * **Expected Behavior**:
+    1. The item appears in the `No Re-Order / Write-Off` filtered view.
+    2. Coworkers can audit the write-off and click `[ ✓ Written Off ]` to resolve it.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -3643,6 +3741,7 @@ Each test scenario defines:
 | **Phase 14: Batch RMA & Realtime Revocation Watchdog** | Intake Portal & Gatekeeper Engine | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 15: 4-Pillar Action System & Financial Hold Safety Guard** | Quick Action Modal & Accounting | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 16: Coworker Inventory & Re-order Queues** | REST API & Queue Strip | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 17: Video Audit 9 Bug Fixes & UI Streamlining** | Workstation Bar & Action Cards | `READY FOR TESTING` | *Lead QA Director* |
 
 
 --- END FILE: docs/MANUAL_QA_TESTING_CHECKLIST.md ---
@@ -4344,6 +4443,54 @@ Public intake users are kept fully aware of their session duration:
    - 🔴 **Pulsing Rose**: Under 5 minutes remaining.
 2. **Intake Form Header**: Renders an authorized return session banner showing the authorized store/vendor name, verified Google identity, and the live ticking clock.
 3. **Instant Expiry Lock**: When the countdown reaches `0s`, the session is purged from memory and `localStorage`, and the device is immediately locked with an amber *"Authorization Expired"* screen.
+
+---
+
+## Chapter 12: 4-Pillar Operational Action Architecture, Workstation Queues & Database Constraint Safety
+
+To eliminate ambiguous triage decisions and prevent warehouse inventory disconnects, Wholesale RMA Portal v2 standardizes all physical returns into **4 operational pillars** and **3 scoped workstation queues**.
+
+### 12.1 Stream-Specific Physical Triage Cards
+
+When opening **Quick RMA Processing** (`QuickRMAActionModal.jsx`), physical inspectors are presented with stream-specific action cards:
+
+#### A. Customer RMA Inbound (6 Action Cards):
+1. 🟢 **Card #1 — Restock to Shelves / Resellable**: Good condition goods (`Grade A/B`). Sets `disposition: '2- Restock to Inventory'` and routes into the Restock Queue with rack/bin location.
+2. 🟣 **Card #2 — Move to Supplier RTV**: Defective or expired store returns qualifying for vendor chargeback. Automatically transfers the record to the Supplier Hub.
+3. 🔴 **Card #3 — Scrap / Total Loss Disposal**: Damaged beyond recovery (`Grade D`). Automatically stages in `SCRAP-BIN` and exposes the Purchasing Replenishment Switch (`[ 🔄 Re-Order: YES ]` vs `[ 🚫 Re-Order: NO ]`).
+4. 🔵 **Card #4 — Immediate 1-to-1 Buffer Stock Swap**: Emergency replacement dispatched to customer. Generates buffer handover slip and locks credit memo issuance to prevent double refunding.
+5. 🟡 **Card #5 — Quarantine / Put On Hold**: Suspicious defects, missing paperwork, or AE review needed. Freezes all financial claims until supervisor release.
+6. ⚫ **Card #6 — Reject Claim & Return to Customer**: Store error, customer negligence, or outside warranty. Opens Customer Rejection box (`CUSTOMER REJECTION REASON *`), AE notification, and Store Return Gate Pass.
+
+#### B. Supplier RTV Outbound (5 Action Cards):
+1. ⏳ **Card #1 — Stage at Dock for Vendor Pickup**: Default RTV state. Location: `RTV-DOCK`. Authorizes Official Vendor RTV Gate Pass printout.
+2. 💵 **Card #2 — Vendor AP Deduction / Credit Memo Settled**: Supplier granted credit note or AP debit memo deduction.
+3. 🟢 **Card #3 — Vendor Delivered Replacement Stock**: Supplier replaced physical merchandise 1-to-1. Staged at receiving bin and routed to Restock Queue.
+4. 🔴 **Card #4 — Claim Rejected by Vendor**: Vendor rejected return claim. Sets `SCRAP-BIN` and activates Purchasing Replenishment Switch (`YES` vs `NO`). **Strictly isolated from customer rejection gates.**
+5. 🟡 **Card #5 — Under Vendor Dispute / Hold**: Contested chargeback under negotiation. Freezes financial debit claims.
+
+### 12.2 Purchasing Replenishment Switch (`[ 🔄 Re-Order: YES ]` vs `[ 🚫 Re-Order: NO ]`)
+Whenever an item suffers total physical loss (Scrap, RTV, Buffer Swap, or Vendor Rejected):
+- An explicit toggle allows warehouse staff to decide whether procurement must re-order replacement inventory:
+  - `[ 🔄 Re-Order: YES ]` (Default): Item enters the **Supplier Re-Order Queue** (`?queue=reorder`). Coworkers place a PO to replenish stock.
+  - `[ 🚫 Re-Order: NO ]`: Item enters the **No Re-Order / Write-Off Queue** (`?queue=scrap_no_reorder`). No supplier purchase order is triggered.
+- Stored safely in `ai_document_metadata.needs_reorder: boolean` without polluting human notes.
+
+### 12.3 The 3 Scoped Workstation Queues
+Located in the top dark navy bar of both Customer RMA Hub and Supplier RTV Hub:
+1. `[ 📦 Ready to Restock (N) ]`: Filter for all items approved for warehouse restocking. Coworkers click `[ ✓ Restocked in WMS ]` to confirm.
+2. `[ 🔄 Supplier Re-Order (N) ]`: Filter for all lost items flagged `needs_reorder: true`. Coworkers click `[ ✓ PO Placed ]` to confirm replacement order.
+3. `[ 🚫 No Re-Order / Write-Off (N) ]`: Filter for all lost items where `needs_reorder: false`. Coworkers click `[ ✓ Written Off ]` to resolve write-offs.
+4. `[ ✕ Clear Queue Filter ]`: Dynamically appears to reset back to full hub view.
+
+### 12.4 PostgreSQL Check Constraint Safety & Lifecycle Status Resolution
+- **PostgreSQL Enum Check Constraint**: `public.rma_reports.status` enforces `rma_reports_status_check` (`'pending'`, `'received_at_dock'`, `'under_inspection'`, `'credit_memo_issued'`, `'vendor_claimed'`, `'buffer_replacement_dispatched'`, `'resolved'`, `'closed'`, `'rejected'`).
+- Direct mutations to `'restocked'` or `'scrapped'` are prevented. The platform safely sets `status: 'resolved'` and records `workflow_resolution: 'restocked' | 'reordered' | 'scrapped_no_reorder'` in `ai_document_metadata`.
+- All interfaces format resolved tickets into distinct operational stages:
+  - `6- Restocked` (emerald badge)
+  - `7- Re-Ordered (PO Placed)` (emerald/amber badge)
+  - `7- Scrapped / Written Off` (slate/rose badge)
+
 
 
 
@@ -6627,18 +6774,19 @@ export default async function handler(req, res) {
           if (cleanQueue === 'restock') {
             const isRestockDisp = itemDisp.includes('restock') || itemDisp.includes('replacement stock received');
             if (!isRestockDisp) return false;
-            if (FINALIZED_RESTOCK.has(itemStatus)) return false;
+            if (FINALIZED_RESTOCK.has(itemStatus) || item.ai_document_metadata?.workflow_resolution) return false;
           } else if (cleanQueue === 'reorder' || cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
-            const isLossDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('reorder') || itemDisp.includes('rtv') || itemDisp.includes('vendor') || itemDisp.includes('buffer') || itemDisp.includes('claim rejected by vendor');
+            const isLossDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('reorder') || itemDisp.includes('rtv') || itemDisp.includes('vendor') || itemDisp.includes('buffer') || itemDisp.includes('claim rejected by vendor') || itemDisp.includes('pending vendor pickup');
             const isExcluded = itemDisp.includes('restock') || itemDisp.includes('replacement stock received') || itemDisp.includes('quarantine') || itemDisp.includes('hold') || itemStatus === 'rejected' || itemDisp.includes('8- rejected');
             if (!isLossDisp || isExcluded) return false;
             if (needsReorderFlag === false) return false;
-            if (FINALIZED_SCRAP.has(itemStatus)) return false;
+            if (FINALIZED_SCRAP.has(itemStatus) || item.ai_document_metadata?.workflow_resolution) return false;
           } else if (cleanQueue === 'scrap_no_reorder') {
-            const isScrapDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('claim rejected by vendor');
-            if (!isScrapDisp) return false;
+            const isLossDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('reorder') || itemDisp.includes('rtv') || itemDisp.includes('vendor') || itemDisp.includes('buffer') || itemDisp.includes('claim rejected by vendor') || itemDisp.includes('pending vendor pickup');
+            const isExcluded = itemDisp.includes('restock') || itemDisp.includes('replacement stock received') || itemDisp.includes('quarantine') || itemDisp.includes('hold') || itemStatus === 'rejected' || itemDisp.includes('8- rejected');
+            if (!isLossDisp || isExcluded) return false;
             if (needsReorderFlag !== false) return false;
-            if (FINALIZED_SCRAP.has(itemStatus)) return false;
+            if (FINALIZED_SCRAP.has(itemStatus) || item.ai_document_metadata?.workflow_resolution) return false;
           } else if (cleanQueue === 'rtv_debit' || cleanQueue === 'rtv') {
             const isRtv = itemDisp.includes('rtv') || itemDisp.includes('return to vendor') || itemDisp.includes('vendor') || item.rma_type === 'supplier_outbound';
             if (!isRtv) return false;
@@ -6974,12 +7122,16 @@ export default async function handler(req, res) {
       }
 
       // Normalize status and disposition for coworker restock, scrap/re-order, RTV & hold sync
+      let requestedWorkflowResolution = null;
       if (updateData.status) {
         const s = String(updateData.status).toLowerCase().trim();
         if (s === 'restocked' || s === '6- restocked') {
-          updateData.status = 'restocked';
-        } else if (s === 'scrapped' || s === 'disposed' || s === '7- scrapped / disposed') {
-          updateData.status = 'scrapped';
+          updateData.status = 'resolved';
+          requestedWorkflowResolution = 'restocked';
+        } else if (s === 'scrapped' || s === 'disposed' || s === '7- scrapped / disposed' || s === 'reordered') {
+          updateData.status = 'resolved';
+          const explicitNoReorder = body?.needs_reorder === false;
+          requestedWorkflowResolution = explicitNoReorder ? 'scrapped_no_reorder' : 'reordered';
         } else if (s === 'vendor_claimed' || s === '3- vendor claimed' || s === 'vendor_claim') {
           updateData.status = 'vendor_claimed';
           if (!updateData.disposition) updateData.disposition = '3- Return to Vendor (RTV)';
@@ -6989,12 +7141,13 @@ export default async function handler(req, res) {
         } else if (s === 'rejected' || s === '8- rejected' || s === 'claim_rejected') {
           updateData.status = 'rejected';
         } else if (s === 'resolved' || s === 'closed') {
-          // If disposition indicates scrap, normalize to scrapped; otherwise restocked
+          updateData.status = 'resolved';
           const d = String(updateData.disposition || '').toLowerCase();
+          const explicitNoReorder = body?.needs_reorder === false;
           if (d.includes('scrap') || d.includes('dispose')) {
-            updateData.status = 'scrapped';
+            requestedWorkflowResolution = explicitNoReorder ? 'scrapped_no_reorder' : 'reordered';
           } else {
-            updateData.status = 'restocked';
+            requestedWorkflowResolution = 'restocked';
           }
         }
       }
@@ -7037,10 +7190,12 @@ export default async function handler(req, res) {
 
       // Standardized Audit Trail Note for 4 Operational Actions
       let auditNote = `RMA status updated to ${updateData.status || 'updated'} by ${actorName}`;
-      if (updateData.status === 'restocked') {
+      if (requestedWorkflowResolution === 'restocked') {
         auditNote = `ERP Restock confirmed by ${actorName}`;
-      } else if (updateData.status === 'scrapped') {
+      } else if (requestedWorkflowResolution === 'reordered') {
         auditNote = `Supplier Re-order confirmed by ${actorName}`;
+      } else if (requestedWorkflowResolution === 'scrapped_no_reorder') {
+        auditNote = `Scrap written off by ${actorName}`;
       } else if (updateData.status === 'vendor_claimed') {
         auditNote = `Vendor RTV claim confirmed by ${actorName}`;
       } else if (updateData.status === 'quarantine' || (updateData.disposition && updateData.disposition.includes('Quarantine'))) {
@@ -7049,10 +7204,12 @@ export default async function handler(req, res) {
         auditNote = `Hold released by ${actorName}`;
       }
 
-      const lifecycleStageLabel = updateData.status === 'restocked'
+      const lifecycleStageLabel = requestedWorkflowResolution === 'restocked'
         ? '6- Restocked'
-        : updateData.status === 'scrapped'
-        ? '7- Scrapped / Disposed'
+        : requestedWorkflowResolution === 'reordered'
+        ? '7- Re-Ordered (PO Placed)'
+        : requestedWorkflowResolution === 'scrapped_no_reorder'
+        ? '7- Scrapped / Written Off'
         : updateData.status === 'vendor_claimed'
         ? '3- Vendor Claimed'
         : (updateData.status === 'quarantine' || updateData.disposition?.includes('Quarantine'))
@@ -7061,7 +7218,7 @@ export default async function handler(req, res) {
 
       const auditEntry = {
         timestamp: new Date().toISOString(),
-        stage: updateData.status === 'restocked' ? 'ERP_RESTOCK' : (updateData.status === 'scrapped' ? 'SUPPLIER_REORDER' : (updateData.status === 'vendor_claimed' ? 'VENDOR_RTV' : ((updateData.status === 'quarantine' || updateData.disposition?.includes('Quarantine')) ? 'HOLD_QUARANTINE' : 'API_PATCH'))),
+        stage: requestedWorkflowResolution === 'restocked' ? 'ERP_RESTOCK' : (requestedWorkflowResolution === 'reordered' ? 'SUPPLIER_REORDER' : (requestedWorkflowResolution === 'scrapped_no_reorder' ? 'SCRAP_DISPOSAL' : (updateData.status === 'vendor_claimed' ? 'VENDOR_RTV' : ((updateData.status === 'quarantine' || updateData.disposition?.includes('Quarantine')) ? 'HOLD_QUARANTINE' : 'API_PATCH')))),
         actor: actorName,
         status: updateData.status,
         lifecycle_stage: lifecycleStageLabel,
@@ -7086,23 +7243,21 @@ export default async function handler(req, res) {
           ...currentMeta,
           ...(explicitNeedsReorder !== undefined ? { needs_reorder: explicitNeedsReorder } : {}),
           ...(explicitHoldReason ? { hold_reason: explicitHoldReason } : {}),
-          ...(explicitRejectionReason ? { rejection_reason: explicitRejectionReason } : {})
+          ...(explicitRejectionReason ? { rejection_reason: explicitRejectionReason } : {}),
+          ...(requestedWorkflowResolution ? {
+            workflow_resolution: requestedWorkflowResolution,
+            resolved_at: new Date().toISOString(),
+            resolved_by: actorName
+          } : {})
         };
 
-        // Append operational tags into notes safely
+        // Clean operational tags from notes (avoid raw internal tags showing to customers)
         let updatedNotes = row.notes || '';
-        if (explicitNeedsReorder !== undefined) {
-          updatedNotes = updatedNotes.replace(/\[REORDER:\s*(YES|NO)\]/gi, '').trim();
-          updatedNotes = `${updatedNotes} [REORDER: ${explicitNeedsReorder ? 'YES' : 'NO'}]`.trim();
-        }
-        if (explicitHoldReason) {
-          updatedNotes = updatedNotes.replace(/\[HOLD REASON:\s*[^\]]+\]/gi, '').trim();
-          updatedNotes = `${updatedNotes} [HOLD REASON: ${explicitHoldReason}]`.trim();
-        }
-        if (explicitRejectionReason) {
-          updatedNotes = updatedNotes.replace(/\[REJECTED:\s*[^\]]+\]/gi, '').trim();
-          updatedNotes = `${updatedNotes} [REJECTED: ${explicitRejectionReason}]`.trim();
-        }
+        updatedNotes = updatedNotes
+          .replace(/\[REORDER:\s*(YES|NO)\]/gi, '')
+          .replace(/\[HOLD REASON:\s*[^\]]+\]/gi, '')
+          .replace(/\[REJECTED:\s*[^\]]+\]/gi, '')
+          .trim();
 
         let rowPayload = {
           ...updateData,
@@ -7137,8 +7292,8 @@ export default async function handler(req, res) {
             const itDisp = String(it.disposition || '').toLowerCase();
             const matchesSpecificBarcode = targetBarcode && itBarcode === targetBarcode;
             const matchesQueueDisposition = !targetBarcode && (
-              (updateData.status === 'restocked' && itDisp.includes('restock')) ||
-              (updateData.status === 'scrapped' && (itDisp.includes('scrap') || itDisp.includes('dispose'))) ||
+              (requestedWorkflowResolution === 'restocked' && itDisp.includes('restock')) ||
+              (requestedWorkflowResolution && (itDisp.includes('scrap') || itDisp.includes('dispose'))) ||
               (updateData.status === 'vendor_claimed' && (itDisp.includes('rtv') || itDisp.includes('vendor'))) ||
               (updateData.status === 'quarantine' && (itDisp.includes('quarantine') || itDisp.includes('hold'))) ||
               (!updateData.status)
@@ -7148,6 +7303,7 @@ export default async function handler(req, res) {
               return {
                 ...it,
                 status: updateData.status !== undefined ? updateData.status : it.status,
+                workflow_resolution: requestedWorkflowResolution || it.workflow_resolution,
                 warehouse_location: updateData.warehouse_location !== undefined ? updateData.warehouse_location : it.warehouse_location,
                 disposition: updateData.disposition !== undefined ? updateData.disposition : it.disposition
               };
@@ -7162,14 +7318,19 @@ export default async function handler(req, res) {
           parsedRowItems.forEach(it => {
             const d = String(it.disposition || '').toLowerCase();
             const st = String(it.status || '').toLowerCase();
-            if (st === 'restocked' || d.includes('restock')) restockCnt += 1;
+            const res = it.workflow_resolution;
+            if (st === 'resolved' && res === 'restocked') restockCnt += 1;
+            else if (st === 'resolved' && (res === 'reordered' || res === 'scrapped_no_reorder')) scrapCnt += 1;
+            else if (st === 'restocked' || d.includes('restock')) restockCnt += 1;
             else if (st === 'scrapped' || d.includes('scrap') || d.includes('dispose')) scrapCnt += 1;
             else if (!d || d.includes('pending')) pendingCnt += 1;
           });
           if (restockCnt === parsedRowItems.length) {
-            rowPayload.status = 'restocked';
+            rowPayload.status = 'resolved';
+            updatedMeta.workflow_resolution = 'restocked';
           } else if (scrapCnt === parsedRowItems.length) {
-            rowPayload.status = 'scrapped';
+            rowPayload.status = 'resolved';
+            updatedMeta.workflow_resolution = explicitNeedsReorder === false ? 'scrapped_no_reorder' : 'reordered';
           } else if (pendingCnt === parsedRowItems.length) {
             rowPayload.status = 'under_inspection';
           } else {
@@ -8353,30 +8514,41 @@ If you are syncing returned goods back into your warehouse inventory:
    Once added to your ERP stock, send \`PATCH /api/v1/rma/{id}\` with body:
    \`\`\`json
    {
-     "status": "restocked",
+     "status": "resolved",
+     "workflow_resolution": "restocked",
      "disposition": "2- Restock to Inventory",
      "warehouse_location": "RACK-03-BIN-A",
      "notes": "Added to inventory counts in ERP"
    }
    \`\`\`
+   *(Passing \`"status": "restocked"\` is also supported and automatically resolved safely without Supabase constraint errors).*
    This marks the ticket as **6- Restocked** so it won't be double-counted.
 
-#### 2. 🔴 Supplier Re-Order Queue (?queue=reorder):
-If you need to know which items were scrapped (damaged beyond repair / expired) so your procurement system can re-order replacement stock from suppliers:
+#### 2. 🔄 Supplier Re-Order Queue (?queue=reorder):
+If you need to know which items were lost/scrapped so your procurement system can re-order replacement stock from suppliers:
 1. **Query Re-Order Needed Items**:
    Send \`GET /api/v1/rma?queue=reorder\`
-   Retrieves all items that were deemed total loss with defect reason, quantity, and supplier details.
+   Retrieves all items that were flagged for replenishment with \`needs_reorder: true\`.
 2. **Place Replacement PO & Acknowledge**:
    Once your procurement system places a replacement Purchase Order to the supplier, send \`PATCH /api/v1/rma/{id}\` with body:
    \`\`\`json
    {
-     "status": "scrapped",
+     "status": "resolved",
+     "workflow_resolution": "reordered",
      "disposition": "5- Scrap / Dispose",
-     "warehouse_location": "SCRAP-BIN",
-     "notes": "Item marked scrapped. Replacement supplier PO #PO-2026-9901 issued."
+     "notes": "Replacement supplier PO #PO-2026-9901 issued."
    }
    \`\`\`
-   This marks the ticket as **7- Scrapped / Disposed**.
+   This marks the ticket as **7- Re-Ordered (PO Placed)**.
+
+#### 3. 🚫 No Re-Order / Write-Off Queue (?queue=scrap_no_reorder):
+If you need to audit items marked for disposal without placing a replacement supplier purchase order:
+1. **Query Write-Off Items**:
+   Send \`GET /api/v1/rma?queue=scrap_no_reorder\`
+   Retrieves all items where \`needs_reorder: false\`.
+2. **Confirm Scrap & Acknowledge**:
+   Send \`PATCH /api/v1/rma/{id}\` with \`workflow_resolution: "scrapped_no_reorder"\`.
+   This marks the ticket as **7- Scrapped / Written Off**.
 
 #### 3. 🟣 Vendor Recovery / Outbound RTV Queue (?queue=rtv_debit):
 Send \`GET /api/v1/rma?queue=rtv_debit\` to retrieve merchandise queued for return to vendor recovery claims.
@@ -9073,7 +9245,10 @@ export const UpdateRMAReportSchema = z.object({
   notes: z.string().optional().openapi({ example: 'Inspection verified by supervisor' }),
   explanation: z.string().optional().openapi({ example: 'Replacement voucher issued' }),
   price: z.number().optional().openapi({ example: 25.00 }),
-  price_with_vat: z.number().optional().openapi({ example: 28.00 })
+  price_with_vat: z.number().optional().openapi({ example: 28.00 }),
+  needs_reorder: z.boolean().optional().openapi({ example: true, description: 'Purchasing replenishment switch: true flags for supplier re-order, false marks as write-off' }),
+  workflow_resolution: z.enum(['restocked', 'reordered', 'scrapped_no_reorder']).optional().openapi({ example: 'restocked', description: 'Resolution workflow flag stored safely in ai_document_metadata' }),
+  hold_reason: z.string().optional().openapi({ example: 'Packaging seal torn during transit' })
 }).openapi('UpdateRMAReportRequest');
 
 export function registerRMARoutes(registry) {
@@ -9873,7 +10048,9 @@ import {
   isItemReorderNeeded,
   isItemScrappedNoReorder,
   isItemOnHold,
-  isItemRejected
+  isItemRejected,
+  cleanExplanationText,
+  formatLifecycleStage as formatLifecycleStageHelper
 } from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
@@ -9910,45 +10087,10 @@ export function isManifestSubItem(item, allReports = []) {
 }
 
 /**
- * Universal Lifecycle Stage Formatter & Color Resolver
+ * Universal Lifecycle Stage Formatter & Color Resolver supporting 4-Pillar Resolutions
  */
-function formatLifecycleStage(status) {
-  if (!status) return { label: '2- Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
-  const s = String(status).toLowerCase();
-  switch (s) {
-    case 'draft':
-      return { label: '1- Draft / Intake', color: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
-    case 'pending':
-    case 'received_at_dock':
-      return { label: '2- Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
-    case 'under_inspection':
-      return { label: '3- Under Inspection', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800' };
-    case 'pending_finance_approval':
-      return { label: '4- Pending Finance Approval', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
-    case 'credit_memo_issued':
-      return { label: '5- Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
-    case 'restocked':
-      return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
-    case 'scrapped':
-    case 'disposed':
-      return { label: '7- Scrapped / Disposed', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
-    case 'partially_completed':
-      return { label: 'Partially Completed', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-300 dark:border-purple-800' };
-    case 'closed':
-    case 'resolved':
-      return { label: 'Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
-    case 'buffer_replacement_dispatched':
-    case 'buffer_dispatched':
-      return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
-    case 'rejected':
-      return { label: '8- Rejected / Invalid Claim', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
-    case 'vendor_claimed':
-      return { label: 'RTV Claimed', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' };
-    case 'pending_admin_details':
-      return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
-    default:
-      return { label: s.replace(/_/g, ' '), color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300' };
-  }
+function formatLifecycleStage(status, item = null) {
+  return formatLifecycleStageHelper(status, item);
 }
 
 /**
@@ -11308,12 +11450,32 @@ export default function App() {
     return unpacked;
   }, [recentReportsList]);
 
+  // Hub-scoped Coworker Inventory & Procurement Queues
+  const activeHubReports = React.useMemo(() => {
+    if (adminActiveTab === 'supplier_claims') {
+      return supplierOutboundReports;
+    }
+    return customerInboundReports;
+  }, [adminActiveTab, supplierOutboundReports, customerInboundReports]);
+
+  const hubReadyToRestockCount = React.useMemo(() => {
+    return activeHubReports.filter(r => isItemReadyToRestock(r, recentReportsList)).length;
+  }, [activeHubReports, recentReportsList]);
+
+  const hubReorderNeededCount = React.useMemo(() => {
+    return activeHubReports.filter(r => isItemReorderNeeded(r, recentReportsList)).length;
+  }, [activeHubReports, recentReportsList]);
+
+  const hubScrappedNoReorderCount = React.useMemo(() => {
+    return activeHubReports.filter(r => isItemScrappedNoReorder(r, recentReportsList)).length;
+  }, [activeHubReports, recentReportsList]);
+
   // Filter and sort return reports - strictly isolated to Customer Inbound Returns
   const processedReports = React.useMemo(() => {
     const q = reportsSearchQuery.toLowerCase().trim();
     let list = recentReportsList.filter(item => {
-      // Isolate to Customer Inbound Returns by default, unless a Coworker Inventory Queue ('restock' or 'scrap') is active
-      if (coworkerQueueFilter === 'all' && item.rma_type && item.rma_type !== 'customer_inbound') {
+      // Customer RMA Hub strictly isolates to Customer Inbound Returns at ALL times
+      if (item.rma_type === 'supplier_outbound') {
         return false;
       }
       // Omit child rows of manifest returns (which share identical rma_number with parent)
@@ -13994,57 +14156,58 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (coworkerQueueFilter === 'restock' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')) {
-                        setCoworkerQueueFilter('all');
-                      } else {
-                        setCoworkerQueueFilter('restock');
-                        setReportsDispositionFilter('all');
-                        setReportsStatusFilter('all');
-                        setReportsCurrentPage(1);
-                        if (adminActiveTab === 'supplier_claims') {
-                          setAdminActiveTab('customer_reports');
-                        }
-                      }
+                      setCoworkerQueueFilter(coworkerQueueFilter === 'restock' ? 'all' : 'restock');
+                      setReportsCurrentPage(1);
                     }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                      coworkerQueueFilter === 'restock' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
+                      coworkerQueueFilter === 'restock'
                         ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-400/40'
                         : 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-emerald-500/40'
                     }`}
-                    title="Filter table to items triaged as Restock to Inventory whose status is not yet restocked"
+                    title="Filter table to items triaged as Restock to Inventory or Replacement Received"
                   >
-                    <span>📦 Ready to Restock ({readyToRestockReports.length})</span>
+                    <span>📦 Ready to Restock ({hubReadyToRestockCount})</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => {
-                      if ((coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')) {
-                        setCoworkerQueueFilter('all');
-                      } else {
-                        setCoworkerQueueFilter('reorder');
-                        setReportsDispositionFilter('all');
-                        setReportsStatusFilter('all');
-                        setReportsCurrentPage(1);
-                        if (adminActiveTab === 'supplier_claims') {
-                          setAdminActiveTab('customer_reports');
-                        }
-                      }
+                      setCoworkerQueueFilter(coworkerQueueFilter === 'reorder' ? 'all' : 'reorder');
+                      setReportsCurrentPage(1);
                     }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                      (coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
+                      coworkerQueueFilter === 'reorder'
                         ? 'bg-amber-600 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
                         : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/40'
                     }`}
-                    title="Filter table to items flagged for Supplier Re-Order whose purchase order is not yet placed"
+                    title="Filter table to items flagged for Supplier Replacement PO re-order"
                   >
-                    <span>🔄 Supplier Re-Order ({reorderNeededReports.length})</span>
+                    <span>🔄 Supplier Re-Order ({hubReorderNeededCount})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCoworkerQueueFilter(coworkerQueueFilter === 'scrap_no_reorder' ? 'all' : 'scrap_no_reorder');
+                      setReportsCurrentPage(1);
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+                      coworkerQueueFilter === 'scrap_no_reorder'
+                        ? 'bg-rose-700 text-white border-rose-600 shadow-sm ring-2 ring-rose-400/40'
+                        : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-rose-500/40'
+                    }`}
+                    title="Filter table to items marked as Scrap / Write-Off without supplier re-order"
+                  >
+                    <span>🚫 No Re-Order / Write-Off ({hubScrappedNoReorderCount})</span>
                   </button>
 
                   {coworkerQueueFilter !== 'all' && (
                     <button
                       type="button"
-                      onClick={() => setCoworkerQueueFilter('all')}
+                      onClick={() => {
+                        setCoworkerQueueFilter('all');
+                        setReportsCurrentPage(1);
+                      }}
                       className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer"
                     >
                       Clear Queue Filter
@@ -14131,111 +14294,6 @@ export default function App() {
 
                 {/* Filter / Search & Sort Controls Toolbar */}
                 <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 sm:p-3.5 space-y-2.5 w-full min-w-0 box-border">
-                  {/* Top Queue Filter Strip (Subject 2.1) */}
-                  <div className="flex flex-wrap items-center gap-1.5 pb-2.5 border-b border-slate-200 dark:border-slate-700/80">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCoworkerQueueFilter('all');
-                        setReportsCurrentPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                        coworkerQueueFilter === 'all'
-                          ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
-                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      All ({customerInboundReports.length})
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCoworkerQueueFilter(coworkerQueueFilter === 'restock' ? 'all' : 'restock');
-                        setReportsCurrentPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                        coworkerQueueFilter === 'restock'
-                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-400/40'
-                          : 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50'
-                      }`}
-                    >
-                      <span>🟢 Ready to Restock ({readyToRestockReports.length})</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCoworkerQueueFilter((coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') ? 'all' : 'reorder');
-                        setReportsCurrentPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                        coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap'
-                          ? 'bg-rose-600 text-white border-rose-500 shadow-sm ring-2 ring-rose-400/40'
-                          : 'bg-white dark:bg-slate-900 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 hover:bg-rose-50'
-                      }`}
-                    >
-                      <span>🔄 Re-order Needed ({reorderNeededReports.length})</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCoworkerQueueFilter(coworkerQueueFilter === 'scrap_no_reorder' ? 'all' : 'scrap_no_reorder');
-                        setReportsCurrentPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                        coworkerQueueFilter === 'scrap_no_reorder'
-                          ? 'bg-slate-700 text-white border-slate-600 shadow-sm ring-2 ring-slate-400/40'
-                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      <span>🗑️ Scrapped — No Re-Order ({scrappedNoReorderReports.length})</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCoworkerQueueFilter((coworkerQueueFilter === 'hold' || coworkerQueueFilter === 'quarantine') ? 'all' : 'hold');
-                        setReportsCurrentPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                        coworkerQueueFilter === 'hold' || coworkerQueueFilter === 'quarantine'
-                          ? 'bg-amber-500 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
-                          : 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-50'
-                      }`}
-                    >
-                      <span>🟡 On Hold ({onHoldReports.length})</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCoworkerQueueFilter(coworkerQueueFilter === 'rejected' ? 'all' : 'rejected');
-                        setReportsCurrentPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                        coworkerQueueFilter === 'rejected'
-                          ? 'bg-rose-950 text-rose-200 border-rose-800 shadow-sm ring-2 ring-rose-500/40'
-                          : 'bg-white dark:bg-slate-900 text-rose-900 dark:text-rose-400 border-rose-300 dark:border-rose-900 hover:bg-rose-50'
-                      }`}
-                    >
-                      <span>⚫ Rejected Claims ({rejectedReports.length})</span>
-                    </button>
-
-                    {coworkerQueueFilter !== 'all' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCoworkerQueueFilter('all');
-                          setReportsCurrentPage(1);
-                        }}
-                        className="px-2.5 py-1 text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 underline cursor-pointer"
-                      >
-                        Reset Queue
-                      </button>
-                    )}
-                  </div>
 
                   {/* Search Input: Full width row */}
                   <div className="relative w-full min-w-0">
@@ -14780,7 +14838,8 @@ export default function App() {
                                           (!isManifest && item.items?.[0]?.explanation ? item.items[0].explanation : '') ||
                                           ''
                                         ).trim();
-                                        if (!rawNote) return null;
+                                        const cleanNote = cleanExplanationText(rawNote);
+                                        if (!cleanNote) return null;
                                         return (
                                           <div className="flex items-center gap-1 max-w-[165px]">
                                             <button
@@ -14789,14 +14848,14 @@ export default function App() {
                                                 rmaNumber: item.rma_number,
                                                 productName: resolvedName,
                                                 reason: item.reason || 'Damaged',
-                                                explanation: rawNote,
+                                                explanation: cleanNote,
                                                 reporter: item.reporter_name || item.reported_by || 'Staff'
                                               })}
                                               className="group text-left flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-100/90 hover:bg-blue-50 dark:bg-slate-800/80 dark:hover:bg-blue-950/60 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors cursor-pointer max-w-full"
                                               title="Click to read full reporter explanation"
                                             >
                                               <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[110px]">
-                                                "{rawNote}"
+                                                "{cleanNote}"
                                               </span>
                                               <span className="text-[9px] font-black text-blue-600 dark:text-blue-400 shrink-0 group-hover:underline">
                                                 Read
@@ -15800,11 +15859,12 @@ export default function App() {
                                   (!isManifest && item.items?.[0]?.explanation ? item.items[0].explanation : '') ||
                                   ''
                                 ).trim();
-                                if (!rawNote) return null;
+                                const cleanNote = cleanExplanationText(rawNote);
+                                if (!cleanNote) return null;
                                 return (
                                   <div className="flex items-center justify-between gap-2 bg-white/80 dark:bg-slate-900/60 px-2.5 py-1 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
                                     <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate">
-                                      Note: "{rawNote}"
+                                      Note: "{cleanNote}"
                                     </span>
                                     <button
                                       type="button"
@@ -15812,7 +15872,7 @@ export default function App() {
                                         rmaNumber: item.rma_number,
                                         productName: resolvedName,
                                         reason: item.reason || 'Damaged',
-                                        explanation: rawNote,
+                                        explanation: cleanNote,
                                         reporter: item.reporter_name || item.reported_by || 'Staff'
                                       })}
                                       className="text-[10px] font-black text-blue-600 dark:text-blue-400 hover:underline shrink-0 cursor-pointer"
@@ -16140,6 +16200,7 @@ export default function App() {
                 onPrintLabel={(report) => setThermalPrintReport(report)}
                 onViewExplanation={(info) => setViewingExplanationModal(info)}
                 savedProductsList={savedProductsList}
+                coworkerQueueFilter={coworkerQueueFilter}
               />
             )}
 
@@ -16809,7 +16870,7 @@ export default function App() {
                 Full Reporter Explanation / Notes:
               </span>
               <p className="text-xs text-slate-800 dark:text-slate-100 leading-relaxed whitespace-pre-wrap break-words font-medium">
-                {viewingExplanationModal.explanation}
+                {cleanExplanationText(viewingExplanationModal.explanation)}
               </p>
             </div>
 
@@ -29335,8 +29396,7 @@ import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
 import { supplierClaimService } from '../services/supplierClaimService';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, resolveBatchManifestLifecycle } from '../utils/rmaHelpers';
-import { getItemNeedsReorder } from '../utils/rmaHelpers';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, resolveBatchManifestLifecycle, getItemNeedsReorder, cleanExplanationText } from '../utils/rmaHelpers';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -29453,16 +29513,20 @@ export default function QuickRMAActionModal({
     report?.status === 'hold'
   );
 
-  const isRejected = Boolean(
-    (disposition && (disposition.toLowerCase().includes('rejected') || disposition.toLowerCase().includes('8- rejected'))) ||
-    (report?.disposition && (String(report.disposition).toLowerCase().includes('rejected') || String(report.disposition).toLowerCase().includes('8- rejected'))) ||
-    report?.status === 'rejected'
+  const isCustomerRejected = Boolean(
+    !isSupplierStream && (
+      (disposition && (disposition.toLowerCase().includes('rejected / return to customer') || disposition.toLowerCase().includes('8- rejected') || (disposition.toLowerCase().includes('rejected') && !disposition.toLowerCase().includes('claim rejected by vendor')))) ||
+      (report?.disposition && (String(report.disposition).toLowerCase().includes('rejected / return to customer') || String(report.disposition).toLowerCase().includes('8- rejected') || (String(report.disposition).toLowerCase().includes('rejected') && !String(report.disposition).toLowerCase().includes('claim rejected by vendor')))) ||
+      report?.status === 'rejected'
+    )
   );
 
   const isVendorRejectedClaim = Boolean(
     (disposition && disposition.toLowerCase().includes('claim rejected by vendor')) ||
     (report?.disposition && String(report.disposition).toLowerCase().includes('claim rejected by vendor'))
   );
+
+  const isRejected = isCustomerRejected || isVendorRejectedClaim;
 
   const printRejectedGatePass = () => {
     const win = window.open('', '_blank');
@@ -29571,24 +29635,30 @@ export default function QuickRMAActionModal({
         currentDisp === '1- Pending Triage' ||
         currentDisp === '1 - Pending Triage';
 
-      // Automatically update disposition when switching streams
-      const targetDisposition = (newType === 'supplier_outbound' && isPendingTriage)
-        ? 'Return to Vendor (RTV)'
-        : (newType === 'customer_inbound' && (currentDisp.includes('Pending Vendor Pickup') || currentDisp.includes('Return to Vendor'))
-            ? '1- Pending Triage'
-            : (report.disposition || '1- Pending Triage'));
+      // Automatically update disposition and status when switching streams
+      let targetDisposition;
+      let targetStatus;
+      if (newType === 'customer_inbound') {
+        targetDisposition = '2- Restock to Inventory';
+        targetStatus = 'under_inspection';
+      } else {
+        targetDisposition = '1 - Pending Vendor Pickup';
+        targetStatus = 'vendor_claimed';
+      }
 
       // Optimistic update
       const updatedReport = { 
         ...report, 
         rma_type: newType,
-        disposition: targetDisposition
+        disposition: targetDisposition,
+        status: targetStatus
       };
       setReport(updatedReport);
       setDisposition(targetDisposition);
+      setRmaStatus(targetStatus);
 
       const cleanId = report.id || report.rma_number;
-      const savedData = await catalogService.updateRMAType(cleanId, newType, targetDisposition);
+      const savedData = await catalogService.updateRMAType(cleanId, newType, targetDisposition, targetStatus);
       const finalReport = { ...updatedReport, ...(savedData || {}) };
       setReport(finalReport);
 
@@ -29809,22 +29879,8 @@ export default function QuickRMAActionModal({
         rejection_reason: isRejectAction ? rejectionReason.trim() : undefined
       };
 
-      let updatedNotes = report.notes || '';
-      updatedNotes = updatedNotes
-        .replace(/\[REORDER:\s*(YES|NO)\]/gi, '')
-        .replace(/\[HOLD REASON:\s*[^\]]+\]/gi, '')
-        .replace(/\[REJECTED:\s*[^\]]+\]/gi, '')
-        .trim();
-
-      if (isHoldAction) {
-        updatedNotes = `${updatedNotes} [HOLD REASON: ${holdReason.trim()}]`.trim();
-      } else if (isRejectAction) {
-        updatedNotes = `${updatedNotes} [REJECTED: ${rejectionReason.trim()}] [REORDER: NO]`.trim();
-      } else if (isRestockAction) {
-        updatedNotes = `${updatedNotes} [REORDER: NO]`.trim();
-      } else {
-        updatedNotes = `${updatedNotes} [REORDER: ${effectiveNeedsReorder ? 'YES' : 'NO'}]`.trim();
-      }
+      // Clean notes of internal bracket tags (operational state is safely tracked in ai_document_metadata & audit_trail)
+      const updatedNotes = cleanExplanationText(report.notes || '') || null;
 
       const updates = {
         condition_grade: conditionGrade,
@@ -32287,7 +32343,8 @@ export default function QuickRMAActionModal({
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <label className="text-[10px] uppercase font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5 tracking-wide">
-                              <span>${isSupplierStream ? 'Supplier RTV Physical Actions (5 Cards)' : 'Customer RMA Physical Actions (6 Cards)'}</span>
+                              <Layers className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                              <span>{isSupplierStream ? 'Supplier RTV Physical Actions (5 Cards)' : 'Customer RMA Physical Actions (6 Cards)'}</span>
                             </label>
                             {isOnHold && (
                               <button
@@ -32664,7 +32721,7 @@ export default function QuickRMAActionModal({
                         })()}
 
                         {/* Customer Rejection Reason Input & Gate Pass */}
-                        {isRejected && (
+                        {isCustomerRejected && (
                           <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-700 rounded-xl space-y-2 animate-in fade-in">
                             <div className="flex items-center justify-between">
                               <label className="text-[10px] uppercase font-bold text-rose-900 dark:text-rose-300 flex items-center gap-1">
@@ -33696,44 +33753,7 @@ import {
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import { exportRMAReportsToCSV } from '../utils/exportCsv';
-
-/**
- * Universal Lifecycle Stage Formatter & Color Resolver
- */
-function formatLifecycleStage(status) {
-  if (!status) return { label: 'Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
-  const s = String(status).toLowerCase();
-  switch (s) {
-    case 'draft':
-      return { label: 'Draft / Intake', color: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
-    case 'pending':
-    case 'received_at_dock':
-      return { label: 'Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
-    case 'under_inspection':
-      return { label: 'Under Inspection', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800' };
-    case 'pending_finance_approval':
-      return { label: 'Pending Finance', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
-    case 'credit_memo_issued':
-      return { label: 'Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
-    case 'restocked':
-      return { label: 'Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
-    case 'scrapped':
-    case 'disposed':
-      return { label: 'Scrapped / Disposed', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
-    case 'closed':
-    case 'resolved':
-      return { label: 'Closed / Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
-    case 'buffer_replacement_dispatched':
-    case 'buffer_dispatched':
-      return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
-    case 'rejected':
-      return { label: 'Rejected / Invalid', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
-    case 'pending_admin_details':
-      return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
-    default:
-      return { label: s.replace(/_/g, ' '), color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300' };
-  }
-}
+import { formatLifecycleStage } from '../utils/rmaHelpers';
 
 export default function RMAReportsModal({ 
   isOpen, 
@@ -34395,7 +34415,7 @@ export default function RMAReportsModal({
                         {/* 8. Lifecycle Stage */}
                         <td className="py-3 px-3 text-center whitespace-nowrap">
                           {(() => {
-                            const stageInfo = formatLifecycleStage(item.status);
+                            const stageInfo = formatLifecycleStage(item.status, item);
                             return (
                               <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-block shadow-2xs ${stageInfo.color}`}>
                                 {stageInfo.label}
@@ -37867,7 +37887,8 @@ import {
   isItemReorderNeeded,
   isItemScrappedNoReorder,
   isItemOnHold,
-  isItemRejected
+  isItemRejected,
+  cleanExplanationText
 } from '../utils/rmaHelpers';
 
 export default function SupplierClaimsTab({
@@ -37882,13 +37903,13 @@ export default function SupplierClaimsTab({
   onOpenQuickAction,
   onPrintLabel,
   onViewExplanation,
-  savedProductsList = []
+  savedProductsList = [],
+  coworkerQueueFilter = 'all'
 }) {
   const [selectedSupplier, setSelectedSupplier] = useState('All');
   const [dispositionFilter, setDispositionFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState('created_at');
-  const [queueFilter, setQueueFilter] = useState('all'); // 'all' | 'restock' | 'rtv' | 'reorder' | 'hold'
   const [updatingQueueId, setUpdatingQueueId] = useState(null);
 
   const handleConfirmCoworkerAction = async (item, targetStatus) => {
@@ -38218,16 +38239,17 @@ export default function SupplierClaimsTab({
         rDisp === dispositionFilter.toLowerCase() ||
         rDisp.replace(/^\d+\s*-\s*/, '').trim() === cleanFilter;
 
-      // Unified Coworker Workstation Queue Filter
-      if (queueFilter === 'restock') {
+      // Unified Coworker Workstation Queue Filter (Controlled by top dark navy bar)
+      const activeQueue = coworkerQueueFilter || 'all';
+      if (activeQueue === 'restock') {
         if (!isItemReadyToRestock(r)) return false;
-      } else if (queueFilter === 'reorder' || queueFilter === 'scrap') {
+      } else if (activeQueue === 'reorder' || activeQueue === 'scrap') {
         if (!isItemReorderNeeded(r)) return false;
-      } else if (queueFilter === 'scrap_no_reorder') {
+      } else if (activeQueue === 'scrap_no_reorder') {
         if (!isItemScrappedNoReorder(r)) return false;
-      } else if (queueFilter === 'hold' || queueFilter === 'quarantine') {
+      } else if (activeQueue === 'hold' || activeQueue === 'quarantine') {
         if (!isItemOnHold(r)) return false;
-      } else if (queueFilter === 'rejected') {
+      } else if (activeQueue === 'rejected') {
         if (!isItemRejected(r)) return false;
       }
 
@@ -38295,35 +38317,8 @@ export default function SupplierClaimsTab({
     });
 
     return list;
-  }, [reportsList, selectedSupplier, dispositionFilter, searchTerm, queueFilter, sortField, sortDirection, savedProductsList]);
+  }, [allRtvItems, selectedSupplier, dispositionFilter, searchTerm, coworkerQueueFilter, sortField, sortDirection, savedProductsList]);
 
-  // Compute 4-Pillar Queue Counts
-  const queueCounts = useMemo(() => {
-    let restock = 0;
-    let rtv = 0;
-    let reorder = 0;
-    let hold = 0;
-
-    allRtvItems.forEach(r => {
-      const d = String(r.disposition || '').toLowerCase();
-      const st = String(r.status || '').toLowerCase();
-
-      if (d.includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(st)) {
-        restock++;
-      }
-      if ((r.rma_type === 'supplier_outbound' || d.includes('rtv') || d.includes('vendor')) && !['closed', 'resolved', 'rejected', 'deleted', 'restocked', 'scrapped', 'disposed'].includes(st)) {
-        rtv++;
-      }
-      if ((d.includes('scrap') || d.includes('dispose') || d.includes('reorder')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(st)) {
-        reorder++;
-      }
-      if ((d.includes('quarantine') || d.includes('hold') || st === 'quarantine' || st === 'hold') && !['closed', 'resolved', 'rejected', 'deleted'].includes(st)) {
-        hold++;
-      }
-    });
-
-    return { restock, rtv, reorder, hold, all: allRtvItems.length };
-  }, [allRtvItems]);
 
   // Paginated Slice
   const paginatedCandidates = useMemo(() => {
@@ -38771,118 +38766,7 @@ export default function SupplierClaimsTab({
 
       {/* Filter Controls Bar (Dropdowns + Search) */}
       <div className="p-3 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-3 shadow-xs w-full min-w-0 box-border">
-        {/* Top Unified Coworker Workstation Queue Bar */}
-        <div className="flex flex-wrap items-center gap-1.5 pb-2.5 border-b border-slate-200 dark:border-slate-800">
-          <button
-            type="button"
-            onClick={() => {
-              setQueueFilter('all');
-              setSelectedRmaIds(new Set());
-              setCurrentPage(1);
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-              queueFilter === 'all'
-                ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
-                : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            All Returns (${queueCounts.all})
-          </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setQueueFilter(queueFilter === 'restock' ? 'all' : 'restock');
-              setSelectedRmaIds(new Set());
-              setCurrentPage(1);
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-              queueFilter === 'restock'
-                ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-400/40'
-                : 'bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50'
-            }`}
-          >
-            <span>📦 Ready to Restock (${queueCounts.restock})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setQueueFilter(queueFilter === 'reorder' ? 'all' : 'reorder');
-              setSelectedRmaIds(new Set());
-              setCurrentPage(1);
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-              queueFilter === 'reorder'
-                ? 'bg-amber-600 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
-                : 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-50'
-            }`}
-          >
-            <span>🔄 Re-Order Needed (${queueCounts.reorder})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setQueueFilter(queueFilter === 'scrap_no_reorder' ? 'all' : 'scrap_no_reorder');
-              setSelectedRmaIds(new Set());
-              setCurrentPage(1);
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-              queueFilter === 'scrap_no_reorder'
-                ? 'bg-rose-600 text-white border-rose-500 shadow-sm ring-2 ring-rose-400/40'
-                : 'bg-white dark:bg-slate-800 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 hover:bg-rose-50'
-            }`}
-          >
-            <span>🗑️ Scrapped — No Re-Order (${queueCounts.scrap_no_reorder})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setQueueFilter(queueFilter === 'hold' ? 'all' : 'hold');
-              setSelectedRmaIds(new Set());
-              setCurrentPage(1);
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-              queueFilter === 'hold'
-                ? 'bg-amber-500 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
-                : 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-50'
-            }`}
-          >
-            <span>🟡 On Hold (${queueCounts.hold})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setQueueFilter(queueFilter === 'rejected' ? 'all' : 'rejected');
-              setSelectedRmaIds(new Set());
-              setCurrentPage(1);
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-              queueFilter === 'rejected'
-                ? 'bg-slate-800 text-white border-slate-700 shadow-sm ring-2 ring-slate-600/40'
-                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            <span>⚫ Rejected Claims (${queueCounts.rejected})</span>
-          </button>
-
-          {queueFilter !== 'all' && (
-            <button
-              type="button"
-              onClick={() => {
-                setQueueFilter('all');
-                setSelectedRmaIds(new Set());
-                setCurrentPage(1);
-              }}
-              className="px-2.5 py-1 text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 underline cursor-pointer"
-            >
-              Reset Queue
-            </button>
-          )}
-        </div>
 
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 w-full min-w-0">
           
@@ -39427,7 +39311,8 @@ export default function SupplierClaimsTab({
                                 (!isManifest && r.items?.[0]?.explanation ? r.items[0].explanation : '') ||
                                 ''
                               ).trim();
-                              if (!rawNote) return null;
+                              const cleanNote = cleanExplanationText(rawNote);
+                              if (!cleanNote) return null;
                               return (
                                 <div className="flex items-center gap-1 max-w-[175px]" onClick={(e) => e.stopPropagation()}>
                                   <button
@@ -39436,14 +39321,14 @@ export default function SupplierClaimsTab({
                                       rmaNumber: r.rma_number,
                                       productName: res.name,
                                       reason: r.reason || 'Damaged',
-                                      explanation: rawNote,
+                                      explanation: cleanNote,
                                       reporter: r.reporter_name || r.reported_by || 'Staff'
                                     })}
                                     className="group text-left flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-100/90 hover:bg-amber-50 dark:bg-slate-800/80 dark:hover:bg-amber-950/60 border border-slate-200 dark:border-slate-700 hover:border-amber-300 dark:hover:border-amber-700 transition-colors cursor-pointer max-w-full"
                                     title="Click to read full reporter explanation"
                                   >
                                     <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[120px]">
-                                      "{rawNote}"
+                                      "{cleanNote}"
                                     </span>
                                     <span className="text-[9px] font-black text-amber-600 dark:text-amber-400 shrink-0 group-hover:underline">
                                       Read
@@ -45133,7 +45018,7 @@ export const catalogService = {
   /**
    * Reclassify RMA Type between 'customer_inbound' and 'supplier_outbound'
    */
-  async updateRMAType(id, rma_type, disposition = null) {
+  async updateRMAType(id, rma_type, disposition = null, status = null) {
     const cleanType = rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
     const cleanId = String(id).trim();
     const isNum = /^\d+$/.test(cleanId);
@@ -45141,6 +45026,9 @@ export const catalogService = {
     const updates = { rma_type: cleanType };
     if (disposition) {
       updates.disposition = disposition;
+    }
+    if (status) {
+      updates.status = status;
     }
 
     // 1. Fetch current record to resolve id, rma_number, and child items
@@ -45229,15 +45117,18 @@ export const catalogService = {
     const cleanActor = String(actorName || 'Warehouse Staff').trim();
 
     let stage = 'SUPPLIER_REORDER';
+    let workflowResolution = 'reordered';
     let auditNote = `Supplier Re-order PO confirmed by ${cleanActor}`;
     if (cleanStatus === 'restocked') {
       stage = 'ERP_RESTOCK';
+      workflowResolution = 'restocked';
       auditNote = `ERP Restock confirmed by ${cleanActor}`;
     } else {
       const notes = String(item?.notes || '');
       const isExplicitNoReorder = item?.needs_reorder === false || item?.ai_document_metadata?.needs_reorder === false || notes.includes('[REORDER: NO]');
       if (isExplicitNoReorder) {
         stage = 'SCRAP_DISPOSAL';
+        workflowResolution = 'scrapped_no_reorder';
         auditNote = `Scrap written off by ${cleanActor}`;
       }
     }
@@ -45246,7 +45137,8 @@ export const catalogService = {
       timestamp: new Date().toISOString(),
       stage,
       actor: cleanActor,
-      status: cleanStatus,
+      status: 'resolved',
+      workflow_resolution: workflowResolution,
       warehouse_location: warehouseLocation || item.warehouse_location || undefined,
       note: auditNote
     };
@@ -45269,9 +45161,17 @@ export const catalogService = {
     const currentAudit = Array.isArray(primaryRow?.audit_trail) ? [...primaryRow.audit_trail] : [];
     currentAudit.push(auditEntry);
 
+    const updatedMeta = {
+      ...((primaryRow?.ai_document_metadata && typeof primaryRow.ai_document_metadata === 'object') ? primaryRow.ai_document_metadata : {}),
+      workflow_resolution: workflowResolution,
+      resolved_at: new Date().toISOString(),
+      resolved_by: cleanActor
+    };
+
     const updates = {
-      status: cleanStatus,
-      audit_trail: currentAudit
+      status: 'resolved', // STRICT DB CONSTRAINT: Always use valid DB check constraint enum 'resolved'
+      audit_trail: currentAudit,
+      ai_document_metadata: updatedMeta
     };
     if (warehouseLocation) {
       updates.warehouse_location = String(warehouseLocation).trim().toUpperCase();
@@ -45301,7 +45201,8 @@ export const catalogService = {
         if (matchesSpecific || matchesDisp) {
           return {
             ...child,
-            status: cleanStatus,
+            status: 'resolved',
+            workflow_resolution: workflowResolution,
             warehouse_location: warehouseLocation ? String(warehouseLocation).trim().toUpperCase() : child.warehouse_location
           };
         }
@@ -45309,15 +45210,12 @@ export const catalogService = {
       });
       updates.items = parsedItems;
 
-      // Recompute parent manifest status if only a subset of items were updated
-      const allRestocked = parsedItems.every(c => String(c.status || '').toLowerCase() === 'restocked');
-      const allScrapped = parsedItems.every(c => String(c.status || '').toLowerCase() === 'scrapped');
-      if (allRestocked) {
-        updates.status = 'restocked';
-      } else if (allScrapped) {
-        updates.status = 'scrapped';
+      // Recompute parent manifest status
+      const allResolved = parsedItems.every(c => c.status === 'resolved' || ['restocked', 'scrapped', 'closed', 'resolved'].includes(String(c.status || '').toLowerCase()));
+      if (allResolved) {
+        updates.status = 'resolved';
       } else if (targetBarcode) {
-        updates.status = 'partially_completed';
+        updates.status = 'under_inspection';
       }
     }
 
@@ -45338,7 +45236,8 @@ export const catalogService = {
     this.notifyChange('coworker-queue-updated', {
       reportId: updatedReport.id,
       rmaNumber: updatedReport.rma_number,
-      status: cleanStatus,
+      status: 'resolved',
+      workflow_resolution: workflowResolution,
       report: updatedReport
     });
 
@@ -51337,6 +51236,72 @@ export function resolveBatchManifestLifecycle(report, allReports = []) {
 }
 
 /**
+ * Strips internal operational bracket tags (e.g. [REORDER: NO], [HOLD REASON: ...], [REJECTED: ...])
+ * from customer explanation or notes strings so UI displays clean human-readable text.
+ */
+export function cleanExplanationText(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/\s*\[(REORDER|HOLD REASON|REJECTED):[^\]]*\]/gi, '')
+    .trim();
+}
+
+/**
+ * Standardized Lifecycle Stage Formatter supporting 4-Pillar Resolutions
+ */
+export function formatLifecycleStage(status, item = null) {
+  if (!status) return { label: '2- Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
+  const s = String(status).toLowerCase();
+
+  if (s === 'resolved' || s === 'closed') {
+    const resolution = item?.ai_document_metadata?.workflow_resolution;
+    const disp = String(item?.disposition || '').toLowerCase();
+    if (resolution === 'reordered') {
+      return { label: '7- Re-Ordered (PO Placed)', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
+    }
+    if (resolution === 'scrapped_no_reorder' || (!resolution && (disp.includes('scrap') || disp.includes('dispose')))) {
+      return { label: '7- Scrapped / Written Off', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+    }
+    if (resolution === 'restocked' || (!resolution && (disp.includes('restock') || disp.includes('replacement')))) {
+      return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    }
+    return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+  }
+
+  switch (s) {
+    case 'draft':
+      return { label: '1- Draft / Intake', color: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
+    case 'pending':
+    case 'received_at_dock':
+      return { label: '2- Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
+    case 'under_inspection':
+      return { label: '3- Under Inspection', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800' };
+    case 'pending_finance_approval':
+      return { label: '4- Pending Finance Approval', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
+    case 'credit_memo_issued':
+      return { label: '5- Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
+    case 'restocked':
+      return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    case 'scrapped':
+    case 'disposed':
+      return { label: '7- Scrapped / Disposed', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+    case 'partially_completed':
+      return { label: 'Partially Completed', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-300 dark:border-purple-800' };
+    case 'buffer_replacement_dispatched':
+    case 'buffer_dispatched':
+      return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
+    case 'rejected':
+      return { label: '8- Rejected / Invalid Claim', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
+    case 'vendor_claimed':
+      return { label: 'RTV Claimed', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' };
+    case 'pending_admin_details':
+      return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
+    default:
+      return { label: s.replace(/_/g, ' '), color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300' };
+  }
+}
+
+/**
  * Resolves the explicit or inferred purchasing replenishment flag (needs_reorder).
  * Returns true if the lost stock should be reordered from supplier, false otherwise.
  */
@@ -51367,7 +51332,7 @@ export function getRecoverySource(item) {
 /**
  * Helper to check if an item (or child items in a batch manifest) belongs to the Ready to Restock queue:
  * disposition: 'Restock to Inventory' OR 'Vendor Replacement Stock Received'
- * and status !== 'restocked'
+ * and status !== 'restocked' and not finalized/resolved.
  */
 export function isItemReadyToRestock(item, allReports = []) {
   if (!item) return false;
@@ -51377,15 +51342,19 @@ export function isItemReadyToRestock(item, allReports = []) {
   }
   const disp = String(item.disposition || '').toLowerCase();
   const st = String(item.status || '').toLowerCase();
+  const resolution = item?.ai_document_metadata?.workflow_resolution;
+  if (resolution || ['restocked', 'closed', 'resolved', 'scrapped', 'disposed', 'rejected'].includes(st)) {
+    return false;
+  }
   const isRestockDisp = disp.includes('restock') || disp.includes('replacement stock received');
-  return isRestockDisp && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed', 'rejected'].includes(st);
+  return isRestockDisp;
 }
 
 /**
  * Helper to check if an item belongs to the Re-Order Needed queue:
  * disposition: Scrap / RTV / Buffer Swap / Claim Rejected by Vendor
  * AND needs_reorder !== false
- * AND status !== 'scrapped' (and not restock, hold, or rejected)
+ * AND not finalized/resolved.
  */
 export function isItemReorderNeeded(item, allReports = []) {
   if (!item) return false;
@@ -51395,6 +51364,10 @@ export function isItemReorderNeeded(item, allReports = []) {
   }
   const disp = String(item.disposition || '').toLowerCase();
   const st = String(item.status || '').toLowerCase();
+  const resolution = item?.ai_document_metadata?.workflow_resolution;
+  if (resolution || ['scrapped', 'disposed', 'closed', 'resolved', 'restocked', 'rejected'].includes(st)) {
+    return false;
+  }
 
   if (
     disp.includes('restock') ||
@@ -51414,16 +51387,17 @@ export function isItemReorderNeeded(item, allReports = []) {
     disp.includes('rtv') ||
     disp.includes('vendor') ||
     disp.includes('buffer') ||
-    disp.includes('claim rejected by vendor');
+    disp.includes('claim rejected by vendor') ||
+    disp.includes('pending vendor pickup');
 
   const needsReorder = getItemNeedsReorder(item);
-  return isLossDisp && needsReorder !== false && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked', 'rejected'].includes(st);
+  return isLossDisp && needsReorder !== false;
 }
 
 /**
- * Helper to check if an item is Scrapped with No Re-Order:
- * disposition is Scrap or Vendor Rejected AND needs_reorder === false
- * AND status !== 'scrapped'
+ * Helper to check if an item is Scrapped with No Re-Order / Write-Off:
+ * Any item in Scrap, RTV, Pending Vendor Pickup, Buffer Swap, or Vendor Rejected
+ * where needs_reorder === false AND not finalized/resolved.
  */
 export function isItemScrappedNoReorder(item, allReports = []) {
   if (!item) return false;
@@ -51433,9 +51407,34 @@ export function isItemScrappedNoReorder(item, allReports = []) {
   }
   const disp = String(item.disposition || '').toLowerCase();
   const st = String(item.status || '').toLowerCase();
-  const isScrapDisp = disp.includes('scrap') || disp.includes('dispose') || disp.includes('claim rejected by vendor');
+  const resolution = item?.ai_document_metadata?.workflow_resolution;
+  if (resolution || ['scrapped', 'disposed', 'closed', 'resolved', 'rejected', 'restocked'].includes(st)) {
+    return false;
+  }
+
+  if (
+    disp.includes('restock') ||
+    disp.includes('replacement stock received') ||
+    disp.includes('quarantine') ||
+    disp.includes('hold') ||
+    st === 'rejected' ||
+    disp.includes('8- rejected')
+  ) {
+    return false;
+  }
+
+  const isLossDisp =
+    disp.includes('scrap') ||
+    disp.includes('dispose') ||
+    disp.includes('reorder') ||
+    disp.includes('rtv') ||
+    disp.includes('vendor') ||
+    disp.includes('buffer') ||
+    disp.includes('claim rejected by vendor') ||
+    disp.includes('pending vendor pickup');
+
   const needsReorder = getItemNeedsReorder(item);
-  return isScrapDisp && needsReorder === false && !['scrapped', 'disposed', 'closed', 'resolved', 'rejected'].includes(st);
+  return isLossDisp && needsReorder === false;
 }
 
 /**

@@ -444,6 +444,72 @@ export function resolveBatchManifestLifecycle(report, allReports = []) {
 }
 
 /**
+ * Strips internal operational bracket tags (e.g. [REORDER: NO], [HOLD REASON: ...], [REJECTED: ...])
+ * from customer explanation or notes strings so UI displays clean human-readable text.
+ */
+export function cleanExplanationText(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/\s*\[(REORDER|HOLD REASON|REJECTED):[^\]]*\]/gi, '')
+    .trim();
+}
+
+/**
+ * Standardized Lifecycle Stage Formatter supporting 4-Pillar Resolutions
+ */
+export function formatLifecycleStage(status, item = null) {
+  if (!status) return { label: '2- Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
+  const s = String(status).toLowerCase();
+
+  if (s === 'resolved' || s === 'closed') {
+    const resolution = item?.ai_document_metadata?.workflow_resolution;
+    const disp = String(item?.disposition || '').toLowerCase();
+    if (resolution === 'reordered') {
+      return { label: '7- Re-Ordered (PO Placed)', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
+    }
+    if (resolution === 'scrapped_no_reorder' || (!resolution && (disp.includes('scrap') || disp.includes('dispose')))) {
+      return { label: '7- Scrapped / Written Off', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+    }
+    if (resolution === 'restocked' || (!resolution && (disp.includes('restock') || disp.includes('replacement')))) {
+      return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    }
+    return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+  }
+
+  switch (s) {
+    case 'draft':
+      return { label: '1- Draft / Intake', color: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
+    case 'pending':
+    case 'received_at_dock':
+      return { label: '2- Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
+    case 'under_inspection':
+      return { label: '3- Under Inspection', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800' };
+    case 'pending_finance_approval':
+      return { label: '4- Pending Finance Approval', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
+    case 'credit_memo_issued':
+      return { label: '5- Credit Memo Issued', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
+    case 'restocked':
+      return { label: '6- Restocked', color: 'bg-teal-100 text-teal-800 dark:bg-teal-950/70 dark:text-teal-300 border-teal-200 dark:border-teal-800' };
+    case 'scrapped':
+    case 'disposed':
+      return { label: '7- Scrapped / Disposed', color: 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-800' };
+    case 'partially_completed':
+      return { label: 'Partially Completed', color: 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-300 dark:border-purple-800' };
+    case 'buffer_replacement_dispatched':
+    case 'buffer_dispatched':
+      return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
+    case 'rejected':
+      return { label: '8- Rejected / Invalid Claim', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
+    case 'vendor_claimed':
+      return { label: 'RTV Claimed', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' };
+    case 'pending_admin_details':
+      return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
+    default:
+      return { label: s.replace(/_/g, ' '), color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300' };
+  }
+}
+
+/**
  * Resolves the explicit or inferred purchasing replenishment flag (needs_reorder).
  * Returns true if the lost stock should be reordered from supplier, false otherwise.
  */
@@ -474,7 +540,7 @@ export function getRecoverySource(item) {
 /**
  * Helper to check if an item (or child items in a batch manifest) belongs to the Ready to Restock queue:
  * disposition: 'Restock to Inventory' OR 'Vendor Replacement Stock Received'
- * and status !== 'restocked'
+ * and status !== 'restocked' and not finalized/resolved.
  */
 export function isItemReadyToRestock(item, allReports = []) {
   if (!item) return false;
@@ -484,15 +550,19 @@ export function isItemReadyToRestock(item, allReports = []) {
   }
   const disp = String(item.disposition || '').toLowerCase();
   const st = String(item.status || '').toLowerCase();
+  const resolution = item?.ai_document_metadata?.workflow_resolution;
+  if (resolution || ['restocked', 'closed', 'resolved', 'scrapped', 'disposed', 'rejected'].includes(st)) {
+    return false;
+  }
   const isRestockDisp = disp.includes('restock') || disp.includes('replacement stock received');
-  return isRestockDisp && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed', 'rejected'].includes(st);
+  return isRestockDisp;
 }
 
 /**
  * Helper to check if an item belongs to the Re-Order Needed queue:
  * disposition: Scrap / RTV / Buffer Swap / Claim Rejected by Vendor
  * AND needs_reorder !== false
- * AND status !== 'scrapped' (and not restock, hold, or rejected)
+ * AND not finalized/resolved.
  */
 export function isItemReorderNeeded(item, allReports = []) {
   if (!item) return false;
@@ -502,6 +572,10 @@ export function isItemReorderNeeded(item, allReports = []) {
   }
   const disp = String(item.disposition || '').toLowerCase();
   const st = String(item.status || '').toLowerCase();
+  const resolution = item?.ai_document_metadata?.workflow_resolution;
+  if (resolution || ['scrapped', 'disposed', 'closed', 'resolved', 'restocked', 'rejected'].includes(st)) {
+    return false;
+  }
 
   if (
     disp.includes('restock') ||
@@ -521,16 +595,17 @@ export function isItemReorderNeeded(item, allReports = []) {
     disp.includes('rtv') ||
     disp.includes('vendor') ||
     disp.includes('buffer') ||
-    disp.includes('claim rejected by vendor');
+    disp.includes('claim rejected by vendor') ||
+    disp.includes('pending vendor pickup');
 
   const needsReorder = getItemNeedsReorder(item);
-  return isLossDisp && needsReorder !== false && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked', 'rejected'].includes(st);
+  return isLossDisp && needsReorder !== false;
 }
 
 /**
- * Helper to check if an item is Scrapped with No Re-Order:
- * disposition is Scrap or Vendor Rejected AND needs_reorder === false
- * AND status !== 'scrapped'
+ * Helper to check if an item is Scrapped with No Re-Order / Write-Off:
+ * Any item in Scrap, RTV, Pending Vendor Pickup, Buffer Swap, or Vendor Rejected
+ * where needs_reorder === false AND not finalized/resolved.
  */
 export function isItemScrappedNoReorder(item, allReports = []) {
   if (!item) return false;
@@ -540,9 +615,34 @@ export function isItemScrappedNoReorder(item, allReports = []) {
   }
   const disp = String(item.disposition || '').toLowerCase();
   const st = String(item.status || '').toLowerCase();
-  const isScrapDisp = disp.includes('scrap') || disp.includes('dispose') || disp.includes('claim rejected by vendor');
+  const resolution = item?.ai_document_metadata?.workflow_resolution;
+  if (resolution || ['scrapped', 'disposed', 'closed', 'resolved', 'rejected', 'restocked'].includes(st)) {
+    return false;
+  }
+
+  if (
+    disp.includes('restock') ||
+    disp.includes('replacement stock received') ||
+    disp.includes('quarantine') ||
+    disp.includes('hold') ||
+    st === 'rejected' ||
+    disp.includes('8- rejected')
+  ) {
+    return false;
+  }
+
+  const isLossDisp =
+    disp.includes('scrap') ||
+    disp.includes('dispose') ||
+    disp.includes('reorder') ||
+    disp.includes('rtv') ||
+    disp.includes('vendor') ||
+    disp.includes('buffer') ||
+    disp.includes('claim rejected by vendor') ||
+    disp.includes('pending vendor pickup');
+
   const needsReorder = getItemNeedsReorder(item);
-  return isScrapDisp && needsReorder === false && !['scrapped', 'disposed', 'closed', 'resolved', 'rejected'].includes(st);
+  return isLossDisp && needsReorder === false;
 }
 
 /**

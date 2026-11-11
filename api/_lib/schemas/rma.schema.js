@@ -132,7 +132,10 @@ export const UpdateRMAReportSchema = z.object({
   notes: z.string().optional().openapi({ example: 'Inspection verified by supervisor' }),
   explanation: z.string().optional().openapi({ example: 'Replacement voucher issued' }),
   price: z.number().optional().openapi({ example: 25.00 }),
-  price_with_vat: z.number().optional().openapi({ example: 28.00 })
+  price_with_vat: z.number().optional().openapi({ example: 28.00 }),
+  needs_reorder: z.boolean().optional().openapi({ example: true, description: 'Purchasing replenishment switch: true flags for supplier re-order, false marks as write-off' }),
+  workflow_resolution: z.enum(['restocked', 'reordered', 'scrapped_no_reorder']).optional().openapi({ example: 'restocked', description: 'Resolution workflow flag stored safely in ai_document_metadata' }),
+  hold_reason: z.string().optional().openapi({ example: 'Packaging seal torn during transit' })
 }).openapi('UpdateRMAReportRequest');
 
 export function registerRMARoutes(registry) {

@@ -69,30 +69,41 @@ If you are syncing returned goods back into your warehouse inventory:
    Once added to your ERP stock, send \`PATCH /api/v1/rma/{id}\` with body:
    \`\`\`json
    {
-     "status": "restocked",
+     "status": "resolved",
+     "workflow_resolution": "restocked",
      "disposition": "2- Restock to Inventory",
      "warehouse_location": "RACK-03-BIN-A",
      "notes": "Added to inventory counts in ERP"
    }
    \`\`\`
+   *(Passing \`"status": "restocked"\` is also supported and automatically resolved safely without Supabase constraint errors).*
    This marks the ticket as **6- Restocked** so it won't be double-counted.
 
-#### 2. 🔴 Supplier Re-Order Queue (?queue=reorder):
-If you need to know which items were scrapped (damaged beyond repair / expired) so your procurement system can re-order replacement stock from suppliers:
+#### 2. 🔄 Supplier Re-Order Queue (?queue=reorder):
+If you need to know which items were lost/scrapped so your procurement system can re-order replacement stock from suppliers:
 1. **Query Re-Order Needed Items**:
    Send \`GET /api/v1/rma?queue=reorder\`
-   Retrieves all items that were deemed total loss with defect reason, quantity, and supplier details.
+   Retrieves all items that were flagged for replenishment with \`needs_reorder: true\`.
 2. **Place Replacement PO & Acknowledge**:
    Once your procurement system places a replacement Purchase Order to the supplier, send \`PATCH /api/v1/rma/{id}\` with body:
    \`\`\`json
    {
-     "status": "scrapped",
+     "status": "resolved",
+     "workflow_resolution": "reordered",
      "disposition": "5- Scrap / Dispose",
-     "warehouse_location": "SCRAP-BIN",
-     "notes": "Item marked scrapped. Replacement supplier PO #PO-2026-9901 issued."
+     "notes": "Replacement supplier PO #PO-2026-9901 issued."
    }
    \`\`\`
-   This marks the ticket as **7- Scrapped / Disposed**.
+   This marks the ticket as **7- Re-Ordered (PO Placed)**.
+
+#### 3. 🚫 No Re-Order / Write-Off Queue (?queue=scrap_no_reorder):
+If you need to audit items marked for disposal without placing a replacement supplier purchase order:
+1. **Query Write-Off Items**:
+   Send \`GET /api/v1/rma?queue=scrap_no_reorder\`
+   Retrieves all items where \`needs_reorder: false\`.
+2. **Confirm Scrap & Acknowledge**:
+   Send \`PATCH /api/v1/rma/{id}\` with \`workflow_resolution: "scrapped_no_reorder"\`.
+   This marks the ticket as **7- Scrapped / Written Off**.
 
 #### 3. 🟣 Vendor Recovery / Outbound RTV Queue (?queue=rtv_debit):
 Send \`GET /api/v1/rma?queue=rtv_debit\` to retrieve merchandise queued for return to vendor recovery claims.

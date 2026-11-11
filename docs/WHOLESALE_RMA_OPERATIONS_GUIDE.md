@@ -695,4 +695,52 @@ Public intake users are kept fully aware of their session duration:
 2. **Intake Form Header**: Renders an authorized return session banner showing the authorized store/vendor name, verified Google identity, and the live ticking clock.
 3. **Instant Expiry Lock**: When the countdown reaches `0s`, the session is purged from memory and `localStorage`, and the device is immediately locked with an amber *"Authorization Expired"* screen.
 
+---
+
+## Chapter 12: 4-Pillar Operational Action Architecture, Workstation Queues & Database Constraint Safety
+
+To eliminate ambiguous triage decisions and prevent warehouse inventory disconnects, Wholesale RMA Portal v2 standardizes all physical returns into **4 operational pillars** and **3 scoped workstation queues**.
+
+### 12.1 Stream-Specific Physical Triage Cards
+
+When opening **Quick RMA Processing** (`QuickRMAActionModal.jsx`), physical inspectors are presented with stream-specific action cards:
+
+#### A. Customer RMA Inbound (6 Action Cards):
+1. 🟢 **Card #1 — Restock to Shelves / Resellable**: Good condition goods (`Grade A/B`). Sets `disposition: '2- Restock to Inventory'` and routes into the Restock Queue with rack/bin location.
+2. 🟣 **Card #2 — Move to Supplier RTV**: Defective or expired store returns qualifying for vendor chargeback. Automatically transfers the record to the Supplier Hub.
+3. 🔴 **Card #3 — Scrap / Total Loss Disposal**: Damaged beyond recovery (`Grade D`). Automatically stages in `SCRAP-BIN` and exposes the Purchasing Replenishment Switch (`[ 🔄 Re-Order: YES ]` vs `[ 🚫 Re-Order: NO ]`).
+4. 🔵 **Card #4 — Immediate 1-to-1 Buffer Stock Swap**: Emergency replacement dispatched to customer. Generates buffer handover slip and locks credit memo issuance to prevent double refunding.
+5. 🟡 **Card #5 — Quarantine / Put On Hold**: Suspicious defects, missing paperwork, or AE review needed. Freezes all financial claims until supervisor release.
+6. ⚫ **Card #6 — Reject Claim & Return to Customer**: Store error, customer negligence, or outside warranty. Opens Customer Rejection box (`CUSTOMER REJECTION REASON *`), AE notification, and Store Return Gate Pass.
+
+#### B. Supplier RTV Outbound (5 Action Cards):
+1. ⏳ **Card #1 — Stage at Dock for Vendor Pickup**: Default RTV state. Location: `RTV-DOCK`. Authorizes Official Vendor RTV Gate Pass printout.
+2. 💵 **Card #2 — Vendor AP Deduction / Credit Memo Settled**: Supplier granted credit note or AP debit memo deduction.
+3. 🟢 **Card #3 — Vendor Delivered Replacement Stock**: Supplier replaced physical merchandise 1-to-1. Staged at receiving bin and routed to Restock Queue.
+4. 🔴 **Card #4 — Claim Rejected by Vendor**: Vendor rejected return claim. Sets `SCRAP-BIN` and activates Purchasing Replenishment Switch (`YES` vs `NO`). **Strictly isolated from customer rejection gates.**
+5. 🟡 **Card #5 — Under Vendor Dispute / Hold**: Contested chargeback under negotiation. Freezes financial debit claims.
+
+### 12.2 Purchasing Replenishment Switch (`[ 🔄 Re-Order: YES ]` vs `[ 🚫 Re-Order: NO ]`)
+Whenever an item suffers total physical loss (Scrap, RTV, Buffer Swap, or Vendor Rejected):
+- An explicit toggle allows warehouse staff to decide whether procurement must re-order replacement inventory:
+  - `[ 🔄 Re-Order: YES ]` (Default): Item enters the **Supplier Re-Order Queue** (`?queue=reorder`). Coworkers place a PO to replenish stock.
+  - `[ 🚫 Re-Order: NO ]`: Item enters the **No Re-Order / Write-Off Queue** (`?queue=scrap_no_reorder`). No supplier purchase order is triggered.
+- Stored safely in `ai_document_metadata.needs_reorder: boolean` without polluting human notes.
+
+### 12.3 The 3 Scoped Workstation Queues
+Located in the top dark navy bar of both Customer RMA Hub and Supplier RTV Hub:
+1. `[ 📦 Ready to Restock (N) ]`: Filter for all items approved for warehouse restocking. Coworkers click `[ ✓ Restocked in WMS ]` to confirm.
+2. `[ 🔄 Supplier Re-Order (N) ]`: Filter for all lost items flagged `needs_reorder: true`. Coworkers click `[ ✓ PO Placed ]` to confirm replacement order.
+3. `[ 🚫 No Re-Order / Write-Off (N) ]`: Filter for all lost items where `needs_reorder: false`. Coworkers click `[ ✓ Written Off ]` to resolve write-offs.
+4. `[ ✕ Clear Queue Filter ]`: Dynamically appears to reset back to full hub view.
+
+### 12.4 PostgreSQL Check Constraint Safety & Lifecycle Status Resolution
+- **PostgreSQL Enum Check Constraint**: `public.rma_reports.status` enforces `rma_reports_status_check` (`'pending'`, `'received_at_dock'`, `'under_inspection'`, `'credit_memo_issued'`, `'vendor_claimed'`, `'buffer_replacement_dispatched'`, `'resolved'`, `'closed'`, `'rejected'`).
+- Direct mutations to `'restocked'` or `'scrapped'` are prevented. The platform safely sets `status: 'resolved'` and records `workflow_resolution: 'restocked' | 'reordered' | 'scrapped_no_reorder'` in `ai_document_metadata`.
+- All interfaces format resolved tickets into distinct operational stages:
+  - `6- Restocked` (emerald badge)
+  - `7- Re-Ordered (PO Placed)` (emerald/amber badge)
+  - `7- Scrapped / Written Off` (slate/rose badge)
+
+
 
