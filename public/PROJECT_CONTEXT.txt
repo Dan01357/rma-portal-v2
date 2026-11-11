@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-11T06:00:32.964Z
+Generated At: 2026-11-11T06:13:09.298Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -57,8 +57,7 @@ rma-portal-v2/
 │   │   ├── test_openapi.js
 │   │   └── vercel_err.html
 ├── scripts/
-│   │   ├── build_context.js
-│   │   └── update_app_and_supplier.cjs
+│   │   └── build_context.js
 ├── src/
 │   │   ├── archive_v1/
 │   │   │   │   ├── AdminPinModal.jsx
@@ -14020,10 +14019,10 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (coworkerQueueFilter === 'scrap' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')) {
+                      if ((coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')) {
                         setCoworkerQueueFilter('all');
                       } else {
-                        setCoworkerQueueFilter('scrap');
+                        setCoworkerQueueFilter('reorder');
                         setReportsDispositionFilter('all');
                         setReportsStatusFilter('all');
                         setReportsCurrentPage(1);
@@ -14033,13 +14032,13 @@ export default function App() {
                       }
                     }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                      coworkerQueueFilter === 'scrap' && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
+                      (coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') && (adminActiveTab === 'customer_reports' || adminActiveTab === 'reports')
                         ? 'bg-amber-600 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
                         : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/40'
                     }`}
-                    title="Filter table to items triaged as Scrap / Dispose whose status is not yet scrapped"
+                    title="Filter table to items flagged for Supplier Re-Order whose purchase order is not yet placed"
                   >
-                    <span>🔄 Supplier Re-Order ({supplierReorderReports.length})</span>
+                    <span>🔄 Supplier Re-Order ({reorderNeededReports.length})</span>
                   </button>
 
                   {coworkerQueueFilter !== 'all' && (
@@ -14167,21 +14166,6 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => {
-                        setCoworkerQueueFilter(coworkerQueueFilter === 'rtv' ? 'all' : 'rtv');
-                        setReportsCurrentPage(1);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                        coworkerQueueFilter === 'rtv'
-                          ? 'bg-purple-600 text-white border-purple-500 shadow-sm ring-2 ring-purple-400/40'
-                          : 'bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800 hover:bg-purple-50'
-                      }`}
-                    >
-                      <span>🟣 Vendor RTV ({vendorRtvReports.length})</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
                         setCoworkerQueueFilter((coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') ? 'all' : 'reorder');
                         setReportsCurrentPage(1);
                       }}
@@ -14191,22 +14175,52 @@ export default function App() {
                           : 'bg-white dark:bg-slate-900 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 hover:bg-rose-50'
                       }`}
                     >
-                      <span>🔴 Re-order Needed ({supplierReorderReports.length})</span>
+                      <span>🔄 Re-order Needed ({reorderNeededReports.length})</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => {
-                        setCoworkerQueueFilter(coworkerQueueFilter === 'hold' ? 'all' : 'hold');
+                        setCoworkerQueueFilter(coworkerQueueFilter === 'scrap_no_reorder' ? 'all' : 'scrap_no_reorder');
                         setReportsCurrentPage(1);
                       }}
                       className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                        coworkerQueueFilter === 'hold'
+                        coworkerQueueFilter === 'scrap_no_reorder'
+                          ? 'bg-slate-700 text-white border-slate-600 shadow-sm ring-2 ring-slate-400/40'
+                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span>🗑️ Scrapped — No Re-Order ({scrappedNoReorderReports.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCoworkerQueueFilter((coworkerQueueFilter === 'hold' || coworkerQueueFilter === 'quarantine') ? 'all' : 'hold');
+                        setReportsCurrentPage(1);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+                        coworkerQueueFilter === 'hold' || coworkerQueueFilter === 'quarantine'
                           ? 'bg-amber-500 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
                           : 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-50'
                       }`}
                     >
                       <span>🟡 On Hold ({onHoldReports.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCoworkerQueueFilter(coworkerQueueFilter === 'rejected' ? 'all' : 'rejected');
+                        setReportsCurrentPage(1);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+                        coworkerQueueFilter === 'rejected'
+                          ? 'bg-rose-950 text-rose-200 border-rose-800 shadow-sm ring-2 ring-rose-500/40'
+                          : 'bg-white dark:bg-slate-900 text-rose-900 dark:text-rose-400 border-rose-300 dark:border-rose-900 hover:bg-rose-50'
+                      }`}
+                    >
+                      <span>⚫ Rejected Claims ({rejectedReports.length})</span>
                     </button>
 
                     {coworkerQueueFilter !== 'all' && (
