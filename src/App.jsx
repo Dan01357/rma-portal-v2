@@ -93,6 +93,14 @@ import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
 import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest, formatQuantityWithPackSize, formatManifestBreakdown, resolveBatchManifestLifecycle } from './utils/rmaHelpers';
+import {
+  getItemNeedsReorder,
+  isItemReadyToRestock,
+  isItemReorderNeeded,
+  isItemScrappedNoReorder,
+  isItemOnHold,
+  isItemRejected
+} from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
   '1- Damaged Box / Crushed Packaging',
@@ -1471,19 +1479,23 @@ export default function App() {
 
   const readyToRestockReports = React.useMemo(() => {
     return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemReadyToRestock(r, recentReportsList));
-  }, [recentReportsList, isItemReadyToRestock]);
+  }, [recentReportsList]);
 
-  const supplierReorderReports = React.useMemo(() => {
-    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemReadyForSupplierReorder(r, recentReportsList));
-  }, [recentReportsList, isItemReadyForSupplierReorder]);
+  const reorderNeededReports = React.useMemo(() => {
+    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemReorderNeeded(r, recentReportsList));
+  }, [recentReportsList]);
 
-  const vendorRtvReports = React.useMemo(() => {
-    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemVendorRtv(r, recentReportsList));
-  }, [recentReportsList, isItemVendorRtv]);
+  const scrappedNoReorderReports = React.useMemo(() => {
+    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemScrappedNoReorder(r, recentReportsList));
+  }, [recentReportsList]);
 
   const onHoldReports = React.useMemo(() => {
     return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemOnHold(r, recentReportsList));
-  }, [recentReportsList, isItemOnHold]);
+  }, [recentReportsList]);
+
+  const rejectedReports = React.useMemo(() => {
+    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemRejected(r, recentReportsList));
+  }, [recentReportsList]);
 
   const supplierOutboundReports = React.useMemo(() => {
     const unpacked = [];
@@ -1608,15 +1620,17 @@ export default function App() {
       }
 
       // Date Range filters
-      // 4-Pillar Dedicated Queue Filters ('restock' | 'rtv' | 'reorder' | 'hold')
+      // Unified Coworker Workstation Queue Filters
       if (coworkerQueueFilter === 'restock') {
         if (!isItemReadyToRestock(item, recentReportsList)) return false;
       } else if (coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') {
-        if (!isItemReadyForSupplierReorder(item, recentReportsList)) return false;
-      } else if (coworkerQueueFilter === 'rtv') {
-        if (!isItemVendorRtv(item, recentReportsList)) return false;
-      } else if (coworkerQueueFilter === 'hold') {
+        if (!isItemReorderNeeded(item, recentReportsList)) return false;
+      } else if (coworkerQueueFilter === 'scrap_no_reorder') {
+        if (!isItemScrappedNoReorder(item, recentReportsList)) return false;
+      } else if (coworkerQueueFilter === 'hold' || coworkerQueueFilter === 'quarantine') {
         if (!isItemOnHold(item, recentReportsList)) return false;
+      } else if (coworkerQueueFilter === 'rejected') {
+        if (!isItemRejected(item, recentReportsList)) return false;
       }
 
       if (reportsDateFrom) {
@@ -4559,43 +4573,7 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Quick-Filter Chips for Warehouse Disposition: Swipeable with touch momentum */}
-                  <div className="relative w-full min-w-0 pt-2 border-t border-slate-200 dark:border-slate-700/80">
-                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-0.5 w-full scroll-smooth min-w-0 -mx-0.5 sm:mx-0">
-                      <span className="text-[10px] uppercase font-black text-slate-400 shrink-0 mr-1 flex items-center gap-1 whitespace-nowrap">
-                        <Layers className="w-3 h-3 text-blue-500 shrink-0" />
-                        Disposition:
-                      </span>
-                      {[
-                        { id: 'all', label: 'All Dispositions' },
-                        { id: 'Pending Triage', label: '1- Pending Triage' },
-                        { id: 'Restock to Inventory', label: '2- Restock' },
-                        { id: 'Return to Vendor (RTV)', label: '3- Return to Vendor (RTV)' },
-                        { id: 'Quarantine', label: '4- Quarantine' },
-                        { id: 'Scrap / Dispose', label: '5- Scrap / Dispose' },
-                        { id: 'Buffer Stock Exchange', label: '6- Buffer Exchange' }
-                      ].map(chip => {
-                        const isActive = coworkerQueueFilter === 'all' && reportsDispositionFilter.toLowerCase() === chip.id.toLowerCase();
-                        return (
-                          <button
-                            key={chip.id}
-                            type="button"
-                            onClick={() => {
-                              setCoworkerQueueFilter('all');
-                              setReportsDispositionFilter(chip.id);
-                              setReportsCurrentPage(1);
-                            }}
-                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 whitespace-nowrap transition-all cursor-pointer ${isActive
-                              ? 'bg-blue-600 text-white shadow-2xs font-black'
-                              : 'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                              }`}
-                          >
-                            {chip.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+
 
                   <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
                     <span>
@@ -5301,11 +5279,12 @@ export default function App() {
                                           );
                                         }
                                         const isReportOnHold = isItemOnHold(item, recentReportsList);
+                                        const isReportRejected = isItemRejected(item, recentReportsList);
                                         if (canEditProducts) {
                                           return (
                                             <button
                                               type="button"
-                                              disabled={isReportOnHold}
+                                              disabled={isReportOnHold || isReportRejected}
                                               onClick={() => {
                                                 if (isReportOnHold) {
                                                   alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");

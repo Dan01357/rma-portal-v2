@@ -1,6 +1,26 @@
 import { supabase } from '../../_lib/supabase.js';
 import { requireApiKey, sendJson, setCorsHeaders } from '../../_lib/auth.js';
 
+const getItemNeedsReorder = (item) => {
+  if (item?.needs_reorder !== undefined && item?.needs_reorder !== null) {
+    return Boolean(item.needs_reorder);
+  }
+  if (item?.ai_document_metadata?.needs_reorder !== undefined && item?.ai_document_metadata?.needs_reorder !== null) {
+    return Boolean(item.ai_document_metadata.needs_reorder);
+  }
+  const notes = String(item?.notes || '');
+  if (notes.includes('[REORDER: NO]')) return false;
+  if (notes.includes('[REORDER: YES]')) return true;
+  return true;
+};
+
+const getRecoverySource = (item) => {
+  const disp = String(item?.disposition || '').toLowerCase();
+  if (disp.includes('buffer')) return 'buffer_swap';
+  if (disp.includes('rtv') || disp.includes('vendor') || item?.rma_type === 'supplier_outbound') return 'vendor_rtv';
+  return 'scrap';
+};
+
 export default async function handler(req, res) {
   setCorsHeaders(res);
 
@@ -179,14 +199,25 @@ export default async function handler(req, res) {
         const itemDisp = String(item.disposition || '').toLowerCase();
         const itemStatus = String(item.status || 'received_at_dock').toLowerCase().trim();
 
-        // 4-Pillar Dedicated Queues (Restock, Re-order, RTV, Hold)
+        // Unified 5-Queue Filtering (restock, reorder, scrap_no_reorder, quarantine, rejected)
         if (queue) {
           const cleanQueue = String(queue).trim().toLowerCase();
+          const needsReorderFlag = getItemNeedsReorder(item);
+
           if (cleanQueue === 'restock') {
-            if (!itemDisp.includes('restock')) return false;
+            const isRestockDisp = itemDisp.includes('restock') || itemDisp.includes('replacement stock received');
+            if (!isRestockDisp) return false;
             if (FINALIZED_RESTOCK.has(itemStatus)) return false;
           } else if (cleanQueue === 'reorder' || cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
-            if (!itemDisp.includes('scrap') && !itemDisp.includes('dispose') && !itemDisp.includes('reorder')) return false;
+            const isLossDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('reorder') || itemDisp.includes('rtv') || itemDisp.includes('vendor') || itemDisp.includes('buffer') || itemDisp.includes('claim rejected by vendor');
+            const isExcluded = itemDisp.includes('restock') || itemDisp.includes('replacement stock received') || itemDisp.includes('quarantine') || itemDisp.includes('hold') || itemStatus === 'rejected' || itemDisp.includes('8- rejected');
+            if (!isLossDisp || isExcluded) return false;
+            if (needsReorderFlag === false) return false;
+            if (FINALIZED_SCRAP.has(itemStatus)) return false;
+          } else if (cleanQueue === 'scrap_no_reorder') {
+            const isScrapDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('claim rejected by vendor');
+            if (!isScrapDisp) return false;
+            if (needsReorderFlag !== false) return false;
             if (FINALIZED_SCRAP.has(itemStatus)) return false;
           } else if (cleanQueue === 'rtv_debit' || cleanQueue === 'rtv') {
             const isRtv = itemDisp.includes('rtv') || itemDisp.includes('return to vendor') || itemDisp.includes('vendor') || item.rma_type === 'supplier_outbound';
@@ -196,6 +227,10 @@ export default async function handler(req, res) {
             const isHold = itemDisp.includes('quarantine') || itemDisp.includes('hold') || itemStatus === 'quarantine' || itemStatus === 'hold';
             if (!isHold) return false;
             if (['closed', 'resolved', 'rejected', 'deleted'].includes(itemStatus)) return false;
+          } else if (cleanQueue === 'rejected') {
+            const isRejected = itemStatus === 'rejected' || itemDisp.includes('rejected') || itemDisp.includes('claim rejected by vendor');
+            if (!isRejected) return false;
+            if (['closed', 'resolved', 'deleted'].includes(itemStatus)) return false;
           }
         }
 
@@ -258,6 +293,18 @@ export default async function handler(req, res) {
       });
 
       const paginatedData = filtered.slice(numOffset, numOffset + numLimit);
+      const enrichedData = paginatedData.map(item => {
+        const needsReorder = getItemNeedsReorder(item);
+        const itemObj = {
+          ...item,
+          needs_reorder: needsReorder
+        };
+        const cleanQueue = queue ? String(queue).trim().toLowerCase() : '';
+        if (cleanQueue === 'reorder' || cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
+          itemObj.recovery_source = getRecoverySource(item);
+        }
+        return itemObj;
+      });
 
       return sendJson(res, 200, {
         success: true,
@@ -266,7 +313,7 @@ export default async function handler(req, res) {
         total: filtered.length,
         limit: numLimit,
         offset: numOffset,
-        data: paginatedData
+        data: enrichedData
       });
     } catch (err) {
       console.error('[API v1 RMA GET] Server error:', err);

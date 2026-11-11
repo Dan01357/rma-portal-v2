@@ -35,6 +35,14 @@ import {
   formatManifestBreakdown,
   hasAssignedSku 
 } from '../utils/rmaHelpers';
+import {
+  getItemNeedsReorder,
+  isItemReadyToRestock,
+  isItemReorderNeeded,
+  isItemScrappedNoReorder,
+  isItemOnHold,
+  isItemRejected
+} from '../utils/rmaHelpers';
 
 export default function SupplierClaimsTab({
   reportsList = [],
@@ -384,19 +392,17 @@ export default function SupplierClaimsTab({
         rDisp === dispositionFilter.toLowerCase() ||
         rDisp.replace(/^\d+\s*-\s*/, '').trim() === cleanFilter;
 
-      // 4-Pillar Queue Filter
+      // Unified Coworker Workstation Queue Filter
       if (queueFilter === 'restock') {
-        const isRestock = rDisp.includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(rStatus);
-        if (!isRestock) return false;
-      } else if (queueFilter === 'rtv') {
-        const isRtv = (r.rma_type === 'supplier_outbound' || rDisp.includes('rtv') || rDisp.includes('vendor')) && !['closed', 'resolved', 'rejected', 'deleted', 'restocked', 'scrapped', 'disposed'].includes(rStatus);
-        if (!isRtv) return false;
+        if (!isItemReadyToRestock(r)) return false;
       } else if (queueFilter === 'reorder' || queueFilter === 'scrap') {
-        const isReorder = (rDisp.includes('scrap') || rDisp.includes('dispose') || rDisp.includes('reorder')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(rStatus);
-        if (!isReorder) return false;
-      } else if (queueFilter === 'hold') {
-        const isHold = (rDisp.includes('quarantine') || rDisp.includes('hold') || rStatus === 'quarantine') && !['closed', 'resolved', 'rejected', 'deleted'].includes(rStatus);
-        if (!isHold) return false;
+        if (!isItemReorderNeeded(r)) return false;
+      } else if (queueFilter === 'scrap_no_reorder') {
+        if (!isItemScrappedNoReorder(r)) return false;
+      } else if (queueFilter === 'hold' || queueFilter === 'quarantine') {
+        if (!isItemOnHold(r)) return false;
+      } else if (queueFilter === 'rejected') {
+        if (!isItemRejected(r)) return false;
       }
 
       const q = searchTerm.toLowerCase().trim();
@@ -939,7 +945,7 @@ export default function SupplierClaimsTab({
 
       {/* Filter Controls Bar (Dropdowns + Search) */}
       <div className="p-3 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-3 shadow-xs w-full min-w-0 box-border">
-        {/* Top Queue Filter Strip (Subject 2.1) */}
+        {/* Top Unified Coworker Workstation Queue Bar */}
         <div className="flex flex-wrap items-center gap-1.5 pb-2.5 border-b border-slate-200 dark:border-slate-800">
           <button
             type="button"
@@ -954,7 +960,7 @@ export default function SupplierClaimsTab({
                 : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
             }`}
           >
-            All (${queueCounts.all})
+            All Returns (${queueCounts.all})
           </button>
 
           <button
@@ -970,23 +976,7 @@ export default function SupplierClaimsTab({
                 : 'bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50'
             }`}
           >
-            <span>🟢 Ready to Restock (${queueCounts.restock})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setQueueFilter(queueFilter === 'rtv' ? 'all' : 'rtv');
-              setSelectedRmaIds(new Set());
-              setCurrentPage(1);
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-              queueFilter === 'rtv'
-                ? 'bg-purple-600 text-white border-purple-500 shadow-sm ring-2 ring-purple-400/40'
-                : 'bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800 hover:bg-purple-50'
-            }`}
-          >
-            <span>🟣 Vendor RTV (${queueCounts.rtv})</span>
+            <span>📦 Ready to Restock (${queueCounts.restock})</span>
           </button>
 
           <button
@@ -998,11 +988,27 @@ export default function SupplierClaimsTab({
             }}
             className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
               queueFilter === 'reorder'
+                ? 'bg-amber-600 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
+                : 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-50'
+            }`}
+          >
+            <span>🔄 Re-Order Needed (${queueCounts.reorder})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setQueueFilter(queueFilter === 'scrap_no_reorder' ? 'all' : 'scrap_no_reorder');
+              setSelectedRmaIds(new Set());
+              setCurrentPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+              queueFilter === 'scrap_no_reorder'
                 ? 'bg-rose-600 text-white border-rose-500 shadow-sm ring-2 ring-rose-400/40'
                 : 'bg-white dark:bg-slate-800 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 hover:bg-rose-50'
             }`}
           >
-            <span>🔴 Re-order Needed (${queueCounts.reorder})</span>
+            <span>🗑️ Scrapped — No Re-Order (${queueCounts.scrap_no_reorder})</span>
           </button>
 
           <button
@@ -1019,6 +1025,22 @@ export default function SupplierClaimsTab({
             }`}
           >
             <span>🟡 On Hold (${queueCounts.hold})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setQueueFilter(queueFilter === 'rejected' ? 'all' : 'rejected');
+              setSelectedRmaIds(new Set());
+              setCurrentPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+              queueFilter === 'rejected'
+                ? 'bg-slate-800 text-white border-slate-700 shadow-sm ring-2 ring-slate-600/40'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <span>⚫ Rejected Claims (${queueCounts.rejected})</span>
           </button>
 
           {queueFilter !== 'all' && (
@@ -1691,8 +1713,8 @@ export default function SupplierClaimsTab({
                               </button>
                             )}
 
-                            {/* 1-Click Coworker WMS Restock Action */}
-                            {String(r.disposition || '').toLowerCase().includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(String(r.status || '').toLowerCase()) && (
+                            {/* 1-Click Ready to Restock Action */}
+                            {isItemReadyToRestock(r) && (
                               <button
                                 type="button"
                                 disabled={updatingQueueId === (r.id || r.rma_number)}
@@ -1700,25 +1722,38 @@ export default function SupplierClaimsTab({
                                 className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
                                 title="1-click confirm that this item has been stocked in WMS (updates status to 6- Restocked)"
                               >
-                                <span>✓ Restocked in WMS</span>
+                                <span>✓ Confirm Restocked in WMS</span>
                               </button>
                             )}
 
-                            {/* 1-Click Coworker Supplier Re-Order Action */}
-                            {(String(r.disposition || '').toLowerCase().includes('scrap') || String(r.disposition || '').toLowerCase().includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(String(r.status || '').toLowerCase()) && (
+                            {/* 1-Click Re-Order Needed Action */}
+                            {isItemReorderNeeded(r) && (
+                              <button
+                                type="button"
+                                disabled={updatingQueueId === (r.id || r.rma_number)}
+                                onClick={() => handleConfirmCoworkerAction(r, 'scrapped')}
+                                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                title="1-click confirm replacement order placed with supplier (updates status to 7- Scrapped / Disposed)"
+                              >
+                                <span>✓ Confirm Re-Ordered (PO Placed)</span>
+                              </button>
+                            )}
+
+                            {/* 1-Click Scrapped — No Re-Order Action */}
+                            {isItemScrappedNoReorder(r) && (
                               <button
                                 type="button"
                                 disabled={updatingQueueId === (r.id || r.rma_number)}
                                 onClick={() => handleConfirmCoworkerAction(r, 'scrapped')}
                                 className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
-                                title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
+                                title="1-click confirm that this total loss is written off without re-ordering"
                               >
-                                <span>✓ PO Placed</span>
+                                <span>✓ Confirm Written Off</span>
                               </button>
                             )}
 
                             {/* Release Hold Action */}
-                            {(String(r.disposition || '').toLowerCase().includes('quarantine') || String(r.disposition || '').toLowerCase().includes('hold') || String(r.status || '').toLowerCase() === 'quarantine') && (
+                            {isItemOnHold(r) && (
                               <button
                                 type="button"
                                 onClick={() => onOpenQuickAction && onOpenQuickAction(r.rma_number)}
@@ -1728,6 +1763,13 @@ export default function SupplierClaimsTab({
                                 <Unlock className="w-3 h-3" />
                                 <span>🔓 Release Hold</span>
                               </button>
+                            )}
+
+                            {/* Rejected Badge */}
+                            {isItemRejected(r) && (
+                              <span className="px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold text-[10px] border border-slate-300 dark:border-slate-700">
+                                🚫 Claim Rejected
+                              </span>
                             )}
 
                             {/* 4. Official Debit Claim Generation or Viewing */}
@@ -1742,11 +1784,9 @@ export default function SupplierClaimsTab({
                                 <span>RTV Voucher Active</span>
                               </button>
                             ) : (() => {
-                              const isRowOnHold = Boolean(
-                                String(r.disposition || '').toLowerCase().includes('quarantine') ||
-                                String(r.disposition || '').toLowerCase().includes('hold') ||
-                                String(r.status || '').toLowerCase() === 'quarantine'
-                              );
+                              const isRowOnHold = isItemOnHold(r);
+                              const isRowRejected = isItemRejected(r);
+                              const isVendorRefused = String(r.disposition || '').toLowerCase().includes('claim rejected by vendor');
 
                               if (isRowOnHold) {
                                 return (
@@ -1761,6 +1801,20 @@ export default function SupplierClaimsTab({
                                   >
                                     <Lock className="w-3 h-3 text-amber-500" />
                                     <span>Hold: Debit Claim Locked</span>
+                                  </button>
+                                );
+                              }
+
+                              if (isRowRejected || isVendorRefused) {
+                                return (
+                                  <button
+                                    type="button"
+                                    disabled={true}
+                                    className="px-2.5 py-1 bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-not-allowed opacity-70"
+                                    title={isVendorRefused ? "Vendor refused claim. Debit claims cannot be issued." : "Claim is Rejected."}
+                                  >
+                                    <Lock className="w-3 h-3 text-rose-500" />
+                                    <span>{isVendorRefused ? 'Vendor Rejected Claim' : 'Claim Rejected'}</span>
                                   </button>
                                 );
                               }

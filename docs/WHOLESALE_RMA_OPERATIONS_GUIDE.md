@@ -278,12 +278,45 @@ Inspectors select from 4 enterprise condition grades:
 * **Grade C — Defective / Parts Only**: Electrical failure, broken components, leakage. Requires Return to Vendor (RTV) debit claim or component salvage.
 * **Grade D — Total Loss / Scrap**: Expired food items, shattered glass, contaminated chemicals. Hazardous waste or authorized destruction.
 
-### 3.3 Warehouse Disposition Routing
-Inspectors select the physical disposition route:
-1. **Restock to Inventory**: Generates positive inventory adjustment in WMS/ERP.
-2. **Return to Vendor (RTV)**: Queues item for Chapter 5 Supplier Debit Claims.
-3. **Quarantine**: Holds item pending manufacturer rep inspection or safety audit.
-4. **Scrap / Dispose**: Marks item for certified destruction certificate.
+### 3.3 Stream-Specific Warehouse Disposition Cards & Purchasing Replenishment Switch
+
+The triage workflow automatically adapts its decision matrix based on whether the ticket is a **Customer Return** (`rma_type: 'customer_inbound'`) or a **Supplier Outbound Defect** (`rma_type: 'supplier_outbound'`):
+
+#### A. Customer RMA Hub (`customer_inbound` — 6 Cards):
+1. **🟢 1. Restock to Shelf** (`disposition: '2- Restock to Inventory'`):
+   - Prompts for `Target Rack / Bin Location *`.
+   - Routes to Coworker **Ready to Restock** queue (`needs_reorder: false`).
+2. **🟣 2. Move to Supplier RTV** (`disposition: '3- Return to Vendor (RTV)'`):
+   - Auto-sets bin to `'RTV-DOCK'`.
+   - Prompts the **Purchasing Replenishment Switch** (`[ 🔄 YES — Flag for Supplier Re-Order ]` vs `[ 🚫 NO — Do Not Re-Order ]`, default `YES`).
+   - Automatically transfers ticket to Supplier Hub (`rma_type: 'supplier_outbound'`).
+3. **🔴 3. Scrap / Dispose** (`disposition: '5- Scrap / Dispose'`):
+   - Auto-sets bin to `'SCRAP-BIN'`.
+   - Prompts the **Purchasing Replenishment Switch** (default `YES`).
+4. **🔵 4. Buffer Stock Swap (1:1)** (`disposition: '6- Buffer Stock Exchange'`):
+   - Opens the Buffer Stock Replacement Slip.
+   - Prompts the **Purchasing Replenishment Switch** (default `YES`, replacing buffer unit).
+5. **🟡 5. On Hold / Quarantine** (`disposition: '4- Quarantine'`, `status: 'under_inspection'`):
+   - Auto-sets bin to `'QUARANTINE-HOLD'`.
+   - Requires mandatory **Hold / Investigation Reason**.
+   - **Safety Lock:** Freezes Credit Memo, Restock, and Re-Order actions until released.
+6. **⚫ 6. Reject & Return to Customer** (`disposition: '8- Rejected / Return to Customer'`, `status: 'rejected'`):
+   - Auto-sets bin to `'OUTBOUND-RETURN-TO-STORE'`.
+   - Requires mandatory **Customer Rejection Reason**.
+   - **Safety Lock:** Permanently blocks Credit Memo.
+   - Provides button `[ 🖨️ Print Rejected Return Gate Pass ]` to dispatch the box back to customer.
+
+#### B. Supplier RTV Hub (`supplier_outbound` — 5 Cards):
+1. **⏳ 1. Pending Vendor Pickup** (`disposition: '1 - Pending Vendor Pickup'`):
+   - Staged in `RTV-DOCK`, prompts Replenishment Switch.
+2. **💵 2. Vendor Credit Settled** (`disposition: '3 - Vendor Credit / AP Deduction Settled'`):
+   - Vendor credit memo or AP deduction confirmed. Prompts Replenishment Switch.
+3. **🟢 3. Vendor Sent Replacement Stock** (`disposition: '4 - Vendor Replacement Stock Received'`):
+   - Prompts for shelf location. Routes to Coworker **Ready to Restock** queue and sets `needs_reorder: false`.
+4. **🔴 4. Vendor Rejected Claim** (`disposition: '5 - Claim Rejected by Vendor'`):
+   - Auto-sets bin to `'SCRAP-BIN'`. Blocks Debit Claims. Prompts Replenishment Switch.
+5. **🟡 5. Under Vendor Dispute** (`disposition: '4- Quarantine'`):
+   - Auto-sets bin to `'QUARANTINE-HOLD'`. Requires dispute note. Freezes Debit Claims.
 
 ### 3.4 Rack & Bin Location Tagging
 Inspectors input the physical warehouse address (e.g., `RACK-03-BIN-A`, `BAY-2-PALLET-09`, `QUARANTINE-LOCKER`). This prints directly on box labels for pickers.

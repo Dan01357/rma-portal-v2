@@ -443,7 +443,134 @@ export function resolveBatchManifestLifecycle(report, allReports = []) {
   };
 }
 
+/**
+ * Resolves the explicit or inferred purchasing replenishment flag (needs_reorder).
+ * Returns true if the lost stock should be reordered from supplier, false otherwise.
+ */
+export function getItemNeedsReorder(item) {
+  if (item?.needs_reorder !== undefined && item?.needs_reorder !== null) {
+    return Boolean(item.needs_reorder);
+  }
+  if (item?.ai_document_metadata?.needs_reorder !== undefined && item?.ai_document_metadata?.needs_reorder !== null) {
+    return Boolean(item.ai_document_metadata.needs_reorder);
+  }
+  const notes = String(item?.notes || '');
+  if (notes.includes('[REORDER: NO]')) return false;
+  if (notes.includes('[REORDER: YES]')) return true;
+  // Default for Scrap / RTV / Buffer Swap / Vendor Rejected is true
+  return true;
+}
 
+/**
+ * Computes recovery source for items flagged for replenishment: 'scrap' | 'vendor_rtv' | 'buffer_swap'
+ */
+export function getRecoverySource(item) {
+  const disp = String(item?.disposition || '').toLowerCase();
+  if (disp.includes('buffer')) return 'buffer_swap';
+  if (disp.includes('rtv') || disp.includes('vendor') || item?.rma_type === 'supplier_outbound') return 'vendor_rtv';
+  return 'scrap';
+}
 
+/**
+ * Helper to check if an item (or child items in a batch manifest) belongs to the Ready to Restock queue:
+ * disposition: 'Restock to Inventory' OR 'Vendor Replacement Stock Received'
+ * and status !== 'restocked'
+ */
+export function isItemReadyToRestock(item, allReports = []) {
+  if (!item) return false;
+  if (!item.is_unpacked_manifest_item && (item.is_parent || (Array.isArray(item.items) && item.items.length > 1))) {
+    const children = Array.isArray(item.items) && item.items.length > 0 ? item.items : [];
+    return children.some(c => isItemReadyToRestock(c, allReports));
+  }
+  const disp = String(item.disposition || '').toLowerCase();
+  const st = String(item.status || '').toLowerCase();
+  const isRestockDisp = disp.includes('restock') || disp.includes('replacement stock received');
+  return isRestockDisp && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed', 'rejected'].includes(st);
+}
 
+/**
+ * Helper to check if an item belongs to the Re-Order Needed queue:
+ * disposition: Scrap / RTV / Buffer Swap / Claim Rejected by Vendor
+ * AND needs_reorder !== false
+ * AND status !== 'scrapped' (and not restock, hold, or rejected)
+ */
+export function isItemReorderNeeded(item, allReports = []) {
+  if (!item) return false;
+  if (!item.is_unpacked_manifest_item && (item.is_parent || (Array.isArray(item.items) && item.items.length > 1))) {
+    const children = Array.isArray(item.items) && item.items.length > 0 ? item.items : [];
+    return children.some(c => isItemReorderNeeded(c, allReports));
+  }
+  const disp = String(item.disposition || '').toLowerCase();
+  const st = String(item.status || '').toLowerCase();
 
+  if (
+    disp.includes('restock') ||
+    disp.includes('replacement stock received') ||
+    disp.includes('quarantine') ||
+    disp.includes('hold') ||
+    st === 'rejected' ||
+    disp.includes('8- rejected')
+  ) {
+    return false;
+  }
+
+  const isLossDisp =
+    disp.includes('scrap') ||
+    disp.includes('dispose') ||
+    disp.includes('reorder') ||
+    disp.includes('rtv') ||
+    disp.includes('vendor') ||
+    disp.includes('buffer') ||
+    disp.includes('claim rejected by vendor');
+
+  const needsReorder = getItemNeedsReorder(item);
+  return isLossDisp && needsReorder !== false && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked', 'rejected'].includes(st);
+}
+
+/**
+ * Helper to check if an item is Scrapped with No Re-Order:
+ * disposition is Scrap or Vendor Rejected AND needs_reorder === false
+ * AND status !== 'scrapped'
+ */
+export function isItemScrappedNoReorder(item, allReports = []) {
+  if (!item) return false;
+  if (!item.is_unpacked_manifest_item && (item.is_parent || (Array.isArray(item.items) && item.items.length > 1))) {
+    const children = Array.isArray(item.items) && item.items.length > 0 ? item.items : [];
+    return children.some(c => isItemScrappedNoReorder(c, allReports));
+  }
+  const disp = String(item.disposition || '').toLowerCase();
+  const st = String(item.status || '').toLowerCase();
+  const isScrapDisp = disp.includes('scrap') || disp.includes('dispose') || disp.includes('claim rejected by vendor');
+  const needsReorder = getItemNeedsReorder(item);
+  return isScrapDisp && needsReorder === false && !['scrapped', 'disposed', 'closed', 'resolved', 'rejected'].includes(st);
+}
+
+/**
+ * Helper to check if an item is On Hold / Quarantine:
+ * disposition includes Quarantine or Hold or status is quarantine / hold
+ */
+export function isItemOnHold(item, allReports = []) {
+  if (!item) return false;
+  if (!item.is_unpacked_manifest_item && (item.is_parent || (Array.isArray(item.items) && item.items.length > 1))) {
+    const children = Array.isArray(item.items) && item.items.length > 0 ? item.items : [];
+    return children.some(c => isItemOnHold(c, allReports));
+  }
+  const disp = String(item.disposition || '').toLowerCase();
+  const st = String(item.status || '').toLowerCase();
+  return (disp.includes('quarantine') || disp.includes('hold') || st === 'quarantine' || st === 'hold') && !['closed', 'resolved', 'rejected', 'deleted'].includes(st);
+}
+
+/**
+ * Helper to check if an item is Rejected:
+ * status === 'rejected' OR disposition includes '8- Rejected / Return to Customer' OR 'Claim Rejected by Vendor'
+ */
+export function isItemRejected(item, allReports = []) {
+  if (!item) return false;
+  if (!item.is_unpacked_manifest_item && (item.is_parent || (Array.isArray(item.items) && item.items.length > 1))) {
+    const children = Array.isArray(item.items) && item.items.length > 0 ? item.items : [];
+    return children.some(c => isItemRejected(c, allReports));
+  }
+  const disp = String(item.disposition || '').toLowerCase();
+  const st = String(item.status || '').toLowerCase();
+  return (st === 'rejected' || disp.includes('8- rejected') || disp.includes('claim rejected by vendor')) && !['closed', 'resolved', 'deleted'].includes(st);
+}

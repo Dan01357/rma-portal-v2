@@ -1213,6 +1213,49 @@ Each test scenario defines:
 ## Section 16: 4-Pillar Operational Action Trigger System (Restock, Re-order, RTV, Hold) & Coworker Queues
 
 ### 16.0 4-Pillar Operational Action Triggers in Quick Action Modal
+
+- [ ] **TC-PILLAR-10 (Customer Hub 6-Card Stream Isolation & Rejection Gate Pass)**
+  * **Location**: Customer RMA Hub -> Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**:
+    1. Open any customer inbound ticket.
+    2. Verify exactly 6 action cards are rendered: *1. Restock to Shelf*, *2. Move to Supplier RTV*, *3. Scrap / Dispose*, *4. Buffer Stock Swap*, *5. On Hold / Quarantine*, *6. Reject & Return*.
+    3. Click *6. Reject & Return*.
+    4. Type a customer rejection reason (*"Physical water damage caused in customer store"*).
+    5. Click "Save Physical Triage".
+    6. Click **[ 🖨️ Print Rejected Return Gate Pass ]**.
+  * **Expected Behavior**:
+    1. Printable Rejected Return Gate Pass launches in a new window with red border, rejection reason, reference numbers, and courier handover signatures.
+    2. Disposition updates to `"8- Rejected / Return to Customer"` and status updates to `"rejected"`.
+    3. Staging location is automatically set to `"OUTBOUND-RETURN-TO-STORE"`.
+    4. `+ Issue Credit Memo` is permanently disabled with tooltip: *"Claim is Rejected. Credit Memos cannot be issued."*
+    5. Item appears in the top workstation queue under **⚫ Rejected Claims**.
+
+- [ ] **TC-PILLAR-11 (Supplier Hub 5-Card Stream Isolation & Free Replacement Routing)**
+  * **Location**: Supplier RTV Hub -> Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**:
+    1. Open any supplier outbound ticket in Supplier Hub.
+    2. Verify exactly 5 action cards are rendered: *1. Pending Vendor Pickup*, *2. Vendor Credit Settled*, *3. Replacement Received*, *4. Vendor Rejected Claim*, *5. Under Vendor Dispute*.
+    3. Click *3. Replacement Received*.
+    4. Enter bin location: `SHELF-04-A`.
+    5. Click "Save Physical Triage".
+  * **Expected Behavior**:
+    1. Card activates with teal highlight.
+    2. `needs_reorder` is automatically set to `false` (cancelling re-orders since vendor replaced goods free).
+    3. Item immediately reflects under the **📦 Ready to Restock** queue.
+    4. Row displays `[ ✓ Confirm Restocked in WMS ]`.
+
+- [ ] **TC-PILLAR-12 (Explicit Purchasing Replenishment Switch [Re-Order: YES / NO])**
+  * **Location**: Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**:
+    1. Select *Scrap / Dispose* or *Move to Supplier RTV*.
+    2. Observe the **Purchasing Replenishment Switch**.
+    3. Click **[ 🚫 NO — Do Not Re-Order ]** and save.
+  * **Expected Behavior**:
+    1. Switch toggles to grey/slate with indicator *"Write-Off / No Re-Order"*.
+    2. Item is saved without triggering Supabase `400 Bad Request` (flag is stored safely inside `ai_document_metadata` and tagged `[REORDER: NO]` in notes).
+    3. Item does NOT appear under **🔄 Re-Order Needed**, but instead appears under **🗑️ Scrapped — No Re-Order**.
+    4. Table row displays `[ ✓ Confirm Written Off ]` instead of `[ ✓ Confirm Re-Ordered (PO Placed) ]`.
+
 - [ ] **TC-PILLAR-01 (Restock to Inventory Workflow)**
   * **Location**: Admin Portal -> Customer RMA Hub / Supplier Hub -> Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
   * **Action**:

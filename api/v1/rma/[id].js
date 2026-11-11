@@ -89,8 +89,10 @@ export default async function handler(req, res) {
           updateData.status = 'vendor_claimed';
           if (!updateData.disposition) updateData.disposition = '3- Return to Vendor (RTV)';
         } else if (s === 'quarantine' || s === 'hold' || s === '4- quarantine') {
-          updateData.status = 'quarantine';
+          updateData.status = 'under_inspection';
           if (!updateData.disposition) updateData.disposition = '4- Quarantine';
+        } else if (s === 'rejected' || s === '8- rejected' || s === 'claim_rejected') {
+          updateData.status = 'rejected';
         } else if (s === 'resolved' || s === 'closed') {
           // If disposition indicates scrap, normalize to scrapped; otherwise restocked
           const d = String(updateData.disposition || '').toLowerCase();
@@ -175,14 +177,53 @@ export default async function handler(req, res) {
 
       const updatedRows = [];
 
+      const explicitNeedsReorder = body?.needs_reorder !== undefined ? Boolean(body.needs_reorder) : undefined;
+      const explicitHoldReason = body?.hold_reason ? String(body.hold_reason).trim() : undefined;
+      const explicitRejectionReason = body?.rejection_reason ? String(body.rejection_reason).trim() : undefined;
+
       for (const row of existingRows) {
         const currentAudit = Array.isArray(row.audit_trail) ? [...row.audit_trail] : [];
         currentAudit.push(auditEntry);
 
+        // Merge operational metadata safely into JSONB ai_document_metadata
+        const currentMeta = (row.ai_document_metadata && typeof row.ai_document_metadata === 'object') ? row.ai_document_metadata : {};
+        const updatedMeta = {
+          ...currentMeta,
+          ...(explicitNeedsReorder !== undefined ? { needs_reorder: explicitNeedsReorder } : {}),
+          ...(explicitHoldReason ? { hold_reason: explicitHoldReason } : {}),
+          ...(explicitRejectionReason ? { rejection_reason: explicitRejectionReason } : {})
+        };
+
+        // Append operational tags into notes safely
+        let updatedNotes = row.notes || '';
+        if (explicitNeedsReorder !== undefined) {
+          updatedNotes = updatedNotes.replace(/\[REORDER:\s*(YES|NO)\]/gi, '').trim();
+          updatedNotes = `${updatedNotes} [REORDER: ${explicitNeedsReorder ? 'YES' : 'NO'}]`.trim();
+        }
+        if (explicitHoldReason) {
+          updatedNotes = updatedNotes.replace(/\[HOLD REASON:\s*[^\]]+\]/gi, '').trim();
+          updatedNotes = `${updatedNotes} [HOLD REASON: ${explicitHoldReason}]`.trim();
+        }
+        if (explicitRejectionReason) {
+          updatedNotes = updatedNotes.replace(/\[REJECTED:\s*[^\]]+\]/gi, '').trim();
+          updatedNotes = `${updatedNotes} [REJECTED: ${explicitRejectionReason}]`.trim();
+        }
+
         let rowPayload = {
           ...updateData,
-          audit_trail: currentAudit
+          audit_trail: currentAudit,
+          ai_document_metadata: updatedMeta,
+          notes: updatedNotes
         };
+
+        // Ensure non-existent columns are never sent to Supabase
+        delete rowPayload.needs_reorder;
+        delete rowPayload.hold_reason;
+        delete rowPayload.rejection_reason;
+        delete rowPayload.actor;
+        delete rowPayload.user;
+        delete rowPayload.updated_by;
+        delete rowPayload.barcode;
 
         // If this row is a parent batch manifest, also update its child items inside row.items
         let parsedRowItems = [];

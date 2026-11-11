@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-11T03:17:39.408Z
+Generated At: 2026-11-11T06:00:32.964Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -57,7 +57,8 @@ rma-portal-v2/
 │   │   ├── test_openapi.js
 │   │   └── vercel_err.html
 ├── scripts/
-│   │   └── build_context.js
+│   │   ├── build_context.js
+│   │   └── update_app_and_supplier.cjs
 ├── src/
 │   │   ├── archive_v1/
 │   │   │   │   ├── AdminPinModal.jsx
@@ -3463,6 +3464,49 @@ Each test scenario defines:
 ## Section 16: 4-Pillar Operational Action Trigger System (Restock, Re-order, RTV, Hold) & Coworker Queues
 
 ### 16.0 4-Pillar Operational Action Triggers in Quick Action Modal
+
+- [ ] **TC-PILLAR-10 (Customer Hub 6-Card Stream Isolation & Rejection Gate Pass)**
+  * **Location**: Customer RMA Hub -> Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**:
+    1. Open any customer inbound ticket.
+    2. Verify exactly 6 action cards are rendered: *1. Restock to Shelf*, *2. Move to Supplier RTV*, *3. Scrap / Dispose*, *4. Buffer Stock Swap*, *5. On Hold / Quarantine*, *6. Reject & Return*.
+    3. Click *6. Reject & Return*.
+    4. Type a customer rejection reason (*"Physical water damage caused in customer store"*).
+    5. Click "Save Physical Triage".
+    6. Click **[ 🖨️ Print Rejected Return Gate Pass ]**.
+  * **Expected Behavior**:
+    1. Printable Rejected Return Gate Pass launches in a new window with red border, rejection reason, reference numbers, and courier handover signatures.
+    2. Disposition updates to `"8- Rejected / Return to Customer"` and status updates to `"rejected"`.
+    3. Staging location is automatically set to `"OUTBOUND-RETURN-TO-STORE"`.
+    4. `+ Issue Credit Memo` is permanently disabled with tooltip: *"Claim is Rejected. Credit Memos cannot be issued."*
+    5. Item appears in the top workstation queue under **⚫ Rejected Claims**.
+
+- [ ] **TC-PILLAR-11 (Supplier Hub 5-Card Stream Isolation & Free Replacement Routing)**
+  * **Location**: Supplier RTV Hub -> Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**:
+    1. Open any supplier outbound ticket in Supplier Hub.
+    2. Verify exactly 5 action cards are rendered: *1. Pending Vendor Pickup*, *2. Vendor Credit Settled*, *3. Replacement Received*, *4. Vendor Rejected Claim*, *5. Under Vendor Dispute*.
+    3. Click *3. Replacement Received*.
+    4. Enter bin location: `SHELF-04-A`.
+    5. Click "Save Physical Triage".
+  * **Expected Behavior**:
+    1. Card activates with teal highlight.
+    2. `needs_reorder` is automatically set to `false` (cancelling re-orders since vendor replaced goods free).
+    3. Item immediately reflects under the **📦 Ready to Restock** queue.
+    4. Row displays `[ ✓ Confirm Restocked in WMS ]`.
+
+- [ ] **TC-PILLAR-12 (Explicit Purchasing Replenishment Switch [Re-Order: YES / NO])**
+  * **Location**: Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**:
+    1. Select *Scrap / Dispose* or *Move to Supplier RTV*.
+    2. Observe the **Purchasing Replenishment Switch**.
+    3. Click **[ 🚫 NO — Do Not Re-Order ]** and save.
+  * **Expected Behavior**:
+    1. Switch toggles to grey/slate with indicator *"Write-Off / No Re-Order"*.
+    2. Item is saved without triggering Supabase `400 Bad Request` (flag is stored safely inside `ai_document_metadata` and tagged `[REORDER: NO]` in notes).
+    3. Item does NOT appear under **🔄 Re-Order Needed**, but instead appears under **🗑️ Scrapped — No Re-Order**.
+    4. Table row displays `[ ✓ Confirm Written Off ]` instead of `[ ✓ Confirm Re-Ordered (PO Placed) ]`.
+
 - [ ] **TC-PILLAR-01 (Restock to Inventory Workflow)**
   * **Location**: Admin Portal -> Customer RMA Hub / Supplier Hub -> Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
   * **Action**:
@@ -3885,12 +3929,45 @@ Inspectors select from 4 enterprise condition grades:
 * **Grade C — Defective / Parts Only**: Electrical failure, broken components, leakage. Requires Return to Vendor (RTV) debit claim or component salvage.
 * **Grade D — Total Loss / Scrap**: Expired food items, shattered glass, contaminated chemicals. Hazardous waste or authorized destruction.
 
-### 3.3 Warehouse Disposition Routing
-Inspectors select the physical disposition route:
-1. **Restock to Inventory**: Generates positive inventory adjustment in WMS/ERP.
-2. **Return to Vendor (RTV)**: Queues item for Chapter 5 Supplier Debit Claims.
-3. **Quarantine**: Holds item pending manufacturer rep inspection or safety audit.
-4. **Scrap / Dispose**: Marks item for certified destruction certificate.
+### 3.3 Stream-Specific Warehouse Disposition Cards & Purchasing Replenishment Switch
+
+The triage workflow automatically adapts its decision matrix based on whether the ticket is a **Customer Return** (`rma_type: 'customer_inbound'`) or a **Supplier Outbound Defect** (`rma_type: 'supplier_outbound'`):
+
+#### A. Customer RMA Hub (`customer_inbound` — 6 Cards):
+1. **🟢 1. Restock to Shelf** (`disposition: '2- Restock to Inventory'`):
+   - Prompts for `Target Rack / Bin Location *`.
+   - Routes to Coworker **Ready to Restock** queue (`needs_reorder: false`).
+2. **🟣 2. Move to Supplier RTV** (`disposition: '3- Return to Vendor (RTV)'`):
+   - Auto-sets bin to `'RTV-DOCK'`.
+   - Prompts the **Purchasing Replenishment Switch** (`[ 🔄 YES — Flag for Supplier Re-Order ]` vs `[ 🚫 NO — Do Not Re-Order ]`, default `YES`).
+   - Automatically transfers ticket to Supplier Hub (`rma_type: 'supplier_outbound'`).
+3. **🔴 3. Scrap / Dispose** (`disposition: '5- Scrap / Dispose'`):
+   - Auto-sets bin to `'SCRAP-BIN'`.
+   - Prompts the **Purchasing Replenishment Switch** (default `YES`).
+4. **🔵 4. Buffer Stock Swap (1:1)** (`disposition: '6- Buffer Stock Exchange'`):
+   - Opens the Buffer Stock Replacement Slip.
+   - Prompts the **Purchasing Replenishment Switch** (default `YES`, replacing buffer unit).
+5. **🟡 5. On Hold / Quarantine** (`disposition: '4- Quarantine'`, `status: 'under_inspection'`):
+   - Auto-sets bin to `'QUARANTINE-HOLD'`.
+   - Requires mandatory **Hold / Investigation Reason**.
+   - **Safety Lock:** Freezes Credit Memo, Restock, and Re-Order actions until released.
+6. **⚫ 6. Reject & Return to Customer** (`disposition: '8- Rejected / Return to Customer'`, `status: 'rejected'`):
+   - Auto-sets bin to `'OUTBOUND-RETURN-TO-STORE'`.
+   - Requires mandatory **Customer Rejection Reason**.
+   - **Safety Lock:** Permanently blocks Credit Memo.
+   - Provides button `[ 🖨️ Print Rejected Return Gate Pass ]` to dispatch the box back to customer.
+
+#### B. Supplier RTV Hub (`supplier_outbound` — 5 Cards):
+1. **⏳ 1. Pending Vendor Pickup** (`disposition: '1 - Pending Vendor Pickup'`):
+   - Staged in `RTV-DOCK`, prompts Replenishment Switch.
+2. **💵 2. Vendor Credit Settled** (`disposition: '3 - Vendor Credit / AP Deduction Settled'`):
+   - Vendor credit memo or AP deduction confirmed. Prompts Replenishment Switch.
+3. **🟢 3. Vendor Sent Replacement Stock** (`disposition: '4 - Vendor Replacement Stock Received'`):
+   - Prompts for shelf location. Routes to Coworker **Ready to Restock** queue and sets `needs_reorder: false`.
+4. **🔴 4. Vendor Rejected Claim** (`disposition: '5 - Claim Rejected by Vendor'`):
+   - Auto-sets bin to `'SCRAP-BIN'`. Blocks Debit Claims. Prompts Replenishment Switch.
+5. **🟡 5. Under Vendor Dispute** (`disposition: '4- Quarantine'`):
+   - Auto-sets bin to `'QUARANTINE-HOLD'`. Requires dispute note. Freezes Debit Claims.
 
 ### 3.4 Rack & Bin Location Tagging
 Inspectors input the physical warehouse address (e.g., `RACK-03-BIN-A`, `BAY-2-PALLET-09`, `QUARANTINE-LOCKER`). This prints directly on box labels for pickers.
@@ -6345,6 +6422,26 @@ export default async function handler(req, res) {
 import { supabase } from '../../_lib/supabase.js';
 import { requireApiKey, sendJson, setCorsHeaders } from '../../_lib/auth.js';
 
+const getItemNeedsReorder = (item) => {
+  if (item?.needs_reorder !== undefined && item?.needs_reorder !== null) {
+    return Boolean(item.needs_reorder);
+  }
+  if (item?.ai_document_metadata?.needs_reorder !== undefined && item?.ai_document_metadata?.needs_reorder !== null) {
+    return Boolean(item.ai_document_metadata.needs_reorder);
+  }
+  const notes = String(item?.notes || '');
+  if (notes.includes('[REORDER: NO]')) return false;
+  if (notes.includes('[REORDER: YES]')) return true;
+  return true;
+};
+
+const getRecoverySource = (item) => {
+  const disp = String(item?.disposition || '').toLowerCase();
+  if (disp.includes('buffer')) return 'buffer_swap';
+  if (disp.includes('rtv') || disp.includes('vendor') || item?.rma_type === 'supplier_outbound') return 'vendor_rtv';
+  return 'scrap';
+};
+
 export default async function handler(req, res) {
   setCorsHeaders(res);
 
@@ -6523,14 +6620,25 @@ export default async function handler(req, res) {
         const itemDisp = String(item.disposition || '').toLowerCase();
         const itemStatus = String(item.status || 'received_at_dock').toLowerCase().trim();
 
-        // 4-Pillar Dedicated Queues (Restock, Re-order, RTV, Hold)
+        // Unified 5-Queue Filtering (restock, reorder, scrap_no_reorder, quarantine, rejected)
         if (queue) {
           const cleanQueue = String(queue).trim().toLowerCase();
+          const needsReorderFlag = getItemNeedsReorder(item);
+
           if (cleanQueue === 'restock') {
-            if (!itemDisp.includes('restock')) return false;
+            const isRestockDisp = itemDisp.includes('restock') || itemDisp.includes('replacement stock received');
+            if (!isRestockDisp) return false;
             if (FINALIZED_RESTOCK.has(itemStatus)) return false;
           } else if (cleanQueue === 'reorder' || cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
-            if (!itemDisp.includes('scrap') && !itemDisp.includes('dispose') && !itemDisp.includes('reorder')) return false;
+            const isLossDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('reorder') || itemDisp.includes('rtv') || itemDisp.includes('vendor') || itemDisp.includes('buffer') || itemDisp.includes('claim rejected by vendor');
+            const isExcluded = itemDisp.includes('restock') || itemDisp.includes('replacement stock received') || itemDisp.includes('quarantine') || itemDisp.includes('hold') || itemStatus === 'rejected' || itemDisp.includes('8- rejected');
+            if (!isLossDisp || isExcluded) return false;
+            if (needsReorderFlag === false) return false;
+            if (FINALIZED_SCRAP.has(itemStatus)) return false;
+          } else if (cleanQueue === 'scrap_no_reorder') {
+            const isScrapDisp = itemDisp.includes('scrap') || itemDisp.includes('dispose') || itemDisp.includes('claim rejected by vendor');
+            if (!isScrapDisp) return false;
+            if (needsReorderFlag !== false) return false;
             if (FINALIZED_SCRAP.has(itemStatus)) return false;
           } else if (cleanQueue === 'rtv_debit' || cleanQueue === 'rtv') {
             const isRtv = itemDisp.includes('rtv') || itemDisp.includes('return to vendor') || itemDisp.includes('vendor') || item.rma_type === 'supplier_outbound';
@@ -6540,6 +6648,10 @@ export default async function handler(req, res) {
             const isHold = itemDisp.includes('quarantine') || itemDisp.includes('hold') || itemStatus === 'quarantine' || itemStatus === 'hold';
             if (!isHold) return false;
             if (['closed', 'resolved', 'rejected', 'deleted'].includes(itemStatus)) return false;
+          } else if (cleanQueue === 'rejected') {
+            const isRejected = itemStatus === 'rejected' || itemDisp.includes('rejected') || itemDisp.includes('claim rejected by vendor');
+            if (!isRejected) return false;
+            if (['closed', 'resolved', 'deleted'].includes(itemStatus)) return false;
           }
         }
 
@@ -6602,6 +6714,18 @@ export default async function handler(req, res) {
       });
 
       const paginatedData = filtered.slice(numOffset, numOffset + numLimit);
+      const enrichedData = paginatedData.map(item => {
+        const needsReorder = getItemNeedsReorder(item);
+        const itemObj = {
+          ...item,
+          needs_reorder: needsReorder
+        };
+        const cleanQueue = queue ? String(queue).trim().toLowerCase() : '';
+        if (cleanQueue === 'reorder' || cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
+          itemObj.recovery_source = getRecoverySource(item);
+        }
+        return itemObj;
+      });
 
       return sendJson(res, 200, {
         success: true,
@@ -6610,7 +6734,7 @@ export default async function handler(req, res) {
         total: filtered.length,
         limit: numLimit,
         offset: numOffset,
-        data: paginatedData
+        data: enrichedData
       });
     } catch (err) {
       console.error('[API v1 RMA GET] Server error:', err);
@@ -6861,8 +6985,10 @@ export default async function handler(req, res) {
           updateData.status = 'vendor_claimed';
           if (!updateData.disposition) updateData.disposition = '3- Return to Vendor (RTV)';
         } else if (s === 'quarantine' || s === 'hold' || s === '4- quarantine') {
-          updateData.status = 'quarantine';
+          updateData.status = 'under_inspection';
           if (!updateData.disposition) updateData.disposition = '4- Quarantine';
+        } else if (s === 'rejected' || s === '8- rejected' || s === 'claim_rejected') {
+          updateData.status = 'rejected';
         } else if (s === 'resolved' || s === 'closed') {
           // If disposition indicates scrap, normalize to scrapped; otherwise restocked
           const d = String(updateData.disposition || '').toLowerCase();
@@ -6947,14 +7073,53 @@ export default async function handler(req, res) {
 
       const updatedRows = [];
 
+      const explicitNeedsReorder = body?.needs_reorder !== undefined ? Boolean(body.needs_reorder) : undefined;
+      const explicitHoldReason = body?.hold_reason ? String(body.hold_reason).trim() : undefined;
+      const explicitRejectionReason = body?.rejection_reason ? String(body.rejection_reason).trim() : undefined;
+
       for (const row of existingRows) {
         const currentAudit = Array.isArray(row.audit_trail) ? [...row.audit_trail] : [];
         currentAudit.push(auditEntry);
 
+        // Merge operational metadata safely into JSONB ai_document_metadata
+        const currentMeta = (row.ai_document_metadata && typeof row.ai_document_metadata === 'object') ? row.ai_document_metadata : {};
+        const updatedMeta = {
+          ...currentMeta,
+          ...(explicitNeedsReorder !== undefined ? { needs_reorder: explicitNeedsReorder } : {}),
+          ...(explicitHoldReason ? { hold_reason: explicitHoldReason } : {}),
+          ...(explicitRejectionReason ? { rejection_reason: explicitRejectionReason } : {})
+        };
+
+        // Append operational tags into notes safely
+        let updatedNotes = row.notes || '';
+        if (explicitNeedsReorder !== undefined) {
+          updatedNotes = updatedNotes.replace(/\[REORDER:\s*(YES|NO)\]/gi, '').trim();
+          updatedNotes = `${updatedNotes} [REORDER: ${explicitNeedsReorder ? 'YES' : 'NO'}]`.trim();
+        }
+        if (explicitHoldReason) {
+          updatedNotes = updatedNotes.replace(/\[HOLD REASON:\s*[^\]]+\]/gi, '').trim();
+          updatedNotes = `${updatedNotes} [HOLD REASON: ${explicitHoldReason}]`.trim();
+        }
+        if (explicitRejectionReason) {
+          updatedNotes = updatedNotes.replace(/\[REJECTED:\s*[^\]]+\]/gi, '').trim();
+          updatedNotes = `${updatedNotes} [REJECTED: ${explicitRejectionReason}]`.trim();
+        }
+
         let rowPayload = {
           ...updateData,
-          audit_trail: currentAudit
+          audit_trail: currentAudit,
+          ai_document_metadata: updatedMeta,
+          notes: updatedNotes
         };
+
+        // Ensure non-existent columns are never sent to Supabase
+        delete rowPayload.needs_reorder;
+        delete rowPayload.hold_reason;
+        delete rowPayload.rejection_reason;
+        delete rowPayload.actor;
+        delete rowPayload.user;
+        delete rowPayload.updated_by;
+        delete rowPayload.barcode;
 
         // If this row is a parent batch manifest, also update its child items inside row.items
         let parsedRowItems = [];
@@ -8872,6 +9037,9 @@ export const CreateRMAReportSchema = z.object({
   condition_grade: RMAConditionGradeEnum.optional().default('B - Damaged Packaging Only').openapi({ example: 'B - Damaged Packaging Only' }),
   disposition: RMADispositionEnum.optional().default('Pending Triage').openapi({ example: 'Pending Triage' }),
   warehouse_location: z.string().optional().openapi({ example: 'RACK-03-BIN-A' }),
+  needs_reorder: z.boolean().optional().openapi({ example: true, description: 'Explicit replenishment toggle for purchasing' }),
+  hold_reason: z.string().optional().openapi({ example: 'Pending quality inspection' }),
+  rejection_reason: z.string().optional().openapi({ example: 'Customer damage outside return window' }),
   inspected_by: z.string().optional().openapi({ example: 'Warehouse Lead' }),
   reason: z.string().optional().default('Damaged Box / Crushed Packaging').openapi({ example: 'Damaged Box / Crushed Packaging' }),
   explanation: z.string().optional().openapi({ example: 'Crushed box during unloading' }),
@@ -9700,6 +9868,14 @@ import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
 import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest, formatQuantityWithPackSize, formatManifestBreakdown, resolveBatchManifestLifecycle } from './utils/rmaHelpers';
+import {
+  getItemNeedsReorder,
+  isItemReadyToRestock,
+  isItemReorderNeeded,
+  isItemScrappedNoReorder,
+  isItemOnHold,
+  isItemRejected
+} from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
   '1- Damaged Box / Crushed Packaging',
@@ -11078,19 +11254,23 @@ export default function App() {
 
   const readyToRestockReports = React.useMemo(() => {
     return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemReadyToRestock(r, recentReportsList));
-  }, [recentReportsList, isItemReadyToRestock]);
+  }, [recentReportsList]);
 
-  const supplierReorderReports = React.useMemo(() => {
-    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemReadyForSupplierReorder(r, recentReportsList));
-  }, [recentReportsList, isItemReadyForSupplierReorder]);
+  const reorderNeededReports = React.useMemo(() => {
+    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemReorderNeeded(r, recentReportsList));
+  }, [recentReportsList]);
 
-  const vendorRtvReports = React.useMemo(() => {
-    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemVendorRtv(r, recentReportsList));
-  }, [recentReportsList, isItemVendorRtv]);
+  const scrappedNoReorderReports = React.useMemo(() => {
+    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemScrappedNoReorder(r, recentReportsList));
+  }, [recentReportsList]);
 
   const onHoldReports = React.useMemo(() => {
     return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemOnHold(r, recentReportsList));
-  }, [recentReportsList, isItemOnHold]);
+  }, [recentReportsList]);
+
+  const rejectedReports = React.useMemo(() => {
+    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemRejected(r, recentReportsList));
+  }, [recentReportsList]);
 
   const supplierOutboundReports = React.useMemo(() => {
     const unpacked = [];
@@ -11215,15 +11395,17 @@ export default function App() {
       }
 
       // Date Range filters
-      // 4-Pillar Dedicated Queue Filters ('restock' | 'rtv' | 'reorder' | 'hold')
+      // Unified Coworker Workstation Queue Filters
       if (coworkerQueueFilter === 'restock') {
         if (!isItemReadyToRestock(item, recentReportsList)) return false;
       } else if (coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') {
-        if (!isItemReadyForSupplierReorder(item, recentReportsList)) return false;
-      } else if (coworkerQueueFilter === 'rtv') {
-        if (!isItemVendorRtv(item, recentReportsList)) return false;
-      } else if (coworkerQueueFilter === 'hold') {
+        if (!isItemReorderNeeded(item, recentReportsList)) return false;
+      } else if (coworkerQueueFilter === 'scrap_no_reorder') {
+        if (!isItemScrappedNoReorder(item, recentReportsList)) return false;
+      } else if (coworkerQueueFilter === 'hold' || coworkerQueueFilter === 'quarantine') {
         if (!isItemOnHold(item, recentReportsList)) return false;
+      } else if (coworkerQueueFilter === 'rejected') {
+        if (!isItemRejected(item, recentReportsList)) return false;
       }
 
       if (reportsDateFrom) {
@@ -14166,43 +14348,7 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Quick-Filter Chips for Warehouse Disposition: Swipeable with touch momentum */}
-                  <div className="relative w-full min-w-0 pt-2 border-t border-slate-200 dark:border-slate-700/80">
-                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-0.5 w-full scroll-smooth min-w-0 -mx-0.5 sm:mx-0">
-                      <span className="text-[10px] uppercase font-black text-slate-400 shrink-0 mr-1 flex items-center gap-1 whitespace-nowrap">
-                        <Layers className="w-3 h-3 text-blue-500 shrink-0" />
-                        Disposition:
-                      </span>
-                      {[
-                        { id: 'all', label: 'All Dispositions' },
-                        { id: 'Pending Triage', label: '1- Pending Triage' },
-                        { id: 'Restock to Inventory', label: '2- Restock' },
-                        { id: 'Return to Vendor (RTV)', label: '3- Return to Vendor (RTV)' },
-                        { id: 'Quarantine', label: '4- Quarantine' },
-                        { id: 'Scrap / Dispose', label: '5- Scrap / Dispose' },
-                        { id: 'Buffer Stock Exchange', label: '6- Buffer Exchange' }
-                      ].map(chip => {
-                        const isActive = coworkerQueueFilter === 'all' && reportsDispositionFilter.toLowerCase() === chip.id.toLowerCase();
-                        return (
-                          <button
-                            key={chip.id}
-                            type="button"
-                            onClick={() => {
-                              setCoworkerQueueFilter('all');
-                              setReportsDispositionFilter(chip.id);
-                              setReportsCurrentPage(1);
-                            }}
-                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 whitespace-nowrap transition-all cursor-pointer ${isActive
-                              ? 'bg-blue-600 text-white shadow-2xs font-black'
-                              : 'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                              }`}
-                          >
-                            {chip.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+
 
                   <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
                     <span>
@@ -14908,11 +15054,12 @@ export default function App() {
                                           );
                                         }
                                         const isReportOnHold = isItemOnHold(item, recentReportsList);
+                                        const isReportRejected = isItemRejected(item, recentReportsList);
                                         if (canEditProducts) {
                                           return (
                                             <button
                                               type="button"
-                                              disabled={isReportOnHold}
+                                              disabled={isReportOnHold || isReportRejected}
                                               onClick={() => {
                                                 if (isReportOnHold) {
                                                   alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
@@ -29175,6 +29322,7 @@ import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
 import { supplierClaimService } from '../services/supplierClaimService';
 import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, resolveBatchManifestLifecycle } from '../utils/rmaHelpers';
+import { getItemNeedsReorder } from '../utils/rmaHelpers';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -29277,6 +29425,8 @@ export default function QuickRMAActionModal({
   const [warehouseLocation, setWarehouseLocation] = useState('');
   const [rmaStatus, setRmaStatus] = useState('received_at_dock');
   const [holdReason, setHoldReason] = useState('');
+  const [needsReorder, setNeedsReorder] = useState(true);
+  const [rejectionReason, setRejectionReason] = useState('');
   const [isSavingTriage, setIsSavingTriage] = useState(false);
   const [triageSavedSuccess, setTriageSavedSuccess] = useState(false);
   const [triageSaveError, setTriageSaveError] = useState(null);
@@ -29288,6 +29438,74 @@ export default function QuickRMAActionModal({
     report?.status === 'quarantine' ||
     report?.status === 'hold'
   );
+
+  const isRejected = Boolean(
+    (disposition && (disposition.toLowerCase().includes('rejected') || disposition.toLowerCase().includes('8- rejected'))) ||
+    (report?.disposition && (String(report.disposition).toLowerCase().includes('rejected') || String(report.disposition).toLowerCase().includes('8- rejected'))) ||
+    report?.status === 'rejected'
+  );
+
+  const isVendorRejectedClaim = Boolean(
+    (disposition && disposition.toLowerCase().includes('claim rejected by vendor')) ||
+    (report?.disposition && String(report.disposition).toLowerCase().includes('claim rejected by vendor'))
+  );
+
+  const printRejectedGatePass = () => {
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write(`
+        <html>
+          <head>
+            <title>Rejected Return Gate Pass - ${report?.rma_number}</title>
+            <style>
+              @page { size: A4 portrait; margin: 12mm; }
+              body { font-family: Arial, sans-serif; padding: 18px; color: #111; border: 2px solid #dc2626; border-radius: 6px; box-sizing: border-box; }
+              h2 { margin: 0 0 6px 0; font-size: 18px; color: #dc2626; }
+              table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
+              th, td { border: 1px solid #333; padding: 8px; text-align: left; }
+              th { background: #fee2e2; color: #991b1b; }
+              .header { border-bottom: 2px solid #dc2626; padding-bottom: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <div>
+                <h2>PINGCON MARKETING - REJECTED RETURN GATE PASS</h2>
+                <div>Return Reference: <strong>${report?.rma_number}</strong></div>
+                <div>Customer / Store: <strong>${adminStoreBranch || report?.store_branch || report?.reporter_name || report?.supplier_name || 'Customer'}</strong></div>
+              </div>
+              <div style="text-align: right;">
+                <div>Date: <strong>${new Date().toLocaleDateString()}</strong></div>
+                <div>Location: <strong>${warehouseLocation || 'OUTBOUND-RETURN-TO-STORE'}</strong></div>
+              </div>
+            </div>
+            <p style="font-size: 12px; color: #b91c1c; font-weight: bold;">
+              NOTICE: This item has been formally REJECTED and is unauthorized for credit memo or restock. Authorizes physical dispatch back to the customer store / branch.
+            </p>
+            <div style="background: #f8fafc; border: 1px solid #cbd5e1; padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 12px;">
+              <strong>Formal Rejection Reason:</strong>
+              <p style="margin: 4px 0 0 0; color: #334155;">${rejectionReason || report?.notes || 'Customer damaged item / Outside return window / Defect not covered'}</p>
+            </div>
+            <table>
+              <tr><th>Item Description</th><th>Barcode / SKU</th><th>Qty & Unit</th><th>Disposition</th></tr>
+              <tr>
+                <td>${report?.name || 'Product'}</td>
+                <td>${report?.code || report?.sku || report?.barcode || 'N/A'}</td>
+                <td>${report?.quantity || 1} ${report?.unit_name || 'pc'}</td>
+                <td>Rejected / Return to Customer</td>
+              </tr>
+            </table>
+            <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 12px;">
+              <div>Warehouse Dispatch Signature: _______________________</div>
+              <div>Driver / Courier Acknowledgment: _______________________</div>
+            </div>
+            <script>window.print();</script>
+          </body>
+        </html>
+      `);
+      win.document.close();
+    }
+  };
   const [isThermalLabelOpen, setIsThermalLabelOpen] = useState(false);
   const [isBufferSlipOpen, setIsBufferSlipOpen] = useState(false);
   const [isUpdatingType, setIsUpdatingType] = useState(false);
@@ -29387,7 +29605,16 @@ export default function QuickRMAActionModal({
       setConditionGrade(report.condition_grade || 'B - Damaged Packaging Only');
       setDisposition(normalizeDispositionOption(report.disposition));
       setWarehouseLocation(report.warehouse_location || '');
-      setHoldReason(report.hold_reason || report.notes || '');
+      setNeedsReorder(getItemNeedsReorder(report));
+      const extractedHoldReason = report.hold_reason || report.ai_document_metadata?.hold_reason || (
+        report.notes && report.notes.match(/\[HOLD REASON: ([^\]]+)\]/) ? report.notes.match(/\[HOLD REASON: ([^\]]+)\]/)[1] : ''
+      ) || '';
+      setHoldReason(extractedHoldReason);
+
+      const extractedRejectReason = report.rejection_reason || report.ai_document_metadata?.rejection_reason || (
+        report.notes && report.notes.match(/\[REJECTED: ([^\]]+)\]/) ? report.notes.match(/\[REJECTED: ([^\]]+)\]/)[1] : ''
+      ) || '';
+      setRejectionReason(extractedRejectReason);
       const rawStatus = String(report.status || '').toLowerCase().trim();
       if (rawStatus === 'resolved' || rawStatus === 'restocked' || rawStatus === 'closed' || rawStatus.includes('closed') || rawStatus.includes('restock')) {
         setRmaStatus('restocked');
@@ -29477,8 +29704,18 @@ export default function QuickRMAActionModal({
     }
 
     const isHoldAction = disposition && (disposition.toLowerCase().includes('quarantine') || disposition.toLowerCase().includes('hold'));
+    const isRejectAction = disposition && (disposition.toLowerCase().includes('rejected') || disposition.toLowerCase().includes('8- rejected'));
+    const isRestockAction = disposition && (disposition.toLowerCase().includes('restock') || disposition.toLowerCase().includes('replacement stock received'));
+    const isRtvAction = disposition && (disposition.toLowerCase().includes('return to vendor') || disposition.toLowerCase().includes('rtv') || disposition.toLowerCase().includes('pending vendor pickup'));
+    const isScrapAction = disposition && (disposition.toLowerCase().includes('scrap') || disposition.toLowerCase().includes('dispose') || disposition.toLowerCase().includes('claim rejected by vendor'));
+
     if (isHoldAction && !holdReason.trim()) {
       setTriageSaveError("Please enter a mandatory hold note / reason before placing this item on Hold / Quarantine.");
+      return;
+    }
+
+    if (isRejectAction && !rejectionReason.trim()) {
+      setTriageSaveError("Please enter a mandatory customer rejection reason before rejecting this return.");
       return;
     }
 
@@ -29488,18 +29725,18 @@ export default function QuickRMAActionModal({
       const inspectorName = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
       const existingAudit = Array.isArray(report.audit_trail) ? [...report.audit_trail] : [];
 
-      const isRtvAction = disposition && (disposition.toLowerCase().includes('return to vendor') || disposition.toLowerCase().includes('rtv'));
-      const isScrapAction = disposition && (disposition.toLowerCase().includes('scrap') || disposition.toLowerCase().includes('dispose'));
-      const isRestockAction = disposition && disposition.toLowerCase().includes('restock');
-
       let autoStatus = 'under_inspection';
       let auditStage = 'TRIAGE';
       let auditNote = `Physical triage completed by ${inspectorName}: ${disposition}`;
 
       if (isHoldAction) {
-        autoStatus = 'quarantine';
+        autoStatus = 'under_inspection';
         auditStage = 'HOLD_QUARANTINE';
         auditNote = `Placed on Hold / Quarantine by ${inspectorName}: ${holdReason.trim()}`;
+      } else if (isRejectAction) {
+        autoStatus = 'rejected';
+        auditStage = 'CLAIM_REJECTED';
+        auditNote = `Return rejected by ${inspectorName}: ${rejectionReason.trim()}`;
       } else if (isRtvAction) {
         autoStatus = 'vendor_claimed';
         auditStage = 'VENDOR_RTV';
@@ -29507,7 +29744,7 @@ export default function QuickRMAActionModal({
       } else if (isScrapAction) {
         autoStatus = (report.status === 'scrapped' || report.status === 'disposed') ? 'scrapped' : 'under_inspection';
         auditStage = 'SUPPLIER_REORDER';
-        auditNote = `Supplier Re-order / Scrap staged by ${inspectorName}`;
+        auditNote = `Supplier Re-order / Scrap staged by ${inspectorName} [Re-Order: ${needsReorder ? 'YES' : 'NO'}]`;
       } else if (isRestockAction) {
         autoStatus = report.status === 'restocked' ? 'restocked' : 'under_inspection';
         auditStage = 'RESTOCK_TRIAGE';
@@ -29521,7 +29758,19 @@ export default function QuickRMAActionModal({
         auditNote = `Hold released by ${inspectorName}. New action: ${disposition}`;
       }
 
-      const finalLocation = isScrapAction ? 'SCRAP-BIN' : (warehouseLocation.trim().toUpperCase() || null);
+      // Determine final location
+      let finalLocation = warehouseLocation ? warehouseLocation.trim().toUpperCase() : null;
+      if (isScrapAction) {
+        finalLocation = 'SCRAP-BIN';
+      } else if (isHoldAction) {
+        finalLocation = 'QUARANTINE-HOLD';
+      } else if (isRejectAction) {
+        finalLocation = 'OUTBOUND-RETURN-TO-STORE';
+      } else if (isRtvAction && !finalLocation) {
+        finalLocation = 'RTV-DOCK';
+      }
+
+      const effectiveNeedsReorder = isRestockAction ? false : (isRejectAction ? false : needsReorder);
 
       const newAuditEvent = {
         timestamp: new Date().toISOString(),
@@ -29530,11 +29779,38 @@ export default function QuickRMAActionModal({
         condition_grade: conditionGrade,
         disposition: disposition,
         warehouse_location: finalLocation,
+        needs_reorder: effectiveNeedsReorder,
         hold_reason: isHoldAction ? holdReason.trim() : undefined,
+        rejection_reason: isRejectAction ? rejectionReason.trim() : undefined,
         note: auditNote
       };
 
       setRmaStatus(autoStatus);
+
+      // Clean metadata and notes to avoid 400 Bad Request
+      const cleanAiMetadata = {
+        ...(report.ai_document_metadata || {}),
+        needs_reorder: effectiveNeedsReorder,
+        hold_reason: isHoldAction ? holdReason.trim() : undefined,
+        rejection_reason: isRejectAction ? rejectionReason.trim() : undefined
+      };
+
+      let updatedNotes = report.notes || '';
+      updatedNotes = updatedNotes
+        .replace(/\[REORDER:\s*(YES|NO)\]/gi, '')
+        .replace(/\[HOLD REASON:\s*[^\]]+\]/gi, '')
+        .replace(/\[REJECTED:\s*[^\]]+\]/gi, '')
+        .trim();
+
+      if (isHoldAction) {
+        updatedNotes = `${updatedNotes} [HOLD REASON: ${holdReason.trim()}]`.trim();
+      } else if (isRejectAction) {
+        updatedNotes = `${updatedNotes} [REJECTED: ${rejectionReason.trim()}] [REORDER: NO]`.trim();
+      } else if (isRestockAction) {
+        updatedNotes = `${updatedNotes} [REORDER: NO]`.trim();
+      } else {
+        updatedNotes = `${updatedNotes} [REORDER: ${effectiveNeedsReorder ? 'YES' : 'NO'}]`.trim();
+      }
 
       const updates = {
         condition_grade: conditionGrade,
@@ -29543,12 +29819,10 @@ export default function QuickRMAActionModal({
         status: autoStatus,
         inspected_by: inspectorName,
         inspected_at: new Date().toISOString(),
-        audit_trail: [...existingAudit, newAuditEvent]
+        audit_trail: [...existingAudit, newAuditEvent],
+        ai_document_metadata: cleanAiMetadata,
+        notes: updatedNotes
       };
-
-      if (isHoldAction) {
-        updates.notes = holdReason.trim();
-      }
 
       // In Customer Hub: Transfers item to Supplier Hub if Vendor RTV action selected
       if (isRtvAction && report.rma_type === 'customer_inbound') {
@@ -31849,22 +32123,57 @@ export default function QuickRMAActionModal({
                                 Disposition
                               </label>
                               <select
-                                value={it.disposition || '1- Pending Triage'}
+                                value={it.disposition || (isSupplierStream ? '1 - Pending Vendor Pickup' : '1- Pending Triage')}
                                 onChange={(e) => {
                                   const val = e.target.value;
                                   updateManifestItemField(idx, 'disposition', val);
-                                  if (val.includes('Scrap') || val.includes('Dispose')) {
+                                  if (val.includes('Scrap') || val.includes('Dispose') || val.includes('Claim Rejected by Vendor')) {
                                     updateManifestItemField(idx, 'warehouse_location', 'SCRAP-BIN');
+                                  } else if (val.includes('Quarantine')) {
+                                    updateManifestItemField(idx, 'warehouse_location', 'QUARANTINE-HOLD');
+                                  } else if (val.includes('Return to Vendor') || val.includes('Pending Vendor Pickup')) {
+                                    updateManifestItemField(idx, 'warehouse_location', 'RTV-DOCK');
+                                  } else if (val.includes('Rejected / Return to Customer')) {
+                                    updateManifestItemField(idx, 'warehouse_location', 'OUTBOUND-RETURN-TO-STORE');
                                   }
                                 }}
                                 className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
                               >
-                                <option value="2- Restock to Inventory">🟢 2- Restock to Inventory</option>
-                                <option value="3- Return to Vendor (RTV)">🟣 3- Return to Vendor (RTV)</option>
-                                <option value="5- Scrap / Dispose">🔴 5- Scrap / Dispose</option>
-                                <option value="4- Quarantine">🟡 4- Quarantine (Hold)</option>
-                                <option value="1- Pending Triage">1- Pending Triage</option>
+                                {!isSupplierStream ? (
+                                  <>
+                                    <option value="2- Restock to Inventory">🟢 1. Restock to Shelf</option>
+                                    <option value="3- Return to Vendor (RTV)">🟣 2. Move to Supplier RTV</option>
+                                    <option value="5- Scrap / Dispose">🔴 3. Scrap / Dispose</option>
+                                    <option value="6- Buffer Stock Exchange">🔵 4. Buffer Stock Swap</option>
+                                    <option value="4- Quarantine">🟡 5. On Hold / Quarantine</option>
+                                    <option value="8- Rejected / Return to Customer">⚫ 6. Reject & Return to Customer</option>
+                                    <option value="1- Pending Triage">1- Pending Triage</option>
+                                  </>
+                                ) : (
+                                  <>
+                                    <option value="1 - Pending Vendor Pickup">⏳ 1. Pending Vendor Pickup</option>
+                                    <option value="3 - Vendor Credit / AP Deduction Settled">💵 2. Vendor Credit Settled</option>
+                                    <option value="4 - Vendor Replacement Stock Received">🟢 3. Vendor Replacement Received</option>
+                                    <option value="5 - Claim Rejected by Vendor">🔴 4. Vendor Rejected Claim</option>
+                                    <option value="4- Quarantine">🟡 5. Under Vendor Dispute</option>
+                                    <option value="1- Pending Triage">1- Pending Triage</option>
+                                  </>
+                                )}
                               </select>
+                              <div className="flex items-center justify-between mt-1 pt-1 border-t border-slate-200 dark:border-slate-700 text-[10px]">
+                                <span className="text-slate-500 font-bold">Replenishment:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => updateManifestItemField(idx, 'needs_reorder', it.needs_reorder === false ? true : false)}
+                                  className={`px-2 py-0.5 rounded font-black cursor-pointer ${
+                                    it.needs_reorder !== false
+                                      ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
+                                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-slate-700'
+                                  }`}
+                                >
+                                  {it.needs_reorder !== false ? '🔄 Re-Order: YES' : '🚫 Re-Order: NO'}
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -31960,17 +32269,17 @@ export default function QuickRMAActionModal({
                           </div>
                         </div>
 
-                        {/* 4-Pillar Operational Action Trigger Cards */}
-                        <div className="space-y-1.5">
+                        {/* Stream-Specific Operational Action Trigger Cards */}
+                        <div className="space-y-2">
                           <div className="flex items-center justify-between">
-                            <label className="text-[10px] uppercase font-extrabold text-slate-600 dark:text-slate-300 block tracking-wide">
-                              Operational Action Trigger (4 Pillars)
+                            <label className="text-[10px] uppercase font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5 tracking-wide">
+                              <span>${isSupplierStream ? 'Supplier RTV Physical Actions (5 Cards)' : 'Customer RMA Physical Actions (6 Cards)'}</span>
                             </label>
                             {isOnHold && (
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setDisposition('2- Restock to Inventory');
+                                  setDisposition(isSupplierStream ? '1 - Pending Vendor Pickup' : '2- Restock to Inventory');
                                   setRmaStatus('under_inspection');
                                   setHoldReason('');
                                 }}
@@ -31983,112 +32292,404 @@ export default function QuickRMAActionModal({
                             )}
                           </div>
 
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            {/* Card 1: 🟢 Restock to Inventory */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setDisposition('2- Restock to Inventory');
-                                setRmaStatus('under_inspection');
-                                if (warehouseLocation === 'SCRAP-BIN') setWarehouseLocation('');
-                              }}
-                              className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                String(disposition || '').toLowerCase().includes('restock')
-                                  ? 'border-emerald-500 bg-emerald-50/90 dark:bg-emerald-950/60 ring-2 ring-emerald-500/50 shadow-sm'
-                                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-emerald-300 hover:bg-emerald-50/30'
-                              }`}
-                            >
-                              <div className="flex items-center gap-1.5 mb-1">
-                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                                <span className="font-extrabold text-xs text-emerald-800 dark:text-emerald-300">
-                                  Restock
-                                </span>
-                              </div>
-                              <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                Return goods to active stock. Queued for WMS (?queue=restock).
-                              </p>
-                            </button>
+                          {!isSupplierStream ? (
+                            /* Customer Hub: 6 Action Cards */
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                              {/* Card 1: 🟢 Restock to Shelf */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDisposition('2- Restock to Inventory');
+                                  setRmaStatus('under_inspection');
+                                  setNeedsReorder(false);
+                                  if (['SCRAP-BIN', 'RTV-DOCK', 'QUARANTINE-HOLD', 'OUTBOUND-RETURN-TO-STORE'].includes(warehouseLocation)) {
+                                    setWarehouseLocation('');
+                                  }
+                                }}
+                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                                  disposition === '2- Restock to Inventory' || disposition?.toLowerCase().includes('restock')
+                                    ? 'border-emerald-500 bg-emerald-50/90 dark:bg-emerald-950/60 ring-2 ring-emerald-500/50 shadow-sm'
+                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-emerald-300 hover:bg-emerald-50/30'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                                  <span className="font-extrabold text-xs text-emerald-800 dark:text-emerald-300">
+                                    1. Restock to Shelf
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
+                                  Return good units to active stock. Ready to Restock queue.
+                                </p>
+                              </button>
 
-                            {/* Card 2: 🟣 Vendor Recovery / RTV */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setDisposition('3- Return to Vendor (RTV)');
-                                setRmaStatus('vendor_claimed');
-                              }}
-                              className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                (String(disposition || '').toLowerCase().includes('return to vendor') || String(disposition || '').toLowerCase().includes('rtv') || String(disposition || '').toLowerCase().includes('vendor pickup'))
-                                  ? 'border-purple-500 bg-purple-50/90 dark:bg-purple-950/60 ring-2 ring-purple-500/50 shadow-sm'
-                                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-purple-300 hover:bg-purple-50/30'
-                              }`}
-                            >
-                              <div className="flex items-center gap-1.5 mb-1">
-                                <span className="w-2.5 h-2.5 rounded-full bg-purple-500 shrink-0" />
-                                <span className="font-extrabold text-xs text-purple-800 dark:text-purple-300">
-                                  Vendor RTV
-                                </span>
-                              </div>
-                              <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                Outbound vendor claim. Moves to Supplier Hub (?queue=rtv_debit).
-                              </p>
-                            </button>
+                              {/* Card 2: 🟣 Move to Supplier RTV */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDisposition('3- Return to Vendor (RTV)');
+                                  setRmaStatus('vendor_claimed');
+                                  setWarehouseLocation('RTV-DOCK');
+                                  setNeedsReorder(true);
+                                }}
+                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                                  disposition === '3- Return to Vendor (RTV)' || disposition?.toLowerCase().includes('return to vendor')
+                                    ? 'border-purple-500 bg-purple-50/90 dark:bg-purple-950/60 ring-2 ring-purple-500/50 shadow-sm'
+                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-purple-300 hover:bg-purple-50/30'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-purple-500 shrink-0" />
+                                  <span className="font-extrabold text-xs text-purple-800 dark:text-purple-300">
+                                    2. Move to Supplier RTV
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
+                                  Transfer to Supplier Hub. Bin RTV-DOCK for debit recovery.
+                                </p>
+                              </button>
 
-                            {/* Card 3: 🔴 Supplier Re-Order / Scrap */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setDisposition('5- Scrap / Dispose');
-                                setWarehouseLocation('SCRAP-BIN');
-                                setRmaStatus('under_inspection');
-                              }}
-                              className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                (String(disposition || '').toLowerCase().includes('scrap') || String(disposition || '').toLowerCase().includes('dispose'))
-                                  ? 'border-rose-500 bg-rose-50/90 dark:bg-rose-950/60 ring-2 ring-rose-500/50 shadow-sm'
-                                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-rose-300 hover:bg-rose-50/30'
-                              }`}
-                            >
-                              <div className="flex items-center gap-1.5 mb-1">
-                                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
-                                <span className="font-extrabold text-xs text-rose-800 dark:text-rose-300">
-                                  Re-Order / Scrap
-                                </span>
-                              </div>
-                              <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                Total loss. Staged in SCRAP-BIN for Purchasing (?queue=reorder).
-                              </p>
-                            </button>
+                              {/* Card 3: 🔴 Scrap / Dispose */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDisposition('5- Scrap / Dispose');
+                                  setWarehouseLocation('SCRAP-BIN');
+                                  setRmaStatus('under_inspection');
+                                  setNeedsReorder(true);
+                                }}
+                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                                  disposition === '5- Scrap / Dispose' || (disposition?.toLowerCase().includes('scrap') && !disposition?.toLowerCase().includes('claim rejected'))
+                                    ? 'border-rose-500 bg-rose-50/90 dark:bg-rose-950/60 ring-2 ring-rose-500/50 shadow-sm'
+                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-rose-300 hover:bg-rose-50/30'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
+                                  <span className="font-extrabold text-xs text-rose-800 dark:text-rose-300">
+                                    3. Scrap / Dispose
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
+                                  Total loss in SCRAP-BIN. Flags purchasing replenishment.
+                                </p>
+                              </button>
 
-                            {/* Card 4: 🟡 Hold / Quarantine */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setDisposition('4- Quarantine');
-                                setRmaStatus('quarantine');
-                              }}
-                              className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                (String(disposition || '').toLowerCase().includes('quarantine') || String(disposition || '').toLowerCase().includes('hold'))
-                                  ? 'border-amber-500 bg-amber-50/90 dark:bg-amber-950/60 ring-2 ring-amber-500/50 shadow-sm'
-                                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-amber-300 hover:bg-amber-50/30'
-                              }`}
-                            >
-                              <div className="flex items-center gap-1.5 mb-1">
-                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
-                                <span className="font-extrabold text-xs text-amber-800 dark:text-amber-300">
-                                  Hold / Quarantine
-                                </span>
-                              </div>
-                              <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                Freeze claims. Requires mandatory investigation note.
-                              </p>
-                            </button>
-                          </div>
+                              {/* Card 4: 🔵 Buffer Stock Swap (1:1) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDisposition('6- Buffer Stock Exchange');
+                                  setRmaStatus('under_inspection');
+                                  setNeedsReorder(true);
+                                  setIsBufferSlipOpen(true);
+                                }}
+                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                                  disposition === '6- Buffer Stock Exchange' || disposition?.toLowerCase().includes('buffer')
+                                    ? 'border-blue-500 bg-blue-50/90 dark:bg-blue-950/60 ring-2 ring-blue-500/50 shadow-sm'
+                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-blue-300 hover:bg-blue-50/30'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
+                                  <span className="font-extrabold text-xs text-blue-800 dark:text-blue-300">
+                                    4. Buffer Stock Swap
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
+                                  Dispatch 1:1 buffer replacement slip to customer.
+                                </p>
+                              </button>
+
+                              {/* Card 5: 🟡 On Hold / Quarantine */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDisposition('4- Quarantine');
+                                  setWarehouseLocation('QUARANTINE-HOLD');
+                                  setRmaStatus('under_inspection');
+                                }}
+                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                                  disposition === '4- Quarantine' || disposition?.toLowerCase().includes('quarantine') || disposition?.toLowerCase().includes('hold')
+                                    ? 'border-amber-500 bg-amber-50/90 dark:bg-amber-950/60 ring-2 ring-amber-500/50 shadow-sm'
+                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-amber-300 hover:bg-amber-50/30'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                                  <span className="font-extrabold text-xs text-amber-800 dark:text-amber-300">
+                                    5. On Hold / Quarantine
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
+                                  Freeze claims in QUARANTINE-HOLD. Requires reason note.
+                                </p>
+                              </button>
+
+                              {/* Card 6: ⚫ Reject & Return to Customer */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDisposition('8- Rejected / Return to Customer');
+                                  setWarehouseLocation('OUTBOUND-RETURN-TO-STORE');
+                                  setRmaStatus('rejected');
+                                  setNeedsReorder(false);
+                                }}
+                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                                  disposition === '8- Rejected / Return to Customer' || disposition?.toLowerCase().includes('rejected')
+                                    ? 'border-slate-600 bg-slate-100 dark:bg-slate-800 ring-2 ring-slate-500/50 shadow-sm'
+                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-slate-400 hover:bg-slate-50'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-slate-800 dark:bg-slate-200 shrink-0" />
+                                  <span className="font-extrabold text-xs text-slate-900 dark:text-white">
+                                    6. Reject & Return
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
+                                  Defect out-of-policy. Blocks Credit Memo & prints gate pass.
+                                </p>
+                              </button>
+                            </div>
+                          ) : (
+                            /* Supplier Hub: 5 Action Cards */
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                              {/* Card 1: ⏳ Pending Vendor Pickup */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDisposition('1 - Pending Vendor Pickup');
+                                  setWarehouseLocation('RTV-DOCK');
+                                  setRmaStatus('under_inspection');
+                                  setNeedsReorder(true);
+                                }}
+                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                                  disposition === '1 - Pending Vendor Pickup' || disposition?.toLowerCase().includes('pending vendor pickup')
+                                    ? 'border-amber-500 bg-amber-50/90 dark:bg-amber-950/60 ring-2 ring-amber-500/50 shadow-sm'
+                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-amber-300 hover:bg-amber-50/30'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                                  <span className="font-extrabold text-xs text-amber-800 dark:text-amber-300">
+                                    1. Pending Vendor Pickup
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
+                                  Staged in RTV-DOCK awaiting vendor driver retrieval.
+                                </p>
+                              </button>
+
+                              {/* Card 2: 💵 Vendor Credit Settled */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDisposition('3 - Vendor Credit / AP Deduction Settled');
+                                  setRmaStatus('vendor_claimed');
+                                  setNeedsReorder(true);
+                                }}
+                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                                  disposition === '3 - Vendor Credit / AP Deduction Settled' || disposition?.toLowerCase().includes('deduction settled')
+                                    ? 'border-emerald-500 bg-emerald-50/90 dark:bg-emerald-950/60 ring-2 ring-emerald-500/50 shadow-sm'
+                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-emerald-300 hover:bg-emerald-50/30'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                                  <span className="font-extrabold text-xs text-emerald-800 dark:text-emerald-300">
+                                    2. Vendor Credit Settled
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
+                                  Vendor credit note / AP deduction finalized.
+                                </p>
+                              </button>
+
+                              {/* Card 3: 🟢 Replacement Stock Received */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDisposition('4 - Vendor Replacement Stock Received');
+                                  setRmaStatus('under_inspection');
+                                  setNeedsReorder(false);
+                                  if (['SCRAP-BIN', 'RTV-DOCK', 'QUARANTINE-HOLD'].includes(warehouseLocation)) {
+                                    setWarehouseLocation('');
+                                  }
+                                }}
+                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                                  disposition === '4 - Vendor Replacement Stock Received' || disposition?.toLowerCase().includes('replacement stock received')
+                                    ? 'border-teal-500 bg-teal-50/90 dark:bg-teal-950/60 ring-2 ring-teal-500/50 shadow-sm'
+                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-teal-300 hover:bg-teal-50/30'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-teal-500 shrink-0" />
+                                  <span className="font-extrabold text-xs text-teal-800 dark:text-teal-300">
+                                    3. Replacement Received
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
+                                  Free vendor stock arrived. Routes to Ready to Restock.
+                                </p>
+                              </button>
+
+                              {/* Card 4: 🔴 Vendor Rejected Claim */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDisposition('5 - Claim Rejected by Vendor');
+                                  setWarehouseLocation('SCRAP-BIN');
+                                  setRmaStatus('under_inspection');
+                                  setNeedsReorder(true);
+                                }}
+                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                                  disposition === '5 - Claim Rejected by Vendor' || disposition?.toLowerCase().includes('claim rejected by vendor')
+                                    ? 'border-rose-500 bg-rose-50/90 dark:bg-rose-950/60 ring-2 ring-rose-500/50 shadow-sm'
+                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-rose-300 hover:bg-rose-50/30'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
+                                  <span className="font-extrabold text-xs text-rose-800 dark:text-rose-300">
+                                    4. Vendor Rejected Claim
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
+                                  Vendor refused credit. Convert to SCRAP-BIN. Blocks Debit Claim.
+                                </p>
+                              </button>
+
+                              {/* Card 5: 🟡 Under Vendor Dispute */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDisposition('4- Quarantine');
+                                  setWarehouseLocation('QUARANTINE-HOLD');
+                                  setRmaStatus('under_inspection');
+                                }}
+                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                                  disposition === '4- Quarantine' || disposition?.toLowerCase().includes('quarantine') || disposition?.toLowerCase().includes('hold')
+                                    ? 'border-amber-500 bg-amber-50/90 dark:bg-amber-950/60 ring-2 ring-amber-500/50 shadow-sm'
+                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-amber-300 hover:bg-amber-50/30'
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                                  <span className="font-extrabold text-xs text-amber-800 dark:text-amber-300">
+                                    5. Under Vendor Dispute
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
+                                  Hold in QUARANTINE-HOLD. Dispute in progress. Blocks Debit Claim.
+                                </p>
+                              </button>
+                            </div>
+                          )}
                         </div>
 
-                        {/* Dynamic Adaptive Inputs based on Selected Pillar */}
-                        {String(disposition || '').toLowerCase().includes('restock') && (
+                        {/* Purchasing Replenishment Switch (Explicit YES / NO) */}
+                        {(() => {
+                          const disp = String(disposition || '').toLowerCase();
+                          const showSwitch = !isRejected && !isOnHold && (
+                            disp.includes('scrap') ||
+                            disp.includes('dispose') ||
+                            disp.includes('return to vendor') ||
+                            disp.includes('rtv') ||
+                            disp.includes('buffer') ||
+                            disp.includes('pending vendor pickup') ||
+                            disp.includes('deduction settled') ||
+                            disp.includes('claim rejected by vendor')
+                          ) && !disp.includes('restock') && !disp.includes('replacement stock received');
+
+                          if (!showSwitch) return null;
+
+                          return (
+                            <div className="p-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-300 dark:border-slate-700 rounded-xl space-y-2 animate-in fade-in">
+                              <div className="flex items-center justify-between">
+                                <label className="text-[10px] uppercase font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                                  <span>🔄 Purchasing Replenishment Switch</span>
+                                </label>
+                                <span className={`text-[9.5px] font-black px-2 py-0.5 rounded-md ${
+                                  needsReorder 
+                                    ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
+                                    : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                                }`}>
+                                  {needsReorder ? 'PO Placement Flagged' : 'Write-Off / No Re-Order'}
+                                </span>
+                              </div>
+                              <p className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight">
+                                Should our purchasing coworkers place a replacement Purchase Order to replenish this lost inventory?
+                              </p>
+                              <div className="grid grid-cols-2 gap-2 pt-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setNeedsReorder(true)}
+                                  className={`py-2 px-3 rounded-lg text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                    needsReorder
+                                      ? 'bg-amber-500 text-white shadow-xs ring-2 ring-amber-400/40'
+                                      : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  <span>🔄 YES — Flag for Supplier Re-Order</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setNeedsReorder(false)}
+                                  className={`py-2 px-3 rounded-lg text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                    !needsReorder
+                                      ? 'bg-slate-700 dark:bg-slate-600 text-white shadow-xs ring-2 ring-slate-500/40'
+                                      : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  <span>🚫 NO — Do Not Re-Order</span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Customer Rejection Reason Input & Gate Pass */}
+                        {isRejected && (
+                          <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-700 rounded-xl space-y-2 animate-in fade-in">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] uppercase font-bold text-rose-900 dark:text-rose-300 flex items-center gap-1">
+                                <AlertTriangle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                                <span>Customer Rejection Reason * (Required)</span>
+                              </label>
+                              <span className="text-[9.5px] font-bold text-rose-800 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/60 px-2 py-0.5 rounded-md">
+                                Credit Blocked
+                              </span>
+                            </div>
+                            <textarea
+                              rows={2}
+                              value={rejectionReason}
+                              onChange={(e) => setRejectionReason(e.target.value)}
+                              placeholder="e.g. Customer physical damage / Broken seal / Return requested past 15-day return policy..."
+                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-rose-300 dark:border-rose-700 rounded-lg text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-rose-600"
+                            />
+                            <div className="flex items-center justify-between pt-1">
+                              <span className="text-[10px] text-rose-700 dark:text-rose-400 italic">
+                                Staged at OUTBOUND-RETURN-TO-STORE. Blocked from credit memo and coworker queues.
+                              </span>
+                              <button
+                                type="button"
+                                onClick={printRejectedGatePass}
+                                className="px-2.5 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all shadow-2xs shrink-0"
+                                title="Print Official Rejected Return Gate Pass for driver dispatch back to store"
+                              >
+                                <Printer className="w-3 h-3" />
+                                <span>🖨️ Print Rejected Return Gate Pass</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Target Rack / Bin Location (For Restock or Replacement Received) */}
+                        {(String(disposition || '').toLowerCase().includes('restock') || String(disposition || '').toLowerCase().includes('replacement stock received')) && (
                           <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 rounded-xl space-y-1.5 animate-in fade-in">
                             <label className="text-[10px] uppercase font-bold text-emerald-900 dark:text-emerald-300 block">
-                              Warehouse Rack / Bin Location *
+                              Target Rack / Bin Location *
                             </label>
                             <div className="relative">
                               <MapPin className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 absolute left-2.5 top-2.5" />
@@ -32106,28 +32707,33 @@ export default function QuickRMAActionModal({
                           </div>
                         )}
 
-                        {(String(disposition || '').toLowerCase().includes('scrap') || String(disposition || '').toLowerCase().includes('dispose')) && (
+                        {/* Scrap Staging Notification */}
+                        {(String(disposition || '').toLowerCase().includes('scrap') || String(disposition || '').toLowerCase().includes('dispose') || String(disposition || '').toLowerCase().includes('claim rejected by vendor')) && (
                           <div className="p-3 bg-rose-50/60 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 rounded-xl space-y-1 animate-in fade-in">
                             <div className="flex items-center justify-between">
                               <span className="text-[10px] uppercase font-extrabold text-rose-900 dark:text-rose-300">
                                 Staging Location: SCRAP-BIN
                               </span>
                               <span className="text-[9.5px] font-bold text-rose-700 dark:text-rose-400 bg-rose-100 dark:bg-rose-900/60 px-2 py-0.5 rounded-md">
-                                Auto-Queued for PO
+                                {needsReorder ? 'Auto-Queued for PO' : 'Scrapped (No Re-Order)'}
                               </span>
                             </div>
                             <p className="text-[10.5px] text-rose-800 dark:text-rose-300">
-                              Physical goods staged in <strong>SCRAP-BIN</strong> for disposal. Purchasing coworker can view and place supplier replacement PO via <code>?queue=reorder</code>.
+                              Physical goods staged in <strong>SCRAP-BIN</strong> for disposal.
+                              {needsReorder
+                                ? ' Purchasing coworkers can view and place supplier replacement PO via ?queue=reorder.'
+                                : ' Marked as write-off without re-order (?queue=scrap_no_reorder).'}
                             </p>
                           </div>
                         )}
 
-                        {(String(disposition || '').toLowerCase().includes('quarantine') || String(disposition || '').toLowerCase().includes('hold')) && (
+                        {/* Hold / Quarantine Reason Input */}
+                        {isOnHold && (
                           <div className="p-3 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 rounded-xl space-y-2 animate-in fade-in">
                             <div className="flex items-center justify-between">
                               <label className="text-[10px] uppercase font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1">
                                 <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                                <span>Mandatory Hold Reason / Investigation Note *</span>
+                                <span>Hold / Investigation Reason * (Required)</span>
                               </label>
                               <span className="text-[9.5px] font-bold text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/60 px-2 py-0.5 rounded-md">
                                 Claims Locked
@@ -32147,7 +32753,7 @@ export default function QuickRMAActionModal({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setDisposition('2- Restock to Inventory');
+                                  setDisposition(isSupplierStream ? '1 - Pending Vendor Pickup' : '2- Restock to Inventory');
                                   setRmaStatus('under_inspection');
                                   setHoldReason('');
                                 }}
@@ -32160,7 +32766,8 @@ export default function QuickRMAActionModal({
                           </div>
                         )}
 
-                        {(String(disposition || '').toLowerCase().includes('return to vendor') || String(disposition || '').toLowerCase().includes('rtv')) && (
+                        {/* Outbound RTV Staging Notice */}
+                        {(String(disposition || '').toLowerCase().includes('return to vendor') || String(disposition || '').toLowerCase().includes('rtv') || String(disposition || '').toLowerCase().includes('pending vendor pickup')) && (
                           <div className="p-3 bg-purple-50 dark:bg-purple-950/60 border border-purple-300 dark:border-purple-800 rounded-xl text-xs font-semibold text-purple-900 dark:text-purple-200 flex items-start gap-2 animate-in fade-in">
                             <Truck className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0 mt-0.5" />
                             <div className="space-y-0.5">
@@ -32269,10 +32876,10 @@ export default function QuickRMAActionModal({
                           console.warn('Debit claim creation notice:', e);
                         }
                       }}
-                      disabled={isOnHold}
-                      title={isOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : undefined}
+                      disabled={isOnHold || isRejected || isVendorRejectedClaim}
+                      title={isOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : (isVendorRejectedClaim ? "Vendor rejected claim. Debit Claims cannot be issued." : (isRejected ? "Claim is Rejected." : undefined))}
                       className={`py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors shadow-xs ${
-                        isOnHold
+                        (isOnHold || isRejected || isVendorRejectedClaim)
                           ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
                           : 'bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white cursor-pointer'
                       }`}
@@ -32462,8 +33069,8 @@ export default function QuickRMAActionModal({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
                       <button
                         type="button"
-                        disabled={!canIssueCreditMemo || isOnHold}
-                        title={isOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : (!canIssueCreditMemo ? "Locked: Super Admin Approval Required" : undefined)}
+                        disabled={!canIssueCreditMemo || isOnHold || isRejected}
+                        title={isOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : (isRejected ? "Claim is Rejected. Credit Memos cannot be issued." : (!canIssueCreditMemo ? "Locked: Super Admin Approval Required" : undefined))}
                         onClick={() => {
                           if (isOnHold) {
                             alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
@@ -37240,6 +37847,14 @@ import {
   formatManifestBreakdown,
   hasAssignedSku 
 } from '../utils/rmaHelpers';
+import {
+  getItemNeedsReorder,
+  isItemReadyToRestock,
+  isItemReorderNeeded,
+  isItemScrappedNoReorder,
+  isItemOnHold,
+  isItemRejected
+} from '../utils/rmaHelpers';
 
 export default function SupplierClaimsTab({
   reportsList = [],
@@ -37589,19 +38204,17 @@ export default function SupplierClaimsTab({
         rDisp === dispositionFilter.toLowerCase() ||
         rDisp.replace(/^\d+\s*-\s*/, '').trim() === cleanFilter;
 
-      // 4-Pillar Queue Filter
+      // Unified Coworker Workstation Queue Filter
       if (queueFilter === 'restock') {
-        const isRestock = rDisp.includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(rStatus);
-        if (!isRestock) return false;
-      } else if (queueFilter === 'rtv') {
-        const isRtv = (r.rma_type === 'supplier_outbound' || rDisp.includes('rtv') || rDisp.includes('vendor')) && !['closed', 'resolved', 'rejected', 'deleted', 'restocked', 'scrapped', 'disposed'].includes(rStatus);
-        if (!isRtv) return false;
+        if (!isItemReadyToRestock(r)) return false;
       } else if (queueFilter === 'reorder' || queueFilter === 'scrap') {
-        const isReorder = (rDisp.includes('scrap') || rDisp.includes('dispose') || rDisp.includes('reorder')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(rStatus);
-        if (!isReorder) return false;
-      } else if (queueFilter === 'hold') {
-        const isHold = (rDisp.includes('quarantine') || rDisp.includes('hold') || rStatus === 'quarantine') && !['closed', 'resolved', 'rejected', 'deleted'].includes(rStatus);
-        if (!isHold) return false;
+        if (!isItemReorderNeeded(r)) return false;
+      } else if (queueFilter === 'scrap_no_reorder') {
+        if (!isItemScrappedNoReorder(r)) return false;
+      } else if (queueFilter === 'hold' || queueFilter === 'quarantine') {
+        if (!isItemOnHold(r)) return false;
+      } else if (queueFilter === 'rejected') {
+        if (!isItemRejected(r)) return false;
       }
 
       const q = searchTerm.toLowerCase().trim();
@@ -38144,7 +38757,7 @@ export default function SupplierClaimsTab({
 
       {/* Filter Controls Bar (Dropdowns + Search) */}
       <div className="p-3 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-3 shadow-xs w-full min-w-0 box-border">
-        {/* Top Queue Filter Strip (Subject 2.1) */}
+        {/* Top Unified Coworker Workstation Queue Bar */}
         <div className="flex flex-wrap items-center gap-1.5 pb-2.5 border-b border-slate-200 dark:border-slate-800">
           <button
             type="button"
@@ -38159,7 +38772,7 @@ export default function SupplierClaimsTab({
                 : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
             }`}
           >
-            All (${queueCounts.all})
+            All Returns (${queueCounts.all})
           </button>
 
           <button
@@ -38175,23 +38788,7 @@ export default function SupplierClaimsTab({
                 : 'bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50'
             }`}
           >
-            <span>🟢 Ready to Restock (${queueCounts.restock})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setQueueFilter(queueFilter === 'rtv' ? 'all' : 'rtv');
-              setSelectedRmaIds(new Set());
-              setCurrentPage(1);
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-              queueFilter === 'rtv'
-                ? 'bg-purple-600 text-white border-purple-500 shadow-sm ring-2 ring-purple-400/40'
-                : 'bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800 hover:bg-purple-50'
-            }`}
-          >
-            <span>🟣 Vendor RTV (${queueCounts.rtv})</span>
+            <span>📦 Ready to Restock (${queueCounts.restock})</span>
           </button>
 
           <button
@@ -38203,11 +38800,27 @@ export default function SupplierClaimsTab({
             }}
             className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
               queueFilter === 'reorder'
+                ? 'bg-amber-600 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
+                : 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-50'
+            }`}
+          >
+            <span>🔄 Re-Order Needed (${queueCounts.reorder})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setQueueFilter(queueFilter === 'scrap_no_reorder' ? 'all' : 'scrap_no_reorder');
+              setSelectedRmaIds(new Set());
+              setCurrentPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+              queueFilter === 'scrap_no_reorder'
                 ? 'bg-rose-600 text-white border-rose-500 shadow-sm ring-2 ring-rose-400/40'
                 : 'bg-white dark:bg-slate-800 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 hover:bg-rose-50'
             }`}
           >
-            <span>🔴 Re-order Needed (${queueCounts.reorder})</span>
+            <span>🗑️ Scrapped — No Re-Order (${queueCounts.scrap_no_reorder})</span>
           </button>
 
           <button
@@ -38224,6 +38837,22 @@ export default function SupplierClaimsTab({
             }`}
           >
             <span>🟡 On Hold (${queueCounts.hold})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setQueueFilter(queueFilter === 'rejected' ? 'all' : 'rejected');
+              setSelectedRmaIds(new Set());
+              setCurrentPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+              queueFilter === 'rejected'
+                ? 'bg-slate-800 text-white border-slate-700 shadow-sm ring-2 ring-slate-600/40'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <span>⚫ Rejected Claims (${queueCounts.rejected})</span>
           </button>
 
           {queueFilter !== 'all' && (
@@ -38896,8 +39525,8 @@ export default function SupplierClaimsTab({
                               </button>
                             )}
 
-                            {/* 1-Click Coworker WMS Restock Action */}
-                            {String(r.disposition || '').toLowerCase().includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(String(r.status || '').toLowerCase()) && (
+                            {/* 1-Click Ready to Restock Action */}
+                            {isItemReadyToRestock(r) && (
                               <button
                                 type="button"
                                 disabled={updatingQueueId === (r.id || r.rma_number)}
@@ -38905,25 +39534,38 @@ export default function SupplierClaimsTab({
                                 className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
                                 title="1-click confirm that this item has been stocked in WMS (updates status to 6- Restocked)"
                               >
-                                <span>✓ Restocked in WMS</span>
+                                <span>✓ Confirm Restocked in WMS</span>
                               </button>
                             )}
 
-                            {/* 1-Click Coworker Supplier Re-Order Action */}
-                            {(String(r.disposition || '').toLowerCase().includes('scrap') || String(r.disposition || '').toLowerCase().includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(String(r.status || '').toLowerCase()) && (
+                            {/* 1-Click Re-Order Needed Action */}
+                            {isItemReorderNeeded(r) && (
+                              <button
+                                type="button"
+                                disabled={updatingQueueId === (r.id || r.rma_number)}
+                                onClick={() => handleConfirmCoworkerAction(r, 'scrapped')}
+                                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                title="1-click confirm replacement order placed with supplier (updates status to 7- Scrapped / Disposed)"
+                              >
+                                <span>✓ Confirm Re-Ordered (PO Placed)</span>
+                              </button>
+                            )}
+
+                            {/* 1-Click Scrapped — No Re-Order Action */}
+                            {isItemScrappedNoReorder(r) && (
                               <button
                                 type="button"
                                 disabled={updatingQueueId === (r.id || r.rma_number)}
                                 onClick={() => handleConfirmCoworkerAction(r, 'scrapped')}
                                 className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
-                                title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
+                                title="1-click confirm that this total loss is written off without re-ordering"
                               >
-                                <span>✓ PO Placed</span>
+                                <span>✓ Confirm Written Off</span>
                               </button>
                             )}
 
                             {/* Release Hold Action */}
-                            {(String(r.disposition || '').toLowerCase().includes('quarantine') || String(r.disposition || '').toLowerCase().includes('hold') || String(r.status || '').toLowerCase() === 'quarantine') && (
+                            {isItemOnHold(r) && (
                               <button
                                 type="button"
                                 onClick={() => onOpenQuickAction && onOpenQuickAction(r.rma_number)}
@@ -38933,6 +39575,13 @@ export default function SupplierClaimsTab({
                                 <Unlock className="w-3 h-3" />
                                 <span>🔓 Release Hold</span>
                               </button>
+                            )}
+
+                            {/* Rejected Badge */}
+                            {isItemRejected(r) && (
+                              <span className="px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold text-[10px] border border-slate-300 dark:border-slate-700">
+                                🚫 Claim Rejected
+                              </span>
                             )}
 
                             {/* 4. Official Debit Claim Generation or Viewing */}
@@ -38947,11 +39596,9 @@ export default function SupplierClaimsTab({
                                 <span>RTV Voucher Active</span>
                               </button>
                             ) : (() => {
-                              const isRowOnHold = Boolean(
-                                String(r.disposition || '').toLowerCase().includes('quarantine') ||
-                                String(r.disposition || '').toLowerCase().includes('hold') ||
-                                String(r.status || '').toLowerCase() === 'quarantine'
-                              );
+                              const isRowOnHold = isItemOnHold(r);
+                              const isRowRejected = isItemRejected(r);
+                              const isVendorRefused = String(r.disposition || '').toLowerCase().includes('claim rejected by vendor');
 
                               if (isRowOnHold) {
                                 return (
@@ -38966,6 +39613,20 @@ export default function SupplierClaimsTab({
                                   >
                                     <Lock className="w-3 h-3 text-amber-500" />
                                     <span>Hold: Debit Claim Locked</span>
+                                  </button>
+                                );
+                              }
+
+                              if (isRowRejected || isVendorRefused) {
+                                return (
+                                  <button
+                                    type="button"
+                                    disabled={true}
+                                    className="px-2.5 py-1 bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-not-allowed opacity-70"
+                                    title={isVendorRefused ? "Vendor refused claim. Debit claims cannot be issued." : "Claim is Rejected."}
+                                  >
+                                    <Lock className="w-3 h-3 text-rose-500" />
+                                    <span>{isVendorRefused ? 'Vendor Rejected Claim' : 'Claim Rejected'}</span>
                                   </button>
                                 );
                               }
@@ -44552,13 +45213,24 @@ export const catalogService = {
     if (!item || !targetStatus) throw new Error('Item and targetStatus are required.');
     const cleanStatus = String(targetStatus).toLowerCase().trim() === 'scrapped' ? 'scrapped' : 'restocked';
     const cleanActor = String(actorName || 'Warehouse Staff').trim();
-    const auditNote = cleanStatus === 'restocked'
-      ? `ERP Restock confirmed by ${cleanActor}`
-      : `Supplier Re-order confirmed by ${cleanActor}`;
+
+    let stage = 'SUPPLIER_REORDER';
+    let auditNote = `Supplier Re-order PO confirmed by ${cleanActor}`;
+    if (cleanStatus === 'restocked') {
+      stage = 'ERP_RESTOCK';
+      auditNote = `ERP Restock confirmed by ${cleanActor}`;
+    } else {
+      const notes = String(item?.notes || '');
+      const isExplicitNoReorder = item?.needs_reorder === false || item?.ai_document_metadata?.needs_reorder === false || notes.includes('[REORDER: NO]');
+      if (isExplicitNoReorder) {
+        stage = 'SCRAP_DISPOSAL';
+        auditNote = `Scrap written off by ${cleanActor}`;
+      }
+    }
 
     const auditEntry = {
       timestamp: new Date().toISOString(),
-      stage: cleanStatus === 'restocked' ? 'ERP_RESTOCK' : 'SUPPLIER_REORDER',
+      stage,
       actor: cleanActor,
       status: cleanStatus,
       warehouse_location: warehouseLocation || item.warehouse_location || undefined,
@@ -50650,9 +51322,136 @@ export function resolveBatchManifestLifecycle(report, allReports = []) {
   };
 }
 
+/**
+ * Resolves the explicit or inferred purchasing replenishment flag (needs_reorder).
+ * Returns true if the lost stock should be reordered from supplier, false otherwise.
+ */
+export function getItemNeedsReorder(item) {
+  if (item?.needs_reorder !== undefined && item?.needs_reorder !== null) {
+    return Boolean(item.needs_reorder);
+  }
+  if (item?.ai_document_metadata?.needs_reorder !== undefined && item?.ai_document_metadata?.needs_reorder !== null) {
+    return Boolean(item.ai_document_metadata.needs_reorder);
+  }
+  const notes = String(item?.notes || '');
+  if (notes.includes('[REORDER: NO]')) return false;
+  if (notes.includes('[REORDER: YES]')) return true;
+  // Default for Scrap / RTV / Buffer Swap / Vendor Rejected is true
+  return true;
+}
 
+/**
+ * Computes recovery source for items flagged for replenishment: 'scrap' | 'vendor_rtv' | 'buffer_swap'
+ */
+export function getRecoverySource(item) {
+  const disp = String(item?.disposition || '').toLowerCase();
+  if (disp.includes('buffer')) return 'buffer_swap';
+  if (disp.includes('rtv') || disp.includes('vendor') || item?.rma_type === 'supplier_outbound') return 'vendor_rtv';
+  return 'scrap';
+}
 
+/**
+ * Helper to check if an item (or child items in a batch manifest) belongs to the Ready to Restock queue:
+ * disposition: 'Restock to Inventory' OR 'Vendor Replacement Stock Received'
+ * and status !== 'restocked'
+ */
+export function isItemReadyToRestock(item, allReports = []) {
+  if (!item) return false;
+  if (!item.is_unpacked_manifest_item && (item.is_parent || (Array.isArray(item.items) && item.items.length > 1))) {
+    const children = Array.isArray(item.items) && item.items.length > 0 ? item.items : [];
+    return children.some(c => isItemReadyToRestock(c, allReports));
+  }
+  const disp = String(item.disposition || '').toLowerCase();
+  const st = String(item.status || '').toLowerCase();
+  const isRestockDisp = disp.includes('restock') || disp.includes('replacement stock received');
+  return isRestockDisp && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed', 'rejected'].includes(st);
+}
 
+/**
+ * Helper to check if an item belongs to the Re-Order Needed queue:
+ * disposition: Scrap / RTV / Buffer Swap / Claim Rejected by Vendor
+ * AND needs_reorder !== false
+ * AND status !== 'scrapped' (and not restock, hold, or rejected)
+ */
+export function isItemReorderNeeded(item, allReports = []) {
+  if (!item) return false;
+  if (!item.is_unpacked_manifest_item && (item.is_parent || (Array.isArray(item.items) && item.items.length > 1))) {
+    const children = Array.isArray(item.items) && item.items.length > 0 ? item.items : [];
+    return children.some(c => isItemReorderNeeded(c, allReports));
+  }
+  const disp = String(item.disposition || '').toLowerCase();
+  const st = String(item.status || '').toLowerCase();
 
+  if (
+    disp.includes('restock') ||
+    disp.includes('replacement stock received') ||
+    disp.includes('quarantine') ||
+    disp.includes('hold') ||
+    st === 'rejected' ||
+    disp.includes('8- rejected')
+  ) {
+    return false;
+  }
+
+  const isLossDisp =
+    disp.includes('scrap') ||
+    disp.includes('dispose') ||
+    disp.includes('reorder') ||
+    disp.includes('rtv') ||
+    disp.includes('vendor') ||
+    disp.includes('buffer') ||
+    disp.includes('claim rejected by vendor');
+
+  const needsReorder = getItemNeedsReorder(item);
+  return isLossDisp && needsReorder !== false && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked', 'rejected'].includes(st);
+}
+
+/**
+ * Helper to check if an item is Scrapped with No Re-Order:
+ * disposition is Scrap or Vendor Rejected AND needs_reorder === false
+ * AND status !== 'scrapped'
+ */
+export function isItemScrappedNoReorder(item, allReports = []) {
+  if (!item) return false;
+  if (!item.is_unpacked_manifest_item && (item.is_parent || (Array.isArray(item.items) && item.items.length > 1))) {
+    const children = Array.isArray(item.items) && item.items.length > 0 ? item.items : [];
+    return children.some(c => isItemScrappedNoReorder(c, allReports));
+  }
+  const disp = String(item.disposition || '').toLowerCase();
+  const st = String(item.status || '').toLowerCase();
+  const isScrapDisp = disp.includes('scrap') || disp.includes('dispose') || disp.includes('claim rejected by vendor');
+  const needsReorder = getItemNeedsReorder(item);
+  return isScrapDisp && needsReorder === false && !['scrapped', 'disposed', 'closed', 'resolved', 'rejected'].includes(st);
+}
+
+/**
+ * Helper to check if an item is On Hold / Quarantine:
+ * disposition includes Quarantine or Hold or status is quarantine / hold
+ */
+export function isItemOnHold(item, allReports = []) {
+  if (!item) return false;
+  if (!item.is_unpacked_manifest_item && (item.is_parent || (Array.isArray(item.items) && item.items.length > 1))) {
+    const children = Array.isArray(item.items) && item.items.length > 0 ? item.items : [];
+    return children.some(c => isItemOnHold(c, allReports));
+  }
+  const disp = String(item.disposition || '').toLowerCase();
+  const st = String(item.status || '').toLowerCase();
+  return (disp.includes('quarantine') || disp.includes('hold') || st === 'quarantine' || st === 'hold') && !['closed', 'resolved', 'rejected', 'deleted'].includes(st);
+}
+
+/**
+ * Helper to check if an item is Rejected:
+ * status === 'rejected' OR disposition includes '8- Rejected / Return to Customer' OR 'Claim Rejected by Vendor'
+ */
+export function isItemRejected(item, allReports = []) {
+  if (!item) return false;
+  if (!item.is_unpacked_manifest_item && (item.is_parent || (Array.isArray(item.items) && item.items.length > 1))) {
+    const children = Array.isArray(item.items) && item.items.length > 0 ? item.items : [];
+    return children.some(c => isItemRejected(c, allReports));
+  }
+  const disp = String(item.disposition || '').toLowerCase();
+  const st = String(item.status || '').toLowerCase();
+  return (st === 'rejected' || disp.includes('8- rejected') || disp.includes('claim rejected by vendor')) && !['closed', 'resolved', 'deleted'].includes(st);
+}
 
 --- END FILE: src/utils/rmaHelpers.js ---

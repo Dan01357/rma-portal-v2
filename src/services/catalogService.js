@@ -1662,13 +1662,24 @@ export const catalogService = {
     if (!item || !targetStatus) throw new Error('Item and targetStatus are required.');
     const cleanStatus = String(targetStatus).toLowerCase().trim() === 'scrapped' ? 'scrapped' : 'restocked';
     const cleanActor = String(actorName || 'Warehouse Staff').trim();
-    const auditNote = cleanStatus === 'restocked'
-      ? `ERP Restock confirmed by ${cleanActor}`
-      : `Supplier Re-order confirmed by ${cleanActor}`;
+
+    let stage = 'SUPPLIER_REORDER';
+    let auditNote = `Supplier Re-order PO confirmed by ${cleanActor}`;
+    if (cleanStatus === 'restocked') {
+      stage = 'ERP_RESTOCK';
+      auditNote = `ERP Restock confirmed by ${cleanActor}`;
+    } else {
+      const notes = String(item?.notes || '');
+      const isExplicitNoReorder = item?.needs_reorder === false || item?.ai_document_metadata?.needs_reorder === false || notes.includes('[REORDER: NO]');
+      if (isExplicitNoReorder) {
+        stage = 'SCRAP_DISPOSAL';
+        auditNote = `Scrap written off by ${cleanActor}`;
+      }
+    }
 
     const auditEntry = {
       timestamp: new Date().toISOString(),
-      stage: cleanStatus === 'restocked' ? 'ERP_RESTOCK' : 'SUPPLIER_REORDER',
+      stage,
       actor: cleanActor,
       status: cleanStatus,
       warehouse_location: warehouseLocation || item.warehouse_location || undefined,
