@@ -78,13 +78,19 @@ export default async function handler(req, res) {
         });
       }
 
-      // Normalize status and disposition for coworker restock & scrap/re-order sync
+      // Normalize status and disposition for coworker restock, scrap/re-order, RTV & hold sync
       if (updateData.status) {
         const s = String(updateData.status).toLowerCase().trim();
         if (s === 'restocked' || s === '6- restocked') {
           updateData.status = 'restocked';
         } else if (s === 'scrapped' || s === 'disposed' || s === '7- scrapped / disposed') {
           updateData.status = 'scrapped';
+        } else if (s === 'vendor_claimed' || s === '3- vendor claimed' || s === 'vendor_claim') {
+          updateData.status = 'vendor_claimed';
+          if (!updateData.disposition) updateData.disposition = '3- Return to Vendor (RTV)';
+        } else if (s === 'quarantine' || s === 'hold' || s === '4- quarantine') {
+          updateData.status = 'quarantine';
+          if (!updateData.disposition) updateData.disposition = '4- Quarantine';
         } else if (s === 'resolved' || s === 'closed') {
           // If disposition indicates scrap, normalize to scrapped; otherwise restocked
           const d = String(updateData.disposition || '').toLowerCase();
@@ -106,6 +112,13 @@ export default async function handler(req, res) {
           updateData.disposition = '2- Restock to Inventory';
         } else if (d === 'Scrap / Dispose' || d === '5- Scrap / Dispose' || /scrap|dispose/i.test(d)) {
           updateData.disposition = '5- Scrap / Dispose';
+          if (!updateData.warehouse_location) updateData.warehouse_location = 'SCRAP-BIN';
+        } else if (d === 'Return to Vendor (RTV)' || d === '3- Return to Vendor (RTV)' || /rtv|vendor/i.test(d)) {
+          updateData.disposition = '3- Return to Vendor (RTV)';
+          if (!updateData.status) updateData.status = 'vendor_claimed';
+        } else if (d === 'Quarantine' || d === '4- Quarantine' || /quarantine|hold/i.test(d)) {
+          updateData.disposition = '4- Quarantine';
+          if (!updateData.status) updateData.status = 'quarantine';
         }
       }
 
@@ -125,27 +138,38 @@ export default async function handler(req, res) {
       const actorName = String(body?.actor || body?.user || body?.updated_by || client.name || 'Coworker').trim();
       const targetBarcode = body?.barcode ? String(body.barcode).trim() : null;
 
-      // Standardized Audit Trail Note (Subject 1)
+      // Standardized Audit Trail Note for 4 Operational Actions
       let auditNote = `RMA status updated to ${updateData.status || 'updated'} by ${actorName}`;
       if (updateData.status === 'restocked') {
         auditNote = `ERP Restock confirmed by ${actorName}`;
       } else if (updateData.status === 'scrapped') {
         auditNote = `Supplier Re-order confirmed by ${actorName}`;
+      } else if (updateData.status === 'vendor_claimed') {
+        auditNote = `Vendor RTV claim confirmed by ${actorName}`;
+      } else if (updateData.status === 'quarantine' || (updateData.disposition && updateData.disposition.includes('Quarantine'))) {
+        auditNote = `Item placed on Hold / Quarantine by ${actorName}${body?.hold_reason ? `: ${body.hold_reason}` : ''}`;
+      } else if (existingRows.some(r => r.disposition?.includes('Quarantine') || r.status === 'quarantine')) {
+        auditNote = `Hold released by ${actorName}`;
       }
 
       const lifecycleStageLabel = updateData.status === 'restocked'
         ? '6- Restocked'
         : updateData.status === 'scrapped'
         ? '7- Scrapped / Disposed'
+        : updateData.status === 'vendor_claimed'
+        ? '3- Vendor Claimed'
+        : (updateData.status === 'quarantine' || updateData.disposition?.includes('Quarantine'))
+        ? '4- Quarantine'
         : undefined;
 
       const auditEntry = {
         timestamp: new Date().toISOString(),
-        stage: updateData.status === 'restocked' ? 'ERP_RESTOCK' : (updateData.status === 'scrapped' ? 'SUPPLIER_REORDER' : 'API_PATCH'),
+        stage: updateData.status === 'restocked' ? 'ERP_RESTOCK' : (updateData.status === 'scrapped' ? 'SUPPLIER_REORDER' : (updateData.status === 'vendor_claimed' ? 'VENDOR_RTV' : ((updateData.status === 'quarantine' || updateData.disposition?.includes('Quarantine')) ? 'HOLD_QUARANTINE' : 'API_PATCH'))),
         actor: actorName,
         status: updateData.status,
         lifecycle_stage: lifecycleStageLabel,
         warehouse_location: updateData.warehouse_location || undefined,
+        hold_reason: body?.hold_reason || undefined,
         note: auditNote
       };
 
@@ -179,6 +203,8 @@ export default async function handler(req, res) {
             const matchesQueueDisposition = !targetBarcode && (
               (updateData.status === 'restocked' && itDisp.includes('restock')) ||
               (updateData.status === 'scrapped' && (itDisp.includes('scrap') || itDisp.includes('dispose'))) ||
+              (updateData.status === 'vendor_claimed' && (itDisp.includes('rtv') || itDisp.includes('vendor'))) ||
+              (updateData.status === 'quarantine' && (itDisp.includes('quarantine') || itDisp.includes('hold'))) ||
               (!updateData.status)
             );
 

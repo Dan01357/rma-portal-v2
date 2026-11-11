@@ -1210,6 +1210,126 @@ Each test scenario defines:
 
 ---
 
+## Section 16: 4-Pillar Operational Action Trigger System (Restock, Re-order, RTV, Hold) & Coworker Queues
+
+### 16.0 4-Pillar Operational Action Triggers in Quick Action Modal
+- [ ] **TC-PILLAR-01 (Restock to Inventory Workflow)**
+  * **Location**: Admin Portal -> Customer RMA Hub / Supplier Hub -> Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**:
+    1. Click "Inspect / Triage" on any received RMA ticket.
+    2. Click the **🟢 Restock to Inventory** Action Card.
+    3. Verify that the Rack / Bin Location input field is displayed.
+    4. Type a valid warehouse location (e.g. `RACK-03-BIN-A`).
+    5. Click "Save Physical Triage".
+  * **Expected Behavior**:
+    1. Card is selected with high-contrast emerald border and checkmark indicator.
+    2. Disposition updates to `"2- Restock to Inventory"`.
+    3. Status transitions to `"under_inspection"`.
+    4. Audit log records: `Restock to Inventory staged by [Inspector Name]`.
+    5. The item immediately reflects in the top filter strip under **🟢 Ready to Restock**.
+
+- [ ] **TC-PILLAR-02 (Supplier Re-Order / Scrap Workflow)**
+  * **Location**: Admin Portal -> Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**:
+    1. Click the **🔴 Supplier Re-Order / Scrap** Action Card.
+    2. Observe the warehouse rack/bin field.
+    3. Click "Save Physical Triage".
+  * **Expected Behavior**:
+    1. Card is selected with rose border and alert indicator.
+    2. Warehouse rack/bin is automatically locked and set to `"SCRAP-BIN"`.
+    3. A clear operational notice appears explaining that total loss goods are flagged for replacement re-ordering.
+    4. Disposition updates to `"5- Scrap / Dispose"`.
+    5. Status updates to `"under_inspection"` (or preserves `"scrapped"`).
+    6. Audit log records: `Supplier Re-order / Scrap staged by [Inspector Name]`.
+    7. The item immediately reflects under the **🔴 Re-order Needed** queue.
+
+- [ ] **TC-PILLAR-03 (Vendor Recovery / Outbound RTV Workflow)**
+  * **Location**: Admin Portal -> Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**:
+    1. Click the **🟣 Vendor Recovery / RTV** Action Card.
+    2. Click "Save Physical Triage".
+  * **Expected Behavior**:
+    1. Card is selected with purple border and truck icon.
+    2. Disposition updates to `"3- Return to Vendor (RTV)"`.
+    3. Status updates to `"vendor_claimed"`.
+    4. Audit log records: `Vendor Recovery / RTV triage confirmed by [Inspector Name]`.
+    5. If in Customer Hub (`customer_inbound`), a prominent button appears offering to transfer the item to the Outbound Supplier Hub (`rma_type: 'supplier_outbound'`).
+    6. In Supplier Hub, the item is unlocked for `[ + Debit Claim ]`.
+    7. The item appears in the top filter strip under **🟣 Vendor RTV**.
+
+- [ ] **TC-PILLAR-04 (Hold / Quarantine Action Card & Mandatory Hold Reason Guard)**
+  * **Location**: Admin Portal -> Quick RMA Action Modal (`QuickRMAActionModal.jsx`)
+  * **Action**:
+    1. Click the **🟡 Hold / Quarantine** Action Card.
+    2. Leave the "Mandatory Hold / Quarantine Reason" textarea completely blank.
+    3. Click "Save Physical Triage".
+  * **Expected Behavior**:
+    1. Form submission is blocked with an error banner: *"Please enter a mandatory hold note / reason before placing this item on Hold / Quarantine."*
+    2. Type a reason: *"Suspected batch defect from factory — pending QC audit"*.
+    3. Click "Save Physical Triage".
+    4. Disposition updates to `"4- Quarantine"` and status updates to `"quarantine"`.
+    5. Audit log records: `Placed on Hold / Quarantine by [Inspector Name]: Suspected batch defect...`.
+    6. The item appears under the **🟡 On Hold** filter chip.
+
+- [ ] **TC-PILLAR-05 (Strict Financial Claims Safety Guard on Held Items)**
+  * **Location**: Admin Portal -> Quick Action Modal, Customer Hub Table, and Supplier Hub Table
+  * **Action**:
+    1. View an RMA item that is on Hold (`disposition: '4- Quarantine'` or `status: 'quarantine'`).
+    2. In `QuickRMAActionModal.jsx`, observe the `+ Issue Credit Memo`, `Buffer Stock Replacement Slip`, and `+ Debit Claim` buttons.
+    3. In `App.jsx` and `SupplierClaimsTab.jsx`, observe the `+ Credit Memo` and `+ Debit Claim` action buttons.
+  * **Expected Behavior**:
+    1. In Quick Action Modal, all financial action buttons are completely disabled (grayed out with lock icon).
+    2. Tooltip / Title displays: *"Item is on Hold / Quarantine. Resolve hold before issuing financial claims."*
+    3. In Customer Hub table, `+ Credit Memo` is disabled and labeled `"Locked (On Hold)"`.
+    4. In Supplier Hub table, `+ Debit Claim` (both per-row and batch buttons) is disabled with lock tooltip.
+    5. Attempting to click triggers a warning alert blocking financial claims until hold is resolved.
+
+- [ ] **TC-PILLAR-06 (Release Hold Re-Triage Workflow)**
+  * **Location**: Admin Portal -> Customer Hub Table, Supplier Hub Table, or Quick Action Modal
+  * **Action**:
+    1. Locate an item on hold with a `[ 🔓 Release Hold ]` button.
+    2. Click `[ 🔓 Release Hold ]`.
+  * **Expected Behavior**:
+    1. A confirmation prompt asks the user to release the hold and choose a new operational path (Restock, Vendor RTV, or Scrap).
+    2. Upon release, `disposition` is reset from `"4- Quarantine"`, status returns to active triage (`under_inspection`), and financial buttons are unlocked.
+    3. Audit trail logs: `Hold released by [Actor Name]`.
+
+- [ ] **TC-PILLAR-07 (Top Queue Filter Strip & Active Badges)**
+  * **Location**: Customer RMA Hub (`App.jsx`) & Supplier Claims Tab (`SupplierClaimsTab.jsx`)
+  * **Action**:
+    1. Observe the filter chips above the search bar: `[ All ]` | `[ 🟢 Ready to Restock (count) ]` | `[ 🟣 Vendor RTV (count) ]` | `[ 🔴 Re-order Needed (count) ]` | `[ 🟡 On Hold (count) ]`.
+    2. Click on each filter chip one by one.
+  * **Expected Behavior**:
+    1. The badge counts accurately calculate the number of items in each queue.
+    2. Clicking a chip filters the table to only show items belonging to that operational pillar.
+    3. Batch manifests are intelligently unpacked so line items with different dispositions are correctly surfaced.
+    4. A "Reset" button appears to return to the full unsegmented table view.
+
+- [ ] **TC-PILLAR-08 (1-Click WMS and Re-order Row Actions)**
+  * **Location**: Customer Hub Table / Batch Drawer & Supplier Hub Table
+  * **Action**:
+    1. On an item in the Restock queue, click `[ ✓ Restocked in WMS ]`.
+    2. On an item in the Re-order queue, click `[ ✓ PO Placed ]`.
+  * **Expected Behavior**:
+    1. `[ ✓ Restocked in WMS ]` immediately updates the item status to `"6- Restocked"`, saves the rack location, and appends `ERP Restock confirmed by [User]` to the audit log.
+    2. `[ ✓ PO Placed ]` immediately updates the item status to `"7- Scrapped / Disposed"` and appends `Supplier Re-order confirmed by [User]` to the audit log.
+    3. The completed items disappear from the pending coworker queues, preventing double-processing.
+
+- [ ] **TC-PILLAR-09 (Coworker Inventory REST API Queues & Manifest Unpacking)**
+  * **Location**: Partner Integration API (`/docs`, `/api/v1/rma`)
+  * **Action**:
+    1. Send `GET /api/v1/rma?queue=restock` with valid API key.
+    2. Send `GET /api/v1/rma?queue=reorder` with valid API key.
+    3. Send `GET /api/v1/rma?queue=rtv_debit` with valid API key.
+    4. Send `GET /api/v1/rma?queue=quarantine` with valid API key.
+    5. Send `PATCH /api/v1/rma/{id}` with `{"status": "restocked", "warehouse_location": "RACK-03-BIN-A"}`.
+  * **Expected Behavior**:
+    1. All 4 queue queries return HTTP 200 with JSON payload containing only items matching that operational state.
+    2. Parent manifest containers are unpacked into individual child line items, preventing double counting.
+    3. Once patched to `restocked` or `scrapped`, the item is excluded from subsequent pending queue queries.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -1228,4 +1348,6 @@ Each test scenario defines:
 | **Phase 12: SKU & Barcode Decoupling** | Product Engine & RMA Manifests | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 13: 1-Click Google Identity Lock** | Customer RMA Invites & OAuth Gate | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 14: Batch RMA & Realtime Revocation Watchdog** | Intake Portal & Gatekeeper Engine | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 15: 4-Pillar Action System & Financial Hold Safety Guard** | Quick Action Modal & Accounting | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 16: Coworker Inventory & Re-order Queues** | REST API & Queue Strip | `READY FOR TESTING` | *Lead QA Director* |
 

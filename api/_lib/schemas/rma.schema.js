@@ -141,14 +141,12 @@ export function registerRMARoutes(registry) {
     description: `Fetch paginated return reports with dedicated support for ERP inventory queues.
 Individual line items are automatically returned and generic parent manifest containers are filtered out, completely eliminating double-counting.
 
-### 📦 Queue 1: Inventory Restock Queue
-To fetch all goods approved by warehouse triage for inventory restocking:
+### 🟢 Queue 1: Ready to Restock Queue (?queue=restock)
+To fetch all goods approved for warehouse restocking:
 \`\`\`bash
 curl -X GET "https://rma-portal-v2.vercel.app/api/v1/rma?queue=restock" \\
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
-*(Or query \`disposition=Restock to Inventory&status=pending\`)*.
-Returns active pre-restock items (\`pending\`, \`received_at_dock\`, \`logged\`, \`credit_memo_issued\`, \`under_inspection\`, \`pending_finance_approval\`) approved for restock.
 After restocking into ERP, confirm via PATCH:
 \`\`\`bash
 curl -X PATCH "https://rma-portal-v2.vercel.app/api/v1/rma/{id}" \\
@@ -157,25 +155,38 @@ curl -X PATCH "https://rma-portal-v2.vercel.app/api/v1/rma/{id}" \\
   -d '{"status": "restocked", "warehouse_location": "RACK-03-BIN-A"}'
 \`\`\`
 
-### 🗑️ Queue 2: Scrapped / Supplier Re-Order Queue
+### 🔴 Queue 2: Re-Order Needed / Scrapped (?queue=reorder)
 To fetch all goods deemed total loss / scrapped so your ERP can re-order replacement stock from suppliers:
 \`\`\`bash
-curl -X GET "https://rma-portal-v2.vercel.app/api/v1/rma?queue=scrap" \\
+curl -X GET "https://rma-portal-v2.vercel.app/api/v1/rma?queue=reorder" \\
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
-*(Or query \`disposition=Scrap / Dispose&status=pending\`)*.
 After re-ordering from suppliers, confirm via PATCH:
 \`\`\`bash
 curl -X PATCH "https://rma-portal-v2.vercel.app/api/v1/rma/{id}" \\
   -H "x-api-key: sk_live_rma_..." \\
   -H "Content-Type: application/json" \\
   -d '{"status": "scrapped"}'
+\`\`\`
+
+### 🟣 Queue 3: Vendor Recovery / RTV (?queue=rtv_debit)
+To fetch all merchandise scheduled for outbound Return to Vendor (RTV) claims:
+\`\`\`bash
+curl -X GET "https://rma-portal-v2.vercel.app/api/v1/rma?queue=rtv_debit" \\
+  -H "x-api-key: sk_live_rma_..."
+\`\`\`
+
+### 🟡 Queue 4: Hold / Quarantine (?queue=quarantine)
+To fetch all merchandise currently frozen on Hold / Quarantine awaiting investigation:
+\`\`\`bash
+curl -X GET "https://rma-portal-v2.vercel.app/api/v1/rma?queue=quarantine" \\
+  -H "x-api-key: sk_live_rma_..."
 \`\`\``,
     tags: ['RMA Reports'],
     request: {
       query: PaginationQuerySchema.extend({
         rma_type: z.enum(['customer_inbound', 'supplier_outbound']).optional().openapi({ description: 'Filter by logistics type: customer_inbound or supplier_outbound', example: 'customer_inbound' }),
-        queue: z.enum(['restock', 'scrap']).optional().openapi({ description: 'Filter by inventory operation queue: "restock" (items approved for inventory restocking) or "scrap" (items marked for scrap/disposal to re-order from suppliers)', example: 'restock' }),
+        queue: z.enum(['restock', 'reorder', 'scrap', 'rtv_debit', 'quarantine']).optional().openapi({ description: 'Filter by 4-pillar operational queue: "restock" (ready to restock in WMS), "reorder" or "scrap" (re-order replacement from supplier), "rtv_debit" (vendor recovery / outbound RTV claims), "quarantine" (items on hold)', example: 'restock' }),
         status: z.string().optional().openapi({ description: 'Filter by status (pending, open, restocked, scrapped). "pending" and "open" return all pre-finalized active returns.', example: 'pending' }),
         barcode: z.string().optional().openapi({ description: 'Filter by exact product barcode', example: '4800016644833' }),
         disposition: z.string().optional().openapi({ description: 'Filter by warehouse triage disposition (e.g. "Restock to Inventory", "Return to Vendor (RTV)", "Scrap / Dispose")', example: 'Restock to Inventory' }),

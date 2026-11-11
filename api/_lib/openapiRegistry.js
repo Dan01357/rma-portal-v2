@@ -58,12 +58,12 @@ Pass your secret API key in all requests:
 - \`x-api-key: sk_live_rma_...\`
 - Or \`Authorization: Bearer sk_live_rma_...\`
 
-### 📦 Coworker Inventory Integration Guide:
+### 📦 4-Pillar Operations & Coworker Inventory Integration Guide:
 
-#### 1. Inventory Restock Queue:
+#### 1. 🟢 Ready to Restock Queue (?queue=restock):
 If you are syncing returned goods back into your warehouse inventory:
 1. **Query Pending Restock Items**:
-   Send \`GET /api/v1/rma?disposition=Restock to Inventory&status=pending\`
+   Send \`GET /api/v1/rma?queue=restock\`
    Retrieves all items that warehouse inspection approved for restocking with quantities and bin locations.
 2. **Update Inventory & Acknowledge**:
    Once added to your ERP stock, send \`PATCH /api/v1/rma/{id}\` with body:
@@ -77,10 +77,10 @@ If you are syncing returned goods back into your warehouse inventory:
    \`\`\`
    This marks the ticket as **6- Restocked** so it won't be double-counted.
 
-#### 2. Scrapped / Supplier Re-Order Queue:
+#### 2. 🔴 Supplier Re-Order Queue (?queue=reorder):
 If you need to know which items were scrapped (damaged beyond repair / expired) so your procurement system can re-order replacement stock from suppliers:
-1. **Query Scrapped Items**:
-   Send \`GET /api/v1/rma?disposition=Scrap / Dispose&status=pending\`
+1. **Query Re-Order Needed Items**:
+   Send \`GET /api/v1/rma?queue=reorder\`
    Retrieves all items that were deemed total loss with defect reason, quantity, and supplier details.
 2. **Place Replacement PO & Acknowledge**:
    Once your procurement system places a replacement Purchase Order to the supplier, send \`PATCH /api/v1/rma/{id}\` with body:
@@ -93,6 +93,12 @@ If you need to know which items were scrapped (damaged beyond repair / expired) 
    }
    \`\`\`
    This marks the ticket as **7- Scrapped / Disposed**.
+
+#### 3. 🟣 Vendor Recovery / Outbound RTV Queue (?queue=rtv_debit):
+Send \`GET /api/v1/rma?queue=rtv_debit\` to retrieve merchandise queued for return to vendor recovery claims.
+
+#### 4. 🟡 On Hold / Quarantine Queue (?queue=quarantine):
+Send \`GET /api/v1/rma?queue=quarantine\` to retrieve items currently frozen on hold. Financial claims are locked until released.
 
 #### 3. Dual Logistics Streams & Batch Manifests:
 - **\`rma_type: "customer_inbound"\`**: Customer / branch store returns awaiting warehouse triage, restock, or Credit Memo issuance.

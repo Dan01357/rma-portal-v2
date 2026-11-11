@@ -17,9 +17,12 @@ import {
   ArrowUpDown,
   Package,
   ClipboardCheck,
-  ChevronDown
+  ChevronDown,
+  Lock,
+  Unlock
 } from 'lucide-react';
 import { exportRMAReportsToCSV, exportSupplierOutboundClaimsToCSV } from '../utils/exportCsv';
+import { catalogService } from '../services/catalogService';
 import TablePagination from './TablePagination';
 import ImageLightboxModal from './ImageLightboxModal';
 import { supplierClaimService } from '../services/supplierClaimService';
@@ -51,6 +54,31 @@ export default function SupplierClaimsTab({
   const [dispositionFilter, setDispositionFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState('created_at');
+  const [queueFilter, setQueueFilter] = useState('all'); // 'all' | 'restock' | 'rtv' | 'reorder' | 'hold'
+  const [updatingQueueId, setUpdatingQueueId] = useState(null);
+
+  const handleConfirmCoworkerAction = async (item, targetStatus) => {
+    if (!item || updatingQueueId) return;
+    const rowKey = item.id || item.rma_number;
+    setUpdatingQueueId(rowKey);
+    const cleanStatus = targetStatus === 'scrapped' ? 'scrapped' : 'restocked';
+    const actorName = currentUser?.name || (cleanStatus === 'restocked' ? 'Warehouse Staff' : 'Purchasing Staff');
+
+    try {
+      await catalogService.confirmCoworkerQueueAction({
+        item,
+        targetStatus: cleanStatus,
+        warehouseLocation: cleanStatus === 'scrapped' ? 'SCRAP-BIN' : (item.warehouse_location || null),
+        actorName
+      });
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error('Failed to confirm coworker queue action in SupplierHub:', err);
+      alert(`Could not update status: ${err.message}`);
+    } finally {
+      setUpdatingQueueId(null);
+    }
+  };
   const [sortDirection, setSortDirection] = useState('desc');
   const [selectedRmaIds, setSelectedRmaIds] = useState(new Set());
   const [expandedManifestIds, setExpandedManifestIds] = useState(new Set());
@@ -350,10 +378,26 @@ export default function SupplierClaimsTab({
         (r.supplier_name && r.supplier_name.toLowerCase() === selectedSupplier.toLowerCase());
 
       const rDisp = String(r.disposition || '1 - Pending Vendor Pickup').toLowerCase();
+      const rStatus = String(r.status || '').toLowerCase();
       const cleanFilter = dispositionFilter.toLowerCase().replace(/^\d+\s*-\s*/, '').trim();
       const matchesDisposition = dispositionFilter === 'All' || 
         rDisp === dispositionFilter.toLowerCase() ||
         rDisp.replace(/^\d+\s*-\s*/, '').trim() === cleanFilter;
+
+      // 4-Pillar Queue Filter
+      if (queueFilter === 'restock') {
+        const isRestock = rDisp.includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(rStatus);
+        if (!isRestock) return false;
+      } else if (queueFilter === 'rtv') {
+        const isRtv = (r.rma_type === 'supplier_outbound' || rDisp.includes('rtv') || rDisp.includes('vendor')) && !['closed', 'resolved', 'rejected', 'deleted', 'restocked', 'scrapped', 'disposed'].includes(rStatus);
+        if (!isRtv) return false;
+      } else if (queueFilter === 'reorder' || queueFilter === 'scrap') {
+        const isReorder = (rDisp.includes('scrap') || rDisp.includes('dispose') || rDisp.includes('reorder')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(rStatus);
+        if (!isReorder) return false;
+      } else if (queueFilter === 'hold') {
+        const isHold = (rDisp.includes('quarantine') || rDisp.includes('hold') || rStatus === 'quarantine') && !['closed', 'resolved', 'rejected', 'deleted'].includes(rStatus);
+        if (!isHold) return false;
+      }
 
       const q = searchTerm.toLowerCase().trim();
       const matchesSearch = !q || 
@@ -419,7 +463,35 @@ export default function SupplierClaimsTab({
     });
 
     return list;
-  }, [reportsList, selectedSupplier, dispositionFilter, searchTerm, sortField, sortDirection, savedProductsList]);
+  }, [reportsList, selectedSupplier, dispositionFilter, searchTerm, queueFilter, sortField, sortDirection, savedProductsList]);
+
+  // Compute 4-Pillar Queue Counts
+  const queueCounts = useMemo(() => {
+    let restock = 0;
+    let rtv = 0;
+    let reorder = 0;
+    let hold = 0;
+
+    allRtvItems.forEach(r => {
+      const d = String(r.disposition || '').toLowerCase();
+      const st = String(r.status || '').toLowerCase();
+
+      if (d.includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(st)) {
+        restock++;
+      }
+      if ((r.rma_type === 'supplier_outbound' || d.includes('rtv') || d.includes('vendor')) && !['closed', 'resolved', 'rejected', 'deleted', 'restocked', 'scrapped', 'disposed'].includes(st)) {
+        rtv++;
+      }
+      if ((d.includes('scrap') || d.includes('dispose') || d.includes('reorder')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(st)) {
+        reorder++;
+      }
+      if ((d.includes('quarantine') || d.includes('hold') || st === 'quarantine' || st === 'hold') && !['closed', 'resolved', 'rejected', 'deleted'].includes(st)) {
+        hold++;
+      }
+    });
+
+    return { restock, rtv, reorder, hold, all: allRtvItems.length };
+  }, [allRtvItems]);
 
   // Paginated Slice
   const paginatedCandidates = useMemo(() => {
@@ -867,6 +939,103 @@ export default function SupplierClaimsTab({
 
       {/* Filter Controls Bar (Dropdowns + Search) */}
       <div className="p-3 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-3 shadow-xs w-full min-w-0 box-border">
+        {/* Top Queue Filter Strip (Subject 2.1) */}
+        <div className="flex flex-wrap items-center gap-1.5 pb-2.5 border-b border-slate-200 dark:border-slate-800">
+          <button
+            type="button"
+            onClick={() => {
+              setQueueFilter('all');
+              setSelectedRmaIds(new Set());
+              setCurrentPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              queueFilter === 'all'
+                ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
+                : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            All (${queueCounts.all})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setQueueFilter(queueFilter === 'restock' ? 'all' : 'restock');
+              setSelectedRmaIds(new Set());
+              setCurrentPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+              queueFilter === 'restock'
+                ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-400/40'
+                : 'bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50'
+            }`}
+          >
+            <span>🟢 Ready to Restock (${queueCounts.restock})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setQueueFilter(queueFilter === 'rtv' ? 'all' : 'rtv');
+              setSelectedRmaIds(new Set());
+              setCurrentPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+              queueFilter === 'rtv'
+                ? 'bg-purple-600 text-white border-purple-500 shadow-sm ring-2 ring-purple-400/40'
+                : 'bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800 hover:bg-purple-50'
+            }`}
+          >
+            <span>🟣 Vendor RTV (${queueCounts.rtv})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setQueueFilter(queueFilter === 'reorder' ? 'all' : 'reorder');
+              setSelectedRmaIds(new Set());
+              setCurrentPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+              queueFilter === 'reorder'
+                ? 'bg-rose-600 text-white border-rose-500 shadow-sm ring-2 ring-rose-400/40'
+                : 'bg-white dark:bg-slate-800 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 hover:bg-rose-50'
+            }`}
+          >
+            <span>🔴 Re-order Needed (${queueCounts.reorder})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setQueueFilter(queueFilter === 'hold' ? 'all' : 'hold');
+              setSelectedRmaIds(new Set());
+              setCurrentPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+              queueFilter === 'hold'
+                ? 'bg-amber-500 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
+                : 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-50'
+            }`}
+          >
+            <span>🟡 On Hold (${queueCounts.hold})</span>
+          </button>
+
+          {queueFilter !== 'all' && (
+            <button
+              type="button"
+              onClick={() => {
+                setQueueFilter('all');
+                setSelectedRmaIds(new Set());
+                setCurrentPage(1);
+              }}
+              className="px-2.5 py-1 text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 underline cursor-pointer"
+            >
+              Reset Queue
+            </button>
+          )}
+        </div>
+
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 w-full min-w-0">
           
           <div className="grid grid-cols-1 sm:grid-cols-2 md:flex md:flex-wrap md:items-center gap-2.5 w-full md:w-auto min-w-0">
@@ -977,20 +1146,37 @@ export default function SupplierClaimsTab({
                 </span>
 
                 {/* 1. Batch Debit Claim Voucher */}
-                <button
-                  type="button"
-                  onClick={handleGenerateBatchClaim}
-                  disabled={isSavingClaim}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs ${
-                    totalClaimAmount <= 0
-                      ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-dashed border-amber-400 opacity-90'
-                      : 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-500/20'
-                  }`}
-                  title={totalClaimAmount <= 0 ? "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor" : "Generate consolidated supplier debit claim voucher"}
-                >
-                  <Receipt className="w-3.5 h-3.5" />
-                  <span>+ Debit Claim</span>
-                </button>
+                {(() => {
+                  const hasHoldInBatch = selectedItems.some(it =>
+                    String(it.disposition || '').toLowerCase().includes('quarantine') ||
+                    String(it.disposition || '').toLowerCase().includes('hold') ||
+                    String(it.status || '').toLowerCase() === 'quarantine'
+                  );
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (hasHoldInBatch) {
+                          alert("Selected items contain items on Hold / Quarantine. Resolve hold before issuing financial claims.");
+                          return;
+                        }
+                        handleGenerateBatchClaim();
+                      }}
+                      disabled={isSavingClaim || hasHoldInBatch}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs ${
+                        hasHoldInBatch
+                          ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
+                          : totalClaimAmount <= 0
+                          ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-dashed border-amber-400 opacity-90 cursor-pointer'
+                          : 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-500/20 cursor-pointer'
+                      }`}
+                      title={hasHoldInBatch ? "Selected items contain items on Hold / Quarantine. Resolve hold before issuing financial claims." : (totalClaimAmount <= 0 ? "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor" : "Generate consolidated supplier debit claim voucher")}
+                    >
+                      {hasHoldInBatch ? <Lock className="w-3.5 h-3.5 text-amber-500" /> : <Receipt className="w-3.5 h-3.5" />}
+                      <span>{hasHoldInBatch ? 'Hold Locked' : '+ Debit Claim'}</span>
+                    </button>
+                  );
+                })()}
 
                 {/* 2. Print Vouchers for Selected Items */}
                 <button
@@ -1505,6 +1691,45 @@ export default function SupplierClaimsTab({
                               </button>
                             )}
 
+                            {/* 1-Click Coworker WMS Restock Action */}
+                            {String(r.disposition || '').toLowerCase().includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(String(r.status || '').toLowerCase()) && (
+                              <button
+                                type="button"
+                                disabled={updatingQueueId === (r.id || r.rma_number)}
+                                onClick={() => handleConfirmCoworkerAction(r, 'restocked')}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                title="1-click confirm that this item has been stocked in WMS (updates status to 6- Restocked)"
+                              >
+                                <span>✓ Restocked in WMS</span>
+                              </button>
+                            )}
+
+                            {/* 1-Click Coworker Supplier Re-Order Action */}
+                            {(String(r.disposition || '').toLowerCase().includes('scrap') || String(r.disposition || '').toLowerCase().includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(String(r.status || '').toLowerCase()) && (
+                              <button
+                                type="button"
+                                disabled={updatingQueueId === (r.id || r.rma_number)}
+                                onClick={() => handleConfirmCoworkerAction(r, 'scrapped')}
+                                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
+                              >
+                                <span>✓ PO Placed</span>
+                              </button>
+                            )}
+
+                            {/* Release Hold Action */}
+                            {(String(r.disposition || '').toLowerCase().includes('quarantine') || String(r.disposition || '').toLowerCase().includes('hold') || String(r.status || '').toLowerCase() === 'quarantine') && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenQuickAction && onOpenQuickAction(r.rma_number)}
+                                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                                title="Release hold and re-triage to Restock, RTV, or Scrap"
+                              >
+                                <Unlock className="w-3 h-3" />
+                                <span>🔓 Release Hold</span>
+                              </button>
+                            )}
+
                             {/* 4. Official Debit Claim Generation or Viewing */}
                             {existingClaim ? (
                               <button
@@ -1516,34 +1741,63 @@ export default function SupplierClaimsTab({
                                 <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                                 <span>RTV Voucher Active</span>
                               </button>
-                            ) : !isClaimable ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setFinancialWarningTarget({
-                                    item: r,
-                                    title: "Assign SKU & Price Required",
-                                    message: "Cannot issue RTV Debit Claim for ₱0.00 or unassigned SKU/vendor. Please click 'Assign SKU' first to set the official item price and master supplier."
-                                  });
-                                }}
-                                className="px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-2xs hover:border-amber-400 hover:text-amber-600"
-                                title="Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Click 'Assign SKU' first."
-                              >
-                                <AlertTriangle className="w-3 h-3 text-amber-500" />
-                                <span>+ Debit Claim (₱0.00 / Unassigned)</span>
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleGenerateSingleClaim(r)}
-                                disabled={isSavingClaim}
-                                className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                title={`Generate RTV Debit Claim Voucher for ${r.rma_number}`}
-                              >
-                                <Receipt className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                                <span>+ Debit Claim</span>
-                              </button>
-                            )}
+                            ) : (() => {
+                              const isRowOnHold = Boolean(
+                                String(r.disposition || '').toLowerCase().includes('quarantine') ||
+                                String(r.disposition || '').toLowerCase().includes('hold') ||
+                                String(r.status || '').toLowerCase() === 'quarantine'
+                              );
+
+                              if (isRowOnHold) {
+                                return (
+                                  <button
+                                    type="button"
+                                    disabled={true}
+                                    onClick={() => {
+                                      alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
+                                    }}
+                                    className="px-2.5 py-1 bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-not-allowed opacity-70"
+                                    title="Item is on Hold / Quarantine. Resolve hold before issuing financial claims."
+                                  >
+                                    <Lock className="w-3 h-3 text-amber-500" />
+                                    <span>Hold: Debit Claim Locked</span>
+                                  </button>
+                                );
+                              }
+
+                              if (!isClaimable) {
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setFinancialWarningTarget({
+                                        item: r,
+                                        title: "Assign SKU & Price Required",
+                                        message: "Cannot issue RTV Debit Claim for ₱0.00 or unassigned SKU/vendor. Please click 'Assign SKU' first to set the official item price and master supplier."
+                                      });
+                                    }}
+                                    className="px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-2xs hover:border-amber-400 hover:text-amber-600"
+                                    title="Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Click 'Assign SKU' first."
+                                  >
+                                    <AlertTriangle className="w-3 h-3 text-amber-500" />
+                                    <span>+ Debit Claim (₱0.00 / Unassigned)</span>
+                                  </button>
+                                );
+                              }
+
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => handleGenerateSingleClaim(r)}
+                                  disabled={isSavingClaim}
+                                  className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                  title={`Generate RTV Debit Claim Voucher for ${r.rma_number}`}
+                                >
+                                  <Receipt className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                                  <span>+ Debit Claim</span>
+                                </button>
+                              );
+                            })()}
 
                             {/* 5. Delete Report */}
                             {canDeleteReports && onRequestDeleteReport && (

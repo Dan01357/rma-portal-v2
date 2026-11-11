@@ -179,15 +179,23 @@ export default async function handler(req, res) {
         const itemDisp = String(item.disposition || '').toLowerCase();
         const itemStatus = String(item.status || 'received_at_dock').toLowerCase().trim();
 
-        // Dedicated Coworker Queues (Subject 1)
+        // 4-Pillar Dedicated Queues (Restock, Re-order, RTV, Hold)
         if (queue) {
           const cleanQueue = String(queue).trim().toLowerCase();
           if (cleanQueue === 'restock') {
             if (!itemDisp.includes('restock')) return false;
             if (FINALIZED_RESTOCK.has(itemStatus)) return false;
-          } else if (cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
-            if (!itemDisp.includes('scrap') && !itemDisp.includes('dispose')) return false;
+          } else if (cleanQueue === 'reorder' || cleanQueue === 'scrap' || cleanQueue === 'scrapped') {
+            if (!itemDisp.includes('scrap') && !itemDisp.includes('dispose') && !itemDisp.includes('reorder')) return false;
             if (FINALIZED_SCRAP.has(itemStatus)) return false;
+          } else if (cleanQueue === 'rtv_debit' || cleanQueue === 'rtv') {
+            const isRtv = itemDisp.includes('rtv') || itemDisp.includes('return to vendor') || itemDisp.includes('vendor') || item.rma_type === 'supplier_outbound';
+            if (!isRtv) return false;
+            if (['closed', 'resolved', 'rejected', 'deleted', 'restocked', 'scrapped', 'disposed'].includes(itemStatus)) return false;
+          } else if (cleanQueue === 'quarantine' || cleanQueue === 'hold') {
+            const isHold = itemDisp.includes('quarantine') || itemDisp.includes('hold') || itemStatus === 'quarantine' || itemStatus === 'hold';
+            if (!isHold) return false;
+            if (['closed', 'resolved', 'rejected', 'deleted'].includes(itemStatus)) return false;
           }
         }
 

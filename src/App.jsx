@@ -26,6 +26,7 @@ import {
   Phone,
   Mail,
   Lock,
+  Unlock,
   LogOut,
   Users,
   ShieldAlert,
@@ -1366,12 +1367,44 @@ export default function App() {
       return children.some(c => {
         const d = String(c?.disposition || '').toLowerCase();
         const st = String(c?.status || '').toLowerCase();
-        return (d.includes('scrap') || d.includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(st);
+        return (d.includes('scrap') || d.includes('dispose') || d.includes('reorder')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(st);
       });
     }
     const disp = String(item.disposition || '').toLowerCase();
     const st = String(item.status || '').toLowerCase();
-    return (disp.includes('scrap') || disp.includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(st);
+    return (disp.includes('scrap') || disp.includes('dispose') || disp.includes('reorder')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(st);
+  }, [recentReportsList]);
+
+  const isItemVendorRtv = React.useCallback((item, allReports = recentReportsList) => {
+    if (!item) return false;
+    const isManifestRow = !item.is_unpacked_manifest_item && isBatchManifest(item, allReports);
+    if (isManifestRow) {
+      const children = getReportManifestItems(item, allReports);
+      return children.some(c => {
+        const d = String(c?.disposition || '').toLowerCase();
+        const st = String(c?.status || '').toLowerCase();
+        return (c?.rma_type === 'supplier_outbound' || d.includes('rtv') || d.includes('vendor')) && !['closed', 'resolved', 'rejected', 'deleted', 'restocked', 'scrapped', 'disposed'].includes(st);
+      });
+    }
+    const disp = String(item.disposition || '').toLowerCase();
+    const st = String(item.status || '').toLowerCase();
+    return (item.rma_type === 'supplier_outbound' || disp.includes('rtv') || disp.includes('vendor')) && !['closed', 'resolved', 'rejected', 'deleted', 'restocked', 'scrapped', 'disposed'].includes(st);
+  }, [recentReportsList]);
+
+  const isItemOnHold = React.useCallback((item, allReports = recentReportsList) => {
+    if (!item) return false;
+    const isManifestRow = !item.is_unpacked_manifest_item && isBatchManifest(item, allReports);
+    if (isManifestRow) {
+      const children = getReportManifestItems(item, allReports);
+      return children.some(c => {
+        const d = String(c?.disposition || '').toLowerCase();
+        const st = String(c?.status || '').toLowerCase();
+        return (d.includes('quarantine') || d.includes('hold') || st === 'quarantine' || st === 'hold') && !['closed', 'resolved', 'rejected', 'deleted'].includes(st);
+      });
+    }
+    const disp = String(item.disposition || '').toLowerCase();
+    const st = String(item.status || '').toLowerCase();
+    return (disp.includes('quarantine') || disp.includes('hold') || st === 'quarantine' || st === 'hold') && !['closed', 'resolved', 'rejected', 'deleted'].includes(st);
   }, [recentReportsList]);
 
   // 1-Click Coworker Action Handler: Mark as Stocked in WMS ('restocked') or Mark Re-ordered from Supplier ('scrapped')
@@ -1443,6 +1476,14 @@ export default function App() {
   const supplierReorderReports = React.useMemo(() => {
     return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemReadyForSupplierReorder(r, recentReportsList));
   }, [recentReportsList, isItemReadyForSupplierReorder]);
+
+  const vendorRtvReports = React.useMemo(() => {
+    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemVendorRtv(r, recentReportsList));
+  }, [recentReportsList, isItemVendorRtv]);
+
+  const onHoldReports = React.useMemo(() => {
+    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemOnHold(r, recentReportsList));
+  }, [recentReportsList, isItemOnHold]);
 
   const supplierOutboundReports = React.useMemo(() => {
     const unpacked = [];
@@ -1567,11 +1608,15 @@ export default function App() {
       }
 
       // Date Range filters
-      // Coworker Inventory Workstation Quick-Filter ('restock' | 'scrap')
+      // 4-Pillar Dedicated Queue Filters ('restock' | 'rtv' | 'reorder' | 'hold')
       if (coworkerQueueFilter === 'restock') {
         if (!isItemReadyToRestock(item, recentReportsList)) return false;
-      } else if (coworkerQueueFilter === 'scrap') {
+      } else if (coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') {
         if (!isItemReadyForSupplierReorder(item, recentReportsList)) return false;
+      } else if (coworkerQueueFilter === 'rtv') {
+        if (!isItemVendorRtv(item, recentReportsList)) return false;
+      } else if (coworkerQueueFilter === 'hold') {
+        if (!isItemOnHold(item, recentReportsList)) return false;
       }
 
       if (reportsDateFrom) {
@@ -4298,6 +4343,97 @@ export default function App() {
 
                 {/* Filter / Search & Sort Controls Toolbar */}
                 <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 sm:p-3.5 space-y-2.5 w-full min-w-0 box-border">
+                  {/* Top Queue Filter Strip (Subject 2.1) */}
+                  <div className="flex flex-wrap items-center gap-1.5 pb-2.5 border-b border-slate-200 dark:border-slate-700/80">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCoworkerQueueFilter('all');
+                        setReportsCurrentPage(1);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                        coworkerQueueFilter === 'all'
+                          ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs'
+                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      All ({customerInboundReports.length})
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCoworkerQueueFilter(coworkerQueueFilter === 'restock' ? 'all' : 'restock');
+                        setReportsCurrentPage(1);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+                        coworkerQueueFilter === 'restock'
+                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-400/40'
+                          : 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50'
+                      }`}
+                    >
+                      <span>🟢 Ready to Restock ({readyToRestockReports.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCoworkerQueueFilter(coworkerQueueFilter === 'rtv' ? 'all' : 'rtv');
+                        setReportsCurrentPage(1);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+                        coworkerQueueFilter === 'rtv'
+                          ? 'bg-purple-600 text-white border-purple-500 shadow-sm ring-2 ring-purple-400/40'
+                          : 'bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800 hover:bg-purple-50'
+                      }`}
+                    >
+                      <span>🟣 Vendor RTV ({vendorRtvReports.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCoworkerQueueFilter((coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') ? 'all' : 'reorder');
+                        setReportsCurrentPage(1);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+                        coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap'
+                          ? 'bg-rose-600 text-white border-rose-500 shadow-sm ring-2 ring-rose-400/40'
+                          : 'bg-white dark:bg-slate-900 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 hover:bg-rose-50'
+                      }`}
+                    >
+                      <span>🔴 Re-order Needed ({supplierReorderReports.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCoworkerQueueFilter(coworkerQueueFilter === 'hold' ? 'all' : 'hold');
+                        setReportsCurrentPage(1);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+                        coworkerQueueFilter === 'hold'
+                          ? 'bg-amber-500 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
+                          : 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-50'
+                      }`}
+                    >
+                      <span>🟡 On Hold ({onHoldReports.length})</span>
+                    </button>
+
+                    {coworkerQueueFilter !== 'all' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCoworkerQueueFilter('all');
+                          setReportsCurrentPage(1);
+                        }}
+                        className="px-2.5 py-1 text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 underline cursor-pointer"
+                      >
+                        Reset Queue
+                      </button>
+                    )}
+                  </div>
+
                   {/* Search Input: Full width row */}
                   <div className="relative w-full min-w-0">
                     <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 shrink-0" />
@@ -5067,7 +5203,7 @@ export default function App() {
                                           className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
                                           title="1-click confirm that this item has been stocked in WMS (updates status to 6- Restocked)"
                                         >
-                                          <span>✓ Mark as Stocked in WMS</span>
+                                          <span>✓ Restocked in WMS</span>
                                         </button>
                                       )}
 
@@ -5077,10 +5213,23 @@ export default function App() {
                                           type="button"
                                           disabled={updatingQueueId === (item.id || item.rma_number)}
                                           onClick={() => handleConfirmCoworkerAction(item, 'scrapped')}
-                                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                          className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
                                           title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
                                         >
-                                          <span>✓ Mark Re-ordered from Supplier</span>
+                                          <span>✓ PO Placed</span>
+                                        </button>
+                                      )}
+
+                                      {/* Release Hold Action */}
+                                      {isItemOnHold(item, recentReportsList) && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleInspectTriageForReport(item)}
+                                          className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                                          title="Release hold and re-triage to Restock, RTV, or Scrap"
+                                        >
+                                          <Unlock className="w-3 h-3" />
+                                          <span>🔓 Release Hold</span>
                                         </button>
                                       )}
 
@@ -5151,16 +5300,28 @@ export default function App() {
                                             </span>
                                           );
                                         }
+                                        const isReportOnHold = isItemOnHold(item, recentReportsList);
                                         if (canEditProducts) {
                                           return (
                                             <button
                                               type="button"
-                                              onClick={() => handleOpenCreditMemoForReport(item)}
-                                              className="px-2.5 py-1 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                              title="Issue Finance Credit Memo for this Return"
+                                              disabled={isReportOnHold}
+                                              onClick={() => {
+                                                if (isReportOnHold) {
+                                                  alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
+                                                  return;
+                                                }
+                                                handleOpenCreditMemoForReport(item);
+                                              }}
+                                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all shadow-2xs ${
+                                                isReportOnHold
+                                                  ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed border border-slate-300 dark:border-slate-700 opacity-70'
+                                                  : 'bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 cursor-pointer'
+                                              }`}
+                                              title={isReportOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : "Issue Finance Credit Memo for this Return"}
                                             >
-                                              <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                              <span>+ Credit Memo</span>
+                                              {isReportOnHold ? <Lock className="w-3 h-3 text-amber-500" /> : <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
+                                              <span>{isReportOnHold ? 'On Hold' : '+ Credit Memo'}</span>
                                             </button>
                                           );
                                         }
@@ -5404,7 +5565,7 @@ export default function App() {
                                                               className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
                                                               title="1-click confirm stocked in WMS (updates status to 6- Restocked)"
                                                             >
-                                                              <span>✓ Mark as Stocked in WMS</span>
+                                                              <span>✓ Restocked in WMS</span>
                                                             </button>
                                                           )}
                                                           {(String(childDisposition || '').toLowerCase().includes('scrap') || String(childDisposition || '').toLowerCase().includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(String(child.status || '').toLowerCase()) && (
@@ -5412,10 +5573,21 @@ export default function App() {
                                                               type="button"
                                                               disabled={updatingQueueId === (childReportObject.id || item.rma_number)}
                                                               onClick={() => handleConfirmCoworkerAction({ ...childReportObject, is_unpacked_manifest_item: true, warehouse_location: childLocation || item.warehouse_location }, 'scrapped')}
-                                                              className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
-                                                              title="1-click confirm re-ordered from supplier (updates status to 7- Scrapped / Disposed)"
+                                                              className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                                                              title="1-click confirm replacement order placed with supplier (updates status to 7- Scrapped / Disposed)"
                                                             >
-                                                              <span>✓ Mark Re-ordered from Supplier</span>
+                                                              <span>✓ PO Placed</span>
+                                                            </button>
+                                                          )}
+                                                          {(String(childDisposition || '').toLowerCase().includes('quarantine') || String(childDisposition || '').toLowerCase().includes('hold') || String(child.status || '').toLowerCase() === 'quarantine') && (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => handleInspectTriageForReport(item)}
+                                                              className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                                                              title="Release hold and re-triage to Restock, RTV, or Scrap"
+                                                            >
+                                                              <Unlock className="w-3 h-3" />
+                                                              <span>🔓 Release Hold</span>
                                                             </button>
                                                           )}
                                                           {canEditProducts && (
@@ -5459,17 +5631,31 @@ export default function App() {
                                                               <span>CM Voucher</span>
                                                             </button>
                                                           ) : (
-                                                            canEditProducts && (
-                                                              <button
-                                                                type="button"
-                                                                onClick={() => handleOpenCreditMemoForReport(childReportObject)}
-                                                                className="px-2 py-1 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                                                title={`Issue Finance Credit Memo for ${childName} (${childQty} ${childUnit})`}
-                                                              >
-                                                                <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                                                <span>+ Credit Memo</span>
-                                                              </button>
-                                                            )
+                                                            canEditProducts && (() => {
+                                                              const isChildOnHold = Boolean(String(childDisposition || '').toLowerCase().includes('quarantine') || String(childDisposition || '').toLowerCase().includes('hold') || String(child.status || '').toLowerCase() === 'quarantine');
+                                                              return (
+                                                                <button
+                                                                  type="button"
+                                                                  disabled={isChildOnHold}
+                                                                  onClick={() => {
+                                                                    if (isChildOnHold) {
+                                                                      alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
+                                                                      return;
+                                                                    }
+                                                                    handleOpenCreditMemoForReport(childReportObject);
+                                                                  }}
+                                                                  className={`px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition-all shadow-2xs ${
+                                                                    isChildOnHold
+                                                                      ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed border border-slate-300 dark:border-slate-700 opacity-70'
+                                                                      : 'bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 cursor-pointer'
+                                                                  }`}
+                                                                  title={isChildOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : `Issue Finance Credit Memo for ${childName} (${childQty} ${childUnit})`}
+                                                                >
+                                                                  {isChildOnHold ? <Lock className="w-3 h-3 text-amber-500" /> : <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
+                                                                  <span>{isChildOnHold ? 'On Hold' : '+ Credit Memo'}</span>
+                                                                </button>
+                                                              );
+                                                            })()
                                                           )}
                                                         </div>
                                                       </td>
@@ -5706,7 +5892,7 @@ export default function App() {
                                     className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
                                     title="1-click confirm that this item has been stocked in WMS (updates status to 6- Restocked)"
                                   >
-                                    <span>✓ Mark as Stocked in WMS</span>
+                                    <span>✓ Restocked in WMS</span>
                                   </button>
                                 )}
 
@@ -5716,10 +5902,23 @@ export default function App() {
                                     type="button"
                                     disabled={updatingQueueId === (item.id || item.rma_number)}
                                     onClick={() => handleConfirmCoworkerAction(item, 'scrapped')}
-                                    className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                    className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
                                     title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
                                   >
-                                    <span>✓ Mark Re-ordered from Supplier</span>
+                                    <span>✓ PO Placed</span>
+                                  </button>
+                                )}
+
+                                {/* Release Hold Action */}
+                                {isItemOnHold(item, recentReportsList) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleInspectTriageForReport(item)}
+                                    className="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                    title="Release hold and re-triage to Restock, RTV, or Scrap"
+                                  >
+                                    <Unlock className="w-3 h-3" />
+                                    <span>🔓 Release Hold</span>
                                   </button>
                                 )}
 
@@ -5777,16 +5976,28 @@ export default function App() {
                                       </button>
                                     );
                                   }
+                                  const isCardOnHold = isItemOnHold(item, recentReportsList);
                                   if (canEditProducts) {
                                     return (
                                       <button
                                         type="button"
-                                        onClick={() => handleOpenCreditMemoForReport(item)}
-                                        className="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                                        title="Issue Credit Memo"
+                                        disabled={isCardOnHold}
+                                        onClick={() => {
+                                          if (isCardOnHold) {
+                                            alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
+                                            return;
+                                          }
+                                          handleOpenCreditMemoForReport(item);
+                                        }}
+                                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1 ${
+                                          isCardOnHold
+                                            ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed border border-slate-300 dark:border-slate-700 opacity-70'
+                                            : 'bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 cursor-pointer'
+                                        }`}
+                                        title={isCardOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : "Issue Credit Memo"}
                                       >
-                                        <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                        <span>+ CM</span>
+                                        {isCardOnHold ? <Lock className="w-3 h-3 text-amber-500" /> : <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
+                                        <span>{isCardOnHold ? 'On Hold' : '+ CM'}</span>
                                       </button>
                                     );
                                   }
