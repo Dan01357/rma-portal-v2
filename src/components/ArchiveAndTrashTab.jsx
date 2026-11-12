@@ -24,12 +24,16 @@ import TablePagination from './TablePagination';
 
 export default function ArchiveAndTrashTab({
   archivedReports = [],
+  archivedReportsList = [],
   trashedReports = [],
+  trashedReportsList = [],
   currentUser,
   onRefresh,
   onRestore,
   onPermanentlyDelete,
-  onEmptyTrash
+  onEmptyTrash,
+  onViewPhoto,
+  savedProductsList = []
 }) {
   const [activeView, setActiveView] = useState('trash'); // 'archive' | 'trash'
   const [envFilter, setEnvFilter] = useState('all'); // 'all' | 'live' | 'test'
@@ -40,8 +44,17 @@ export default function ArchiveAndTrashTab({
 
   const canManage = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
 
+  // Support both prop names flexibly
+  const effectiveArchived = useMemo(() => {
+    return archivedReports.length > 0 ? archivedReports : (archivedReportsList || []);
+  }, [archivedReports, archivedReportsList]);
+
+  const effectiveTrashed = useMemo(() => {
+    return trashedReports.length > 0 ? trashedReports : (trashedReportsList || []);
+  }, [trashedReports, trashedReportsList]);
+
   // Base list depending on active view
-  const baseList = activeView === 'archive' ? archivedReports : trashedReports;
+  const baseList = activeView === 'archive' ? effectiveArchived : effectiveTrashed;
 
   // Filter list by environment and search query
   const filteredList = useMemo(() => {
@@ -115,7 +128,7 @@ export default function ArchiveAndTrashTab({
             </p>
           </div>
 
-          {activeView === 'trash' && trashedReports.length > 0 && canManage && (
+          {activeView === 'trash' && effectiveTrashed.length > 0 && canManage && (
             <button
               type="button"
               onClick={onEmptyTrash}
@@ -123,7 +136,7 @@ export default function ArchiveAndTrashTab({
               title="Permanently delete all items currently in Trash Bin"
             >
               <Flame className="w-4 h-4" />
-              <span>Empty Trash ({trashedReports.length})</span>
+              <span>Empty Trash ({effectiveTrashed.length})</span>
             </button>
           )}
         </div>
@@ -141,7 +154,7 @@ export default function ArchiveAndTrashTab({
               }`}
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span>🗑️ Trash Bin — 30-Day Auto-Delete ({trashedReports.length})</span>
+              <span>🗑️ Trash Bin — 30-Day Auto-Delete ({effectiveTrashed.length})</span>
             </button>
 
             <button
@@ -154,7 +167,7 @@ export default function ArchiveAndTrashTab({
               }`}
             >
               <Archive className="w-3.5 h-3.5" />
-              <span>🗄️ Archive Vault ({archivedReports.length})</span>
+              <span>🗄️ Archive Vault ({effectiveArchived.length})</span>
             </button>
           </div>
 
@@ -382,3 +395,4 @@ export default function ArchiveAndTrashTab({
     </div>
   );
 }
+

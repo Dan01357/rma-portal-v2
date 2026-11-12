@@ -3530,7 +3530,7 @@ export default function QuickRMAActionModal({
                                 onChange={(e) => setWarehouseLocation(e.target.value)}
                                 className="w-full pl-8 pr-2.5 py-2 bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700 rounded-xl font-mono text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 cursor-pointer"
                               >
-                                <option value="">-- Select Restock Location --</option>
+                                <option value="">-- Select Warehouse Location --</option>
                                 {availableLocations.map(loc => (
                                   <option key={loc} value={loc}>{loc}</option>
                                 ))}

@@ -1118,7 +1118,7 @@ export default function SupplierClaimsTab({
 
           <button
             type="button"
-            onClick={() => exportSupplierOutboundClaimsToCSV(selectedItems.length > 0 ? selectedItems : rtvCandidates)}
+            onClick={() => exportSupplierOutboundClaimsToCSV(selectedItems.length > 0 ? selectedItems : rtvCandidates, null, savedProductsList)}
             className="text-xs text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 flex items-center gap-1.5 font-bold cursor-pointer ml-auto bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-3 py-1.5 rounded-xl shadow-2xs hover:shadow-xs transition-all"
             title="Download vendor chargeback CSV with bin location and batch numbers"
           >
@@ -1689,13 +1689,62 @@ export default function SupplierClaimsTab({
 
                             {/* 4. Stream-Specific Coworker Actions (Restock vs Scrap vs RTV Debit Claim) */}
                             {(() => {
+                              // 1. If RTV Debit Voucher already active, show voucher button
+                              if (existingClaim) {
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveClaimBatch(existingClaim)}
+                                    className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                    title={`View Official RTV Debit Claim Voucher: ${existingClaim.claimNumber || existingClaim.claim_number}`}
+                                  >
+                                    <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                    <span>RTV Voucher Active</span>
+                                  </button>
+                                );
+                              }
+
+                              // 2. If item is on hold
+                              const isRowOnHold = isItemOnHold(r);
+                              const isRowRejected = isItemRejected(r);
+                              const isVendorRefused = String(r.disposition || '').toLowerCase().includes('claim rejected by vendor');
+
+                              if (isRowOnHold) {
+                                return (
+                                  <button
+                                    type="button"
+                                    disabled={true}
+                                    onClick={() => {
+                                      alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
+                                    }}
+                                    className="px-2.5 py-1 bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-not-allowed opacity-70"
+                                    title="Item is on Hold / Quarantine. Resolve hold before issuing financial claims."
+                                  >
+                                    <Lock className="w-3 h-3 text-amber-500" />
+                                    <span>Hold: Debit Claim Locked</span>
+                                  </button>
+                                );
+                              }
+
+                              // 3. If rejected
+                              if (isRowRejected || isVendorRefused) {
+                                return (
+                                  <button
+                                    type="button"
+                                    disabled={true}
+                                    className="px-2.5 py-1 bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-not-allowed opacity-70"
+                                    title={isVendorRefused ? "Vendor refused claim. Debit claims cannot be issued." : "Claim is Rejected."}
+                                  >
+                                    <Lock className="w-3 h-3 text-rose-500" />
+                                    <span>{isVendorRefused ? 'Vendor Rejected Claim' : 'Claim Rejected'}</span>
+                                  </button>
+                                );
+                              }
+
+                              // 4. If Restock item (e.g. Free replacement goods arrived or routed to restock)
                               const isRestockItem = isItemReadyToRestock(r) ||
                                 String(r.disposition || '').toLowerCase().includes('restock') ||
                                 String(r.disposition || '').toLowerCase().includes('replacement stock received');
-
-                              const isScrapItem = isItemReorderNeeded(r) || isItemScrappedNoReorder(r) ||
-                                String(r.disposition || '').toLowerCase().includes('scrap') ||
-                                String(r.disposition || '').toLowerCase().includes('dispose');
 
                               if (isRestockItem) {
                                 return (
@@ -1722,6 +1771,14 @@ export default function SupplierClaimsTab({
                                   </div>
                                 );
                               }
+
+                              // 5. If explicitly Scrap / Dispose item
+                              const isScrapItem = (
+                                String(r.disposition || '').toLowerCase().includes('scrap') ||
+                                String(r.disposition || '').toLowerCase().includes('dispose') ||
+                                r.disposition === '5- Scrap / Dispose' ||
+                                String(r.disposition || '').toLowerCase().includes('scrap-bin')
+                              );
 
                               if (isScrapItem) {
                                 const isReorder = getItemNeedsReorder(r);
@@ -1758,55 +1815,7 @@ export default function SupplierClaimsTab({
                                 );
                               }
 
-                              if (existingClaim) {
-                                return (
-                                  <button
-                                    type="button"
-                                    onClick={() => setActiveClaimBatch(existingClaim)}
-                                    className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                    title={`View Official RTV Debit Claim Voucher: ${existingClaim.claimNumber || existingClaim.claim_number}`}
-                                  >
-                                    <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                    <span>RTV Voucher Active</span>
-                                  </button>
-                                );
-                              }
-
-                              const isRowOnHold = isItemOnHold(r);
-                              const isRowRejected = isItemRejected(r);
-                              const isVendorRefused = String(r.disposition || '').toLowerCase().includes('claim rejected by vendor');
-
-                              if (isRowOnHold) {
-                                return (
-                                  <button
-                                    type="button"
-                                    disabled={true}
-                                    onClick={() => {
-                                      alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
-                                    }}
-                                    className="px-2.5 py-1 bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-not-allowed opacity-70"
-                                    title="Item is on Hold / Quarantine. Resolve hold before issuing financial claims."
-                                  >
-                                    <Lock className="w-3 h-3 text-amber-500" />
-                                    <span>Hold: Debit Claim Locked</span>
-                                  </button>
-                                );
-                              }
-
-                              if (isRowRejected || isVendorRefused) {
-                                return (
-                                  <button
-                                    type="button"
-                                    disabled={true}
-                                    className="px-2.5 py-1 bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-not-allowed opacity-70"
-                                    title={isVendorRefused ? "Vendor refused claim. Debit claims cannot be issued." : "Claim is Rejected."}
-                                  >
-                                    <Lock className="w-3 h-3 text-rose-500" />
-                                    <span>{isVendorRefused ? 'Vendor Rejected Claim' : 'Claim Rejected'}</span>
-                                  </button>
-                                );
-                              }
-
+                              // 6. Default: Standard Return to Vendor (RTV) Claim Action
                               if (!isClaimable) {
                                 return (
                                   <button

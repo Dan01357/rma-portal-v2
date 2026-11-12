@@ -1550,6 +1550,69 @@ Each test scenario defines:
 
 ---
 
+## Section 19: Video QA Audit Resolution & Workflow Refinements
+
+### 19.1 Video Audit Fixes & Quality Hardening
+- [ ] **TC-V2-01 (Mandatory Damaged Product Photo Guard)**
+  * **Location**: Public Portal (`/`) Return Intake Form
+  * **Action**:
+    1. Scan or type product barcode without uploading any photos.
+    2. Attempt to click `[ + Add to Return Manifest ]` or submit the single return report.
+  * **Expected Behavior**:
+    1. Submission is strictly blocked with warning toast: *"Photo of damaged product is required before submitting return report."*
+    2. Photo section badge displays `Damaged Product Photo` with `[ Required * ]` in high-contrast rose styling.
+    3. Auto-generated stock images or Unsplash placeholders are NEVER used.
+  * **Edge Case**: Multi-item manifests ensure each individual line item possesses at least one valid proof photo before submission.
+
+- [ ] **TC-V2-02 (Test Mode Sandbox Row Actions Integration)**
+  * **Location**: Admin Portal -> `🧪 Test Mode Sandbox` (Customer & Supplier Sub-Tabs)
+  * **Action**: Inspect the table rows under Sandbox Customer RMAs and Sandbox Supplier RTVs.
+  * **Expected Behavior**:
+    1. The `Actions` column is fully populated with action controls.
+    2. Renders: `[ 📋 Triage ]` (opens Quick Processing modal), `[ 📦 Assign SKU ]` (for unassigned items), `[ 🖨️ ]` (4x6 thermal box label), `[ ↩️ Reset ]` (for resolved records), `[ 🗄️ ]` (Archive to Vault), and `[ 🗑️ ]` (Move to 30-day Trash).
+    3. No blank table cells exist.
+
+- [ ] **TC-V2-03 (Supplier Claims Hub Stream-Specific Action Buttons)**
+  * **Location**: Admin Portal -> `🚚 Supplier RTV Hub`
+  * **Action**: Review rows with disposition `Return to Vendor (RTV)` or `1- Pending Vendor Pickup`.
+  * **Expected Behavior**:
+    1. Rows display `[ + Debit Claim ]` (or `[ RTV Voucher Active ]` if debit claim note already exists).
+    2. The red `[ ✓ Confirm Re-Ordered (PO Placed) ]` button is strictly reserved for items whose disposition is explicitly `Scrap / Dispose` or `5- Scrap / Dispose`.
+    3. Restock items display `[ ✓ Confirm Restocked in WMS ]`.
+
+- [ ] **TC-V2-04 (Trash Bin & Archive Vault Instant Optimistic Rendering)**
+  * **Location**: Customer Hub, Supplier Hub, or Sandbox -> `[ 🗑️ Trash ]` -> `🗄️ Archive & Trash` Tab
+  * **Action**:
+    1. Click Trash on any report and confirm "Move to Trash (30-Day Recovery)?".
+    2. Immediately switch to `🗄️ Archive & Trash` tab without manually refreshing the page.
+  * **Expected Behavior**:
+    1. Tab badge instantly updates count (e.g. `Trash Bin — 30-Day Auto-Delete (1)`).
+    2. The trashed record is immediately visible in the table.
+    3. Clicking `[ ↩️ Restore ]` returns the record to its active hub and updates the UI instantaneously.
+    4. Clicking `[ 🔥 Delete Forever ]` permanently deletes the item from database and storage.
+
+- [ ] **TC-V2-05 (CSV Export Master Supplier Name Resolution)**
+  * **Location**: Supplier Claims Hub -> `[ Export Supplier Claims CSV ]`
+  * **Action**: Download and open `Pingcon_Supplier_Outbound_Claims.csv` in Excel or Google Sheets.
+  * **Expected Behavior**:
+    1. The `Master Supplier / Vendor` column displays the resolved vendor (e.g. `Savemore`, `Guy Sing Commercial Corp`, `Marina Sales Inc`, `Landmark Corporation`).
+    2. It never displays a blank cell or generic fallback `Pending Assignment` for items whose barcode matches the catalog.
+
+- [ ] **TC-V2-06 (Warehouse Location Dropdown Placeholder Clarity)**
+  * **Location**: RMA Quick Processing Modal -> Target Rack/Bin Location
+  * **Action**: Select physical action card (Restock, Supplier RTV, Quarantine, or Scrap).
+  * **Expected Behavior**:
+    1. The location selector placeholder displays `-- Select Warehouse Location --` rather than hardcoded `-- Select Restock Location --` across non-restock actions.
+
+- [ ] **TC-V2-07 (Public Portal Test Mode Banner Responsive Header)**
+  * **Location**: Public Portal (`/`) with Test Mode enabled for Super Admin
+  * **Action**: Resize window or view on desktop/tablet/mobile screens.
+  * **Expected Behavior**:
+    1. The Super Admin identity badge and test mode toggle do not squish text into vertical 1-character columns.
+    2. Clean 2-row layout with clear distinction between identity status and the stream destination selector (`📥 Customer RMA Hub` vs `📤 Supplier RTV Hub`).
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -1572,4 +1635,5 @@ Each test scenario defines:
 | **Phase 16: Coworker Inventory & Re-order Queues** | REST API & Queue Strip | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 17: Video Audit 9 Bug Fixes & UI Streamlining** | Workstation Bar & Action Cards | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 18: Enterprise Upgrade (Zero Stock Photos, Locations, CSV, Sandbox, Trash & Archive)** | Full Platform & REST API | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 19: Video QA Audit Resolution & Workflow Refinements** | Full Platform & REST API | `READY FOR TESTING` | *Lead QA Director* |
 

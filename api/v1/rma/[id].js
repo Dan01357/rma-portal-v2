@@ -176,16 +176,6 @@ export default async function handler(req, res) {
           if (!updateData.warehouse_location) updateData.warehouse_location = 'Hold / Inspection Area';
         }
       }
-          updateData.disposition = '5- Scrap / Dispose';
-          if (!updateData.warehouse_location) updateData.warehouse_location = 'SCRAP-BIN';
-        } else if (d === 'Return to Vendor (RTV)' || d === '3- Return to Vendor (RTV)' || /rtv|vendor/i.test(d)) {
-          updateData.disposition = '3- Return to Vendor (RTV)';
-          if (!updateData.status) updateData.status = 'vendor_claimed';
-        } else if (d === 'Quarantine' || d === '4- Quarantine' || /quarantine|hold/i.test(d)) {
-          updateData.disposition = '4- Quarantine';
-          if (!updateData.status) updateData.status = 'quarantine';
-        }
-      }
 
       // First, retrieve the matching record(s) so we can update audit trails & parent manifest items
       const { data: existingRows, error: findError } = await matchRma(

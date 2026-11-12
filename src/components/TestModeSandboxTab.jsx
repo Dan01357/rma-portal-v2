@@ -13,13 +13,18 @@ import {
   ClipboardCheck,
   Package,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Printer,
+  Archive,
+  Eye,
+  CheckCircle2
 } from 'lucide-react';
 import { 
   formatQuantityWithPackSize, 
   normalizeWarehouseLocation,
   formatLifecycleStage
 } from '../utils/rmaHelpers';
+import { catalogService } from '../services/catalogService';
 import TablePagination from './TablePagination';
 
 export default function TestModeSandboxTab({
@@ -28,10 +33,16 @@ export default function TestModeSandboxTab({
   currentUser,
   onRefresh,
   onInspectTriage,
+  onOpenQuickAction,
   onResetToPending,
   onClearAllSandbox,
   onAssignSku,
   onViewCreditMemo,
+  onPrintLabel,
+  onViewPhoto,
+  onViewExplanation,
+  onRequestDeleteReport,
+  onArchiveReport,
   savedProductsList = []
 }) {
   const [activeSubTab, setActiveSubTab] = useState('customer'); // 'customer' | 'supplier' | 'memos'
@@ -297,11 +308,15 @@ export default function TestModeSandboxTab({
 
                       <td className="py-3 px-3.5 text-center">
                         <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                          {onInspectTriage && (
+                          {/* 1. Inspect / Triage */}
+                          {(onOpenQuickAction || onInspectTriage) && (
                             <button
                               type="button"
-                              onClick={() => onInspectTriage(item)}
-                              className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
+                              onClick={() => {
+                                if (onOpenQuickAction) onOpenQuickAction(item.rma_number);
+                                else if (onInspectTriage) onInspectTriage(item);
+                              }}
+                              className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs whitespace-nowrap"
                               title="Triage condition and operational disposition"
                             >
                               <ClipboardCheck className="w-3 h-3 text-amber-600" />
@@ -309,15 +324,76 @@ export default function TestModeSandboxTab({
                             </button>
                           )}
 
-                          {isResolved && onResetToPending && (
+                          {/* 2. Assign SKU */}
+                          {onAssignSku && !savedProductsList?.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
                             <button
                               type="button"
-                              onClick={() => onResetToPending(item)}
+                              onClick={() => onAssignSku(item)}
+                              className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs whitespace-nowrap"
+                              title="Assign SKU & Save to Catalog"
+                            >
+                              <Package className="w-3 h-3 text-blue-600" />
+                              <span>Assign SKU</span>
+                            </button>
+                          )}
+
+                          {/* 3. Print 4x6 Label */}
+                          {onPrintLabel && (
+                            <button
+                              type="button"
+                              onClick={() => onPrintLabel(item)}
+                              className="p-1 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
+                              title="Print 4x6 Box Label"
+                            >
+                              <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
+                            </button>
+                          )}
+
+                          {/* 4. Reset to Pending */}
+                          {isResolved && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (onResetToPending) {
+                                  onResetToPending(item);
+                                } else {
+                                  try {
+                                    await catalogService.resetReportToPending(item.id, item.rma_number, currentUser?.name || 'Staff');
+                                    if (onRefresh) onRefresh();
+                                  } catch (e) {
+                                    console.error(e);
+                                  }
+                                }
+                              }}
                               className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs whitespace-nowrap"
                               title="Reset to pending to allow re-testing coworker queues"
                             >
                               <RotateCcw className="w-3 h-3 text-slate-500" />
                               <span>↩️ Reset</span>
+                            </button>
+                          )}
+
+                          {/* 5. Archive to Vault */}
+                          {onArchiveReport && (
+                            <button
+                              type="button"
+                              onClick={() => onArchiveReport(item.id, item.rma_number, item)}
+                              className="p-1 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
+                              title="Archive to Vault"
+                            >
+                              <Archive className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
+                            </button>
+                          )}
+
+                          {/* 6. Move to Trash */}
+                          {onRequestDeleteReport && (
+                            <button
+                              type="button"
+                              onClick={() => onRequestDeleteReport(item.id, item.rma_number, item)}
+                              className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg cursor-pointer transition-colors"
+                              title="Move to 30-Day Trash Bin"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
                             </button>
                           )}
                         </div>
@@ -347,3 +423,4 @@ export default function TestModeSandboxTab({
     </div>
   );
 }
+

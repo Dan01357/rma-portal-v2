@@ -96,6 +96,27 @@ function extractPhotoLink(r) {
   return 'N/A';
 }
 
+/**
+ * Resolve master supplier name with robust fallback to catalog products
+ */
+export function resolveExportSupplier(r, savedProducts = []) {
+  if (!r) return 'Pending Assignment';
+  const cleanBarcode = String(r.barcode || '').trim();
+  const matched = (Array.isArray(savedProducts) && cleanBarcode)
+    ? savedProducts.find(p => p.barcode && String(p.barcode).trim() === cleanBarcode)
+    : null;
+
+  const rawSup = String(r.supplier_name || r.supplier || '').trim();
+  const isInvalid = !rawSup || rawSup.toLowerCase().includes('pending') || rawSup.toLowerCase().includes('unassigned') || rawSup.toLowerCase() === 'warehouse';
+
+  if (!isInvalid) return rawSup;
+  if (matched?.supplier_name && matched.supplier_name.trim()) return matched.supplier_name.trim();
+  if (matched?.supplierName && matched.supplierName.trim()) return matched.supplierName.trim();
+  if (r.items?.[0]?.supplier_name && r.items[0].supplier_name.trim()) return r.items[0].supplier_name.trim();
+  if (r.items?.[0]?.supplier && r.items[0].supplier.trim()) return r.items[0].supplier.trim();
+  return rawSup || 'Pending Assignment';
+}
+
 function downloadCsvBlob(csvContent, filename) {
   // \uFEFF is UTF-8 Byte Order Mark (BOM) so Excel reads formatting and currencies properly
   const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -114,7 +135,7 @@ function downloadCsvBlob(csvContent, filename) {
 /**
  * Export RMA Reports to CSV
  */
-export function exportRMAReportsToCSV(reports, filename = null) {
+export function exportRMAReportsToCSV(reports, filename = null, savedProducts = []) {
   if (!reports || reports.length === 0) {
     alert('No reports available to export.');
     return;
@@ -158,6 +179,7 @@ export function exportRMAReportsToCSV(reports, filename = null) {
     const photoLink = extractPhotoLink(r);
     const cleanExpiry = formatCleanDateOnly(r.expiry_date);
     const loc = normalizeWarehouseLocation(r.warehouse_location, r);
+    const supplier = resolveExportSupplier(r, savedProducts);
 
     return [
       escapeCsvCell(index + 1),
@@ -171,7 +193,7 @@ export function exportRMAReportsToCSV(reports, filename = null) {
       escapeCsvCell(r.disposition || 'Pending Triage'),
       escapeCsvCell(r.condition_grade || 'Unassessed'),
       escapeCsvCell(loc),
-      escapeCsvCell(r.supplier_name || 'Savemore'),
+      escapeCsvCell(supplier),
       escapeCsvTextFormula(r.barcode),
       escapeCsvTextFormula(r.code || r.sku || ''),
       escapeCsvCell(r.name),
@@ -198,7 +220,7 @@ export function exportRMAReportsToCSV(reports, filename = null) {
 /**
  * Export Customer Inbound RMAs to CSV
  */
-export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
+export function exportCustomerInboundRMAsToCSV(reports, filename = null, savedProducts = []) {
   if (!reports || reports.length === 0) {
     alert('No customer return reports available to export.');
     return;
@@ -278,7 +300,7 @@ export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
 /**
  * Export Supplier Outbound / RTV Debit Claims to CSV
  */
-export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
+export function exportSupplierOutboundClaimsToCSV(reports, filename = null, savedProducts = []) {
   if (!reports || reports.length === 0) {
     alert('No supplier outbound claims available to export.');
     return;
@@ -318,12 +340,13 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
     const photoLink = extractPhotoLink(r);
     const cleanExpiry = formatCleanDateOnly(r.expiry_date);
     const loc = normalizeWarehouseLocation(r.warehouse_location, r);
+    const supplier = resolveExportSupplier(r, savedProducts);
 
     return [
       escapeCsvCell(index + 1),
       escapeCsvTextFormula(r.rma_number),
       escapeCsvTextFormula(dateStr),
-      escapeCsvCell(r.supplier_name || 'Savemore'),
+      escapeCsvCell(supplier),
       escapeCsvCell(loc),
       escapeCsvTextFormula(r.batch_lot_number || ''),
       escapeCsvTextFormula(cleanExpiry),

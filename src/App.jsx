@@ -947,22 +947,123 @@ export default function App() {
 
   const handleArchiveReport = async (id, rmaNumber, item) => {
     try {
+      setRecentReportsList(prev => prev.map(r => {
+        if ((id && r.id === id) || (rmaNumber && r.rma_number === rmaNumber)) {
+          return {
+            ...r,
+            ai_document_metadata: {
+              ...(r.ai_document_metadata || {}),
+              is_archived: true,
+              is_trashed: false,
+              archived_at: new Date().toISOString(),
+              archived_by: currentUser?.name || 'Staff'
+            }
+          };
+        }
+        return r;
+      }));
       await catalogService.archiveReport(id, rmaNumber, currentUser?.name || 'Staff');
       showToast(`Archived RMA #${rmaNumber} to Archive Vault.`, 'success');
       refreshAllData();
     } catch (e) {
       showToast(`Could not archive report: ${e.message}`, 'error');
+      refreshAllData();
     }
   };
 
   const handleBulkArchiveReports = async (reportsList) => {
     try {
+      const matchSet = new Set(reportsList.map(r => r.id || r.rma_number));
+      setRecentReportsList(prev => prev.map(r => {
+        if (matchSet.has(r.id) || matchSet.has(r.rma_number)) {
+          return {
+            ...r,
+            ai_document_metadata: {
+              ...(r.ai_document_metadata || {}),
+              is_archived: true,
+              is_trashed: false,
+              archived_at: new Date().toISOString(),
+              archived_by: currentUser?.name || 'Staff'
+            }
+          };
+        }
+        return r;
+      }));
       await catalogService.archiveMultipleReports(reportsList, currentUser?.name || 'Staff');
       setSelectedReportIds(new Set());
       showToast(`Archived ${reportsList.length} return reports to Archive Vault.`, 'success');
       refreshAllData();
     } catch (e) {
       showToast(`Could not archive reports: ${e.message}`, 'error');
+      refreshAllData();
+    }
+  };
+
+  const handleRestoreFromTrashOrArchive = async (item) => {
+    if (!item) return;
+    try {
+      setRecentReportsList(prev => prev.map(r => {
+        if ((item.id && r.id === item.id) || (item.rma_number && r.rma_number === item.rma_number)) {
+          const meta = { ...(r.ai_document_metadata || {}) };
+          delete meta.is_trashed;
+          delete meta.trashed_at;
+          delete meta.trashed_by;
+          delete meta.purge_after;
+          delete meta.is_archived;
+          delete meta.archived_at;
+          delete meta.archived_by;
+          return { ...r, ai_document_metadata: meta };
+        }
+        return r;
+      }));
+      await catalogService.restoreReport(item.id, item.rma_number, currentUser?.name || 'Staff');
+      showToast(`Restored RMA #${item.rma_number} back to active workspace.`, 'success');
+      refreshAllData();
+    } catch (e) {
+      showToast(`Could not restore report: ${e.message}`, 'error');
+      refreshAllData();
+    }
+  };
+
+  const handlePermanentlyDeleteReport = async (item) => {
+    if (!item) return;
+    try {
+      setRecentReportsList(prev => prev.filter(r => {
+        if (item.id && r.id === item.id) return false;
+        if (item.rma_number && r.rma_number === item.rma_number) return false;
+        return true;
+      }));
+      await catalogService.permanentlyDeleteReport(item.id, item.rma_number, item);
+      showToast(`Permanently deleted RMA #${item.rma_number}.`, 'success');
+      refreshAllData();
+    } catch (e) {
+      showToast(`Could not delete report: ${e.message}`, 'error');
+      refreshAllData();
+    }
+  };
+
+  const handleEmptyTrash = async () => {
+    if (trashedReportsList.length === 0) {
+      showToast('Trash Bin is already empty.', 'info');
+      return;
+    }
+    const confirmed = window.confirm(`PERMANENT TRASH PURGE WARNING:\n\nAre you sure you want to permanently delete all ${trashedReportsList.length} items from the 30-day trash bin? This action cannot be reversed.`);
+    if (!confirmed) return;
+    try {
+      const trashedIds = new Set(trashedReportsList.map(r => r.id || r.rma_number));
+      setRecentReportsList(prev => prev.filter(r => !trashedIds.has(r.id) && !trashedIds.has(r.rma_number)));
+      for (const item of trashedReportsList) {
+        try {
+          await catalogService.permanentlyDeleteReport(item.id, item.rma_number, item);
+        } catch (e) {
+          console.warn('Empty trash item failed:', e);
+        }
+      }
+      showToast('Trash bin emptied successfully.', 'success');
+      refreshAllData();
+    } catch (e) {
+      showToast(`Failed to empty trash: ${e.message}`, 'error');
+      refreshAllData();
     }
   };
 
@@ -1150,6 +1251,22 @@ export default function App() {
         refreshAllData();
       } else if (deleteModalState.type === 'report') {
         const { id, rmaNumber, item } = deleteModalState;
+        setRecentReportsList(prev => prev.map(r => {
+          if ((id && r.id === id) || (rmaNumber && r.rma_number === rmaNumber)) {
+            return {
+              ...r,
+              ai_document_metadata: {
+                ...(r.ai_document_metadata || {}),
+                is_trashed: true,
+                is_archived: false,
+                trashed_at: new Date().toISOString(),
+                trashed_by: currentUser?.name || 'Staff',
+                purge_after: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+              }
+            };
+          }
+          return r;
+        }));
         await catalogService.moveReportToTrash(id, rmaNumber, currentUser?.name || 'Staff');
         setSelectedReportIds(prev => {
           const next = new Set(prev);
@@ -1169,6 +1286,23 @@ export default function App() {
         refreshAllData();
       } else if (deleteModalState.type === 'bulk_reports') {
         const items = deleteModalState.items || [];
+        const matchSet = new Set(items.map(r => r.id || r.rma_number));
+        setRecentReportsList(prev => prev.map(r => {
+          if (matchSet.has(r.id) || matchSet.has(r.rma_number)) {
+            return {
+              ...r,
+              ai_document_metadata: {
+                ...(r.ai_document_metadata || {}),
+                is_trashed: true,
+                is_archived: false,
+                trashed_at: new Date().toISOString(),
+                trashed_by: currentUser?.name || 'Staff',
+                purge_after: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+              }
+            };
+          }
+          return r;
+        }));
         await catalogService.moveMultipleReportsToTrash(items, currentUser?.name || 'Staff');
         setSelectedReportIds(new Set());
         showToast(`Moved ${items.length} return reports to 30-Day Trash Bin.`, 'success');
@@ -2323,6 +2457,11 @@ export default function App() {
       return;
     }
 
+    if (photoFiles.length === 0) {
+      showToast('At least one photo of the damaged product is required before adding it to the manifest.', 'warning');
+      return;
+    }
+
     const effectiveItemName = customItemName.trim() || detectedProduct?.name || (cleanBarcode ? `Unidentified Item (${cleanBarcode})` : 'General Return Item');
     const submitQty = Math.max(1, parseInt(quantity, 10) || 1);
     const finalUnit = unitName || detectedProduct?.unit_name || 'pc';
@@ -2423,9 +2562,8 @@ export default function App() {
     let itemsToSubmit = [...manifestItems];
     const activeBarcode = barcodeInput.trim();
     if (activeBarcode) {
-      const isCurrentUnlabeled = isUnlabeledItem || isUnlabeledBarcode(activeBarcode);
-      if (isCurrentUnlabeled && photoFiles.length === 0) {
-        showToast('At least one photo of the unlabeled item is required so warehouse staff can identify it.', 'warning');
+      if (photoFiles.length === 0) {
+        showToast('Photo of damaged product is required before submitting return report.', 'warning');
         return;
       }
       if (selectedReason.toLowerCase().includes('expired') && !expiryDate) {
@@ -2467,6 +2605,15 @@ export default function App() {
     if (itemsToSubmit.length === 0) {
       showToast('Please enter a product barcode or add at least one item to the return manifest.', 'warning');
       return;
+    }
+
+    // Strictly enforce at least 1 photo for every returned product
+    for (let i = 0; i < itemsToSubmit.length; i++) {
+      const it = itemsToSubmit[i];
+      if (!it.photoFiles || it.photoFiles.length === 0) {
+        showToast(`Photo of damaged product is required for item "${it.name || it.barcode}". Please attach proof photo.`, 'warning');
+        return;
+      }
     }
 
     const cleanSi = siNumber.trim();
@@ -3484,9 +3631,9 @@ export default function App() {
                     <div className="flex items-center justify-between gap-1">
                       <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                         <Camera className="w-4 h-4 text-rose-500" />
-                        <span>Optional Item Photo</span>
-                        <span className="text-[9px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
-                          Optional
+                        <span>Damaged Product Photo</span>
+                        <span className="text-[9px] font-black text-rose-700 bg-rose-100 dark:bg-rose-950/70 dark:text-rose-300 px-2 py-0.5 rounded-full border border-rose-300 dark:border-rose-800">
+                          Required *
                         </span>
                       </span>
                       <span className="text-[10px] text-slate-400 font-bold">
@@ -3533,7 +3680,7 @@ export default function App() {
                           Snap Photo of Item / Damage
                         </span>
                         <span className="text-[10px] text-slate-500 dark:text-slate-400">
-                          {photoCaptureMode === 'single' ? 'Tap to open camera' : 'Tap to select photos from gallery'} (Optional)
+                          {photoCaptureMode === 'single' ? 'Tap to open camera' : 'Tap to select photos from gallery'} (Required *)
                         </span>
                         <input
                           type="file"
@@ -4582,7 +4729,7 @@ export default function App() {
 
                       <button
                         type="button"
-                        onClick={() => exportCustomerInboundRMAsToCSV(processedReports)}
+                        onClick={() => exportCustomerInboundRMAsToCSV(processedReports, null, savedProductsList)}
                         className="w-full sm:w-auto justify-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
                         title="Export Customer Inbound RMAs to CSV with Store Branch, Customer Name, DR#, AE Name, and Credit Memo #"
                       >
@@ -6623,10 +6770,15 @@ export default function App() {
             {/* TAB 6: ENTERPRISE ARCHIVE & 30-DAY TRASH BIN */}
             {adminActiveTab === 'archive_trash' && (
               <ArchiveAndTrashTab
+                archivedReports={archivedReportsList}
+                trashedReports={trashedReportsList}
                 archivedReportsList={archivedReportsList}
                 trashedReportsList={trashedReportsList}
                 currentUser={currentUser}
                 onRefresh={refreshAllData}
+                onRestore={handleRestoreFromTrashOrArchive}
+                onPermanentlyDelete={handlePermanentlyDeleteReport}
+                onEmptyTrash={handleEmptyTrash}
                 onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
                 savedProductsList={savedProductsList}
               />
