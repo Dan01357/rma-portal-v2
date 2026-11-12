@@ -22,6 +22,7 @@ import {
 import { catalogService } from '../services/catalogService';
 import { authService } from '../services/authService';
 import { notificationService } from '../services/notificationService';
+import { isUnlabeledBarcode } from '../utils/rmaHelpers';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import SupplierInput from './SupplierInput';
@@ -78,6 +79,9 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     const itemBarcode = String(item.barcode || '').trim();
     const rawCode = String(item.code || item.sku || '').trim();
     const isCodeValid = rawCode && rawCode !== itemBarcode && !rawCode.toLowerCase().includes('awaiting') && !rawCode.toLowerCase().includes('unidentified');
+    const photoList = Array.isArray(item.photos)
+      ? item.photos
+      : (typeof item.photos === 'string' && item.photos.startsWith('[') ? JSON.parse(item.photos || '[]') : []);
 
     setFormData({
       code: isCodeValid ? rawCode : '',
@@ -87,7 +91,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
       priceWithVat: item.price_with_vat ? String(item.price_with_vat) : '',
       brandName: item.brand_name || '',
       unitName: item.unit_name || 'pc',
-      imageUrl: '' // Strictly start with empty state for unassigned pending barcodes
+      imageUrl: (photoList.length > 0 ? photoList[0] : '')
     });
 
     if (item.ae_name || item.ae_email) {
@@ -384,34 +388,62 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                       No pending barcodes match "{searchQuery}"
                     </div>
                   ) : (
-                    paginatedList.map((item, idx) => (
-                      <div 
-                        key={item.id || item.barcode}
-                        className="p-3 bg-slate-50 dark:bg-slate-800/70 hover:bg-blue-50/50 dark:hover:bg-slate-700/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-between gap-3 transition-colors"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <Barcode className="w-6 h-6 text-slate-400 shrink-0" />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono font-black text-[10px] text-amber-900 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.5 rounded-md">
-                                #{(currentPage - 1) * pageSize + idx + 1}
-                              </span>
-                              <span className="font-mono font-bold text-slate-900 dark:text-white text-xs truncate">
-                                {item.barcode}
-                              </span>
-                            </div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                              {item.name || 'Unidentified item scanned by staff'}
+                    paginatedList.map((item, idx) => {
+                      const photoList = Array.isArray(item.photos)
+                        ? item.photos
+                        : (typeof item.photos === 'string' && item.photos.startsWith('[') ? JSON.parse(item.photos || '[]') : []);
+                      const isUnlabeled = isUnlabeledBarcode(item.barcode) || item.ai_document_metadata?.is_unlabeled;
+
+                      return (
+                        <div 
+                          key={item.id || item.barcode}
+                          className="p-3 bg-slate-50 dark:bg-slate-800/70 hover:bg-blue-50/50 dark:hover:bg-slate-700/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-between gap-3 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            {photoList.length > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => setLightboxPhoto({
+                                  images: photoList,
+                                  initialIndex: 0,
+                                  url: photoList[0],
+                                  title: item.name || `Pending Item (${item.barcode})`,
+                                  subtitle: `RMA #${item.rma_number || 'N/A'} • Barcode: ${item.barcode}`
+                                })}
+                                className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 shrink-0 hover:scale-105 transition-transform cursor-zoom-in shadow-xs"
+                                title="Click to view full photo proof"
+                              >
+                                <img src={photoList[0]} alt="Proof" className="w-full h-full object-cover" />
+                              </button>
+                            ) : (
+                              <Barcode className="w-6 h-6 text-slate-400 shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono font-black text-[10px] text-amber-900 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.5 rounded-md">
+                                  #{(currentPage - 1) * pageSize + idx + 1}
+                                </span>
+                                <span className="font-mono font-bold text-slate-900 dark:text-white text-xs truncate">
+                                  {item.barcode}
+                                </span>
+                                {isUnlabeled && (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                    🏷️ Missing Barcode / Unlabeled
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                {item.name || 'Unidentified item scanned by staff'}
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        {canVerify ? (
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => handleSelect(item)}
-                              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                          {canVerify ? (
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleSelect(item)}
+                                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
                             >
                               <Edit3 className="w-3.5 h-3.5" />
                               <span>Enter Details</span>
@@ -437,8 +469,9 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                           </span>
                         )}
                       </div>
-                    ))
-                  )}
+                    );
+                  })
+                )}
                 </div>
 
                 {/* Table Pagination */}

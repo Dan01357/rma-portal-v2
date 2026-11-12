@@ -37,13 +37,14 @@ import {
   Minus,
   ArrowRightLeft,
   Info,
-  FileText
+  FileText,
+  RotateCcw
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
 import { supplierClaimService } from '../services/supplierClaimService';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, resolveBatchManifestLifecycle, getItemNeedsReorder, cleanExplanationText } from '../utils/rmaHelpers';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, resolveBatchManifestLifecycle, getItemNeedsReorder, cleanExplanationText, mapReasonToConditionGrade } from '../utils/rmaHelpers';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -85,26 +86,40 @@ function normalizeDispositionOption(disp) {
  * Enterprise Automatic Lifecycle Status Calculator
  * Lifecycle status is 100% computed automatically from triage disposition and financial records.
  */
-export function computeAutomaticLifecycleStatus(disposition, hasCreditMemo = false, currentStatus = null) {
+export function computeAutomaticLifecycleStatus(disposition, hasCreditMemo = false, currentStatus = null, reportOrItem = null) {
   if (hasCreditMemo) return 'credit_memo_issued';
   const disp = String(disposition || '').toLowerCase().trim();
   const curr = String(currentStatus || '').toLowerCase().trim();
+  const resolution = reportOrItem?.ai_document_metadata?.workflow_resolution;
+
+  if (resolution === 'restocked' || curr === 'restocked') {
+    return '6- Restocked';
+  }
+  if (resolution === 'reordered') {
+    return '7- Re-Ordered (PO Placed)';
+  }
+  if (resolution === 'scrapped_no_reorder' || curr === 'scrapped' || curr === 'disposed') {
+    return '7- Scrapped / Written Off';
+  }
+  if (curr === 'resolved') {
+    if (disp.includes('restock')) return '6- Restocked';
+    if (disp.includes('scrap') || disp.includes('dispose')) return '7- Scrapped / Written Off';
+    return '6- Restocked';
+  }
 
   if (
     disp.includes('restock') || 
     disp.includes('accepted replacement') || 
     disp.includes('replacement stock received')
   ) {
-    // Keep in 'under_inspection' (Ready to Restock queue) until confirmed in WMS/ERP, unless already marked 'restocked'
-    return curr === 'restocked' ? 'restocked' : 'under_inspection';
+    return 'under_inspection';
   }
   if (
     disp.includes('scrap') || 
     disp.includes('dispose') || 
     disp.includes('local destruction')
   ) {
-    // Keep in 'under_inspection' (Supplier Re-Order / Scrap queue) until confirmed, unless already marked 'scrapped'
-    return (curr === 'scrapped' || curr === 'disposed') ? 'scrapped' : 'under_inspection';
+    return 'under_inspection';
   }
   if (disp.includes('buffer stock') || disp.includes('buffer replacement')) {
     return 'buffer_replacement_dispatched';
@@ -333,7 +348,11 @@ export default function QuickRMAActionModal({
   // Synchronize triage inputs when report loads or updates
   useEffect(() => {
     if (report) {
-      setConditionGrade(report.condition_grade || 'B - Damaged Packaging Only');
+      const autoGrade = mapReasonToConditionGrade(report.reason);
+      const resolvedGrade = (report.condition_grade && report.condition_grade !== 'B - Damaged Packaging Only')
+        ? report.condition_grade
+        : (autoGrade || report.condition_grade || 'B - Damaged Packaging Only');
+      setConditionGrade(resolvedGrade);
       setDisposition(normalizeDispositionOption(report.disposition));
       setWarehouseLocation(report.warehouse_location || '');
       setNeedsReorder(getItemNeedsReorder(report));
@@ -2974,13 +2993,35 @@ export default function QuickRMAActionModal({
 
                           {/* Automated RMA Lifecycle Status (Zero Manual Select) */}
                           <div>
-                            <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                              Automated Lifecycle Stage
-                            </label>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">
+                                Automated Lifecycle Stage
+                              </label>
+                              {Boolean(report?.ai_document_metadata?.workflow_resolution || report?.status === 'resolved' || report?.status === 'closed') && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      const res = await catalogService.resetReportToPending(report.id, report.rma_number, verifiedAdmin?.name || 'Staff');
+                                      setReport(res);
+                                      setRmaStatus('under_inspection');
+                                      if (onRefresh) onRefresh();
+                                    } catch (e) {
+                                      alert('Could not reset: ' + e.message);
+                                    }
+                                  }}
+                                  className="text-[10px] font-bold text-amber-700 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
+                                  title="Re-open item and reset to pending for testing coworker actions"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                  <span>↩️ Reset to Pending</span>
+                                </button>
+                              )}
+                            </div>
                             <div className="w-full px-2.5 py-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-700 dark:text-slate-300 text-xs flex items-center gap-1.5 shadow-2xs">
                               <span className={`w-2 h-2 rounded-full shrink-0 ${isOnHold ? 'bg-amber-500 animate-ping' : 'bg-blue-500 animate-pulse'}`} />
                               <span className="capitalize">
-                                {isOnHold ? '4- Quarantine (Hold)' : computeAutomaticLifecycleStatus(disposition, hasLinkedCreditMemo, rmaStatus).replace(/_/g, ' ')}
+                                {isOnHold ? '4- Quarantine (Hold)' : computeAutomaticLifecycleStatus(disposition, hasLinkedCreditMemo, rmaStatus, report).replace(/_/g, ' ')}
                               </span>
                             </div>
                           </div>

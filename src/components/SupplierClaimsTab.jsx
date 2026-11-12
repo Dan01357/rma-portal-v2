@@ -1637,6 +1637,30 @@ export default function SupplierClaimsTab({
                               </span>
                             )}
 
+                            {/* Re-open / Reset to Pending Action for Testing Coworker Actions */}
+                            {Boolean(r.ai_document_metadata?.workflow_resolution || r.status === 'resolved' || r.status === 'closed') && (
+                              <button
+                                type="button"
+                                disabled={updatingQueueId === (r.id || r.rma_number)}
+                                onClick={async () => {
+                                  try {
+                                    setUpdatingQueueId(r.id || r.rma_number);
+                                    await catalogService.resetReportToPending(r.id, r.rma_number, verifiedAdmin?.name || 'Staff');
+                                    if (onRefreshAllData) onRefreshAllData();
+                                  } catch (e) {
+                                    alert('Could not reset report: ' + e.message);
+                                  } finally {
+                                    setUpdatingQueueId(null);
+                                  }
+                                }}
+                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                                title="Re-open this item and reset to pending so coworker queues can test restocking/reordering again"
+                              >
+                                <RotateCcw className="w-3 h-3 text-slate-500" />
+                                <span>↩️ Reset to Pending</span>
+                              </button>
+                            )}
+
                             {/* 4. Official Debit Claim Generation or Viewing */}
                             {existingClaim ? (
                               <button
@@ -1722,7 +1746,10 @@ export default function SupplierClaimsTab({
                             {canDeleteReports && onRequestDeleteReport && (
                               <button
                                 type="button"
-                                onClick={() => onRequestDeleteReport(r.parent_rma_id || r.id, r.rma_number, r)}
+                                onClick={() => {
+                                  const targetDeleteId = r.is_unpacked_manifest_item ? (r.parent_rma_id || r.id) : r.id;
+                                  onRequestDeleteReport(targetDeleteId, r.rma_number, r);
+                                }}
                                 className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
                                 title={`Delete RMA #${r.rma_number} and remove stored proof photos`}
                               >

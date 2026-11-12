@@ -1,6 +1,24 @@
 import { supabase } from '../../_lib/supabase.js';
 import { requireApiKey, sendJson, setCorsHeaders } from '../../_lib/auth.js';
 
+function mapReasonToConditionGrade(reason) {
+  if (!reason) return 'B - Damaged Packaging Only';
+  const r = String(reason).toLowerCase();
+  if (r.includes('wrong item') || r.includes('pull-out') || r.includes('unsold') || r.includes('resellable') || r.includes('like new') || r.includes('incorrect shipment')) {
+    return 'A - Like New / Resellable';
+  }
+  if (r.includes('expired') || r.includes('expiry') || r.includes('spoiled') || r.includes('leaking') || r.includes('broken seal') || r.includes('total loss') || r.includes('scrap')) {
+    return 'D - Total Loss / Scrap';
+  }
+  if (r.includes('factory defect') || r.includes('not working') || r.includes('parts only') || r.includes('other defect') || r.includes('defective')) {
+    return 'C - Defective / Parts Only';
+  }
+  if (r.includes('box') || r.includes('packaging') || r.includes('crushed') || r.includes('dent') || r.includes('damaged box')) {
+    return 'B - Damaged Packaging Only';
+  }
+  return 'B - Damaged Packaging Only';
+}
+
 export default async function handler(req, res) {
   setCorsHeaders(res);
 
@@ -89,6 +107,9 @@ export default async function handler(req, res) {
           updateData.status = 'resolved';
           const explicitNoReorder = body?.needs_reorder === false;
           requestedWorkflowResolution = explicitNoReorder ? 'scrapped_no_reorder' : 'reordered';
+        } else if (s === 'pending' || s === 'under_inspection' || s === 'received_at_dock' || s === 'reopen' || s === 'reset') {
+          updateData.status = (s === 'received_at_dock' || s === 'pending') ? 'pending' : 'under_inspection';
+          requestedWorkflowResolution = null; // Clear resolution to reopen
         } else if (s === 'vendor_claimed' || s === '3- vendor claimed' || s === 'vendor_claim') {
           updateData.status = 'vendor_claimed';
           if (!updateData.disposition) updateData.disposition = '3- Return to Vendor (RTV)';
@@ -107,6 +128,10 @@ export default async function handler(req, res) {
             requestedWorkflowResolution = 'restocked';
           }
         }
+      }
+
+      if (updateData.reason && !updateData.condition_grade) {
+        updateData.condition_grade = mapReasonToConditionGrade(updateData.reason);
       }
 
       if (updateData.warehouse_location) {
@@ -207,6 +232,11 @@ export default async function handler(req, res) {
             resolved_by: actorName
           } : {})
         };
+        if (!requestedWorkflowResolution) {
+          delete updatedMeta.workflow_resolution;
+          delete updatedMeta.resolved_at;
+          delete updatedMeta.resolved_by;
+        }
 
         // Clean operational tags from notes (avoid raw internal tags showing to customers)
         let updatedNotes = row.notes || '';
@@ -306,15 +336,19 @@ export default async function handler(req, res) {
         if (updateErr) {
           console.error(`[API v1 RMA PATCH] Error updating row ${row.id}:`, updateErr);
         } else if (updatedRow) {
+          const res = updatedRow.ai_document_metadata?.workflow_resolution || requestedWorkflowResolution;
+          let calculatedStage = updatedRow.status;
+          if (res === 'restocked') calculatedStage = '6- Restocked';
+          else if (res === 'reordered') calculatedStage = '7- Re-Ordered (PO Placed)';
+          else if (res === 'scrapped_no_reorder') calculatedStage = '7- Scrapped / Written Off';
+          else if (updatedRow.status === 'vendor_claimed') calculatedStage = '3- Vendor Claimed';
+          else if (updatedRow.status === 'under_inspection') calculatedStage = '3- Under Inspection';
+          else if (updatedRow.status === 'pending' || updatedRow.status === 'received_at_dock') calculatedStage = '2- Received at Dock';
+          else if (updatedRow.status === 'partially_completed') calculatedStage = 'Partially Completed';
+
           updatedRows.push({
             ...updatedRow,
-            lifecycle_stage: updatedRow.status === 'restocked'
-              ? '6- Restocked'
-              : updatedRow.status === 'scrapped'
-              ? '7- Scrapped / Disposed'
-              : updatedRow.status === 'partially_completed'
-              ? 'Partially Completed'
-              : updatedRow.status
+            lifecycle_stage: calculatedStage
           });
         }
 

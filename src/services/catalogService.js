@@ -3,6 +3,7 @@ import { INITIAL_PRODUCTS } from '../data/mockData';
 import { notificationService } from './notificationService';
 import { purchaseOrdersApi } from './purchaseOrdersApi';
 import { authService } from './authService';
+import { mapReasonToConditionGrade, isUnlabeledBarcode } from '../utils/rmaHelpers';
 
 /**
  * Safe test mode resolution:
@@ -1213,7 +1214,8 @@ export const catalogService = {
     total_items = null,
     total_quantity = null,
     is_parent = false,
-    parent_rma_id = null
+    parent_rma_id = null,
+    condition_grade = null
   }) {
     const hasItems = Array.isArray(items) && items.length > 0;
     const isBatch = hasItems && items.length > 1;
@@ -1316,6 +1318,7 @@ export const catalogService = {
       : (userProvidedName || (isKnown ? resolvedProduct.name : (resolvedProduct?.name && !resolvedProduct.name.startsWith('Unidentified Item') ? resolvedProduct.name : (cleanBarcode ? `Unidentified Item (${cleanBarcode})` : 'General Return Item'))));
 
     // Ensure manifest barcode is strictly rmaNumber or a dedicated manifest identifier, never a child item's barcode
+    const isUnlabeled = isUnlabeledBarcode(cleanBarcode) || Boolean(ai_document_metadata?.is_unlabeled);
     const finalBarcode = isBatch
       ? (cleanBarcode && cleanBarcode !== 'MANIFEST' && !items.some(it => String(it.barcode).trim() === cleanBarcode) ? cleanBarcode : rmaNumber)
       : cleanBarcode;
@@ -1324,6 +1327,12 @@ export const catalogService = {
     const isAccurateGps = gps && gps.latitude && gps.accuracy && Number(gps.accuracy) <= 150;
 
     const effectiveRmaType = (rma_type === 'supplier_outbound' || rmaType === 'supplier_outbound') ? 'supplier_outbound' : 'customer_inbound';
+    const effectiveGrade = condition_grade || mapReasonToConditionGrade(reason || (hasItems && items[0]?.reason));
+
+    const mergedMetadata = {
+      ...(ai_document_metadata || {}),
+      ...(isUnlabeled ? { is_unlabeled: true, provisional_barcode: finalBarcode } : {})
+    };
 
     const reportRow = {
       rma_number: rmaNumber,
@@ -1342,7 +1351,7 @@ export const catalogService = {
       unit_name: hasItems
         ? (items.every(it => (it.unit_name || it.unit) === (items[0].unit_name || items[0].unit)) ? (items[0].unit_name || items[0].unit || 'pc') : 'mixed')
         : (isKnown ? (resolvedProduct.unit_name || resolvedProduct.unitName || 'pc') : (resolvedProduct?.unit_name || 'pc')),
-      status: isBatch ? 'pending' : (isKnown || (hasItems && items.every(it => Number(it.price) > 0)) ? 'pending' : 'pending_admin_details'),
+      status: isUnlabeled ? 'pending_admin_details' : (isBatch ? 'pending' : (isKnown || (hasItems && items.every(it => Number(it.price) > 0)) ? 'pending' : 'pending_admin_details')),
       reason: reason || (hasItems && items.length > 1 ? `Multi-Item Defect (${items.length} items)` : 'Damaged Box / Crushed Packaging'),
       explanation: explanation || null,
       photos: allPhotos,
@@ -1354,7 +1363,7 @@ export const catalogService = {
       store_branch: store_branch || null,
       expiry_date: expiry_date || null,
       batch_lot_number: batch_lot_number ? String(batch_lot_number).trim() : null,
-      ai_document_metadata: ai_document_metadata || null,
+      ai_document_metadata: Object.keys(mergedMetadata).length > 0 ? mergedMetadata : null,
       google_drive_folder_url: google_drive_folder_url || null,
       google_drive_folder_id: google_drive_folder_id || null,
       gps_latitude: isAccurateGps ? Number(gps.latitude) : null,
@@ -1367,7 +1376,7 @@ export const catalogService = {
       ae_name: isKnown ? (resolvedProduct.ae_name || resolvedProduct.aeName || null) : null,
       ae_email: isKnown ? (resolvedProduct.ae_email || resolvedProduct.aeEmail || null) : null,
       company: isKnown ? (resolvedProduct.company || null) : null,
-      condition_grade: 'B - Damaged Packaging Only',
+      condition_grade: effectiveGrade,
       disposition: effectiveRmaType === 'supplier_outbound' ? '3- Return to Vendor (RTV)' : 'Pending Triage',
       warehouse_location: null,
       inspected_by: null,
@@ -1795,6 +1804,72 @@ export const catalogService = {
   },
 
   /**
+   * Reset an RMA report back to pending / under_inspection (clearing restocked/reordered/scrapped resolution)
+   */
+  async resetReportToPending(id, rmaNumber, actorName = 'Admin') {
+    if (!id && !rmaNumber) return false;
+    const cleanActor = String(actorName || 'Admin').trim();
+    const isNumericId = id !== undefined && id !== null && /^\d+$/.test(String(id));
+
+    let fetchQuery = supabase.from('rma_reports').select('*');
+    if (isNumericId) fetchQuery = fetchQuery.eq('id', Number(id));
+    else fetchQuery = fetchQuery.eq('rma_number', rmaNumber);
+
+    const { data: rows, error: fetchErr } = await fetchQuery;
+    if (fetchErr) throw fetchErr;
+    const primaryRow = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    if (!primaryRow) throw new Error('Report not found');
+
+    const currentAudit = Array.isArray(primaryRow?.audit_trail) ? [...primaryRow.audit_trail] : [];
+    currentAudit.push({
+      timestamp: new Date().toISOString(),
+      stage: 'RESET_TO_PENDING',
+      actor: cleanActor,
+      status: 'under_inspection',
+      note: `Re-opened and reset to pending / under_inspection by ${cleanActor}`
+    });
+
+    const currentMeta = (primaryRow?.ai_document_metadata && typeof primaryRow.ai_document_metadata === 'object') ? { ...primaryRow.ai_document_metadata } : {};
+    delete currentMeta.workflow_resolution;
+    delete currentMeta.resolved_at;
+    delete currentMeta.resolved_by;
+
+    const updates = {
+      status: 'under_inspection',
+      audit_trail: currentAudit,
+      ai_document_metadata: currentMeta
+    };
+
+    // If batch manifest, reset all resolved child items as well
+    if (Array.isArray(primaryRow.items) && primaryRow.items.length > 0) {
+      updates.items = primaryRow.items.map(child => {
+        const cleanChild = { ...child, status: 'under_inspection' };
+        delete cleanChild.workflow_resolution;
+        return cleanChild;
+      });
+    }
+
+    let uq = supabase.from('rma_reports').update(updates);
+    if (isNumericId) uq = uq.eq('id', Number(primaryRow.id));
+    else uq = uq.eq('rma_number', primaryRow.rma_number);
+
+    const { data: updatedData, error: updateErr } = await uq.select('*');
+    if (updateErr) throw updateErr;
+
+    const finalReport = Array.isArray(updatedData) && updatedData.length > 0 ? updatedData[0] : { ...primaryRow, ...updates };
+
+    this.notifyChange('report-updated', { report: finalReport });
+    this.notifyChange('coworker-queue-updated', {
+      reportId: finalReport.id,
+      rmaNumber: finalReport.rma_number,
+      status: 'under_inspection',
+      report: finalReport
+    });
+
+    return finalReport;
+  },
+
+  /**
    * Fetch all unmapped items (Awaiting SKU) across active standalone reports and batch manifest child items
    */
   async getPendingBarcodes() {
@@ -1802,7 +1877,7 @@ export const catalogService = {
       // 1. Fetch active (non-deleted) RMA reports (regardless of whether status is pending, received_at_dock, etc.)
       const { data: activeReports, error: rError } = await supabase
         .from('rma_reports')
-        .select('id, rma_number, parent_rma_id, barcode, code, name, supplier_name, price, price_with_vat, unit_name, status, created_at, is_parent, items')
+        .select('id, rma_number, parent_rma_id, barcode, code, name, supplier_name, price, price_with_vat, unit_name, status, created_at, is_parent, items, photos, ai_document_metadata')
         .not('status', 'eq', 'deleted')
         .order('created_at', { ascending: false });
 
@@ -1909,6 +1984,8 @@ export const catalogService = {
                 price_with_vat: Number(child.price_with_vat || child.priceWithVat || child.price || 0),
                 unit_name: child.unit_name || child.unit || 'pc',
                 status: child.status || r.status || 'pending',
+                photos: child.photos || r.photos || [],
+                ai_document_metadata: child.ai_document_metadata || r.ai_document_metadata || {},
                 is_verified: false,
                 created_at: r.created_at
               });
@@ -1932,6 +2009,8 @@ export const catalogService = {
               price_with_vat: Number(r.price_with_vat || r.price || 0),
               unit_name: r.unit_name || 'pc',
               status: r.status || 'pending',
+              photos: r.photos || [],
+              ai_document_metadata: r.ai_document_metadata || {},
               is_verified: false,
               created_at: r.created_at
             });
@@ -2189,6 +2268,16 @@ export const catalogService = {
         }
       } catch (e) {
         console.warn('[Fetch Report Before Delete Notice]:', e.message);
+      }
+
+      // Critical Split Protection: If this report has split children referencing its id as parent_rma_id,
+      // unlink them first so deleting this parent report NEVER cascades to delete the split children!
+      if (isNumericId) {
+        try {
+          await supabase.from('rma_reports').update({ parent_rma_id: null }).eq('parent_rma_id', id);
+        } catch (unlinkErr) {
+          console.warn('[Unlink Split Children Before Delete]:', unlinkErr.message);
+        }
       }
 
       let query = supabase.from('rma_reports').delete();

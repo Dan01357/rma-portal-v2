@@ -18,6 +18,49 @@ export function generateTicketId(existingCount = 0) {
 }
 
 /**
+ * Generate a provisional tracking identifier for unlabeled / missing-barcode items.
+ * Example: NO-LABEL-2026-K9P2
+ */
+export function generateUnlabeledBarcode() {
+  const currentYear = new Date().getFullYear();
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let randomSuffix = '';
+  for (let i = 0; i < 4; i++) {
+    randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `NO-LABEL-${currentYear}-${randomSuffix}`;
+}
+
+/**
+ * Checks whether a barcode string is a provisional unlabeled tracking tag.
+ */
+export function isUnlabeledBarcode(barcode) {
+  if (!barcode) return false;
+  return /^NO-LABEL/i.test(String(barcode).trim());
+}
+
+/**
+ * Automatically maps a user-selected defect reason to its corresponding condition grade.
+ */
+export function mapReasonToConditionGrade(reason) {
+  if (!reason) return 'B - Damaged Packaging Only';
+  const r = String(reason).toLowerCase();
+  if (r.includes('wrong item') || r.includes('pull-out') || r.includes('unsold') || r.includes('resellable') || r.includes('like new') || r.includes('incorrect shipment')) {
+    return 'A - Like New / Resellable';
+  }
+  if (r.includes('expired') || r.includes('expiry') || r.includes('spoiled') || r.includes('leaking') || r.includes('broken seal') || r.includes('total loss') || r.includes('scrap')) {
+    return 'D - Total Loss / Scrap';
+  }
+  if (r.includes('factory defect') || r.includes('not working') || r.includes('parts only') || r.includes('other defect') || r.includes('defective')) {
+    return 'C - Defective / Parts Only';
+  }
+  if (r.includes('box') || r.includes('packaging') || r.includes('crushed') || r.includes('dent') || r.includes('damaged box')) {
+    return 'B - Damaged Packaging Only';
+  }
+  return 'B - Damaged Packaging Only';
+}
+
+/**
  * Warehouse scanner audio confirmation beep (Web Audio API)
  */
 export function playBeep(type = 'success') {

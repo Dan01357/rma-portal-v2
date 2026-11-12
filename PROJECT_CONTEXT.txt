@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-11T07:28:02.401Z
+Generated At: 2026-11-12T00:35:44.760Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -7044,6 +7044,24 @@ export default async function handler(req, res) {
 import { supabase } from '../../_lib/supabase.js';
 import { requireApiKey, sendJson, setCorsHeaders } from '../../_lib/auth.js';
 
+function mapReasonToConditionGrade(reason) {
+  if (!reason) return 'B - Damaged Packaging Only';
+  const r = String(reason).toLowerCase();
+  if (r.includes('wrong item') || r.includes('pull-out') || r.includes('unsold') || r.includes('resellable') || r.includes('like new') || r.includes('incorrect shipment')) {
+    return 'A - Like New / Resellable';
+  }
+  if (r.includes('expired') || r.includes('expiry') || r.includes('spoiled') || r.includes('leaking') || r.includes('broken seal') || r.includes('total loss') || r.includes('scrap')) {
+    return 'D - Total Loss / Scrap';
+  }
+  if (r.includes('factory defect') || r.includes('not working') || r.includes('parts only') || r.includes('other defect') || r.includes('defective')) {
+    return 'C - Defective / Parts Only';
+  }
+  if (r.includes('box') || r.includes('packaging') || r.includes('crushed') || r.includes('dent') || r.includes('damaged box')) {
+    return 'B - Damaged Packaging Only';
+  }
+  return 'B - Damaged Packaging Only';
+}
+
 export default async function handler(req, res) {
   setCorsHeaders(res);
 
@@ -7132,6 +7150,9 @@ export default async function handler(req, res) {
           updateData.status = 'resolved';
           const explicitNoReorder = body?.needs_reorder === false;
           requestedWorkflowResolution = explicitNoReorder ? 'scrapped_no_reorder' : 'reordered';
+        } else if (s === 'pending' || s === 'under_inspection' || s === 'received_at_dock' || s === 'reopen' || s === 'reset') {
+          updateData.status = (s === 'received_at_dock' || s === 'pending') ? 'pending' : 'under_inspection';
+          requestedWorkflowResolution = null; // Clear resolution to reopen
         } else if (s === 'vendor_claimed' || s === '3- vendor claimed' || s === 'vendor_claim') {
           updateData.status = 'vendor_claimed';
           if (!updateData.disposition) updateData.disposition = '3- Return to Vendor (RTV)';
@@ -7150,6 +7171,10 @@ export default async function handler(req, res) {
             requestedWorkflowResolution = 'restocked';
           }
         }
+      }
+
+      if (updateData.reason && !updateData.condition_grade) {
+        updateData.condition_grade = mapReasonToConditionGrade(updateData.reason);
       }
 
       if (updateData.warehouse_location) {
@@ -7250,6 +7275,11 @@ export default async function handler(req, res) {
             resolved_by: actorName
           } : {})
         };
+        if (!requestedWorkflowResolution) {
+          delete updatedMeta.workflow_resolution;
+          delete updatedMeta.resolved_at;
+          delete updatedMeta.resolved_by;
+        }
 
         // Clean operational tags from notes (avoid raw internal tags showing to customers)
         let updatedNotes = row.notes || '';
@@ -7349,15 +7379,19 @@ export default async function handler(req, res) {
         if (updateErr) {
           console.error(`[API v1 RMA PATCH] Error updating row ${row.id}:`, updateErr);
         } else if (updatedRow) {
+          const res = updatedRow.ai_document_metadata?.workflow_resolution || requestedWorkflowResolution;
+          let calculatedStage = updatedRow.status;
+          if (res === 'restocked') calculatedStage = '6- Restocked';
+          else if (res === 'reordered') calculatedStage = '7- Re-Ordered (PO Placed)';
+          else if (res === 'scrapped_no_reorder') calculatedStage = '7- Scrapped / Written Off';
+          else if (updatedRow.status === 'vendor_claimed') calculatedStage = '3- Vendor Claimed';
+          else if (updatedRow.status === 'under_inspection') calculatedStage = '3- Under Inspection';
+          else if (updatedRow.status === 'pending' || updatedRow.status === 'received_at_dock') calculatedStage = '2- Received at Dock';
+          else if (updatedRow.status === 'partially_completed') calculatedStage = 'Partially Completed';
+
           updatedRows.push({
             ...updatedRow,
-            lifecycle_stage: updatedRow.status === 'restocked'
-              ? '6- Restocked'
-              : updatedRow.status === 'scrapped'
-              ? '7- Scrapped / Disposed'
-              : updatedRow.status === 'partially_completed'
-              ? 'Partially Completed'
-              : updatedRow.status
+            lifecycle_stage: calculatedStage
           });
         }
 
@@ -10041,8 +10075,15 @@ import { inviteService, formatRemainingCountdown } from './services/inviteServic
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, getReportManifestItems, isBatchManifest, formatQuantityWithPackSize, formatManifestBreakdown, resolveBatchManifestLifecycle } from './utils/rmaHelpers';
 import {
+  isSplitChildTicket,
+  isSplitParentTicket,
+  hasAssignedSku,
+  getReportManifestItems,
+  isBatchManifest,
+  formatQuantityWithPackSize,
+  formatManifestBreakdown,
+  resolveBatchManifestLifecycle,
   getItemNeedsReorder,
   isItemReadyToRestock,
   isItemReorderNeeded,
@@ -10050,7 +10091,10 @@ import {
   isItemOnHold,
   isItemRejected,
   cleanExplanationText,
-  formatLifecycleStage as formatLifecycleStageHelper
+  formatLifecycleStage as formatLifecycleStageHelper,
+  generateUnlabeledBarcode,
+  isUnlabeledBarcode,
+  mapReasonToConditionGrade
 } from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
@@ -11149,6 +11193,7 @@ export default function App() {
   const [photoCaptureMode, setPhotoCaptureMode] = useState('single'); // 'single' (Camera snap) | 'batch' (Multi-file select)
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccessReport, setSubmitSuccessReport] = useState(null);
+  const [isUnlabeledItem, setIsUnlabeledItem] = useState(false); // Extra feature: Support reporting items with missing labels / unreadable barcodes
 
   // Official Logistics Paperwork (DR / Invoice / PO) & Gemini Flash AI OCR (Multi-photo up to 3)
   const [paperworkPhotos, setPaperworkPhotos] = useState([]); // Array of { file, previewUrl, metadata } (max 3)
@@ -11740,6 +11785,38 @@ export default function App() {
           message: `${rep?.name || rep?.barcode || 'Item'} (${rep?.quantity || 1} units) - Defect: ${rep?.reason || 'Damaged'}`,
           subtext: rep?.reporter_name ? `Reported by ${rep.reporter_name}` : null
         });
+      } else if (evt.type === 'coworker-queue-updated') {
+        const rep = evt.payload?.report;
+        const res = evt.payload?.workflow_resolution;
+        let title = `Queue Action: ${evt.payload?.rmaNumber || 'RMA'}`;
+        let message = `Status changed to ${evt.payload?.status || 'updated'}`;
+        if (res === 'restocked') {
+          title = `📦 Stocked in WMS: ${evt.payload?.rmaNumber}`;
+          message = `${rep?.name || 'Item'} confirmed restocked in inventory.`;
+        } else if (res === 'reordered') {
+          title = `🔄 PO Placed: ${evt.payload?.rmaNumber}`;
+          message = `Supplier replacement order confirmed.`;
+        } else if (res === 'scrapped_no_reorder') {
+          title = `🚫 Written Off: ${evt.payload?.rmaNumber}`;
+          message = `Item scrap written off.`;
+        } else if (evt.payload?.status === 'under_inspection') {
+          title = `↩️ Re-opened: ${evt.payload?.rmaNumber}`;
+          message = `Reset to pending / under inspection.`;
+        }
+        addNotification({
+          type: 'rma',
+          title,
+          message,
+          subtext: 'Coworker Queue'
+        });
+      } else if (evt.type === 'report-updated') {
+        const rep = evt.payload?.report;
+        addNotification({
+          type: 'rma',
+          title: `Report Updated: ${rep?.rma_number || 'RMA'}`,
+          message: `${rep?.name || 'Item'} details updated.`,
+          subtext: rep?.status || 'Updated'
+        });
       } else if (evt.type === 'unknown-barcode') {
         addNotification({
           type: 'unknown',
@@ -11767,8 +11844,38 @@ export default function App() {
     try {
       realtimeChannel = supabase
         .channel('rma_realtime_stream')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'rma_reports' }, () => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rma_reports' }, (payload) => {
           refreshAllData();
+          if (payload?.eventType === 'INSERT' && payload.new) {
+            const rep = payload.new;
+            addNotification({
+              type: 'rma',
+              title: `New Return Filed: ${rep.rma_number || 'RMA Report'}`,
+              message: `${rep.name || rep.barcode || 'Item'} (${rep.quantity || 1} units) - ${rep.reason || 'Return filed'}`,
+              subtext: rep.reporter_name ? `Reported by ${rep.reporter_name}` : 'Intake Portal'
+            });
+          } else if (payload?.eventType === 'UPDATE' && payload.new) {
+            const rep = payload.new;
+            const res = rep.ai_document_metadata?.workflow_resolution;
+            let statusTitle = `RMA Updated: ${rep.rma_number}`;
+            let statusMsg = `${rep.name || 'Item'} - Status: ${rep.status}`;
+            if (res === 'restocked') {
+              statusTitle = `📦 Stocked in WMS: ${rep.rma_number}`;
+              statusMsg = `${rep.name || 'Item'} restocked to inventory.`;
+            } else if (res === 'reordered') {
+              statusTitle = `🔄 PO Placed: ${rep.rma_number}`;
+              statusMsg = `Replacement order placed with supplier.`;
+            } else if (res === 'scrapped_no_reorder') {
+              statusTitle = `🚫 Written Off: ${rep.rma_number}`;
+              statusMsg = `Item scrapped without re-ordering.`;
+            }
+            addNotification({
+              type: 'rma',
+              title: statusTitle,
+              message: statusMsg,
+              subtext: rep.supplier_name || 'System Update'
+            });
+          }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
           refreshAllData();
@@ -12194,6 +12301,22 @@ export default function App() {
     showToast('Item removed from manifest.', 'info');
   };
 
+  const handleEnableUnlabeledItem = () => {
+    const tag = generateUnlabeledBarcode();
+    setBarcodeInput(tag);
+    setIsUnlabeledItem(true);
+    if (!customItemName) {
+      setCustomItemName('Unlabeled Item');
+    }
+    showToast(`Unlabeled tag ${tag} assigned. Please attach a clear photo and item description.`, 'info');
+  };
+
+  const handleCancelUnlabeledItem = () => {
+    setBarcodeInput('');
+    setIsUnlabeledItem(false);
+    setCustomItemName('');
+  };
+
   const handleSubmitReport = async (e) => {
     e.preventDefault();
 
@@ -12225,6 +12348,11 @@ export default function App() {
     let itemsToSubmit = [...manifestItems];
     const activeBarcode = barcodeInput.trim();
     if (activeBarcode) {
+      const isCurrentUnlabeled = isUnlabeledItem || isUnlabeledBarcode(activeBarcode);
+      if (isCurrentUnlabeled && photoFiles.length === 0) {
+        showToast('At least one photo of the unlabeled item is required so warehouse staff can identify it.', 'warning');
+        return;
+      }
       if (selectedReason.toLowerCase().includes('expired') && !expiryDate) {
         showToast('Product expiry date is required when returning expired items.', 'warning');
         return;
@@ -12390,6 +12518,7 @@ export default function App() {
     setCustomStoreBranch('');
     setExpiryDate('');
     setBatchLotNumber('');
+    setIsUnlabeledItem(false);
     setPaperworkError(null);
     setSelectedReportIds(new Set());
     setIsSubmitting(false);
@@ -12401,7 +12530,8 @@ export default function App() {
           rmaType: determinedRmaType,
           customerName: capturedStoreBranch,
           storeBranch: capturedStoreBranch,
-          supplierName: capturedItems[0]?.supplier_name
+          supplierName: capturedItems[0]?.supplier_name,
+          is_unlabeled: isUnlabeledItem || isUnlabeledBarcode(primaryBarcode)
         };
 
         // 1. Upload damaged item photos sequentially so the folder is created once and reused for all photos
@@ -12495,7 +12625,11 @@ export default function App() {
           store_branch: capturedStoreBranch,
           expiry_date: capturedItems[0]?.expiry_date || null,
           batch_lot_number: capturedBatchLotNumber,
-          ai_document_metadata: capturedPaperworkMetadata,
+          condition_grade: mapReasonToConditionGrade(primaryReason),
+          ai_document_metadata: {
+            ...(capturedPaperworkMetadata || {}),
+            ...((isUnlabeledItem || isUnlabeledBarcode(primaryBarcode)) ? { is_unlabeled: true, provisional_barcode: primaryBarcode } : {})
+          },
           google_drive_folder_url: gdriveFolderUrl,
           google_drive_folder_id: gdriveFolderId,
           gps: capturedGps
@@ -12973,6 +13107,41 @@ export default function App() {
                     <Camera className="w-5 h-5" />
                     <span>Scan with Camera / Google Lens</span>
                   </button>
+
+                  {/* Missing Barcode / Unlabeled Item Action Strip */}
+                  <div className="pt-0.5">
+                    {!isUnlabeledItem ? (
+                      <button
+                        type="button"
+                        onClick={handleEnableUnlabeledItem}
+                        className="w-full py-2 px-3 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/40 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800/80 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                      >
+                        <Tag className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                        <span>🏷️ Missing Barcode / Unlabeled Item? Click here to report</span>
+                      </button>
+                    ) : (
+                      <div className="p-3 bg-amber-50 dark:bg-amber-950/60 border-2 border-amber-400 dark:border-amber-700 rounded-2xl text-xs flex items-center justify-between gap-3 shadow-xs animate-in fade-in">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                          <div className="min-w-0">
+                            <span className="font-black text-amber-950 dark:text-amber-200 block">
+                              Missing Barcode Tracking Tag Assigned
+                            </span>
+                            <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                              Tag: <strong className="font-mono text-amber-950 dark:text-white">{barcodeInput}</strong>. Photo proof required so staff can identify the SKU.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleCancelUnlabeledItem}
+                          className="px-2.5 py-1 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 rounded-xl text-[10px] font-black border border-slate-300 dark:border-slate-600 cursor-pointer shrink-0 shadow-2xs"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
                   <div className="space-y-2.5 pt-1">
                     {/* Full-width Barcode Input Field */}
@@ -13985,9 +14154,7 @@ export default function App() {
               {/* Metric 5: Awaiting SKU */}
               <div
                 onClick={() => {
-                  setAdminActiveTab('customer_reports');
-                  setReportsStatusFilter('pending_admin_details');
-                  setReportsCurrentPage(1);
+                  setIsPendingModalOpen(true);
                 }}
                 className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${pendingBarcodesList.length > 0 ? 'border-amber-400 bg-amber-50/20 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-800'
                   }`}
@@ -14095,9 +14262,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => {
-                  setAdminActiveTab('customer_reports');
-                  setReportsStatusFilter('pending_admin_details');
-                  setReportsCurrentPage(1);
+                  setIsPendingModalOpen(true);
                 }}
                 className="touch-target px-3.5 py-2 rounded-xl text-xs font-bold text-amber-800 dark:text-amber-400 hover:bg-amber-100/60 dark:hover:bg-amber-950/40 flex items-center gap-1.5 sm:ml-auto transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
@@ -14771,6 +14936,11 @@ export default function App() {
                                         {(item.code || matchedProduct?.code) && (
                                           <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.code || matchedProduct?.code}</div>
                                         )}
+                                        {(isUnlabeledBarcode(item.barcode) || item.ai_document_metadata?.is_unlabeled) && (
+                                          <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                            🏷️ Missing Barcode
+                                          </span>
+                                        )}
                                       </>
                                     )}
                                   </td>
@@ -14928,7 +15098,7 @@ export default function App() {
                                         </button>
                                       );
                                     })() : (() => {
-                                      const stageInfo = formatLifecycleStage(item.status);
+                                      const stageInfo = formatLifecycleStage(item.status, item);
                                       return (
                                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-block shadow-2xs ${stageInfo.color}`}>
                                           {stageInfo.label}
@@ -15043,6 +15213,31 @@ export default function App() {
                                           title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
                                         >
                                           <span>✓ PO Placed</span>
+                                        </button>
+                                      )}
+
+                                      {/* Re-open / Reset to Pending Action for Testing Coworker Actions */}
+                                      {Boolean(item.ai_document_metadata?.workflow_resolution || item.status === 'resolved' || item.status === 'closed') && (
+                                        <button
+                                          type="button"
+                                          disabled={updatingQueueId === (item.id || item.rma_number)}
+                                          onClick={async () => {
+                                            try {
+                                              setUpdatingQueueId(item.id || item.rma_number);
+                                              await catalogService.resetReportToPending(item.id, item.rma_number, currentUser?.name || 'Staff');
+                                              refreshAllData();
+                                              showToast(`Reset ${item.rma_number} to pending / under inspection.`, 'success');
+                                            } catch (e) {
+                                              showToast('Could not reset report: ' + e.message, 'error');
+                                            } finally {
+                                              setUpdatingQueueId(null);
+                                            }
+                                          }}
+                                          className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                                          title="Re-open item and reset to pending so coworker queues can test restocking/reordering again"
+                                        >
+                                          <RotateCcw className="w-3 h-3 text-slate-500" />
+                                          <span>↩️ Reset to Pending</span>
                                         </button>
                                       )}
 
@@ -15650,7 +15845,7 @@ export default function App() {
                                       })()}
                                     </>
                                   ) : (() => {
-                                    const stageInfo = formatLifecycleStage(item.status);
+                                    const stageInfo = formatLifecycleStage(item.status, item);
                                     return (
                                       <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider border inline-flex items-center gap-0.5 shadow-2xs ${stageInfo.color}`}>
                                         {stageInfo.label}
@@ -15684,6 +15879,11 @@ export default function App() {
                                     <>
                                       Qty: <strong className="text-slate-900 dark:text-white font-bold">{formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}</strong> • Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
                                       {(item.code || matchedProduct?.code) && <span> • SKU: {item.code || matchedProduct?.code}</span>}
+                                      {(isUnlabeledBarcode(item.barcode) || item.ai_document_metadata?.is_unlabeled) && (
+                                        <span className="inline-flex items-center gap-1 ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                          🏷️ Missing Barcode
+                                        </span>
+                                      )}
                                     </>
                                   )}
                                 </div>
@@ -15733,6 +15933,31 @@ export default function App() {
                                     title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
                                   >
                                     <span>✓ PO Placed</span>
+                                  </button>
+                                )}
+
+                                {/* Re-open / Reset to Pending Action for Testing Coworker Actions */}
+                                {Boolean(item.ai_document_metadata?.workflow_resolution || item.status === 'resolved' || item.status === 'closed') && (
+                                  <button
+                                    type="button"
+                                    disabled={updatingQueueId === (item.id || item.rma_number)}
+                                    onClick={async () => {
+                                      try {
+                                        setUpdatingQueueId(item.id || item.rma_number);
+                                        await catalogService.resetReportToPending(item.id, item.rma_number, currentUser?.name || 'Staff');
+                                        refreshAllData();
+                                        showToast(`Reset ${item.rma_number} to pending / under inspection.`, 'success');
+                                      } catch (e) {
+                                        showToast('Could not reset report: ' + e.message, 'error');
+                                      } finally {
+                                        setUpdatingQueueId(null);
+                                      }
+                                    }}
+                                    className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap shadow-2xs"
+                                    title="Re-open item and reset to pending so coworker queues can test restocking/reordering again"
+                                  >
+                                    <RotateCcw className="w-3 h-3 text-slate-500" />
+                                    <span>↩️ Reset to Pending</span>
                                   </button>
                                 )}
 
@@ -23915,6 +24140,7 @@ import {
 import { catalogService } from '../services/catalogService';
 import { authService } from '../services/authService';
 import { notificationService } from '../services/notificationService';
+import { isUnlabeledBarcode } from '../utils/rmaHelpers';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import SupplierInput from './SupplierInput';
@@ -23971,6 +24197,9 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     const itemBarcode = String(item.barcode || '').trim();
     const rawCode = String(item.code || item.sku || '').trim();
     const isCodeValid = rawCode && rawCode !== itemBarcode && !rawCode.toLowerCase().includes('awaiting') && !rawCode.toLowerCase().includes('unidentified');
+    const photoList = Array.isArray(item.photos)
+      ? item.photos
+      : (typeof item.photos === 'string' && item.photos.startsWith('[') ? JSON.parse(item.photos || '[]') : []);
 
     setFormData({
       code: isCodeValid ? rawCode : '',
@@ -23980,7 +24209,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
       priceWithVat: item.price_with_vat ? String(item.price_with_vat) : '',
       brandName: item.brand_name || '',
       unitName: item.unit_name || 'pc',
-      imageUrl: '' // Strictly start with empty state for unassigned pending barcodes
+      imageUrl: (photoList.length > 0 ? photoList[0] : '')
     });
 
     if (item.ae_name || item.ae_email) {
@@ -24277,34 +24506,62 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                       No pending barcodes match "{searchQuery}"
                     </div>
                   ) : (
-                    paginatedList.map((item, idx) => (
-                      <div 
-                        key={item.id || item.barcode}
-                        className="p-3 bg-slate-50 dark:bg-slate-800/70 hover:bg-blue-50/50 dark:hover:bg-slate-700/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-between gap-3 transition-colors"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <Barcode className="w-6 h-6 text-slate-400 shrink-0" />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono font-black text-[10px] text-amber-900 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.5 rounded-md">
-                                #{(currentPage - 1) * pageSize + idx + 1}
-                              </span>
-                              <span className="font-mono font-bold text-slate-900 dark:text-white text-xs truncate">
-                                {item.barcode}
-                              </span>
-                            </div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                              {item.name || 'Unidentified item scanned by staff'}
+                    paginatedList.map((item, idx) => {
+                      const photoList = Array.isArray(item.photos)
+                        ? item.photos
+                        : (typeof item.photos === 'string' && item.photos.startsWith('[') ? JSON.parse(item.photos || '[]') : []);
+                      const isUnlabeled = isUnlabeledBarcode(item.barcode) || item.ai_document_metadata?.is_unlabeled;
+
+                      return (
+                        <div 
+                          key={item.id || item.barcode}
+                          className="p-3 bg-slate-50 dark:bg-slate-800/70 hover:bg-blue-50/50 dark:hover:bg-slate-700/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-between gap-3 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            {photoList.length > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => setLightboxPhoto({
+                                  images: photoList,
+                                  initialIndex: 0,
+                                  url: photoList[0],
+                                  title: item.name || `Pending Item (${item.barcode})`,
+                                  subtitle: `RMA #${item.rma_number || 'N/A'} • Barcode: ${item.barcode}`
+                                })}
+                                className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 shrink-0 hover:scale-105 transition-transform cursor-zoom-in shadow-xs"
+                                title="Click to view full photo proof"
+                              >
+                                <img src={photoList[0]} alt="Proof" className="w-full h-full object-cover" />
+                              </button>
+                            ) : (
+                              <Barcode className="w-6 h-6 text-slate-400 shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono font-black text-[10px] text-amber-900 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.5 rounded-md">
+                                  #{(currentPage - 1) * pageSize + idx + 1}
+                                </span>
+                                <span className="font-mono font-bold text-slate-900 dark:text-white text-xs truncate">
+                                  {item.barcode}
+                                </span>
+                                {isUnlabeled && (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                    🏷️ Missing Barcode / Unlabeled
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                {item.name || 'Unidentified item scanned by staff'}
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        {canVerify ? (
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => handleSelect(item)}
-                              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                          {canVerify ? (
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleSelect(item)}
+                                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
                             >
                               <Edit3 className="w-3.5 h-3.5" />
                               <span>Enter Details</span>
@@ -24330,8 +24587,9 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                           </span>
                         )}
                       </div>
-                    ))
-                  )}
+                    );
+                  })
+                )}
                 </div>
 
                 {/* Table Pagination */}
@@ -29390,13 +29648,14 @@ import {
   Minus,
   ArrowRightLeft,
   Info,
-  FileText
+  FileText,
+  RotateCcw
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
 import { supplierClaimService } from '../services/supplierClaimService';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, resolveBatchManifestLifecycle, getItemNeedsReorder, cleanExplanationText } from '../utils/rmaHelpers';
+import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, resolveBatchManifestLifecycle, getItemNeedsReorder, cleanExplanationText, mapReasonToConditionGrade } from '../utils/rmaHelpers';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -29438,26 +29697,40 @@ function normalizeDispositionOption(disp) {
  * Enterprise Automatic Lifecycle Status Calculator
  * Lifecycle status is 100% computed automatically from triage disposition and financial records.
  */
-export function computeAutomaticLifecycleStatus(disposition, hasCreditMemo = false, currentStatus = null) {
+export function computeAutomaticLifecycleStatus(disposition, hasCreditMemo = false, currentStatus = null, reportOrItem = null) {
   if (hasCreditMemo) return 'credit_memo_issued';
   const disp = String(disposition || '').toLowerCase().trim();
   const curr = String(currentStatus || '').toLowerCase().trim();
+  const resolution = reportOrItem?.ai_document_metadata?.workflow_resolution;
+
+  if (resolution === 'restocked' || curr === 'restocked') {
+    return '6- Restocked';
+  }
+  if (resolution === 'reordered') {
+    return '7- Re-Ordered (PO Placed)';
+  }
+  if (resolution === 'scrapped_no_reorder' || curr === 'scrapped' || curr === 'disposed') {
+    return '7- Scrapped / Written Off';
+  }
+  if (curr === 'resolved') {
+    if (disp.includes('restock')) return '6- Restocked';
+    if (disp.includes('scrap') || disp.includes('dispose')) return '7- Scrapped / Written Off';
+    return '6- Restocked';
+  }
 
   if (
     disp.includes('restock') || 
     disp.includes('accepted replacement') || 
     disp.includes('replacement stock received')
   ) {
-    // Keep in 'under_inspection' (Ready to Restock queue) until confirmed in WMS/ERP, unless already marked 'restocked'
-    return curr === 'restocked' ? 'restocked' : 'under_inspection';
+    return 'under_inspection';
   }
   if (
     disp.includes('scrap') || 
     disp.includes('dispose') || 
     disp.includes('local destruction')
   ) {
-    // Keep in 'under_inspection' (Supplier Re-Order / Scrap queue) until confirmed, unless already marked 'scrapped'
-    return (curr === 'scrapped' || curr === 'disposed') ? 'scrapped' : 'under_inspection';
+    return 'under_inspection';
   }
   if (disp.includes('buffer stock') || disp.includes('buffer replacement')) {
     return 'buffer_replacement_dispatched';
@@ -29686,7 +29959,11 @@ export default function QuickRMAActionModal({
   // Synchronize triage inputs when report loads or updates
   useEffect(() => {
     if (report) {
-      setConditionGrade(report.condition_grade || 'B - Damaged Packaging Only');
+      const autoGrade = mapReasonToConditionGrade(report.reason);
+      const resolvedGrade = (report.condition_grade && report.condition_grade !== 'B - Damaged Packaging Only')
+        ? report.condition_grade
+        : (autoGrade || report.condition_grade || 'B - Damaged Packaging Only');
+      setConditionGrade(resolvedGrade);
       setDisposition(normalizeDispositionOption(report.disposition));
       setWarehouseLocation(report.warehouse_location || '');
       setNeedsReorder(getItemNeedsReorder(report));
@@ -32327,13 +32604,35 @@ export default function QuickRMAActionModal({
 
                           {/* Automated RMA Lifecycle Status (Zero Manual Select) */}
                           <div>
-                            <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                              Automated Lifecycle Stage
-                            </label>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">
+                                Automated Lifecycle Stage
+                              </label>
+                              {Boolean(report?.ai_document_metadata?.workflow_resolution || report?.status === 'resolved' || report?.status === 'closed') && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      const res = await catalogService.resetReportToPending(report.id, report.rma_number, verifiedAdmin?.name || 'Staff');
+                                      setReport(res);
+                                      setRmaStatus('under_inspection');
+                                      if (onRefresh) onRefresh();
+                                    } catch (e) {
+                                      alert('Could not reset: ' + e.message);
+                                    }
+                                  }}
+                                  className="text-[10px] font-bold text-amber-700 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
+                                  title="Re-open item and reset to pending for testing coworker actions"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                  <span>↩️ Reset to Pending</span>
+                                </button>
+                              )}
+                            </div>
                             <div className="w-full px-2.5 py-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-700 dark:text-slate-300 text-xs flex items-center gap-1.5 shadow-2xs">
                               <span className={`w-2 h-2 rounded-full shrink-0 ${isOnHold ? 'bg-amber-500 animate-ping' : 'bg-blue-500 animate-pulse'}`} />
                               <span className="capitalize">
-                                {isOnHold ? '4- Quarantine (Hold)' : computeAutomaticLifecycleStatus(disposition, hasLinkedCreditMemo, rmaStatus).replace(/_/g, ' ')}
+                                {isOnHold ? '4- Quarantine (Hold)' : computeAutomaticLifecycleStatus(disposition, hasLinkedCreditMemo, rmaStatus, report).replace(/_/g, ' ')}
                               </span>
                             </div>
                           </div>
@@ -39483,6 +39782,30 @@ export default function SupplierClaimsTab({
                               </span>
                             )}
 
+                            {/* Re-open / Reset to Pending Action for Testing Coworker Actions */}
+                            {Boolean(r.ai_document_metadata?.workflow_resolution || r.status === 'resolved' || r.status === 'closed') && (
+                              <button
+                                type="button"
+                                disabled={updatingQueueId === (r.id || r.rma_number)}
+                                onClick={async () => {
+                                  try {
+                                    setUpdatingQueueId(r.id || r.rma_number);
+                                    await catalogService.resetReportToPending(r.id, r.rma_number, verifiedAdmin?.name || 'Staff');
+                                    if (onRefreshAllData) onRefreshAllData();
+                                  } catch (e) {
+                                    alert('Could not reset report: ' + e.message);
+                                  } finally {
+                                    setUpdatingQueueId(null);
+                                  }
+                                }}
+                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                                title="Re-open this item and reset to pending so coworker queues can test restocking/reordering again"
+                              >
+                                <RotateCcw className="w-3 h-3 text-slate-500" />
+                                <span>↩️ Reset to Pending</span>
+                              </button>
+                            )}
+
                             {/* 4. Official Debit Claim Generation or Viewing */}
                             {existingClaim ? (
                               <button
@@ -39568,7 +39891,10 @@ export default function SupplierClaimsTab({
                             {canDeleteReports && onRequestDeleteReport && (
                               <button
                                 type="button"
-                                onClick={() => onRequestDeleteReport(r.parent_rma_id || r.id, r.rma_number, r)}
+                                onClick={() => {
+                                  const targetDeleteId = r.is_unpacked_manifest_item ? (r.parent_rma_id || r.id) : r.id;
+                                  onRequestDeleteReport(targetDeleteId, r.rma_number, r);
+                                }}
                                 className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
                                 title={`Delete RMA #${r.rma_number} and remove stored proof photos`}
                               >
@@ -43453,6 +43779,7 @@ import { INITIAL_PRODUCTS } from '../data/mockData';
 import { notificationService } from './notificationService';
 import { purchaseOrdersApi } from './purchaseOrdersApi';
 import { authService } from './authService';
+import { mapReasonToConditionGrade, isUnlabeledBarcode } from '../utils/rmaHelpers';
 
 /**
  * Safe test mode resolution:
@@ -44663,7 +44990,8 @@ export const catalogService = {
     total_items = null,
     total_quantity = null,
     is_parent = false,
-    parent_rma_id = null
+    parent_rma_id = null,
+    condition_grade = null
   }) {
     const hasItems = Array.isArray(items) && items.length > 0;
     const isBatch = hasItems && items.length > 1;
@@ -44766,6 +45094,7 @@ export const catalogService = {
       : (userProvidedName || (isKnown ? resolvedProduct.name : (resolvedProduct?.name && !resolvedProduct.name.startsWith('Unidentified Item') ? resolvedProduct.name : (cleanBarcode ? `Unidentified Item (${cleanBarcode})` : 'General Return Item'))));
 
     // Ensure manifest barcode is strictly rmaNumber or a dedicated manifest identifier, never a child item's barcode
+    const isUnlabeled = isUnlabeledBarcode(cleanBarcode) || Boolean(ai_document_metadata?.is_unlabeled);
     const finalBarcode = isBatch
       ? (cleanBarcode && cleanBarcode !== 'MANIFEST' && !items.some(it => String(it.barcode).trim() === cleanBarcode) ? cleanBarcode : rmaNumber)
       : cleanBarcode;
@@ -44774,6 +45103,12 @@ export const catalogService = {
     const isAccurateGps = gps && gps.latitude && gps.accuracy && Number(gps.accuracy) <= 150;
 
     const effectiveRmaType = (rma_type === 'supplier_outbound' || rmaType === 'supplier_outbound') ? 'supplier_outbound' : 'customer_inbound';
+    const effectiveGrade = condition_grade || mapReasonToConditionGrade(reason || (hasItems && items[0]?.reason));
+
+    const mergedMetadata = {
+      ...(ai_document_metadata || {}),
+      ...(isUnlabeled ? { is_unlabeled: true, provisional_barcode: finalBarcode } : {})
+    };
 
     const reportRow = {
       rma_number: rmaNumber,
@@ -44792,7 +45127,7 @@ export const catalogService = {
       unit_name: hasItems
         ? (items.every(it => (it.unit_name || it.unit) === (items[0].unit_name || items[0].unit)) ? (items[0].unit_name || items[0].unit || 'pc') : 'mixed')
         : (isKnown ? (resolvedProduct.unit_name || resolvedProduct.unitName || 'pc') : (resolvedProduct?.unit_name || 'pc')),
-      status: isBatch ? 'pending' : (isKnown || (hasItems && items.every(it => Number(it.price) > 0)) ? 'pending' : 'pending_admin_details'),
+      status: isUnlabeled ? 'pending_admin_details' : (isBatch ? 'pending' : (isKnown || (hasItems && items.every(it => Number(it.price) > 0)) ? 'pending' : 'pending_admin_details')),
       reason: reason || (hasItems && items.length > 1 ? `Multi-Item Defect (${items.length} items)` : 'Damaged Box / Crushed Packaging'),
       explanation: explanation || null,
       photos: allPhotos,
@@ -44804,7 +45139,7 @@ export const catalogService = {
       store_branch: store_branch || null,
       expiry_date: expiry_date || null,
       batch_lot_number: batch_lot_number ? String(batch_lot_number).trim() : null,
-      ai_document_metadata: ai_document_metadata || null,
+      ai_document_metadata: Object.keys(mergedMetadata).length > 0 ? mergedMetadata : null,
       google_drive_folder_url: google_drive_folder_url || null,
       google_drive_folder_id: google_drive_folder_id || null,
       gps_latitude: isAccurateGps ? Number(gps.latitude) : null,
@@ -44817,7 +45152,7 @@ export const catalogService = {
       ae_name: isKnown ? (resolvedProduct.ae_name || resolvedProduct.aeName || null) : null,
       ae_email: isKnown ? (resolvedProduct.ae_email || resolvedProduct.aeEmail || null) : null,
       company: isKnown ? (resolvedProduct.company || null) : null,
-      condition_grade: 'B - Damaged Packaging Only',
+      condition_grade: effectiveGrade,
       disposition: effectiveRmaType === 'supplier_outbound' ? '3- Return to Vendor (RTV)' : 'Pending Triage',
       warehouse_location: null,
       inspected_by: null,
@@ -45245,6 +45580,72 @@ export const catalogService = {
   },
 
   /**
+   * Reset an RMA report back to pending / under_inspection (clearing restocked/reordered/scrapped resolution)
+   */
+  async resetReportToPending(id, rmaNumber, actorName = 'Admin') {
+    if (!id && !rmaNumber) return false;
+    const cleanActor = String(actorName || 'Admin').trim();
+    const isNumericId = id !== undefined && id !== null && /^\d+$/.test(String(id));
+
+    let fetchQuery = supabase.from('rma_reports').select('*');
+    if (isNumericId) fetchQuery = fetchQuery.eq('id', Number(id));
+    else fetchQuery = fetchQuery.eq('rma_number', rmaNumber);
+
+    const { data: rows, error: fetchErr } = await fetchQuery;
+    if (fetchErr) throw fetchErr;
+    const primaryRow = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    if (!primaryRow) throw new Error('Report not found');
+
+    const currentAudit = Array.isArray(primaryRow?.audit_trail) ? [...primaryRow.audit_trail] : [];
+    currentAudit.push({
+      timestamp: new Date().toISOString(),
+      stage: 'RESET_TO_PENDING',
+      actor: cleanActor,
+      status: 'under_inspection',
+      note: `Re-opened and reset to pending / under_inspection by ${cleanActor}`
+    });
+
+    const currentMeta = (primaryRow?.ai_document_metadata && typeof primaryRow.ai_document_metadata === 'object') ? { ...primaryRow.ai_document_metadata } : {};
+    delete currentMeta.workflow_resolution;
+    delete currentMeta.resolved_at;
+    delete currentMeta.resolved_by;
+
+    const updates = {
+      status: 'under_inspection',
+      audit_trail: currentAudit,
+      ai_document_metadata: currentMeta
+    };
+
+    // If batch manifest, reset all resolved child items as well
+    if (Array.isArray(primaryRow.items) && primaryRow.items.length > 0) {
+      updates.items = primaryRow.items.map(child => {
+        const cleanChild = { ...child, status: 'under_inspection' };
+        delete cleanChild.workflow_resolution;
+        return cleanChild;
+      });
+    }
+
+    let uq = supabase.from('rma_reports').update(updates);
+    if (isNumericId) uq = uq.eq('id', Number(primaryRow.id));
+    else uq = uq.eq('rma_number', primaryRow.rma_number);
+
+    const { data: updatedData, error: updateErr } = await uq.select('*');
+    if (updateErr) throw updateErr;
+
+    const finalReport = Array.isArray(updatedData) && updatedData.length > 0 ? updatedData[0] : { ...primaryRow, ...updates };
+
+    this.notifyChange('report-updated', { report: finalReport });
+    this.notifyChange('coworker-queue-updated', {
+      reportId: finalReport.id,
+      rmaNumber: finalReport.rma_number,
+      status: 'under_inspection',
+      report: finalReport
+    });
+
+    return finalReport;
+  },
+
+  /**
    * Fetch all unmapped items (Awaiting SKU) across active standalone reports and batch manifest child items
    */
   async getPendingBarcodes() {
@@ -45252,7 +45653,7 @@ export const catalogService = {
       // 1. Fetch active (non-deleted) RMA reports (regardless of whether status is pending, received_at_dock, etc.)
       const { data: activeReports, error: rError } = await supabase
         .from('rma_reports')
-        .select('id, rma_number, parent_rma_id, barcode, code, name, supplier_name, price, price_with_vat, unit_name, status, created_at, is_parent, items')
+        .select('id, rma_number, parent_rma_id, barcode, code, name, supplier_name, price, price_with_vat, unit_name, status, created_at, is_parent, items, photos, ai_document_metadata')
         .not('status', 'eq', 'deleted')
         .order('created_at', { ascending: false });
 
@@ -45359,6 +45760,8 @@ export const catalogService = {
                 price_with_vat: Number(child.price_with_vat || child.priceWithVat || child.price || 0),
                 unit_name: child.unit_name || child.unit || 'pc',
                 status: child.status || r.status || 'pending',
+                photos: child.photos || r.photos || [],
+                ai_document_metadata: child.ai_document_metadata || r.ai_document_metadata || {},
                 is_verified: false,
                 created_at: r.created_at
               });
@@ -45382,6 +45785,8 @@ export const catalogService = {
               price_with_vat: Number(r.price_with_vat || r.price || 0),
               unit_name: r.unit_name || 'pc',
               status: r.status || 'pending',
+              photos: r.photos || [],
+              ai_document_metadata: r.ai_document_metadata || {},
               is_verified: false,
               created_at: r.created_at
             });
@@ -45639,6 +46044,16 @@ export const catalogService = {
         }
       } catch (e) {
         console.warn('[Fetch Report Before Delete Notice]:', e.message);
+      }
+
+      // Critical Split Protection: If this report has split children referencing its id as parent_rma_id,
+      // unlink them first so deleting this parent report NEVER cascades to delete the split children!
+      if (isNumericId) {
+        try {
+          await supabase.from('rma_reports').update({ parent_rma_id: null }).eq('parent_rma_id', id);
+        } catch (unlinkErr) {
+          console.warn('[Unlink Split Children Before Delete]:', unlinkErr.message);
+        }
       }
 
       let query = supabase.from('rma_reports').delete();
@@ -50807,6 +51222,49 @@ export function generateTicketId(existingCount = 0) {
   }
 
   return `RMA-${currentYear}-${seqNum}-${randomSuffix}`;
+}
+
+/**
+ * Generate a provisional tracking identifier for unlabeled / missing-barcode items.
+ * Example: NO-LABEL-2026-K9P2
+ */
+export function generateUnlabeledBarcode() {
+  const currentYear = new Date().getFullYear();
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let randomSuffix = '';
+  for (let i = 0; i < 4; i++) {
+    randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `NO-LABEL-${currentYear}-${randomSuffix}`;
+}
+
+/**
+ * Checks whether a barcode string is a provisional unlabeled tracking tag.
+ */
+export function isUnlabeledBarcode(barcode) {
+  if (!barcode) return false;
+  return /^NO-LABEL/i.test(String(barcode).trim());
+}
+
+/**
+ * Automatically maps a user-selected defect reason to its corresponding condition grade.
+ */
+export function mapReasonToConditionGrade(reason) {
+  if (!reason) return 'B - Damaged Packaging Only';
+  const r = String(reason).toLowerCase();
+  if (r.includes('wrong item') || r.includes('pull-out') || r.includes('unsold') || r.includes('resellable') || r.includes('like new') || r.includes('incorrect shipment')) {
+    return 'A - Like New / Resellable';
+  }
+  if (r.includes('expired') || r.includes('expiry') || r.includes('spoiled') || r.includes('leaking') || r.includes('broken seal') || r.includes('total loss') || r.includes('scrap')) {
+    return 'D - Total Loss / Scrap';
+  }
+  if (r.includes('factory defect') || r.includes('not working') || r.includes('parts only') || r.includes('other defect') || r.includes('defective')) {
+    return 'C - Defective / Parts Only';
+  }
+  if (r.includes('box') || r.includes('packaging') || r.includes('crushed') || r.includes('dent') || r.includes('damaged box')) {
+    return 'B - Damaged Packaging Only';
+  }
+  return 'B - Damaged Packaging Only';
 }
 
 /**
