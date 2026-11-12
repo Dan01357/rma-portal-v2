@@ -58,6 +58,27 @@ Pass your secret API key in all requests:
 - \`x-api-key: sk_live_rma_...\`
 - Or \`Authorization: Bearer sk_live_rma_...\`
 
+### 🧪 Coworker Simulation & Test Mode vs Live Mode:
+- **🟢 Live Production Mode**:
+  Requests made with live keys (\`sk_live_...\`) or without test flags operate directly on production books. Live returns appear in **Customer RMA Hub** or **Supplier Hub**.
+- **🧪 Test Mode Sandbox (Safe Isolation)**:
+  Coworkers can simulate inventory restocks, supplier re-orders, and debit memos safely without touching live financial ledgers or triggering customer/boss notification emails:
+  1. **Query Param**: Add \`?test_mode=true\` (e.g. \`GET /api/v1/rma?test_mode=true\`)
+  2. **HTTP Header**: Pass \`x-test-mode: true\`
+  3. **POST Payload**: Include \`"is_test": true\`
+  4. **API Keys**: Test keys prefixed with \`sk_test_...\` automatically route to the Test Sandbox.
+- **🚀 Simulating Connections via Scalar Documentation (/docs)**:
+  1. Click **"Authorize"** in the top right and paste your API key (\`sk_test_...\` or \`sk_live_...\`).
+  2. Select an endpoint (e.g. \`GET /api/v1/rma\` or \`POST /api/v1/rma\`).
+  3. Set \`test_mode\` to \`true\` in query parameters.
+  4. Click **"Send Request"** to execute real HTTP queries directly against the Vercel backend.
+
+### 📄 Standard Commercial Documents (SI, DR, PO):
+All endpoints support and return standardized commercial logistics references:
+- \`si_number\`: Sales Invoice Number
+- \`dr_number\`: Delivery Receipt Number
+- \`po_number\`: Purchase Order Number
+
 ### 📦 4-Pillar Operations & Coworker Inventory Integration Guide:
 
 #### 1. 🟢 Ready to Restock Queue (?queue=restock):

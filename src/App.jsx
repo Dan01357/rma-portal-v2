@@ -5003,14 +5003,14 @@ export default function App() {
                               </div>
                             </th>
 
-                            {/* 8. Invoice / DR # Header */}
+                            {/* 8. Commercial Documents (SI / DR / PO #) Header */}
                             <th
                               onClick={() => handleReportsSort('invoice_dr_number')}
                               className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Invoice / DR #"
+                              title="Click to sort by Commercial Documents (Sales Invoice, Delivery Receipt, Purchase Order)"
                             >
                               <div className="flex items-center">
-                                <span>Invoice / DR #</span>
+                                <span>Commercial Docs (SI, DR, PO)</span>
                                 {reportsSortField === 'invoice_dr_number' ? (
                                   reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
@@ -6973,33 +6973,43 @@ export default function App() {
 
             // Persist to Supabase rma_items, parent rma_reports items array, and report records
             try {
-              // 1. Update rma_items child table by child id and barcode
-              if (childIdToMatch) {
-                await supabase
-                  .from('rma_items')
-                  .update({
-                    sku: code,
-                    code: code,
-                    name: name,
-                    price: price,
-                    price_with_vat: priceWithVat,
-                    supplier_name: supplierName,
-                    unit_name: unitName
-                  })
-                  .eq('id', childIdToMatch);
+              // 1. Update rma_items child table by numeric child id and barcode safely
+              if (childIdToMatch && /^\d+$/.test(String(childIdToMatch))) {
+                try {
+                  await supabase
+                    .from('rma_items')
+                    .update({
+                      sku: code,
+                      code: code,
+                      name: name,
+                      price: price,
+                      price_with_vat: priceWithVat,
+                      supplier_name: supplierName,
+                      unit_name: unitName
+                    })
+                    .eq('id', Number(childIdToMatch));
+                } catch (e) {
+                  console.warn('Notice updating rma_items by ID:', e?.message);
+                }
               }
-              await supabase
-                .from('rma_items')
-                .update({
-                  sku: code,
-                  code: code,
-                  name: name,
-                  price: price,
-                  price_with_vat: priceWithVat,
-                  supplier_name: supplierName,
-                  unit_name: unitName
-                })
-                .eq('barcode', barcode);
+              if (barcode) {
+                try {
+                  await supabase
+                    .from('rma_items')
+                    .update({
+                      sku: code,
+                      code: code,
+                      name: name,
+                      price: price,
+                      price_with_vat: priceWithVat,
+                      supplier_name: supplierName,
+                      unit_name: unitName
+                    })
+                    .eq('barcode', String(barcode));
+                } catch (e) {
+                  console.warn('Notice updating rma_items by barcode:', e?.message);
+                }
+              }
 
               // 2. Update parent rma_reports JSON items array
               const { data: parentsWithItems } = await supabase

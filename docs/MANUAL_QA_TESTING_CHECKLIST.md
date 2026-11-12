@@ -1613,6 +1613,75 @@ Each test scenario defines:
 
 ---
 
+## Section 20: Phase 20 — Senior RMA Engineering Audit, SI/DR/PO Document Standardization, and Silent Record Restitution
+
+- [ ] **TC-V3-01 (Standardized SI, DR, PO in Supplier Claims Hub & CSV Export)**
+  * **Location**: `🚚 Supplier RTV Hub` -> Table View & `[ Export Supplier Claims CSV ]`
+  * **Action**:
+    1. Inspect table rows in Supplier Claims Hub for commercial document tags (`SI: ...`, `DR: ...`, `PO: ...`).
+    2. Click **"Export Supplier Claims CSV"** and open `Pingcon_Supplier_Outbound_Claims.csv` in Excel.
+  * **Expected Behavior**:
+    1. The single ambiguous `Supplier PO #` column is replaced by three distinct, standardized columns:
+       - `Sales Invoice (SI) #` (Supplier original sales invoice)
+       - `Delivery Receipt (DR) #` (Supplier delivery receipt)
+       - `Purchase Order (PO) #` (Pingcon purchase order placed with vendor)
+    2. Document numbers map accurately to their respective fields with zero blanks caused by column conflation.
+
+- [ ] **TC-V3-02 (Standardized SI, DR, PO in Customer RMA Hub Table & Main CSV Export)**
+  * **Location**: `📥 Customer RMA Hub` -> Table Header & `[ Export CSV ]`
+  * **Action**:
+    1. Inspect table column header: Displays `Commercial Docs (SI, DR, PO)` clearly.
+    2. Click **"Export RMA Reports CSV"** and open `Pingcon_RMA_Reports.csv` in Excel.
+  * **Expected Behavior**:
+    1. Legacy `Invoice / DR #` header is cleanly separated into `Sales Invoice (SI) #`, `Delivery Receipt (DR) #`, and `Purchase Order (PO) #`.
+    2. Document numbers format cleanly without scientific notation truncation.
+
+- [ ] **TC-V3-03 (Super Admin Silent Record Restitution & RMA ID Re-creation)**
+  * **Location**: `QuickRMAActionModal` -> `[ Edit Details & Documents ]`
+  * **Action**:
+    1. As Super Admin, open any return record in Triage.
+    2. Click **"Edit Details & Documents"**.
+    3. Notice the green **🔒 100% Silent Record Restitution Guarantee** banner.
+    4. Modify the **RMA Identifier (Ticket ID)** (e.g. change to match a previously deleted record like `RMA-2026-0099-6KKW`).
+    5. Modify the **Date Logged (Historical Ingest Timestamp)** to the original historical date.
+    6. Click **"Save & Apply Restitution"**.
+  * **Expected Behavior**:
+    1. The database row updates with the exact specified RMA Number and historical timestamp.
+    2. Child manifest records automatically cascade to the new RMA Number.
+    3. **Zero email notifications are dispatched** to boss, coworkers, AE, or suppliers.
+
+- [ ] **TC-V3-04 (Promote Test Mode Sandbox Record to Live Production Without Emails)**
+  * **Location**: `QuickRMAActionModal` -> `Record Environment & Destination Hub`
+  * **Action**:
+    1. In Test Mode, submit an intake return (which routes safely to Sandbox with zero live emails).
+    2. Open the ticket in `QuickRMAActionModal` -> `[ Edit Details & Documents ]`.
+    3. Toggle Environment from **`🧪 Test Mode Sandbox`** to **`🟢 Live Production Hub`**.
+    4. Click **"Save & Apply Restitution"**.
+  * **Expected Behavior**:
+    1. Record immediately leaves the Sandbox and appears in the live `📥 Customer RMA Hub` or `🚚 Supplier RTV Hub`.
+    2. `is_test: false` is written to database, and `[TEST_MODE]` tag is purged from notes.
+    3. **100% SILENT**: Zero notification emails are sent. Boss and coworkers see the record appearing as if it was there all along.
+
+- [ ] **TC-V3-05 (Coworker API Simulation via Scalar Documentation Site `/docs`)**
+  * **Location**: Scalar Documentation Site (`https://rma-portal-pingconmarketing.vercel.app/docs`)
+  * **Action**:
+    1. Open `/docs` and authenticate with coworker test API key `sk_test_wms_restock_simulation_key_2026`.
+    2. Select `GET /api/v1/rma` -> Click **"Test Request"** with query param `test_mode=true`.
+    3. Select `PATCH /api/v1/rma/{id}` -> Send `{"status": "restocked", "warehouse_location": "Good Stock Area"}`.
+  * **Expected Behavior**:
+    1. `GET` returns 200 OK with sandbox records isolated from production books.
+    2. `PATCH` executes ERP restock lifecycle update cleanly.
+    3. Coworkers can verify automated integrations without risk of corrupting live accounting ledgers.
+
+- [ ] **TC-V3-06 (Unlabeled Barcode SKU Assignment Without 400 Bad Request)**
+  * **Location**: Public Portal -> `Awaiting SKU` Modal -> Assign ERPLY Catalog Item
+  * **Action**: Intake an unlabeled product (`NO-LABEL-2026-...`), open Admin `Awaiting SKU` queue, and assign a catalog product.
+  * **Expected Behavior**:
+    1. Supabase update checks numeric ID validity before executing `rma_items` lookup.
+    2. SKU assignment succeeds with zero HTTP 400 Bad Request errors in browser developer tools console.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -1636,4 +1705,5 @@ Each test scenario defines:
 | **Phase 17: Video Audit 9 Bug Fixes & UI Streamlining** | Workstation Bar & Action Cards | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 18: Enterprise Upgrade (Zero Stock Photos, Locations, CSV, Sandbox, Trash & Archive)** | Full Platform & REST API | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 19: Video QA Audit Resolution & Workflow Refinements** | Full Platform & REST API | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 20: Senior RMA Audit, SI/DR/PO Standardization & Silent Restitution** | Full Platform, REST API & Docs | `READY FOR TESTING` | *Lead QA Director* |
 

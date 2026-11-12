@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-12T06:35:58.637Z
+Generated At: 2026-11-12T08:10:18.034Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -135,7 +135,8 @@ rma-portal-v2/
 │   │   └── supabaseClient.js
 ├── video/
 │   │   ├── watch this 1.mp4
-│   │   └── watch this 2.mp4
+│   │   ├── watch this 2.mp4
+│   │   └── watch this 3.mp4
 ├── .env
 ├── .env.example
 ├── .gitignore
@@ -3869,6 +3870,75 @@ Each test scenario defines:
 
 ---
 
+## Section 20: Phase 20 — Senior RMA Engineering Audit, SI/DR/PO Document Standardization, and Silent Record Restitution
+
+- [ ] **TC-V3-01 (Standardized SI, DR, PO in Supplier Claims Hub & CSV Export)**
+  * **Location**: `🚚 Supplier RTV Hub` -> Table View & `[ Export Supplier Claims CSV ]`
+  * **Action**:
+    1. Inspect table rows in Supplier Claims Hub for commercial document tags (`SI: ...`, `DR: ...`, `PO: ...`).
+    2. Click **"Export Supplier Claims CSV"** and open `Pingcon_Supplier_Outbound_Claims.csv` in Excel.
+  * **Expected Behavior**:
+    1. The single ambiguous `Supplier PO #` column is replaced by three distinct, standardized columns:
+       - `Sales Invoice (SI) #` (Supplier original sales invoice)
+       - `Delivery Receipt (DR) #` (Supplier delivery receipt)
+       - `Purchase Order (PO) #` (Pingcon purchase order placed with vendor)
+    2. Document numbers map accurately to their respective fields with zero blanks caused by column conflation.
+
+- [ ] **TC-V3-02 (Standardized SI, DR, PO in Customer RMA Hub Table & Main CSV Export)**
+  * **Location**: `📥 Customer RMA Hub` -> Table Header & `[ Export CSV ]`
+  * **Action**:
+    1. Inspect table column header: Displays `Commercial Docs (SI, DR, PO)` clearly.
+    2. Click **"Export RMA Reports CSV"** and open `Pingcon_RMA_Reports.csv` in Excel.
+  * **Expected Behavior**:
+    1. Legacy `Invoice / DR #` header is cleanly separated into `Sales Invoice (SI) #`, `Delivery Receipt (DR) #`, and `Purchase Order (PO) #`.
+    2. Document numbers format cleanly without scientific notation truncation.
+
+- [ ] **TC-V3-03 (Super Admin Silent Record Restitution & RMA ID Re-creation)**
+  * **Location**: `QuickRMAActionModal` -> `[ Edit Details & Documents ]`
+  * **Action**:
+    1. As Super Admin, open any return record in Triage.
+    2. Click **"Edit Details & Documents"**.
+    3. Notice the green **🔒 100% Silent Record Restitution Guarantee** banner.
+    4. Modify the **RMA Identifier (Ticket ID)** (e.g. change to match a previously deleted record like `RMA-2026-0099-6KKW`).
+    5. Modify the **Date Logged (Historical Ingest Timestamp)** to the original historical date.
+    6. Click **"Save & Apply Restitution"**.
+  * **Expected Behavior**:
+    1. The database row updates with the exact specified RMA Number and historical timestamp.
+    2. Child manifest records automatically cascade to the new RMA Number.
+    3. **Zero email notifications are dispatched** to boss, coworkers, AE, or suppliers.
+
+- [ ] **TC-V3-04 (Promote Test Mode Sandbox Record to Live Production Without Emails)**
+  * **Location**: `QuickRMAActionModal` -> `Record Environment & Destination Hub`
+  * **Action**:
+    1. In Test Mode, submit an intake return (which routes safely to Sandbox with zero live emails).
+    2. Open the ticket in `QuickRMAActionModal` -> `[ Edit Details & Documents ]`.
+    3. Toggle Environment from **`🧪 Test Mode Sandbox`** to **`🟢 Live Production Hub`**.
+    4. Click **"Save & Apply Restitution"**.
+  * **Expected Behavior**:
+    1. Record immediately leaves the Sandbox and appears in the live `📥 Customer RMA Hub` or `🚚 Supplier RTV Hub`.
+    2. `is_test: false` is written to database, and `[TEST_MODE]` tag is purged from notes.
+    3. **100% SILENT**: Zero notification emails are sent. Boss and coworkers see the record appearing as if it was there all along.
+
+- [ ] **TC-V3-05 (Coworker API Simulation via Scalar Documentation Site `/docs`)**
+  * **Location**: Scalar Documentation Site (`https://rma-portal-pingconmarketing.vercel.app/docs`)
+  * **Action**:
+    1. Open `/docs` and authenticate with coworker test API key `sk_test_wms_restock_simulation_key_2026`.
+    2. Select `GET /api/v1/rma` -> Click **"Test Request"** with query param `test_mode=true`.
+    3. Select `PATCH /api/v1/rma/{id}` -> Send `{"status": "restocked", "warehouse_location": "Good Stock Area"}`.
+  * **Expected Behavior**:
+    1. `GET` returns 200 OK with sandbox records isolated from production books.
+    2. `PATCH` executes ERP restock lifecycle update cleanly.
+    3. Coworkers can verify automated integrations without risk of corrupting live accounting ledgers.
+
+- [ ] **TC-V3-06 (Unlabeled Barcode SKU Assignment Without 400 Bad Request)**
+  * **Location**: Public Portal -> `Awaiting SKU` Modal -> Assign ERPLY Catalog Item
+  * **Action**: Intake an unlabeled product (`NO-LABEL-2026-...`), open Admin `Awaiting SKU` queue, and assign a catalog product.
+  * **Expected Behavior**:
+    1. Supabase update checks numeric ID validity before executing `rma_items` lookup.
+    2. SKU assignment succeeds with zero HTTP 400 Bad Request errors in browser developer tools console.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -3892,6 +3962,7 @@ Each test scenario defines:
 | **Phase 17: Video Audit 9 Bug Fixes & UI Streamlining** | Workstation Bar & Action Cards | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 18: Enterprise Upgrade (Zero Stock Photos, Locations, CSV, Sandbox, Trash & Archive)** | Full Platform & REST API | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 19: Video QA Audit Resolution & Workflow Refinements** | Full Platform & REST API | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 20: Senior RMA Audit, SI/DR/PO Standardization & Silent Restitution** | Full Platform, REST API & Docs | `READY FOR TESTING` | *Lead QA Director* |
 
 
 --- END FILE: docs/MANUAL_QA_TESTING_CHECKLIST.md ---
@@ -7383,10 +7454,11 @@ export default async function handler(req, res) {
       delete body.id;
 
       const allowedFields = [
-        'rma_type', 'status', 'notes', 'explanation', 'price', 'price_with_vat',
-        'code', 'name', 'supplier_name', 'unit_name', 'quantity', 'ae_name', 'ae_email',
-        'condition_grade', 'disposition', 'warehouse_location', 'inspected_by', 'inspected_at',
-        'store_branch', 'invoice_dr_number', 'si_number', 'dr_number', 'po_number', 'expiry_date', 'batch_lot_number'
+        'rma_number', 'created_at', 'barcode', 'rma_type', 'status', 'notes', 'explanation', 'price', 'price_with_vat',
+        'code', 'name', 'supplier_name', 'unit_name', 'quantity', 'reporter_name', 'reporter_contact', 'reported_by',
+        'ae_name', 'ae_email', 'condition_grade', 'disposition', 'warehouse_location', 'inspected_by', 'inspected_at',
+        'store_branch', 'invoice_dr_number', 'si_number', 'dr_number', 'po_number', 'expiry_date', 'batch_lot_number',
+        'is_test'
       ];
 
       const updateData = {};
@@ -7573,6 +7645,18 @@ export default async function handler(req, res) {
           delete updatedMeta.archived_by;
         }
 
+        // Handle Test Mode promotion or toggling (promote test record to live production safely)
+        if (body?.is_test !== undefined) {
+          const makeLive = body.is_test === false || body.is_test === 'false';
+          if (makeLive) {
+            delete updatedMeta.is_test;
+            updateData.is_test = false;
+          } else {
+            updatedMeta.is_test = true;
+            updateData.is_test = true;
+          }
+        }
+
         // Clean operational tags from notes (avoid raw internal tags showing to customers)
         let updatedNotes = row.notes || '';
         updatedNotes = updatedNotes
@@ -7580,6 +7664,14 @@ export default async function handler(req, res) {
           .replace(/\[HOLD REASON:\s*[^\]]+\]/gi, '')
           .replace(/\[REJECTED:\s*[^\]]+\]/gi, '')
           .trim();
+
+        if (body?.is_test === false || body?.is_test === 'false') {
+          updatedNotes = updatedNotes.replace(/\[TEST_MODE\]/gi, '').trim();
+        } else if (body?.is_test === true || body?.is_test === 'true') {
+          if (!updatedNotes.includes('[TEST_MODE]')) {
+            updatedNotes = `[TEST_MODE] ${updatedNotes}`.trim();
+          }
+        }
 
         let rowPayload = {
           ...updateData,
@@ -7595,7 +7687,9 @@ export default async function handler(req, res) {
         delete rowPayload.actor;
         delete rowPayload.user;
         delete rowPayload.updated_by;
-        delete rowPayload.barcode;
+        if (!updateData.barcode) {
+          delete rowPayload.barcode;
+        }
         delete rowPayload.lifecycle;
         delete rowPayload.action;
 
@@ -7746,14 +7840,16 @@ export default async function handler(req, res) {
 
           // Also synchronize child row in rma_items if present
           try {
-            await supabase
-              .from('rma_items')
-              .update({
-                status: updateData.status,
-                warehouse_location: updateData.warehouse_location,
-                disposition: updateData.disposition
-              })
-              .or(`id.eq.${row.id},barcode.eq.${row.barcode}`);
+            const childUpdates = {
+              status: updateData.status,
+              warehouse_location: updateData.warehouse_location,
+              disposition: updateData.disposition
+            };
+            if (row.id && /^\d+$/.test(String(row.id))) {
+              await supabase.from('rma_items').update(childUpdates).eq('id', Number(row.id));
+            } else if (row.barcode) {
+              await supabase.from('rma_items').update(childUpdates).eq('barcode', String(row.barcode));
+            }
           } catch (childErr) {
             // non-blocking
           }
@@ -8831,6 +8927,27 @@ Pass your secret API key in all requests:
 - \`x-api-key: sk_live_rma_...\`
 - Or \`Authorization: Bearer sk_live_rma_...\`
 
+### 🧪 Coworker Simulation & Test Mode vs Live Mode:
+- **🟢 Live Production Mode**:
+  Requests made with live keys (\`sk_live_...\`) or without test flags operate directly on production books. Live returns appear in **Customer RMA Hub** or **Supplier Hub**.
+- **🧪 Test Mode Sandbox (Safe Isolation)**:
+  Coworkers can simulate inventory restocks, supplier re-orders, and debit memos safely without touching live financial ledgers or triggering customer/boss notification emails:
+  1. **Query Param**: Add \`?test_mode=true\` (e.g. \`GET /api/v1/rma?test_mode=true\`)
+  2. **HTTP Header**: Pass \`x-test-mode: true\`
+  3. **POST Payload**: Include \`"is_test": true\`
+  4. **API Keys**: Test keys prefixed with \`sk_test_...\` automatically route to the Test Sandbox.
+- **🚀 Simulating Connections via Scalar Documentation (/docs)**:
+  1. Click **"Authorize"** in the top right and paste your API key (\`sk_test_...\` or \`sk_live_...\`).
+  2. Select an endpoint (e.g. \`GET /api/v1/rma\` or \`POST /api/v1/rma\`).
+  3. Set \`test_mode\` to \`true\` in query parameters.
+  4. Click **"Send Request"** to execute real HTTP queries directly against the Vercel backend.
+
+### 📄 Standard Commercial Documents (SI, DR, PO):
+All endpoints support and return standardized commercial logistics references:
+- \`si_number\`: Sales Invoice Number
+- \`dr_number\`: Delivery Receipt Number
+- \`po_number\`: Purchase Order Number
+
 ### 📦 4-Pillar Operations & Coworker Inventory Integration Guide:
 
 #### 1. 🟢 Ready to Restock Queue (?queue=restock):
@@ -9556,6 +9673,14 @@ export const CreateRMAReportSchema = z.object({
 }).openapi('CreateRMAReportRequest');
 
 export const UpdateRMAReportSchema = z.object({
+  rma_number: z.string().optional().openapi({ example: 'RMA-2026-0099-6KKW', description: 'Reconstruct or restore exact historical/deleted RMA ID' }),
+  created_at: z.string().optional().openapi({ example: '2026-11-01T09:30:00.000Z', description: 'Historical ingest timestamp' }),
+  is_test: z.boolean().optional().openapi({ example: false, description: 'Toggle between Test Mode Sandbox (true) and Live Production Hub (false) with 100% silent guarantee (zero emails)' }),
+  name: z.string().optional().openapi({ example: 'Oishi Prawn Crackers 50g' }),
+  barcode: z.string().optional().openapi({ example: '4800016644833' }),
+  code: z.string().optional().openapi({ example: 'P2678P' }),
+  supplier_name: z.string().optional().openapi({ example: 'Liwayway Marketing' }),
+  unit_name: z.string().optional().openapi({ example: 'pc' }),
   status: RMAStatusEnum.optional().openapi({ example: 'restocked', description: 'Lifecycle status update. Use "restocked" (WMS restocking), "reordered" (supplier PO placed), "scrapped", or "pending" (re-open for continuous queue testing)' }),
   warehouse_location: z.string().optional().openapi({ example: 'Good Stock Area', description: 'Standardized warehouse area (e.g. Good Stock Area, Supplier Return Area (RTV), Disposal / Scrap Area, Receiving Area)' }),
   notes: z.string().optional().openapi({ example: 'Confirmed restocked into WMS' }),
@@ -15297,14 +15422,14 @@ export default function App() {
                               </div>
                             </th>
 
-                            {/* 8. Invoice / DR # Header */}
+                            {/* 8. Commercial Documents (SI / DR / PO #) Header */}
                             <th
                               onClick={() => handleReportsSort('invoice_dr_number')}
                               className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Invoice / DR #"
+                              title="Click to sort by Commercial Documents (Sales Invoice, Delivery Receipt, Purchase Order)"
                             >
                               <div className="flex items-center">
-                                <span>Invoice / DR #</span>
+                                <span>Commercial Docs (SI, DR, PO)</span>
                                 {reportsSortField === 'invoice_dr_number' ? (
                                   reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
                                 ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
@@ -17267,33 +17392,43 @@ export default function App() {
 
             // Persist to Supabase rma_items, parent rma_reports items array, and report records
             try {
-              // 1. Update rma_items child table by child id and barcode
-              if (childIdToMatch) {
-                await supabase
-                  .from('rma_items')
-                  .update({
-                    sku: code,
-                    code: code,
-                    name: name,
-                    price: price,
-                    price_with_vat: priceWithVat,
-                    supplier_name: supplierName,
-                    unit_name: unitName
-                  })
-                  .eq('id', childIdToMatch);
+              // 1. Update rma_items child table by numeric child id and barcode safely
+              if (childIdToMatch && /^\d+$/.test(String(childIdToMatch))) {
+                try {
+                  await supabase
+                    .from('rma_items')
+                    .update({
+                      sku: code,
+                      code: code,
+                      name: name,
+                      price: price,
+                      price_with_vat: priceWithVat,
+                      supplier_name: supplierName,
+                      unit_name: unitName
+                    })
+                    .eq('id', Number(childIdToMatch));
+                } catch (e) {
+                  console.warn('Notice updating rma_items by ID:', e?.message);
+                }
               }
-              await supabase
-                .from('rma_items')
-                .update({
-                  sku: code,
-                  code: code,
-                  name: name,
-                  price: price,
-                  price_with_vat: priceWithVat,
-                  supplier_name: supplierName,
-                  unit_name: unitName
-                })
-                .eq('barcode', barcode);
+              if (barcode) {
+                try {
+                  await supabase
+                    .from('rma_items')
+                    .update({
+                      sku: code,
+                      code: code,
+                      name: name,
+                      price: price,
+                      price_with_vat: priceWithVat,
+                      supplier_name: supplierName,
+                      unit_name: unitName
+                    })
+                    .eq('barcode', String(barcode));
+                } catch (e) {
+                  console.warn('Notice updating rma_items by barcode:', e?.message);
+                }
+              }
 
               // 2. Update parent rma_reports JSON items array
               const { data: parentsWithItems } = await supabase
@@ -30990,6 +31125,18 @@ export default function QuickRMAActionModal({
   const [adminStoreBranch, setAdminStoreBranch] = useState('');
   const [adminExpiryDate, setAdminExpiryDate] = useState('');
   const [adminBatchLot, setAdminBatchLot] = useState('');
+
+  // Super Admin Silent Restitution & Record Re-creation Hooks
+  const [adminRmaNumber, setAdminRmaNumber] = useState('');
+  const [adminCreatedAt, setAdminCreatedAt] = useState('');
+  const [adminIsTest, setAdminIsTest] = useState(false);
+  const [adminProductName, setAdminProductName] = useState('');
+  const [adminBarcode, setAdminBarcode] = useState('');
+  const [adminSku, setAdminSku] = useState('');
+  const [adminQuantity, setAdminQuantity] = useState(1);
+  const [adminUnitName, setAdminUnitName] = useState('pc');
+  const [adminPrice, setAdminPrice] = useState(0);
+
   const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
   const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
   const [copyDrSuccess, setCopyDrSuccess] = useState(false);
@@ -31917,9 +32064,42 @@ export default function QuickRMAActionModal({
       setAdminStoreBranch(report.store_branch || meta.store_branch || '');
       setAdminExpiryDate(report.expiry_date || '');
       setAdminBatchLot(report.batch_lot_number || '');
+
+      // Super Admin Silent Restitution & Record Re-creation Hooks
+      setAdminRmaNumber(report.rma_number || '');
+      setAdminCreatedAt(report.created_at ? new Date(report.created_at).toISOString().slice(0, 16) : '');
+      const isTestFlag = Boolean(report.is_test || meta.is_test || (report.notes && report.notes.includes('[TEST_MODE]')));
+      setAdminIsTest(isTestFlag);
+      setAdminProductName(report.name || '');
+      setAdminBarcode(report.barcode || '');
+      setAdminSku(report.code || report.sku || '');
+      setAdminQuantity(Number(report.quantity) || 1);
+      setAdminUnitName(report.unit_name || 'pc');
+      setAdminPrice(Number(report.price || 0));
+
       setIsEditingAiDetails(false);
     }
-  }, [report?.id, report?.si_number, report?.dr_number, report?.po_number, report?.invoice_dr_number, report?.supplier_name, report?.store_branch, report?.expiry_date, report?.batch_lot_number]);
+  }, [
+    report?.id, 
+    report?.rma_number, 
+    report?.created_at, 
+    report?.is_test, 
+    report?.name, 
+    report?.barcode, 
+    report?.code, 
+    report?.sku, 
+    report?.quantity, 
+    report?.unit_name, 
+    report?.price, 
+    report?.si_number, 
+    report?.dr_number, 
+    report?.po_number, 
+    report?.invoice_dr_number, 
+    report?.supplier_name, 
+    report?.store_branch, 
+    report?.expiry_date, 
+    report?.batch_lot_number
+  ]);
 
   // Step 1: Request OTP for authorized company admin
   const handleRequestOtp = async (e) => {
@@ -32027,6 +32207,7 @@ export default function QuickRMAActionModal({
     if (!report?.id) return;
     setIsSavingAiDetails(true);
     try {
+      const isSuperAdmin = currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin';
       const cleanSi = adminSiNumber.trim();
       const cleanDr = adminDrNumber.trim();
       const cleanPo = adminPoNumber.trim();
@@ -32035,9 +32216,13 @@ export default function QuickRMAActionModal({
       const cleanSupplier = adminSupplierName.trim();
       const cleanLot = adminBatchLot.trim();
       const cleanExpiry = adminExpiryDate || null;
+      const cleanRmaNum = isSuperAdmin && adminRmaNumber.trim() ? adminRmaNumber.trim() : report.rma_number;
+      const cleanCreated = isSuperAdmin && adminCreatedAt ? new Date(adminCreatedAt).toISOString() : report.created_at;
 
       // 1. Prepare updates for main rma_reports row
       const updates = {
+        rma_number: cleanRmaNum,
+        created_at: cleanCreated,
         si_number: cleanSi || null,
         dr_number: cleanDr || null,
         po_number: cleanPo || null,
@@ -32049,6 +32234,37 @@ export default function QuickRMAActionModal({
 
       if (cleanSupplier) {
         updates.supplier_name = cleanSupplier;
+      }
+
+      if (isSuperAdmin) {
+        if (adminProductName.trim()) updates.name = adminProductName.trim();
+        if (adminBarcode.trim()) updates.barcode = adminBarcode.trim();
+        if (adminSku.trim()) {
+          updates.code = adminSku.trim();
+          updates.sku = adminSku.trim();
+        }
+        if (adminQuantity) updates.quantity = Number(adminQuantity) || 1;
+        if (adminUnitName.trim()) updates.unit_name = adminUnitName.trim();
+        if (adminPrice !== undefined && adminPrice !== '') updates.price = parseFloat(adminPrice) || 0;
+
+        // Mode switch: Test Mode Sandbox <-> Live Production (100% silent, 0 emails)
+        const currentMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object') ? { ...report.ai_document_metadata } : {};
+        let currentNotes = report.notes || '';
+        if (adminIsTest === false) {
+          updates.is_test = false;
+          delete currentMeta.is_test;
+          currentNotes = currentNotes.replace(/\[TEST_MODE\]/gi, '').trim();
+          updates.notes = currentNotes;
+          updates.ai_document_metadata = currentMeta;
+        } else if (adminIsTest === true) {
+          updates.is_test = true;
+          currentMeta.is_test = true;
+          if (!currentNotes.includes('[TEST_MODE]')) {
+            currentNotes = `[TEST_MODE] ${currentNotes}`.trim();
+          }
+          updates.notes = currentNotes;
+          updates.ai_document_metadata = currentMeta;
+        }
       }
 
       // If multi-item batch manifest, also update child items inside the manifest JSON
@@ -32078,18 +32294,21 @@ export default function QuickRMAActionModal({
       }
 
       // 2. Also update child records in rma_reports table for this parent
-      if (report.id && cleanSupplier) {
-        try {
-          await supabase
-            .from('rma_reports')
-            .update({ supplier_name: cleanSupplier })
-            .eq('parent_rma_id', report.id);
-        } catch { }
+      if (report.id) {
+        const childCascade = {};
+        if (cleanRmaNum && cleanRmaNum !== report.rma_number) childCascade.rma_number = cleanRmaNum;
+        if (cleanSupplier) childCascade.supplier_name = cleanSupplier;
+        if (Object.keys(childCascade).length > 0) {
+          try {
+            await supabase.from('rma_reports').update(childCascade).eq('parent_rma_id', report.id);
+          } catch {}
+        }
       }
 
       // 3. Optimistically update local report state
       const updatedReport = {
         ...report,
+        ...updates,
         si_number: cleanSi || null,
         dr_number: cleanDr || null,
         po_number: cleanPo || null,
@@ -32113,9 +32332,14 @@ export default function QuickRMAActionModal({
       if (typeof onReportUpdated === 'function') {
         onReportUpdated(updatedReport);
       }
+      try {
+        window.dispatchEvent(new CustomEvent('rma-data-changed', {
+          detail: { type: 'report-updated', report: updatedReport }
+        }));
+      } catch {}
     } catch (e) {
       console.error('Failed to update commercial document and AI details:', e);
-      alert('Failed to save updated commercial documents: ' + (e?.message || e));
+      alert('Failed to save updated details: ' + (e?.message || e));
     } finally {
       setIsSavingAiDetails(false);
     }
@@ -32667,106 +32891,279 @@ export default function QuickRMAActionModal({
                     </div>
                   </div>
 
-                  {/* Manual Override Editor for Admin */}
+                  {/* Manual Override Editor for Admin & Super Admin Restitution */}
                   {isEditingAiDetails && (
-                    <div className="p-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl space-y-3 animate-in fade-in">
-                      <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                        <Edit3 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                        <span>Edit Commercial Documents & Paperwork Metadata:</span>
+                    <div className="p-3.5 bg-white dark:bg-slate-800 border-2 border-blue-400 dark:border-blue-600 rounded-2xl space-y-3.5 animate-in fade-in shadow-md">
+                      <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-2">
+                        <div className="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                          <Edit3 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                          <span>{currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin' ? '🛠️ Super Admin Record Restitution & Document Editor' : 'Edit Commercial Documents & Paperwork Metadata'}</span>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300">
+                          {currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin' ? 'Super Admin Mode' : 'Admin'}
+                        </span>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Sales Invoice (SI) #</label>
-                          <input
-                            type="text"
-                            value={adminSiNumber}
-                            onChange={(e) => setAdminSiNumber(e.target.value)}
-                            placeholder="e.g. SI-2026-8819"
-                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
-                          />
+
+                      {/* Silent Guarantee Banner for Super Admins */}
+                      {(currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin') && (
+                        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 rounded-xl text-emerald-900 dark:text-emerald-200 text-xs space-y-1">
+                          <div className="flex items-center gap-1.5 font-black text-[11px] text-emerald-800 dark:text-emerald-300">
+                            <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>🔒 100% Silent Record Restitution Guarantee</span>
+                          </div>
+                          <p className="text-[10.5px] leading-relaxed text-emerald-800/90 dark:text-emerald-300/90">
+                            Saving edits or converting this record to Live Production is <strong>completely silent</strong>. The portal will <strong>never trigger email notifications</strong> to boss, coworkers, AE, or suppliers, allowing you to reconstruct accidentally deleted records invisibly.
+                          </p>
                         </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Delivery Receipt (DR) #</label>
-                          <input
-                            type="text"
-                            value={adminDrNumber}
-                            onChange={(e) => setAdminDrNumber(e.target.value)}
-                            placeholder="e.g. DR-44120"
-                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
-                          />
+                      )}
+
+                      {/* Environment Mode Switch: Test Sandbox vs Live Production */}
+                      {(currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin') && (
+                        <div className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-1.5">
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-400 block">
+                            Record Environment & Destination Hub
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setAdminIsTest(true)}
+                              className={`py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                adminIsTest
+                                  ? 'bg-amber-600 text-white shadow-sm'
+                                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              <span>🧪 Test Mode Sandbox</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setAdminIsTest(false)}
+                              className={`py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                !adminIsTest
+                                  ? 'bg-emerald-600 text-white shadow-sm'
+                                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              <span>🟢 Live Production Hub</span>
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                            {!adminIsTest 
+                              ? '✅ Promoted to Live: Visible in Customer RMA Hub or Supplier Hub. Test tags removed.' 
+                              : '🧪 Isolated: Kept in Test Mode Sandbox only.'}
+                          </p>
                         </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Purchase Order (PO) #</label>
-                          <input
-                            type="text"
-                            value={adminPoNumber}
-                            onChange={(e) => setAdminPoNumber(e.target.value)}
-                            placeholder="e.g. PO-99120"
-                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
-                          />
+                      )}
+
+                      {/* Super Admin RMA ID & Historical Ingest Date */}
+                      {(currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin') && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 bg-blue-50/60 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl">
+                          <div>
+                            <label className="text-[10px] font-black uppercase text-blue-900 dark:text-blue-300 block mb-0.5">
+                              RMA Identifier (Ticket ID)
+                            </label>
+                            <input
+                              type="text"
+                              value={adminRmaNumber}
+                              onChange={(e) => setAdminRmaNumber(e.target.value)}
+                              placeholder="e.g. RMA-2026-0099-6KKW"
+                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl text-xs font-mono font-black text-blue-700 dark:text-blue-300 shadow-2xs"
+                            />
+                            <span className="text-[9.5px] text-blue-700/80 dark:text-blue-400">Match the exact deleted RMA ID</span>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-black uppercase text-blue-900 dark:text-blue-300 block mb-0.5">
+                              Date Logged (Historical Ingest Timestamp)
+                            </label>
+                            <input
+                              type="datetime-local"
+                              value={adminCreatedAt}
+                              onChange={(e) => setAdminCreatedAt(e.target.value)}
+                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 shadow-2xs"
+                            />
+                            <span className="text-[9.5px] text-blue-700/80 dark:text-blue-400">Restores original intake date & time</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Super Admin Product & SKU Overrides */}
+                      {(currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin') && (
+                        <div className="space-y-2 p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
+                          <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                            Product & Catalog Specifications
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <div className="sm:col-span-2">
+                              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Item Name / Product Description</label>
+                              <input
+                                type="text"
+                                value={adminProductName}
+                                onChange={(e) => setAdminProductName(e.target.value)}
+                                className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Barcode</label>
+                              <input
+                                type="text"
+                                value={adminBarcode}
+                                onChange={(e) => setAdminBarcode(e.target.value)}
+                                className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
+                              />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Assigned SKU / Item Code</label>
+                              <input
+                                type="text"
+                                value={adminSku}
+                                onChange={(e) => setAdminSku(e.target.value)}
+                                placeholder="e.g. P1479P"
+                                className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Quantity & Unit</label>
+                              <div className="flex gap-1">
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={adminQuantity}
+                                  onChange={(e) => setAdminQuantity(e.target.value)}
+                                  className="w-16 px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-center"
+                                />
+                                <input
+                                  type="text"
+                                  value={adminUnitName}
+                                  onChange={(e) => setAdminUnitName(e.target.value)}
+                                  placeholder="pc, case"
+                                  className="w-full px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Net Purchase Unit Price (PHP)</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={adminPrice}
+                                onChange={(e) => setAdminPrice(e.target.value)}
+                                className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Commercial Documents: SI, DR, PO */}
+                      <div className="space-y-1">
+                        <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Commercial Invoices & Delivery Receipts
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div>
+                            <label className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 block mb-0.5">Sales Invoice (SI) #</label>
+                            <input
+                              type="text"
+                              value={adminSiNumber}
+                              onChange={(e) => setAdminSiNumber(e.target.value)}
+                              placeholder="e.g. SI-2026-8819"
+                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-mono font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-violet-700 dark:text-violet-300 block mb-0.5">Delivery Receipt (DR) #</label>
+                            <input
+                              type="text"
+                              value={adminDrNumber}
+                              onChange={(e) => setAdminDrNumber(e.target.value)}
+                              placeholder="e.g. DR-44120"
+                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-violet-200 dark:border-violet-800 rounded-xl text-xs font-mono font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-amber-700 dark:text-amber-300 block mb-0.5">Purchase Order (PO) #</label>
+                            <input
+                              type="text"
+                              value={adminPoNumber}
+                              onChange={(e) => setAdminPoNumber(e.target.value)}
+                              placeholder="e.g. PO-99120"
+                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-mono font-bold"
+                            />
+                          </div>
                         </div>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier / Master Vendor</label>
-                          <input
-                            type="text"
-                            list="admin-supplier-suggestions"
-                            value={adminSupplierName}
-                            onChange={(e) => setAdminSupplierName(e.target.value)}
-                            placeholder="e.g. Mondelez, Liwayway, URC..."
-                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
-                          />
-                          <datalist id="admin-supplier-suggestions">
-                            {knownSuppliers.map(s => (
-                              <option key={s} value={s} />
-                            ))}
-                          </datalist>
+
+                      {/* Counterparty & Warehouse Metadata */}
+                      <div className="space-y-1">
+                        <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Supplier, Branch & Lot Information
                         </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Store / Branch Location</label>
-                          <input
-                            type="text"
-                            value={adminStoreBranch}
-                            onChange={(e) => setAdminStoreBranch(e.target.value)}
-                            placeholder="e.g. Savemore Market - Nagtahan"
-                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Product Expiry Date</label>
-                          <input
-                            type="date"
-                            value={adminExpiryDate}
-                            onChange={(e) => setAdminExpiryDate(e.target.value)}
-                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Batch / Lot #</label>
-                          <input
-                            type="text"
-                            value={adminBatchLot}
-                            onChange={(e) => setAdminBatchLot(e.target.value)}
-                            placeholder="e.g. LOT-B42"
-                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
-                          />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier / Master Vendor</label>
+                            <input
+                              type="text"
+                              list="admin-supplier-suggestions"
+                              value={adminSupplierName}
+                              onChange={(e) => setAdminSupplierName(e.target.value)}
+                              placeholder="e.g. Mondelez, Liwayway, URC..."
+                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                            />
+                            <datalist id="admin-supplier-suggestions">
+                              {knownSuppliers.map(s => (
+                                <option key={s} value={s} />
+                              ))}
+                            </datalist>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Store / Branch Location</label>
+                            <input
+                              type="text"
+                              value={adminStoreBranch}
+                              onChange={(e) => setAdminStoreBranch(e.target.value)}
+                              placeholder="e.g. Savemore Market - Nagtahan"
+                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Product Expiry Date</label>
+                            <input
+                              type="date"
+                              value={adminExpiryDate}
+                              onChange={(e) => setAdminExpiryDate(e.target.value)}
+                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Batch / Lot #</label>
+                            <input
+                              type="text"
+                              value={adminBatchLot}
+                              onChange={(e) => setAdminBatchLot(e.target.value)}
+                              placeholder="e.g. LOT-B42"
+                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
+                            />
+                          </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 pt-1">
+
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
                         <button
                           type="button"
                           disabled={isSavingAiDetails}
                           onClick={handleSaveAiDetails}
-                          className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                          className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                         >
                           {isSavingAiDetails && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                          <span>{isSavingAiDetails ? 'Saving...' : 'Save Updated Details'}</span>
+                          <span>{isSavingAiDetails ? 'Saving Record...' : 'Save & Apply Restitution'}</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => setIsEditingAiDetails(false)}
-                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                          className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl transition-colors cursor-pointer"
                         >
                           Cancel
                         </button>
@@ -42189,6 +42586,30 @@ export default function TestModeSandboxTab({
                         <div className="text-[10px] text-slate-400">
                           {new Date(item.created_at).toLocaleDateString()}
                         </div>
+                        {(item.si_number || item.dr_number || item.po_number || item.invoice_dr_number) && (
+                          <div className="flex items-center gap-1 flex-wrap mt-1 text-[9px] font-mono leading-tight">
+                            {item.si_number && (
+                              <span className="px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold">
+                                SI: {item.si_number}
+                              </span>
+                            )}
+                            {item.dr_number && (
+                              <span className="px-1.5 py-0.2 rounded bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-bold">
+                                DR: {item.dr_number}
+                              </span>
+                            )}
+                            {item.po_number && (
+                              <span className="px-1.5 py-0.2 rounded bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold">
+                                PO: {item.po_number}
+                              </span>
+                            )}
+                            {!item.si_number && !item.dr_number && !item.po_number && item.invoice_dr_number && (
+                              <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-bold">
+                                Doc: {item.invoice_dr_number}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3 px-3.5 font-semibold text-slate-800 dark:text-slate-200">
@@ -47445,6 +47866,109 @@ export const catalogService = {
   },
 
   /**
+   * SUPER ADMIN SILENT RESTITUTION:
+   * Recreates or edits an RMA record to match a deleted ticket, with optional
+   * conversion from Test Mode to Live Mode, with a 100% guarantee that NO
+   * email notifications are triggered.
+   */
+  async reconstructRMARecord(id, payload = {}, actorName = 'Super Admin') {
+    if (!id && !payload?.rma_number) throw new Error('ID or RMA Number required for reconstruction.');
+
+    const cleanId = (id && /^\d+$/.test(String(id))) ? Number(id) : null;
+    const rmaLookup = !cleanId ? String(id || payload.rma_number).trim() : null;
+
+    // Fetch existing record first
+    let query = supabase.from('rma_reports').select('*');
+    if (cleanId) query = query.eq('id', cleanId);
+    else query = query.eq('rma_number', rmaLookup);
+
+    const { data: existing, error: fetchErr } = await query.maybeSingle();
+    if (fetchErr) throw fetchErr;
+
+    const existingMeta = (existing?.ai_document_metadata && typeof existing.ai_document_metadata === 'object')
+      ? existing.ai_document_metadata
+      : {};
+
+    const updatedMeta = { ...existingMeta };
+    let updatedNotes = payload.notes !== undefined ? String(payload.notes) : (existing?.notes || '');
+
+    // Operational mode toggle: Promote from Test Mode to Live Mode or vice versa
+    let finalIsTest = existing?.is_test;
+    if (payload.is_test !== undefined) {
+      if (payload.is_test === false || payload.is_test === 'false') {
+        finalIsTest = false;
+        delete updatedMeta.is_test;
+        updatedNotes = updatedNotes.replace(/\[TEST_MODE\]/gi, '').trim();
+      } else {
+        finalIsTest = true;
+        updatedMeta.is_test = true;
+        if (!updatedNotes.includes('[TEST_MODE]')) {
+          updatedNotes = `[TEST_MODE] ${updatedNotes}`.trim();
+        }
+      }
+    }
+
+    const updates = {};
+    if (payload.rma_number) updates.rma_number = String(payload.rma_number).trim();
+    if (payload.created_at) updates.created_at = new Date(payload.created_at).toISOString();
+    if (payload.si_number !== undefined) updates.si_number = payload.si_number ? String(payload.si_number).trim() : null;
+    if (payload.dr_number !== undefined) updates.dr_number = payload.dr_number ? String(payload.dr_number).trim() : null;
+    if (payload.po_number !== undefined) updates.po_number = payload.po_number ? String(payload.po_number).trim() : null;
+    if (payload.invoice_dr_number !== undefined) updates.invoice_dr_number = payload.invoice_dr_number ? String(payload.invoice_dr_number).trim() : null;
+    if (payload.store_branch !== undefined) updates.store_branch = payload.store_branch ? String(payload.store_branch).trim() : null;
+    if (payload.supplier_name !== undefined) updates.supplier_name = payload.supplier_name ? String(payload.supplier_name).trim() : null;
+    if (payload.name !== undefined) updates.name = String(payload.name).trim();
+    if (payload.barcode !== undefined) updates.barcode = String(payload.barcode).trim();
+    if (payload.code !== undefined || payload.sku !== undefined) updates.code = String(payload.code || payload.sku || '').trim() || null;
+    if (payload.quantity !== undefined) updates.quantity = Number(payload.quantity) || 1;
+    if (payload.unit_name !== undefined) updates.unit_name = String(payload.unit_name).trim() || 'pc';
+    if (payload.price !== undefined) updates.price = parseFloat(payload.price) || 0;
+    if (payload.price_with_vat !== undefined) updates.price_with_vat = parseFloat(payload.price_with_vat) || 0;
+    if (payload.warehouse_location !== undefined) updates.warehouse_location = String(payload.warehouse_location).trim();
+    if (payload.batch_lot_number !== undefined) updates.batch_lot_number = payload.batch_lot_number ? String(payload.batch_lot_number).trim() : null;
+    if (payload.expiry_date !== undefined) updates.expiry_date = payload.expiry_date || null;
+    if (payload.disposition !== undefined) updates.disposition = String(payload.disposition).trim();
+    if (payload.status !== undefined) updates.status = String(payload.status).trim();
+    if (payload.condition_grade !== undefined) updates.condition_grade = String(payload.condition_grade).trim();
+    if (payload.reason !== undefined) updates.reason = String(payload.reason).trim();
+    if (payload.rma_type !== undefined) updates.rma_type = String(payload.rma_type).trim();
+
+    updates.is_test = finalIsTest;
+    updates.ai_document_metadata = updatedMeta;
+    updates.notes = updatedNotes;
+
+    const existingAudit = Array.isArray(existing?.audit_trail) ? existing.audit_trail : [];
+    updates.audit_trail = [
+      ...existingAudit,
+      {
+        timestamp: new Date().toISOString(),
+        stage: 'ADMIN_SILENT_RESTITUTION',
+        actor: actorName,
+        note: `Record reconstructed / edited silently by ${actorName}${payload.is_test === false ? ' (Promoted to Live Production)' : ''}`
+      }
+    ];
+
+    let updateQuery = supabase.from('rma_reports').update(updates);
+    if (cleanId) updateQuery = updateQuery.eq('id', cleanId);
+    else updateQuery = updateQuery.eq('rma_number', existing?.rma_number || rmaLookup);
+
+    const { data: updatedData, error: updateErr } = await updateQuery.select().single();
+    if (updateErr) throw updateErr;
+
+    // Cascade to split children or items if rma_number or supplier changed
+    if (updates.rma_number && existing?.id) {
+      try {
+        await supabase.from('rma_reports').update({ rma_number: updates.rma_number }).eq('parent_rma_id', existing.id);
+      } catch (cascadeErr) {
+        console.warn('Notice cascading reconstructed rma_number:', cascadeErr?.message);
+      }
+    }
+
+    this.notifyChange('report-updated', { report: updatedData });
+    return updatedData;
+  },
+
+  /**
    * Broadcasts real-time triage events over rma_portal_sync_bus when an item is triaged
    * as 'Restock to Inventory' or 'Scrap / Dispose' so coworker tabs update live without refresh.
    */
@@ -52093,7 +52617,9 @@ export function exportRMAReportsToCSV(reports, filename = null, savedProducts = 
     'RMA Number',
     'Date Logged (YYYY-MM-DD HHMM)',
     'Store / Branch',
-    'Invoice / DR #',
+    'Sales Invoice (SI) #',
+    'Delivery Receipt (DR) #',
+    'Purchase Order (PO) #',
     'Batch / Lot #',
     'Expiry Date',
     'Status',
@@ -52133,7 +52659,9 @@ export function exportRMAReportsToCSV(reports, filename = null, savedProducts = 
       escapeCsvTextFormula(r.rma_number),
       escapeCsvTextFormula(dateStr),
       escapeCsvCell(r.store_branch || ''),
-      escapeCsvTextFormula(r.invoice_dr_number || ''),
+      escapeCsvTextFormula(r.si_number || ''),
+      escapeCsvTextFormula(r.dr_number || r.invoice_dr_number || ''),
+      escapeCsvTextFormula(r.po_number || ''),
       escapeCsvTextFormula(r.batch_lot_number || ''),
       escapeCsvTextFormula(cleanExpiry),
       escapeCsvCell(r.status || 'pending'),
@@ -52273,7 +52801,9 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null, save
     'Debit Claim Status',
     'Inspected By',
     'Defect Reason / Diagnosis',
-    'Supplier PO #',
+    'Sales Invoice (SI) #',
+    'Delivery Receipt (DR) #',
+    'Purchase Order (PO) #',
     'Google Drive Photo Link',
     'Google Drive Folder',
     'Warehouse Notes'
@@ -52309,6 +52839,8 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null, save
       escapeCsvCell(r.status || 'Pending Debit'),
       escapeCsvCell(r.inspected_by || ''),
       escapeCsvCell(r.reason || r.explanation || ''),
+      escapeCsvTextFormula(r.si_number || ''),
+      escapeCsvTextFormula(r.dr_number || r.invoice_dr_number || ''),
       escapeCsvTextFormula(r.po_number || r.supplier_po_no || ''),
       escapeCsvCell(photoLink),
       escapeCsvCell(r.google_drive_folder_url || ''),

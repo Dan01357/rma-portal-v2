@@ -1658,6 +1658,109 @@ export const catalogService = {
   },
 
   /**
+   * SUPER ADMIN SILENT RESTITUTION:
+   * Recreates or edits an RMA record to match a deleted ticket, with optional
+   * conversion from Test Mode to Live Mode, with a 100% guarantee that NO
+   * email notifications are triggered.
+   */
+  async reconstructRMARecord(id, payload = {}, actorName = 'Super Admin') {
+    if (!id && !payload?.rma_number) throw new Error('ID or RMA Number required for reconstruction.');
+
+    const cleanId = (id && /^\d+$/.test(String(id))) ? Number(id) : null;
+    const rmaLookup = !cleanId ? String(id || payload.rma_number).trim() : null;
+
+    // Fetch existing record first
+    let query = supabase.from('rma_reports').select('*');
+    if (cleanId) query = query.eq('id', cleanId);
+    else query = query.eq('rma_number', rmaLookup);
+
+    const { data: existing, error: fetchErr } = await query.maybeSingle();
+    if (fetchErr) throw fetchErr;
+
+    const existingMeta = (existing?.ai_document_metadata && typeof existing.ai_document_metadata === 'object')
+      ? existing.ai_document_metadata
+      : {};
+
+    const updatedMeta = { ...existingMeta };
+    let updatedNotes = payload.notes !== undefined ? String(payload.notes) : (existing?.notes || '');
+
+    // Operational mode toggle: Promote from Test Mode to Live Mode or vice versa
+    let finalIsTest = existing?.is_test;
+    if (payload.is_test !== undefined) {
+      if (payload.is_test === false || payload.is_test === 'false') {
+        finalIsTest = false;
+        delete updatedMeta.is_test;
+        updatedNotes = updatedNotes.replace(/\[TEST_MODE\]/gi, '').trim();
+      } else {
+        finalIsTest = true;
+        updatedMeta.is_test = true;
+        if (!updatedNotes.includes('[TEST_MODE]')) {
+          updatedNotes = `[TEST_MODE] ${updatedNotes}`.trim();
+        }
+      }
+    }
+
+    const updates = {};
+    if (payload.rma_number) updates.rma_number = String(payload.rma_number).trim();
+    if (payload.created_at) updates.created_at = new Date(payload.created_at).toISOString();
+    if (payload.si_number !== undefined) updates.si_number = payload.si_number ? String(payload.si_number).trim() : null;
+    if (payload.dr_number !== undefined) updates.dr_number = payload.dr_number ? String(payload.dr_number).trim() : null;
+    if (payload.po_number !== undefined) updates.po_number = payload.po_number ? String(payload.po_number).trim() : null;
+    if (payload.invoice_dr_number !== undefined) updates.invoice_dr_number = payload.invoice_dr_number ? String(payload.invoice_dr_number).trim() : null;
+    if (payload.store_branch !== undefined) updates.store_branch = payload.store_branch ? String(payload.store_branch).trim() : null;
+    if (payload.supplier_name !== undefined) updates.supplier_name = payload.supplier_name ? String(payload.supplier_name).trim() : null;
+    if (payload.name !== undefined) updates.name = String(payload.name).trim();
+    if (payload.barcode !== undefined) updates.barcode = String(payload.barcode).trim();
+    if (payload.code !== undefined || payload.sku !== undefined) updates.code = String(payload.code || payload.sku || '').trim() || null;
+    if (payload.quantity !== undefined) updates.quantity = Number(payload.quantity) || 1;
+    if (payload.unit_name !== undefined) updates.unit_name = String(payload.unit_name).trim() || 'pc';
+    if (payload.price !== undefined) updates.price = parseFloat(payload.price) || 0;
+    if (payload.price_with_vat !== undefined) updates.price_with_vat = parseFloat(payload.price_with_vat) || 0;
+    if (payload.warehouse_location !== undefined) updates.warehouse_location = String(payload.warehouse_location).trim();
+    if (payload.batch_lot_number !== undefined) updates.batch_lot_number = payload.batch_lot_number ? String(payload.batch_lot_number).trim() : null;
+    if (payload.expiry_date !== undefined) updates.expiry_date = payload.expiry_date || null;
+    if (payload.disposition !== undefined) updates.disposition = String(payload.disposition).trim();
+    if (payload.status !== undefined) updates.status = String(payload.status).trim();
+    if (payload.condition_grade !== undefined) updates.condition_grade = String(payload.condition_grade).trim();
+    if (payload.reason !== undefined) updates.reason = String(payload.reason).trim();
+    if (payload.rma_type !== undefined) updates.rma_type = String(payload.rma_type).trim();
+
+    updates.is_test = finalIsTest;
+    updates.ai_document_metadata = updatedMeta;
+    updates.notes = updatedNotes;
+
+    const existingAudit = Array.isArray(existing?.audit_trail) ? existing.audit_trail : [];
+    updates.audit_trail = [
+      ...existingAudit,
+      {
+        timestamp: new Date().toISOString(),
+        stage: 'ADMIN_SILENT_RESTITUTION',
+        actor: actorName,
+        note: `Record reconstructed / edited silently by ${actorName}${payload.is_test === false ? ' (Promoted to Live Production)' : ''}`
+      }
+    ];
+
+    let updateQuery = supabase.from('rma_reports').update(updates);
+    if (cleanId) updateQuery = updateQuery.eq('id', cleanId);
+    else updateQuery = updateQuery.eq('rma_number', existing?.rma_number || rmaLookup);
+
+    const { data: updatedData, error: updateErr } = await updateQuery.select().single();
+    if (updateErr) throw updateErr;
+
+    // Cascade to split children or items if rma_number or supplier changed
+    if (updates.rma_number && existing?.id) {
+      try {
+        await supabase.from('rma_reports').update({ rma_number: updates.rma_number }).eq('parent_rma_id', existing.id);
+      } catch (cascadeErr) {
+        console.warn('Notice cascading reconstructed rma_number:', cascadeErr?.message);
+      }
+    }
+
+    this.notifyChange('report-updated', { report: updatedData });
+    return updatedData;
+  },
+
+  /**
    * Broadcasts real-time triage events over rma_portal_sync_bus when an item is triaged
    * as 'Restock to Inventory' or 'Scrap / Dispose' so coworker tabs update live without refresh.
    */

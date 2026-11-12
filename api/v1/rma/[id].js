@@ -92,10 +92,11 @@ export default async function handler(req, res) {
       delete body.id;
 
       const allowedFields = [
-        'rma_type', 'status', 'notes', 'explanation', 'price', 'price_with_vat',
-        'code', 'name', 'supplier_name', 'unit_name', 'quantity', 'ae_name', 'ae_email',
-        'condition_grade', 'disposition', 'warehouse_location', 'inspected_by', 'inspected_at',
-        'store_branch', 'invoice_dr_number', 'si_number', 'dr_number', 'po_number', 'expiry_date', 'batch_lot_number'
+        'rma_number', 'created_at', 'barcode', 'rma_type', 'status', 'notes', 'explanation', 'price', 'price_with_vat',
+        'code', 'name', 'supplier_name', 'unit_name', 'quantity', 'reporter_name', 'reporter_contact', 'reported_by',
+        'ae_name', 'ae_email', 'condition_grade', 'disposition', 'warehouse_location', 'inspected_by', 'inspected_at',
+        'store_branch', 'invoice_dr_number', 'si_number', 'dr_number', 'po_number', 'expiry_date', 'batch_lot_number',
+        'is_test'
       ];
 
       const updateData = {};
@@ -282,6 +283,18 @@ export default async function handler(req, res) {
           delete updatedMeta.archived_by;
         }
 
+        // Handle Test Mode promotion or toggling (promote test record to live production safely)
+        if (body?.is_test !== undefined) {
+          const makeLive = body.is_test === false || body.is_test === 'false';
+          if (makeLive) {
+            delete updatedMeta.is_test;
+            updateData.is_test = false;
+          } else {
+            updatedMeta.is_test = true;
+            updateData.is_test = true;
+          }
+        }
+
         // Clean operational tags from notes (avoid raw internal tags showing to customers)
         let updatedNotes = row.notes || '';
         updatedNotes = updatedNotes
@@ -289,6 +302,14 @@ export default async function handler(req, res) {
           .replace(/\[HOLD REASON:\s*[^\]]+\]/gi, '')
           .replace(/\[REJECTED:\s*[^\]]+\]/gi, '')
           .trim();
+
+        if (body?.is_test === false || body?.is_test === 'false') {
+          updatedNotes = updatedNotes.replace(/\[TEST_MODE\]/gi, '').trim();
+        } else if (body?.is_test === true || body?.is_test === 'true') {
+          if (!updatedNotes.includes('[TEST_MODE]')) {
+            updatedNotes = `[TEST_MODE] ${updatedNotes}`.trim();
+          }
+        }
 
         let rowPayload = {
           ...updateData,
@@ -304,7 +325,9 @@ export default async function handler(req, res) {
         delete rowPayload.actor;
         delete rowPayload.user;
         delete rowPayload.updated_by;
-        delete rowPayload.barcode;
+        if (!updateData.barcode) {
+          delete rowPayload.barcode;
+        }
         delete rowPayload.lifecycle;
         delete rowPayload.action;
 
@@ -455,14 +478,16 @@ export default async function handler(req, res) {
 
           // Also synchronize child row in rma_items if present
           try {
-            await supabase
-              .from('rma_items')
-              .update({
-                status: updateData.status,
-                warehouse_location: updateData.warehouse_location,
-                disposition: updateData.disposition
-              })
-              .or(`id.eq.${row.id},barcode.eq.${row.barcode}`);
+            const childUpdates = {
+              status: updateData.status,
+              warehouse_location: updateData.warehouse_location,
+              disposition: updateData.disposition
+            };
+            if (row.id && /^\d+$/.test(String(row.id))) {
+              await supabase.from('rma_items').update(childUpdates).eq('id', Number(row.id));
+            } else if (row.barcode) {
+              await supabase.from('rma_items').update(childUpdates).eq('barcode', String(row.barcode));
+            }
           } catch (childErr) {
             // non-blocking
           }

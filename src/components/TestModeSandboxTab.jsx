@@ -277,6 +277,30 @@ export default function TestModeSandboxTab({
                         <div className="text-[10px] text-slate-400">
                           {new Date(item.created_at).toLocaleDateString()}
                         </div>
+                        {(item.si_number || item.dr_number || item.po_number || item.invoice_dr_number) && (
+                          <div className="flex items-center gap-1 flex-wrap mt-1 text-[9px] font-mono leading-tight">
+                            {item.si_number && (
+                              <span className="px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold">
+                                SI: {item.si_number}
+                              </span>
+                            )}
+                            {item.dr_number && (
+                              <span className="px-1.5 py-0.2 rounded bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-bold">
+                                DR: {item.dr_number}
+                              </span>
+                            )}
+                            {item.po_number && (
+                              <span className="px-1.5 py-0.2 rounded bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold">
+                                PO: {item.po_number}
+                              </span>
+                            )}
+                            {!item.si_number && !item.dr_number && !item.po_number && item.invoice_dr_number && (
+                              <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-bold">
+                                Doc: {item.invoice_dr_number}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3 px-3.5 font-semibold text-slate-800 dark:text-slate-200">

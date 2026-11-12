@@ -115,6 +115,14 @@ export const CreateRMAReportSchema = z.object({
 }).openapi('CreateRMAReportRequest');
 
 export const UpdateRMAReportSchema = z.object({
+  rma_number: z.string().optional().openapi({ example: 'RMA-2026-0099-6KKW', description: 'Reconstruct or restore exact historical/deleted RMA ID' }),
+  created_at: z.string().optional().openapi({ example: '2026-11-01T09:30:00.000Z', description: 'Historical ingest timestamp' }),
+  is_test: z.boolean().optional().openapi({ example: false, description: 'Toggle between Test Mode Sandbox (true) and Live Production Hub (false) with 100% silent guarantee (zero emails)' }),
+  name: z.string().optional().openapi({ example: 'Oishi Prawn Crackers 50g' }),
+  barcode: z.string().optional().openapi({ example: '4800016644833' }),
+  code: z.string().optional().openapi({ example: 'P2678P' }),
+  supplier_name: z.string().optional().openapi({ example: 'Liwayway Marketing' }),
+  unit_name: z.string().optional().openapi({ example: 'pc' }),
   status: RMAStatusEnum.optional().openapi({ example: 'restocked', description: 'Lifecycle status update. Use "restocked" (WMS restocking), "reordered" (supplier PO placed), "scrapped", or "pending" (re-open for continuous queue testing)' }),
   warehouse_location: z.string().optional().openapi({ example: 'Good Stock Area', description: 'Standardized warehouse area (e.g. Good Stock Area, Supplier Return Area (RTV), Disposal / Scrap Area, Receiving Area)' }),
   notes: z.string().optional().openapi({ example: 'Confirmed restocked into WMS' }),
