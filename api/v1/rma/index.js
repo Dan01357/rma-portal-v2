@@ -21,6 +21,55 @@ const getRecoverySource = (item) => {
   return 'scrap';
 };
 
+function normalizeWarehouseLocation(loc, item = null) {
+  const raw = String(loc || '').trim();
+  const isSupplierOutbound = item?.rma_type === 'supplier_outbound' || 
+    String(item?.disposition || '').toLowerCase().includes('rtv') || 
+    String(item?.disposition || '').toLowerCase().includes('vendor');
+
+  if (!raw || raw === '—' || raw === 'N/A' || raw.toLowerCase() === 'dock' || raw.toLowerCase() === 'dock-intake' || raw.toLowerCase() === 'rtv-dock') {
+    return isSupplierOutbound ? 'Supplier Return Area (RTV)' : 'Receiving Area';
+  }
+
+  const upper = raw.toUpperCase();
+  if (upper.includes('SCRAP') || upper.includes('DISPOS')) return 'Disposal / Scrap Area';
+  if (upper.includes('QUARANTINE') || upper.includes('HOLD') || upper.includes('INSPECT')) return 'Hold / Inspection Area';
+  if (upper.includes('OUTBOUND-RETURN') || upper.includes('CUSTOMER RETURN') || upper.includes('STORE')) return 'Customer Return Area';
+  if (upper.includes('GOOD STOCK') || upper.includes('SHELF') || upper.includes('RESTOCK')) return 'Good Stock Area';
+  if (upper.includes('SUPPLIER') || upper.includes('RTV') || upper.includes('VENDOR')) return 'Supplier Return Area (RTV)';
+  if (upper.includes('RECEIV') || upper.includes('DOCK')) return 'Receiving Area';
+
+  return raw;
+}
+
+function isTestRecord(item) {
+  if (!item) return false;
+  return Boolean(
+    item.is_test === true ||
+    item.ai_document_metadata?.is_test === true ||
+    String(item.notes || '').includes('[TEST_MODE]')
+  );
+}
+
+function isTrashedRecord(item) {
+  if (!item) return false;
+  return Boolean(
+    item.is_trashed === true ||
+    item.ai_document_metadata?.is_trashed === true ||
+    String(item.notes || '').includes('[TRASHED]')
+  );
+}
+
+function isArchivedRecord(item) {
+  if (!item) return false;
+  if (isTrashedRecord(item)) return false;
+  return Boolean(
+    item.is_archived === true ||
+    item.ai_document_metadata?.is_archived === true ||
+    String(item.notes || '').includes('[ARCHIVED]')
+  );
+}
+
 export default async function handler(req, res) {
   setCorsHeaders(res);
 
@@ -35,7 +84,24 @@ export default async function handler(req, res) {
   // 2. GET: List RMA Reports with query filters & dedicated coworker queues
   if (req.method === 'GET') {
     try {
-      const { rma_type, status, barcode, search, disposition, condition_grade, warehouse_location, queue, is_parent, limit = '50', offset = '0' } = req.query;
+      const { 
+        rma_type, 
+        status, 
+        barcode, 
+        search, 
+        disposition, 
+        condition_grade, 
+        warehouse_location, 
+        queue, 
+        is_parent, 
+        test_mode,
+        is_test,
+        lifecycle = 'active',
+        limit = '50', 
+        offset = '0' 
+      } = req.query;
+
+      const isTestModeRequested = test_mode === 'true' || is_test === 'true' || req.headers['x-test-mode'] === 'true';
 
       const numLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
       const numOffset = Math.max(parseInt(offset, 10) || 0, 0);
@@ -193,6 +259,23 @@ export default async function handler(req, res) {
       const FINALIZED_SCRAP = new Set(['scrapped', 'disposed', 'closed', 'resolved', 'restocked', 'rejected', 'deleted']);
 
       const filtered = unpackedList.filter(item => {
+        // Scope filter: Live Production vs Sandbox Test Mode
+        const itemIsTest = isTestRecord(item);
+        if (isTestModeRequested && !itemIsTest) return false;
+        if (!isTestModeRequested && itemIsTest) return false;
+
+        // Lifecycle filter: active vs archived vs trashed
+        const itemIsTrashed = isTrashedRecord(item);
+        const itemIsArchived = isArchivedRecord(item);
+        if (lifecycle === 'trashed') {
+          if (!itemIsTrashed) return false;
+        } else if (lifecycle === 'archived') {
+          if (!itemIsArchived) return false;
+        } else {
+          // default 'active'
+          if (itemIsTrashed || itemIsArchived) return false;
+        }
+
         if (rma_type && item.rma_type !== rma_type) return false;
         if (barcode && String(item.barcode || '').trim() !== String(barcode).trim()) return false;
 
@@ -397,6 +480,8 @@ export default async function handler(req, res) {
       }
       const rmaNumber = `RMA-${currentYear}-${seqStr}-${randomSuffix}`;
 
+      const isTestMode = Boolean(body?.is_test === true || req.query.test_mode === 'true' || req.query.is_test === 'true' || req.headers['x-test-mode'] === 'true');
+
       const reportPayload = {
         rma_number: rmaNumber,
         rma_type: rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound',
@@ -411,7 +496,7 @@ export default async function handler(req, res) {
         status: status || 'received_at_dock',
         condition_grade: condition_grade || 'B - Damaged Packaging Only',
         disposition: disposition || 'Pending Triage',
-        warehouse_location: warehouse_location ? String(warehouse_location).trim().toUpperCase() : null,
+        warehouse_location: normalizeWarehouseLocation(warehouse_location, { rma_type }),
         inspected_by: inspected_by ? String(inspected_by).trim() : null,
         inspected_at: inspected_by ? new Date().toISOString() : null,
         reason: reason || 'Damaged Box / Crushed Packaging',
@@ -429,7 +514,11 @@ export default async function handler(req, res) {
         po_number: po_number ? String(po_number).trim() : null,
         expiry_date: expiry_date || null,
         batch_lot_number: batch_lot_number ? String(batch_lot_number).trim() : null,
-        notes: notes ? String(notes).trim() : `Reported via REST API by ${client.name}`,
+        ai_document_metadata: {
+          ...(body.ai_document_metadata || {}),
+          ...(isTestMode ? { is_test: true } : {})
+        },
+        notes: isTestMode ? `[TEST_MODE] ${notes || ''}`.trim() : (notes ? String(notes).trim() : `Reported via REST API by ${client.name}`),
         created_at: new Date().toISOString()
       };
 

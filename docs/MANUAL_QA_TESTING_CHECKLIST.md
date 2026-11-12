@@ -2,7 +2,7 @@
 
 **QA Director:** Lead QA Director & Principal Software Architect  
 **Test Suite:** End-to-End Functional, Regression, UI/UX, and Database Integrity Suite  
-**Application Target:** `https://rma-portal-v2.vercel.app`  
+**Application Target:** `https://rma-portal-pingconmarketing.vercel.app`  
 **Execution Type:** Manual QA with checkable verification boxes `[ ]`  
 
 ---
@@ -1471,6 +1471,85 @@ Each test scenario defines:
 
 ---
 
+## Phase 18: Enterprise Upgrade (Zero Stock Photos, Standard Locations, Excel CSV Formatting, Test Sandbox Hub, Archive & 30-Day Trash Vault)
+
+- [ ] **TC-ENT-01 (Zero Fake Stock Photos & Real Photo Fallback)**
+  * **Location**: Public Portal (`/`) -> "Report Item for Return"
+  * **Action**:
+    1. Submit an RMA return without attaching any photos.
+    2. Verify in Customer Hub and database that `photos` is strictly `[]` (empty array), never an Unsplash stock image.
+    3. Submit another RMA return with 1 photo attached. Disconnect Google Drive upload or simulate failure.
+    * **Expected Behavior**:
+      1. Photo is converted to base64 fallback and saved to database without error.
+      2. Lightbox displays the real uploaded photo. Legacy Unsplash URLs are filtered out by `getRealPhotos`.
+
+- [ ] **TC-ENT-02 (Standardized Warehouse Locations & Admin Editor Modal)**
+  * **Location**: Quick RMA Action Modal & Settings Tab
+  * **Action**:
+    1. Click `[ ⚙️ Manage Locations ]` in `QuickRMAActionModal` or Settings Tab.
+    2. Add custom location `Aisle 4 Bin 12` or rename an existing location.
+    3. Open triage for any return.
+  * **Expected Behavior**:
+    1. The Warehouse Location dropdown `<select>` immediately reflects the new location without page reload.
+    2. Selecting an action card auto-fills standard locations (`Good Stock Area`, `Supplier Return Area (RTV)`, `Disposal / Scrap Area`, `Hold / Inspection Area`, `Customer Return Area`).
+    3. Legacy messy strings (`DOCK`, `RTV-DOCK`, `SCRAP-BIN`) are normalized by `normalizeWarehouseLocation`.
+
+- [ ] **TC-ENT-03 (CSV / Excel Export Formula Text Wrapping & Clean Dates)**
+  * **Location**: Customer Hub & Supplier Hub -> `[ 📥 Export CSV ]`
+  * **Action**:
+    1. Export CSV reports from Customer RMA Hub and Supplier RTV Hub.
+    2. Open in Microsoft Excel or Google Sheets.
+  * **Expected Behavior**:
+    1. Barcodes, SKUs, RMA numbers, contact numbers, and invoice numbers render with `="value"` escaping and NEVER display in scientific notation (`8.02E+12`).
+    2. Dates render cleanly as `YYYY-MM-DD` without `T00:00:00.000Z` or `#######` column overflows.
+    3. Warehouse locations display standardized plain-English names.
+
+- [ ] **TC-ENT-04 (Split Tickets in Supplier RTV Hub with Coworker Action Buttons)**
+  * **Location**: Supplier Hub (RTV Claims)
+  * **Action**:
+    1. Split a supplier return ticket into Part 1 (Restock) and Part 2 (Scrap).
+  * **Expected Behavior**:
+    1. Both split tickets remain visible in Supplier RTV Hub.
+    2. Part 1 displays teal badge `📦 Restock to Shelf` and `[ ✓ Confirm Restocked in WMS ]` button (never `+ Debit Claim`).
+    3. Part 2 displays `[ ✓ Confirm Re-Ordered (PO Placed) ]` / `[ ✓ Confirm Written Off ]` (never `+ Debit Claim`).
+    4. Neither item can be selected for batch debit claim vouchers.
+
+- [ ] **TC-ENT-05 (Missing Barcode Intake Lock & Badge)**
+  * **Location**: Public Portal (`/`) & Hub Tables
+  * **Action**:
+    1. In Return Intake, click `🏷️ Missing Barcode / Unlabeled Item? Click here to report`.
+  * **Expected Behavior**:
+    1. A provisional tracking barcode `UNLABELED-YYYYMMDD-XXXX` is generated.
+    2. The barcode input is locked (`readOnly`) with amber styling.
+    3. In Customer and Supplier Hubs, amber `🏷️ Missing Barcode` badge is prominently displayed.
+
+- [ ] **TC-ENT-06 (Dedicated Test Mode Sandbox & Shared Coworker API)**
+  * **Location**: Admin Portal -> `🧪 Test Mode Sandbox`
+  * **Action**:
+    1. Toggle Test Mode ON from the Public Portal or Settings.
+    2. Submit an RMA return.
+    3. Navigate to Admin Portal -> `🧪 Test Mode Sandbox`.
+  * **Expected Behavior**:
+    1. The return is tagged with `is_test: true` and isolated strictly to `🧪 Test Mode Sandbox`.
+    2. Live Customer Hub, Supplier Hub, and Credit Memos lists do NOT show the test record.
+    3. Coworkers calling `GET /api/v1/rma?test_mode=true` receive only test records.
+    4. Clicking `[ 🧹 Clear Sandbox Test Records ]` purges only test records, keeping live records completely intact.
+
+- [ ] **TC-ENT-07 (Enterprise Archive Vault & 30-Day Trash Bin)**
+  * **Location**: Hubs -> Row Action `[ 🗄️ Archive ]` & `[ 🗑️ Trash ]`, and Tab `🗄️ Archive & Trash`
+  * **Action**:
+    1. Click `[ 🗄️ Archive ]` on an RMA report.
+    2. Click `[ 🗑️ Trash ]` on another RMA report -> confirm "Move to Trash (30-Day Recovery)?".
+    3. Open `🗄️ Archive & Trash` tab.
+  * **Expected Behavior**:
+    1. Trashed and archived records immediately disappear from active hubs (<100ms).
+    2. In `Archive Vault` view, the archived item is listed with `[ ↩️ Restore ]` button.
+    3. In `30-Day Trash Bin` view, the countdown badge shows `⏳ 30 days remaining` with `[ ↩️ Restore ]` and `[ 🔥 Delete Forever ]`.
+    4. Restoring any record brings it back to its active hub.
+    5. Trashed items past 30 days are auto-purged on system load.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -1492,4 +1571,5 @@ Each test scenario defines:
 | **Phase 15: 4-Pillar Action System & Financial Hold Safety Guard** | Quick Action Modal & Accounting | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 16: Coworker Inventory & Re-order Queues** | REST API & Queue Strip | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 17: Video Audit 9 Bug Fixes & UI Streamlining** | Workstation Bar & Action Cards | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 18: Enterprise Upgrade (Zero Stock Photos, Locations, CSV, Sandbox, Trash & Archive)** | Full Platform & REST API | `READY FOR TESTING` | *Lead QA Director* |
 

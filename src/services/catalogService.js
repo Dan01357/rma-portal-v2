@@ -3,21 +3,25 @@ import { INITIAL_PRODUCTS } from '../data/mockData';
 import { notificationService } from './notificationService';
 import { purchaseOrdersApi } from './purchaseOrdersApi';
 import { authService } from './authService';
-import { mapReasonToConditionGrade, isUnlabeledBarcode } from '../utils/rmaHelpers';
+import { 
+  mapReasonToConditionGrade, 
+  isUnlabeledBarcode, 
+  isTrashedRecord, 
+  isArchivedRecord,
+  isTestRecord,
+  getTrashDaysRemaining 
+} from '../utils/rmaHelpers';
 
 /**
  * Safe test mode resolution:
- * Strictly restricted to Super Admin.
- * Anonymous reporters, store workers, and non-super-admins are ALWAYS Live.
+ * Accessible to authorized staff (Super Admin, Admin, Inventory Staff).
+ * Anonymous public reporters are ALWAYS Live.
  */
 function isSuperAdminTestModeActive() {
   if (typeof window === 'undefined') return false;
   try {
     const user = authService.getCurrentUser();
-    if (user?.role !== 'super_admin') {
-      try {
-        localStorage.setItem('rma_portal_test_mode', 'false');
-      } catch (e) {}
+    if (!user || !['super_admin', 'admin', 'inventory_staff'].includes(user.role)) {
       return false;
     }
     return localStorage.getItem('rma_portal_test_mode') === 'true';
@@ -372,9 +376,9 @@ export const catalogService = {
    * Supports cleaning up specific file URLs, folder IDs, RMA folders, and Product SKU folders
    */
   async deleteStoredImages(imageUrls, folderIds = [], folderUrls = [], extra = {}) {
-    const cleanList = Array.isArray(imageUrls)
+    const cleanList = (Array.isArray(imageUrls)
       ? imageUrls.map(u => (typeof u === 'object' && u) ? (u.url || u.previewUrl || u.fileUrl || u.id) : u).filter(u => u && typeof u === 'string')
-      : [];
+      : []).filter(u => !u.includes('images.unsplash.com'));
     const cleanFolders = Array.isArray(folderIds) ? folderIds.filter(f => f && typeof f === 'string') : (folderIds ? [folderIds] : []);
     const cleanFolderUrls = Array.isArray(folderUrls) ? folderUrls.filter(u => u && typeof u === 'string') : (folderUrls ? [folderUrls] : []);
     const rmaNumbers = Array.isArray(extra?.rmaNumbers) ? extra.rmaNumbers.filter(Boolean) : (extra?.rmaNumber ? [extra.rmaNumber] : []);
@@ -1326,7 +1330,7 @@ export const catalogService = {
     // Filter GPS: Only save if accuracy is <= 150 meters
     const isAccurateGps = gps && gps.latitude && gps.accuracy && Number(gps.accuracy) <= 150;
 
-    const effectiveRmaType = (rma_type === 'supplier_outbound' || rmaType === 'supplier_outbound') ? 'supplier_outbound' : 'customer_inbound';
+    const effectiveRmaType = (rma_type === 'supplier_outbound' || (typeof rmaType !== 'undefined' && rmaType === 'supplier_outbound')) ? 'supplier_outbound' : 'customer_inbound';
     const effectiveGrade = condition_grade || mapReasonToConditionGrade(reason || (hasItems && items[0]?.reason));
 
     const mergedMetadata = {
@@ -1921,7 +1925,7 @@ export const catalogService = {
         }
       });
 
-      const reports = activeReports || [];
+      const reports = (activeReports || []).filter(r => !isTrashedRecord(r) && !isArchivedRecord(r) && !isTestRecord(r));
 
       const isBatchReport = (r) => {
         if (!r) return false;
@@ -2483,6 +2487,240 @@ export const catalogService = {
     }
 
     return Array.from(supplierSet).sort((a, b) => a.localeCompare(b));
+  },
+
+  /**
+   * ENTERPRISE SOFT-DELETE: Move report to 30-Day Trash Bin (<100ms instant execution)
+   */
+  async moveReportToTrash(id, rmaNumber, actorName = 'Staff') {
+    if (!id && !rmaNumber) return false;
+    try {
+      const cleanId = id ? parseInt(id, 10) : null;
+      let targetRow = null;
+      if (cleanId) {
+        const { data } = await supabase.from('rma_reports').select('id, rma_number, ai_document_metadata, audit_trail').eq('id', cleanId).maybeSingle();
+        targetRow = data;
+      } else if (rmaNumber) {
+        const { data } = await supabase.from('rma_reports').select('id, rma_number, ai_document_metadata, audit_trail').eq('rma_number', rmaNumber).maybeSingle();
+        targetRow = data;
+      }
+
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const purgeAfter = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000)).toISOString();
+
+      const existingMeta = targetRow?.ai_document_metadata || {};
+      const updatedMeta = {
+        ...existingMeta,
+        is_trashed: true,
+        is_archived: false,
+        trashed_at: nowIso,
+        trashed_by: actorName,
+        purge_after: purgeAfter
+      };
+
+      const existingAudit = Array.isArray(targetRow?.audit_trail) ? targetRow.audit_trail : [];
+      const newAudit = [
+        ...existingAudit,
+        {
+          timestamp: nowIso,
+          action: 'MOVED_TO_TRASH',
+          stage: 'TRASH_BIN',
+          actor: actorName,
+          notes: `Moved to 30-day Trash Bin by ${actorName}. Auto-purge scheduled for ${purgeAfter}`
+        }
+      ];
+
+      let query = supabase.from('rma_reports').update({
+        ai_document_metadata: updatedMeta,
+        audit_trail: newAudit
+      });
+      if (cleanId) query = query.eq('id', cleanId);
+      else query = query.eq('rma_number', rmaNumber);
+
+      const { error } = await query;
+      if (error) throw error;
+
+      this.notifyChange('report-trashed', { id: cleanId || targetRow?.id, rmaNumber: rmaNumber || targetRow?.rma_number });
+      return true;
+    } catch (e) {
+      console.error('moveReportToTrash error:', e);
+      throw e;
+    }
+  },
+
+  /**
+   * ENTERPRISE ARCHIVE: Store report in Archive Vault indefinitely
+   */
+  async archiveReport(id, rmaNumber, actorName = 'Staff') {
+    if (!id && !rmaNumber) return false;
+    try {
+      const cleanId = id ? parseInt(id, 10) : null;
+      let targetRow = null;
+      if (cleanId) {
+        const { data } = await supabase.from('rma_reports').select('id, rma_number, ai_document_metadata, audit_trail').eq('id', cleanId).maybeSingle();
+        targetRow = data;
+      } else if (rmaNumber) {
+        const { data } = await supabase.from('rma_reports').select('id, rma_number, ai_document_metadata, audit_trail').eq('rma_number', rmaNumber).maybeSingle();
+        targetRow = data;
+      }
+
+      const now = new Date();
+      const nowIso = now.toISOString();
+
+      const existingMeta = targetRow?.ai_document_metadata || {};
+      const updatedMeta = {
+        ...existingMeta,
+        is_archived: true,
+        is_trashed: false,
+        archived_at: nowIso,
+        archived_by: actorName
+      };
+
+      const existingAudit = Array.isArray(targetRow?.audit_trail) ? targetRow.audit_trail : [];
+      const newAudit = [
+        ...existingAudit,
+        {
+          timestamp: nowIso,
+          action: 'ARCHIVED',
+          stage: 'ARCHIVE_VAULT',
+          actor: actorName,
+          notes: `Archived into Enterprise Vault by ${actorName}`
+        }
+      ];
+
+      let query = supabase.from('rma_reports').update({
+        ai_document_metadata: updatedMeta,
+        audit_trail: newAudit
+      });
+      if (cleanId) query = query.eq('id', cleanId);
+      else query = query.eq('rma_number', rmaNumber);
+
+      const { error } = await query;
+      if (error) throw error;
+
+      this.notifyChange('report-archived', { id: cleanId || targetRow?.id, rmaNumber: rmaNumber || targetRow?.rma_number });
+      return true;
+    } catch (e) {
+      console.error('archiveReport error:', e);
+      throw e;
+    }
+  },
+
+  /**
+   * RESTORE REPORT: Return record from Trash or Archive back to active hub
+   */
+  async restoreReport(id, rmaNumber, actorName = 'Staff') {
+    if (!id && !rmaNumber) return false;
+    try {
+      const cleanId = id ? parseInt(id, 10) : null;
+      let targetRow = null;
+      if (cleanId) {
+        const { data } = await supabase.from('rma_reports').select('id, rma_number, ai_document_metadata, audit_trail').eq('id', cleanId).maybeSingle();
+        targetRow = data;
+      } else if (rmaNumber) {
+        const { data } = await supabase.from('rma_reports').select('id, rma_number, ai_document_metadata, audit_trail').eq('rma_number', rmaNumber).maybeSingle();
+        targetRow = data;
+      }
+
+      const now = new Date();
+      const nowIso = now.toISOString();
+
+      const existingMeta = targetRow?.ai_document_metadata || {};
+      const updatedMeta = { ...existingMeta };
+      delete updatedMeta.is_trashed;
+      delete updatedMeta.trashed_at;
+      delete updatedMeta.trashed_by;
+      delete updatedMeta.purge_after;
+      delete updatedMeta.is_archived;
+      delete updatedMeta.archived_at;
+      delete updatedMeta.archived_by;
+
+      const existingAudit = Array.isArray(targetRow?.audit_trail) ? targetRow.audit_trail : [];
+      const newAudit = [
+        ...existingAudit,
+        {
+          timestamp: nowIso,
+          action: 'RESTORED',
+          stage: 'ACTIVE_HUB',
+          actor: actorName,
+          notes: `Restored back to active hub by ${actorName}`
+        }
+      ];
+
+      let query = supabase.from('rma_reports').update({
+        ai_document_metadata: updatedMeta,
+        audit_trail: newAudit
+      });
+      if (cleanId) query = query.eq('id', cleanId);
+      else query = query.eq('rma_number', rmaNumber);
+
+      const { error } = await query;
+      if (error) throw error;
+
+      this.notifyChange('report-restored', { id: cleanId || targetRow?.id, rmaNumber: rmaNumber || targetRow?.rma_number });
+      return true;
+    } catch (e) {
+      console.error('restoreReport error:', e);
+      throw e;
+    }
+  },
+
+  /**
+   * PERMANENT HARD-DELETE: Clean up from database and delete storage photos
+   */
+  async permanentlyDeleteReport(id, rmaNumber, item = null) {
+    return this.deleteReport(id, rmaNumber, item);
+  },
+
+  /**
+   * BULK MOVE TO TRASH
+   */
+  async moveMultipleReportsToTrash(reportsList, actorName = 'Staff') {
+    if (!Array.isArray(reportsList) || reportsList.length === 0) return true;
+    for (const r of reportsList) {
+      try {
+        await this.moveReportToTrash(r.id, r.rma_number, actorName);
+      } catch (e) {
+        console.warn(`Failed moving report ${r.rma_number} to trash:`, e);
+      }
+    }
+    this.notifyChange('reports-bulk-trashed', { count: reportsList.length });
+    return true;
+  },
+
+  /**
+   * BULK ARCHIVE
+   */
+  async archiveMultipleReports(reportsList, actorName = 'Staff') {
+    if (!Array.isArray(reportsList) || reportsList.length === 0) return true;
+    for (const r of reportsList) {
+      try {
+        await this.archiveReport(r.id, r.rma_number, actorName);
+      } catch (e) {
+        console.warn(`Failed archiving report ${r.rma_number}:`, e);
+      }
+    }
+    this.notifyChange('reports-bulk-archived', { count: reportsList.length });
+    return true;
+  },
+
+  /**
+   * AUTO-PURGE EXPIRED TRASH: Automatically hard-delete any trashed items past 30 days
+   */
+  async autoPurgeExpiredTrash(reportsList) {
+    if (!Array.isArray(reportsList) || reportsList.length === 0) return;
+    const expired = reportsList.filter(r => isTrashedRecord(r) && getTrashDaysRemaining(r) <= 0);
+    if (expired.length === 0) return;
+
+    console.info(`[Auto-Purge]: Found ${expired.length} expired trashed items past 30 days. Purging...`);
+    for (const r of expired) {
+      try {
+        await this.permanentlyDeleteReport(r.id, r.rma_number, r);
+      } catch (err) {
+        console.warn(`[Auto-Purge Notice]: Failed to purge ${r.rma_number}:`, err);
+      }
+    }
   }
 };
 

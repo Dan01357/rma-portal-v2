@@ -43,13 +43,20 @@ export default async function handler(req, res) {
         return sendJson(res, 500, { success: false, error: 'DATABASE_ERROR', message: error.message });
       }
 
+      const isTestRequested = req.query.test_mode === 'true' || req.query.is_test === 'true' || req.headers['x-test-mode'] === 'true';
+      const filteredData = (data || []).filter(m => {
+        const isTest = Boolean(m.notes && m.notes.includes('[TEST_MODE]'));
+        return isTestRequested ? isTest : !isTest;
+      });
+
       return sendJson(res, 200, {
         success: true,
         client: client.name,
-        total: count || 0,
+        test_mode: isTestRequested,
+        total: filteredData.length,
         limit: numLimit,
         offset: numOffset,
-        data: data || []
+        data: filteredData
       });
     } catch (err) {
       return sendJson(res, 500, { success: false, error: 'SERVER_ERROR', message: err.message });
@@ -135,7 +142,9 @@ export default async function handler(req, res) {
         credit_amount: finalCreditAmount,
         credit_issued_by: `${client.name} (API)`,
         credit_issued_at: new Date().toISOString(),
-        notes: notes || `Issued via REST API by ${client.name}`,
+        notes: (body?.is_test === true || req.query.test_mode === 'true' || req.headers['x-test-mode'] === 'true')
+          ? `[TEST_MODE] ${notes || `Issued via REST API by ${client.name}`}`
+          : (notes || `Issued via REST API by ${client.name}`),
         status: 'issued'
       };
 

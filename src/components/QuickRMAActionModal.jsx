@@ -44,10 +44,23 @@ import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
 import { supplierClaimService } from '../services/supplierClaimService';
-import { isSplitChildTicket, isSplitParentTicket, hasAssignedSku, resolveBatchManifestLifecycle, getItemNeedsReorder, cleanExplanationText, mapReasonToConditionGrade } from '../utils/rmaHelpers';
+import { 
+  isSplitChildTicket, 
+  isSplitParentTicket, 
+  hasAssignedSku, 
+  resolveBatchManifestLifecycle, 
+  getItemNeedsReorder, 
+  cleanExplanationText, 
+  mapReasonToConditionGrade,
+  getWarehouseLocations,
+  normalizeWarehouseLocation,
+  getRealPhotos,
+  isUnlabeledBarcode
+} from '../utils/rmaHelpers';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
+import WarehouseLocationsModal from './WarehouseLocationsModal';
 
 const QUICK_AUTH_STORAGE_KEY = 'rma_quick_auth_admin';
 
@@ -159,6 +172,15 @@ export default function QuickRMAActionModal({
   const [conditionGrade, setConditionGrade] = useState('B - Damaged Packaging Only');
   const [disposition, setDisposition] = useState('1- Pending Triage');
   const [warehouseLocation, setWarehouseLocation] = useState('');
+  const [isLocationsModalOpen, setIsLocationsModalOpen] = useState(false);
+  const [availableLocations, setAvailableLocations] = useState(() => getWarehouseLocations());
+
+  useEffect(() => {
+    const handleLocs = () => setAvailableLocations(getWarehouseLocations());
+    window.addEventListener('rma-locations-changed', handleLocs);
+    return () => window.removeEventListener('rma-locations-changed', handleLocs);
+  }, []);
+
   const [rmaStatus, setRmaStatus] = useState('received_at_dock');
   const [holdReason, setHoldReason] = useState('');
   const [needsReorder, setNeedsReorder] = useState(true);
@@ -354,7 +376,7 @@ export default function QuickRMAActionModal({
         : (autoGrade || report.condition_grade || 'B - Damaged Packaging Only');
       setConditionGrade(resolvedGrade);
       setDisposition(normalizeDispositionOption(report.disposition));
-      setWarehouseLocation(report.warehouse_location || '');
+      setWarehouseLocation(normalizeWarehouseLocation(report.warehouse_location, report));
       setNeedsReorder(getItemNeedsReorder(report));
       const extractedHoldReason = report.hold_reason || report.ai_document_metadata?.hold_reason || (
         report.notes && report.notes.match(/\[HOLD REASON: ([^\]]+)\]/) ? report.notes.match(/\[HOLD REASON: ([^\]]+)\]/)[1] : ''
@@ -377,7 +399,7 @@ export default function QuickRMAActionModal({
       const qty = Number(report.quantity) || 1;
       if (qty > 1) {
         setSplitPart1Qty(Math.max(1, qty - 1));
-        setSplitPart1Location(report.warehouse_location || '');
+        setSplitPart1Location(normalizeWarehouseLocation(report.warehouse_location, report));
         setSplitPart2Reason(report.reason || 'Damaged packaging / Defective units');
       }
 
@@ -404,7 +426,7 @@ export default function QuickRMAActionModal({
             price: Number(it.price || 0),
             reason: it.reason || report.reason || 'Damaged packaging',
             condition_grade: it.condition_grade || report.condition_grade || 'B - Damaged Packaging Only',
-            warehouse_location: it.warehouse_location || report.warehouse_location || '',
+            warehouse_location: normalizeWarehouseLocation(it.warehouse_location || report.warehouse_location, report),
             disposition: it.disposition || report.disposition || '1- Pending Triage'
           };
         }));
@@ -876,7 +898,7 @@ export default function QuickRMAActionModal({
         total_quantity: p2Qty,
         condition_grade: splitPart2Grade,
         disposition: splitPart2Disposition,
-        warehouse_location: splitPart2Location ? splitPart2Location.trim().toUpperCase() : 'SCRAP-BIN',
+        warehouse_location: normalizeWarehouseLocation(splitPart2Location, report),
         status: computeAutomaticLifecycleStatus(splitPart2Disposition, false, null),
         reason: splitPart2Reason || report.reason || 'Damaged packaging / Defective units',
         explanation: `Split from ${report.rma_number} (${p2Qty} of ${totalQty} units). Disposition: ${splitPart2Disposition}`,
@@ -884,7 +906,7 @@ export default function QuickRMAActionModal({
         items: Array.isArray(report.items) && report.items.length > 0
           ? [{ ...report.items[0], quantity: p2Qty, reason: splitPart2Reason || report.reason }]
           : [],
-        photos: report.photos || [],
+        photos: getRealPhotos(report.photos),
         paperwork_photos: report.paperwork_photos || [],
         store_branch: report.store_branch,
         si_number: report.si_number,
@@ -929,7 +951,7 @@ export default function QuickRMAActionModal({
         status: computeAutomaticLifecycleStatus(splitPart1Disposition, false, report.notes),
         condition_grade: splitPart1Grade,
         disposition: splitPart1Disposition,
-        warehouse_location: splitPart1Location ? splitPart1Location.trim().toUpperCase() : report.warehouse_location || null,
+        warehouse_location: normalizeWarehouseLocation(splitPart1Location, report),
         inspected_by: inspectorName,
         inspected_at: timestamp,
         items: Array.isArray(report.items) && report.items.length > 0
@@ -1628,8 +1650,14 @@ export default function QuickRMAActionModal({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">Item Barcode</span>
-                  <div className="font-mono font-bold text-slate-900 dark:text-white text-sm">
-                    {report.barcode || 'N/A'}
+                  <div className="font-mono font-bold text-slate-900 dark:text-white text-sm flex items-center gap-1.5 flex-wrap">
+                    {(isUnlabeledBarcode(report.barcode) || report.ai_document_metadata?.is_unlabeled) ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 font-bold text-xs border border-amber-300 dark:border-amber-700">
+                        🏷️ Missing Barcode
+                      </span>
+                    ) : (
+                      <span>{report.barcode || 'N/A'}</span>
+                    )}
                   </div>
                   {matchedProduct?.code && (
                     <div className="font-mono text-[11px] text-blue-600 dark:text-blue-400">
@@ -2212,7 +2240,7 @@ export default function QuickRMAActionModal({
 
               {/* ENTERPRISE ACTION 1: PHYSICAL DISPOSITION & WAREHOUSE TRIAGE MODULE */}
               <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-3">
-                <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5 flex-wrap">
                   <div className="flex items-center gap-2">
                     <div className="p-2 rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300">
                       <Layers className="w-4 h-4" />
@@ -2590,14 +2618,26 @@ export default function QuickRMAActionModal({
                         </div>
 
                         <div>
-                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Rack / Bin Location</label>
-                          <input
-                            type="text"
+                          <div className="flex items-center justify-between mb-0.5">
+                            <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block">Rack / Bin Location</label>
+                            <button
+                              type="button"
+                              onClick={() => setIsLocationsModalOpen(true)}
+                              className="text-[9px] text-blue-600 dark:text-blue-400 hover:underline font-bold cursor-pointer"
+                            >
+                              ⚙️ Manage
+                            </button>
+                          </div>
+                          <select
                             value={splitPart1Location}
                             onChange={(e) => setSplitPart1Location(e.target.value)}
-                            placeholder="e.g. RACK-03-BIN-A"
-                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white uppercase font-mono"
-                          />
+                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white font-mono"
+                          >
+                            <option value="">-- Select Location --</option>
+                            {availableLocations.map(loc => (
+                              <option key={loc} value={loc}>{loc}</option>
+                            ))}
+                          </select>
                         </div>
                       </div>
 
@@ -2678,14 +2718,26 @@ export default function QuickRMAActionModal({
                         </div>
 
                         <div>
-                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Location or Bin</label>
-                          <input
-                            type="text"
+                          <div className="flex items-center justify-between mb-0.5">
+                            <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block">Location or Bin</label>
+                            <button
+                              type="button"
+                              onClick={() => setIsLocationsModalOpen(true)}
+                              className="text-[9px] text-blue-600 dark:text-blue-400 hover:underline font-bold cursor-pointer"
+                            >
+                              ⚙️ Manage
+                            </button>
+                          </div>
+                          <select
                             value={splitPart2Location}
                             onChange={(e) => setSplitPart2Location(e.target.value)}
-                            placeholder="e.g. SCRAP-BIN-01"
-                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white uppercase font-mono"
-                          />
+                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white font-mono"
+                          >
+                            <option value="">-- Select Location --</option>
+                            {availableLocations.map(loc => (
+                              <option key={loc} value={loc}>{loc}</option>
+                            ))}
+                          </select>
                         </div>
 
                         <div>
@@ -2841,16 +2893,28 @@ export default function QuickRMAActionModal({
 
                             {/* Rack / Bin Location */}
                             <div>
-                              <label className="text-[9.5px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-0.5">
-                                Bin / Rack Location
-                              </label>
-                              <input
-                                type="text"
+                              <div className="flex items-center justify-between mb-0.5">
+                                <label className="text-[9.5px] uppercase font-bold text-slate-500 dark:text-slate-400 block">
+                                  Bin / Rack Location
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => setIsLocationsModalOpen(true)}
+                                  className="text-[9px] text-blue-600 dark:text-blue-400 hover:underline font-bold cursor-pointer"
+                                >
+                                  ⚙️
+                                </button>
+                              </div>
+                              <select
                                 value={it.warehouse_location || ''}
-                                onChange={(e) => updateManifestItemField(idx, 'warehouse_location', e.target.value.toUpperCase())}
-                                placeholder="e.g. BIN-04-A"
-                                className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white uppercase focus:outline-none focus:border-blue-600"
-                              />
+                                onChange={(e) => updateManifestItemField(idx, 'warehouse_location', e.target.value)}
+                                className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
+                              >
+                                <option value="">-- Select Location --</option>
+                                {availableLocations.map(loc => (
+                                  <option key={loc} value={loc}>{loc}</option>
+                                ))}
+                              </select>
                             </div>
 
                             {/* Disposition */}
@@ -2864,13 +2928,15 @@ export default function QuickRMAActionModal({
                                   const val = e.target.value;
                                   updateManifestItemField(idx, 'disposition', val);
                                   if (val.includes('Scrap') || val.includes('Dispose') || val.includes('Claim Rejected by Vendor')) {
-                                    updateManifestItemField(idx, 'warehouse_location', 'SCRAP-BIN');
-                                  } else if (val.includes('Quarantine')) {
-                                    updateManifestItemField(idx, 'warehouse_location', 'QUARANTINE-HOLD');
-                                  } else if (val.includes('Return to Vendor') || val.includes('Pending Vendor Pickup')) {
-                                    updateManifestItemField(idx, 'warehouse_location', 'RTV-DOCK');
+                                    updateManifestItemField(idx, 'warehouse_location', 'Disposal / Scrap Area');
+                                  } else if (val.includes('Quarantine') || val.includes('Hold') || val.includes('Dispute')) {
+                                    updateManifestItemField(idx, 'warehouse_location', 'Hold / Inspection Area');
+                                  } else if (val.includes('Return to Vendor') || val.includes('Pending Vendor Pickup') || val.includes('Vendor Credit')) {
+                                    updateManifestItemField(idx, 'warehouse_location', 'Supplier Return Area (RTV)');
                                   } else if (val.includes('Rejected / Return to Customer')) {
-                                    updateManifestItemField(idx, 'warehouse_location', 'OUTBOUND-RETURN-TO-STORE');
+                                    updateManifestItemField(idx, 'warehouse_location', 'Customer Return Area');
+                                  } else if (val.includes('Restock') || val.includes('Replacement')) {
+                                    updateManifestItemField(idx, 'warehouse_location', 'Good Stock Area');
                                   }
                                 }}
                                 className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
@@ -3061,9 +3127,7 @@ export default function QuickRMAActionModal({
                                   setDisposition('2- Restock to Inventory');
                                   setRmaStatus('under_inspection');
                                   setNeedsReorder(false);
-                                  if (['SCRAP-BIN', 'RTV-DOCK', 'QUARANTINE-HOLD', 'OUTBOUND-RETURN-TO-STORE'].includes(warehouseLocation)) {
-                                    setWarehouseLocation('');
-                                  }
+                                  setWarehouseLocation('Good Stock Area');
                                 }}
                                 className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
                                   disposition === '2- Restock to Inventory' || disposition?.toLowerCase().includes('restock')
@@ -3088,7 +3152,7 @@ export default function QuickRMAActionModal({
                                 onClick={() => {
                                   setDisposition('3- Return to Vendor (RTV)');
                                   setRmaStatus('vendor_claimed');
-                                  setWarehouseLocation('RTV-DOCK');
+                                  setWarehouseLocation('Supplier Return Area (RTV)');
                                   setNeedsReorder(true);
                                 }}
                                 className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
@@ -3104,7 +3168,7 @@ export default function QuickRMAActionModal({
                                   </span>
                                 </div>
                                 <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Transfer to Supplier Hub. Bin RTV-DOCK for debit recovery.
+                                  Transfer to Supplier Hub. Bin Supplier Return Area (RTV) for debit recovery.
                                 </p>
                               </button>
 
@@ -3113,7 +3177,7 @@ export default function QuickRMAActionModal({
                                 type="button"
                                 onClick={() => {
                                   setDisposition('5- Scrap / Dispose');
-                                  setWarehouseLocation('SCRAP-BIN');
+                                  setWarehouseLocation('Disposal / Scrap Area');
                                   setRmaStatus('under_inspection');
                                   setNeedsReorder(true);
                                 }}
@@ -3130,7 +3194,7 @@ export default function QuickRMAActionModal({
                                   </span>
                                 </div>
                                 <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Total loss in SCRAP-BIN. Flags purchasing replenishment.
+                                  Total loss in Disposal Area. Flags purchasing replenishment.
                                 </p>
                               </button>
 
@@ -3139,6 +3203,7 @@ export default function QuickRMAActionModal({
                                 type="button"
                                 onClick={() => {
                                   setDisposition('6- Buffer Stock Exchange');
+                                  setWarehouseLocation('Good Stock Area');
                                   setRmaStatus('under_inspection');
                                   setNeedsReorder(true);
                                   setIsBufferSlipOpen(true);
@@ -3165,7 +3230,7 @@ export default function QuickRMAActionModal({
                                 type="button"
                                 onClick={() => {
                                   setDisposition('4- Quarantine');
-                                  setWarehouseLocation('QUARANTINE-HOLD');
+                                  setWarehouseLocation('Hold / Inspection Area');
                                   setRmaStatus('under_inspection');
                                 }}
                                 className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
@@ -3181,7 +3246,7 @@ export default function QuickRMAActionModal({
                                   </span>
                                 </div>
                                 <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Freeze claims in QUARANTINE-HOLD. Requires reason note.
+                                  Freeze claims in Hold / Inspection Area. Requires reason note.
                                 </p>
                               </button>
 
@@ -3190,7 +3255,7 @@ export default function QuickRMAActionModal({
                                 type="button"
                                 onClick={() => {
                                   setDisposition('8- Rejected / Return to Customer');
-                                  setWarehouseLocation('OUTBOUND-RETURN-TO-STORE');
+                                  setWarehouseLocation('Customer Return Area');
                                   setRmaStatus('rejected');
                                   setNeedsReorder(false);
                                 }}
@@ -3219,7 +3284,7 @@ export default function QuickRMAActionModal({
                                 type="button"
                                 onClick={() => {
                                   setDisposition('1 - Pending Vendor Pickup');
-                                  setWarehouseLocation('RTV-DOCK');
+                                  setWarehouseLocation('Supplier Return Area (RTV)');
                                   setRmaStatus('under_inspection');
                                   setNeedsReorder(true);
                                 }}
@@ -3236,7 +3301,7 @@ export default function QuickRMAActionModal({
                                   </span>
                                 </div>
                                 <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Staged in RTV-DOCK awaiting vendor driver retrieval.
+                                  Staged in Supplier Return Area (RTV) awaiting vendor driver retrieval.
                                 </p>
                               </button>
 
@@ -3245,6 +3310,7 @@ export default function QuickRMAActionModal({
                                 type="button"
                                 onClick={() => {
                                   setDisposition('3 - Vendor Credit / AP Deduction Settled');
+                                  setWarehouseLocation('Supplier Return Area (RTV)');
                                   setRmaStatus('vendor_claimed');
                                   setNeedsReorder(true);
                                 }}
@@ -3270,11 +3336,9 @@ export default function QuickRMAActionModal({
                                 type="button"
                                 onClick={() => {
                                   setDisposition('4 - Vendor Replacement Stock Received');
+                                  setWarehouseLocation('Good Stock Area');
                                   setRmaStatus('under_inspection');
                                   setNeedsReorder(false);
-                                  if (['SCRAP-BIN', 'RTV-DOCK', 'QUARANTINE-HOLD'].includes(warehouseLocation)) {
-                                    setWarehouseLocation('');
-                                  }
                                 }}
                                 className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
                                   disposition === '4 - Vendor Replacement Stock Received' || disposition?.toLowerCase().includes('replacement stock received')
@@ -3289,7 +3353,7 @@ export default function QuickRMAActionModal({
                                   </span>
                                 </div>
                                 <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Free vendor stock arrived. Routes to Ready to Restock.
+                                  Free vendor stock arrived. Routes to Good Stock Area (Restock).
                                 </p>
                               </button>
 
@@ -3298,7 +3362,7 @@ export default function QuickRMAActionModal({
                                 type="button"
                                 onClick={() => {
                                   setDisposition('5 - Claim Rejected by Vendor');
-                                  setWarehouseLocation('SCRAP-BIN');
+                                  setWarehouseLocation('Disposal / Scrap Area');
                                   setRmaStatus('under_inspection');
                                   setNeedsReorder(true);
                                 }}
@@ -3315,7 +3379,7 @@ export default function QuickRMAActionModal({
                                   </span>
                                 </div>
                                 <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Vendor refused credit. Convert to SCRAP-BIN. Blocks Debit Claim.
+                                  Vendor refused credit. Convert to Disposal / Scrap Area. Blocks Debit Claim.
                                 </p>
                               </button>
 
@@ -3324,7 +3388,7 @@ export default function QuickRMAActionModal({
                                 type="button"
                                 onClick={() => {
                                   setDisposition('4- Quarantine');
-                                  setWarehouseLocation('QUARANTINE-HOLD');
+                                  setWarehouseLocation('Hold / Inspection Area');
                                   setRmaStatus('under_inspection');
                                 }}
                                 className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
@@ -3340,7 +3404,7 @@ export default function QuickRMAActionModal({
                                   </span>
                                 </div>
                                 <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Hold in QUARANTINE-HOLD. Dispute in progress. Blocks Debit Claim.
+                                  Hold in Hold / Inspection Area. Dispute in progress. Blocks Debit Claim.
                                 </p>
                               </button>
                             </div>
@@ -3447,18 +3511,30 @@ export default function QuickRMAActionModal({
                         {/* Target Rack / Bin Location (For Restock or Replacement Received) */}
                         {(String(disposition || '').toLowerCase().includes('restock') || String(disposition || '').toLowerCase().includes('replacement stock received')) && (
                           <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 rounded-xl space-y-1.5 animate-in fade-in">
-                            <label className="text-[10px] uppercase font-bold text-emerald-900 dark:text-emerald-300 block">
-                              Target Rack / Bin Location *
-                            </label>
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] uppercase font-bold text-emerald-900 dark:text-emerald-300 block">
+                                Target Rack / Bin Location *
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => setIsLocationsModalOpen(true)}
+                                className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-bold cursor-pointer"
+                              >
+                                ⚙️ Manage Locations
+                              </button>
+                            </div>
                             <div className="relative">
-                              <MapPin className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 absolute left-2.5 top-2.5" />
-                              <input
-                                type="text"
+                              <MapPin className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 absolute left-2.5 top-2.5 pointer-events-none" />
+                              <select
                                 value={warehouseLocation}
                                 onChange={(e) => setWarehouseLocation(e.target.value)}
-                                placeholder="e.g. RACK-03-BIN-A"
-                                className="w-full pl-8 pr-2.5 py-2 bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700 rounded-xl font-mono text-xs font-bold text-slate-900 dark:text-white uppercase placeholder:normal-case placeholder-slate-400 focus:outline-none focus:border-emerald-600"
-                              />
+                                className="w-full pl-8 pr-2.5 py-2 bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700 rounded-xl font-mono text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 cursor-pointer"
+                              >
+                                <option value="">-- Select Restock Location --</option>
+                                {availableLocations.map(loc => (
+                                  <option key={loc} value={loc}>{loc}</option>
+                                ))}
+                              </select>
                             </div>
                             <span className="text-[10px] text-emerald-700 dark:text-emerald-400">
                               Specify the exact rack or shelf location where restocked units are placed for warehouse staff.
@@ -3471,14 +3547,14 @@ export default function QuickRMAActionModal({
                           <div className="p-3 bg-rose-50/60 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 rounded-xl space-y-1 animate-in fade-in">
                             <div className="flex items-center justify-between">
                               <span className="text-[10px] uppercase font-extrabold text-rose-900 dark:text-rose-300">
-                                Staging Location: SCRAP-BIN
+                                Staging Location: {normalizeWarehouseLocation(warehouseLocation || 'Disposal / Scrap Area', report)}
                               </span>
                               <span className="text-[9.5px] font-bold text-rose-700 dark:text-rose-400 bg-rose-100 dark:bg-rose-900/60 px-2 py-0.5 rounded-md">
                                 {needsReorder ? 'Auto-Queued for PO' : 'Scrapped (No Re-Order)'}
                               </span>
                             </div>
                             <p className="text-[10.5px] text-rose-800 dark:text-rose-300">
-                              Physical goods staged in <strong>SCRAP-BIN</strong> for disposal.
+                              Physical goods staged in <strong>{normalizeWarehouseLocation(warehouseLocation || 'Disposal / Scrap Area', report)}</strong> for disposal.
                               {needsReorder
                                 ? ' Purchasing coworkers can view and place supplier replacement PO via ?queue=reorder.'
                                 : ' Marked as write-off without re-order (?queue=scrap_no_reorder).'}
@@ -3971,6 +4047,16 @@ export default function QuickRMAActionModal({
           }}
         />
       )}
+
+      {/* Admin Warehouse Locations Manager Modal */}
+      <WarehouseLocationsModal
+        isOpen={isLocationsModalOpen}
+        onClose={() => {
+          setIsLocationsModalOpen(false);
+          setAvailableLocations(getWarehouseLocations());
+        }}
+        onLocationsUpdated={(newLocs) => setAvailableLocations(newLocs)}
+      />
     </div>
   );
 }

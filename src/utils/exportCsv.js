@@ -2,6 +2,7 @@
  * Enterprise Accounting & Logistics CSV Exporter
  * Formats financial records with clean headers and UTF-8 BOM for Microsoft Excel & Google Sheets.
  */
+import { normalizeWarehouseLocation } from './rmaHelpers';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -48,6 +49,34 @@ function escapeCsvCell(val) {
   if (val === null || val === undefined) return '""';
   const str = String(val).replace(/"/g, '""');
   return `"${str}"`;
+}
+
+/**
+ * Escape numeric codes, barcodes, dates, and references as Excel text formulas (="...")
+ * to prevent scientific notation (8.02E+12) and auto-formatting corruption in Excel/Sheets.
+ */
+export function escapeCsvTextFormula(val) {
+  if (val === null || val === undefined || val === '') return '""';
+  const str = String(val).trim().replace(/"/g, '""');
+  if (!str || str === 'N/A') return `"${str}"`;
+  return `="${str}"`;
+}
+
+/**
+ * Format date cleanly as YYYY-MM-DD stripping time parts to prevent "#######" cell overflow in Excel.
+ */
+export function formatCleanDateOnly(val) {
+  if (!val) return '';
+  const str = String(val).trim();
+  if (str.includes('T')) {
+    return str.split('T')[0];
+  }
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return str;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 function extractPhotoLink(r) {
@@ -127,22 +156,24 @@ export function exportRMAReportsToCSV(reports, filename = null) {
     const totalVal = (qty * unitPrice).toFixed(2);
     const dateStr = formatMilitaryDateTime(r.created_at);
     const photoLink = extractPhotoLink(r);
+    const cleanExpiry = formatCleanDateOnly(r.expiry_date);
+    const loc = normalizeWarehouseLocation(r.warehouse_location, r);
 
     return [
       escapeCsvCell(index + 1),
-      escapeCsvCell(r.rma_number),
-      escapeCsvCell(dateStr),
+      escapeCsvTextFormula(r.rma_number),
+      escapeCsvTextFormula(dateStr),
       escapeCsvCell(r.store_branch || ''),
-      escapeCsvCell(r.invoice_dr_number || ''),
-      escapeCsvCell(r.batch_lot_number || ''),
-      escapeCsvCell(r.expiry_date || ''),
+      escapeCsvTextFormula(r.invoice_dr_number || ''),
+      escapeCsvTextFormula(r.batch_lot_number || ''),
+      escapeCsvTextFormula(cleanExpiry),
       escapeCsvCell(r.status || 'pending'),
       escapeCsvCell(r.disposition || 'Pending Triage'),
       escapeCsvCell(r.condition_grade || 'Unassessed'),
-      escapeCsvCell(r.warehouse_location || 'DOCK'),
+      escapeCsvCell(loc),
       escapeCsvCell(r.supplier_name || 'Savemore'),
-      escapeCsvCell(r.barcode),
-      escapeCsvCell(r.code || r.sku || ''),
+      escapeCsvTextFormula(r.barcode),
+      escapeCsvTextFormula(r.code || r.sku || ''),
       escapeCsvCell(r.name),
       escapeCsvCell(qty),
       escapeCsvCell(r.unit_name || 'pc'),
@@ -211,18 +242,18 @@ export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
 
     return [
       escapeCsvCell(index + 1),
-      escapeCsvCell(r.rma_number),
-      escapeCsvCell(dateStr),
+      escapeCsvTextFormula(r.rma_number),
+      escapeCsvTextFormula(dateStr),
       escapeCsvCell(r.store_branch || ''),
       escapeCsvCell(r.reporter_name || ''),
-      escapeCsvCell(r.reporter_contact || ''),
-      escapeCsvCell(r.si_number || ''),
-      escapeCsvCell(r.dr_number || r.invoice_dr_number || ''),
-      escapeCsvCell(r.po_number || ''),
+      escapeCsvTextFormula(r.reporter_contact || ''),
+      escapeCsvTextFormula(r.si_number || ''),
+      escapeCsvTextFormula(r.dr_number || r.invoice_dr_number || ''),
+      escapeCsvTextFormula(r.po_number || ''),
       escapeCsvCell(r.ae_name || ''),
       escapeCsvCell(r.ae_email || ''),
-      escapeCsvCell(r.barcode),
-      escapeCsvCell(r.code || r.sku || ''),
+      escapeCsvTextFormula(r.barcode),
+      escapeCsvTextFormula(r.code || r.sku || ''),
       escapeCsvCell(r.name),
       escapeCsvCell(qty),
       escapeCsvCell(r.unit_name || 'pc'),
@@ -232,7 +263,7 @@ export function exportCustomerInboundRMAsToCSV(reports, filename = null) {
       escapeCsvCell(r.disposition || 'Pending Triage'),
       escapeCsvCell(r.condition_grade || 'Unassessed'),
       escapeCsvCell(r.reason || ''),
-      escapeCsvCell(r.credit_memo_no || r.credit_memo_number || ''),
+      escapeCsvTextFormula(r.credit_memo_no || r.credit_memo_number || ''),
       escapeCsvCell(photoLink),
       escapeCsvCell(r.google_drive_folder_url || ''),
       escapeCsvCell(r.notes || '')
@@ -285,17 +316,19 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
     const totalVal = (qty * unitPrice).toFixed(2);
     const dateStr = formatMilitaryDateTime(r.created_at);
     const photoLink = extractPhotoLink(r);
+    const cleanExpiry = formatCleanDateOnly(r.expiry_date);
+    const loc = normalizeWarehouseLocation(r.warehouse_location, r);
 
     return [
       escapeCsvCell(index + 1),
-      escapeCsvCell(r.rma_number),
-      escapeCsvCell(dateStr),
+      escapeCsvTextFormula(r.rma_number),
+      escapeCsvTextFormula(dateStr),
       escapeCsvCell(r.supplier_name || 'Savemore'),
-      escapeCsvCell(r.warehouse_location || 'DOCK'),
-      escapeCsvCell(r.batch_lot_number || ''),
-      escapeCsvCell(r.expiry_date || ''),
-      escapeCsvCell(r.barcode),
-      escapeCsvCell(r.code || r.sku || ''),
+      escapeCsvCell(loc),
+      escapeCsvTextFormula(r.batch_lot_number || ''),
+      escapeCsvTextFormula(cleanExpiry),
+      escapeCsvTextFormula(r.barcode),
+      escapeCsvTextFormula(r.code || r.sku || ''),
       escapeCsvCell(r.name),
       escapeCsvCell(qty),
       escapeCsvCell(r.unit_name || 'pc'),
@@ -306,7 +339,7 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null) {
       escapeCsvCell(r.status || 'Pending Debit'),
       escapeCsvCell(r.inspected_by || ''),
       escapeCsvCell(r.reason || r.explanation || ''),
-      escapeCsvCell(r.po_number || r.supplier_po_no || ''),
+      escapeCsvTextFormula(r.po_number || r.supplier_po_no || ''),
       escapeCsvCell(photoLink),
       escapeCsvCell(r.google_drive_folder_url || ''),
       escapeCsvCell(r.notes || '')
@@ -351,17 +384,20 @@ export function exportCreditMemosToCSV(memos, filename = null) {
   ];
 
   const rows = memos.map((cm, index) => {
+    const pullOutDate = formatCleanDateOnly(cm.pull_out_date);
+    const dateIssued = formatMilitaryDateTime(cm.created_at);
+
     return [
       escapeCsvCell(index + 1),
-      escapeCsvCell(cm.credit_memo_number),
-      escapeCsvCell(cm.rma_number),
-      escapeCsvCell(cm.pull_out_ref),
-      escapeCsvCell(cm.pull_out_date || ''),
-      escapeCsvCell(formatMilitaryDateTime(cm.created_at)),
+      escapeCsvTextFormula(cm.credit_memo_number),
+      escapeCsvTextFormula(cm.rma_number),
+      escapeCsvTextFormula(cm.pull_out_ref),
+      escapeCsvTextFormula(pullOutDate),
+      escapeCsvTextFormula(dateIssued),
       escapeCsvCell(cm.supplier_name || 'Savemore'),
       escapeCsvCell(cm.product_name),
-      escapeCsvCell(cm.sku || ''),
-      escapeCsvCell(cm.barcode),
+      escapeCsvTextFormula(cm.sku || ''),
+      escapeCsvTextFormula(cm.barcode),
       escapeCsvCell(cm.quantity || 1),
       escapeCsvCell(cm.unit_name || 'pc'),
       escapeCsvCell(Number(cm.unit_price || 0).toFixed(2)),

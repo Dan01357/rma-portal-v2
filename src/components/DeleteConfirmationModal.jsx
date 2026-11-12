@@ -5,13 +5,17 @@ export default function DeleteConfirmationModal({
   isOpen,
   onClose,
   onConfirm,
-  title = 'Confirm Deletion',
+  title = '',
   itemName = '',
-  itemType = 'item', // 'product' | 'report' | 'item'
+  itemType = 'item', // 'product' | 'report' | 'item' | 'reports' | 'bulk_reports'
   itemDetails = '',
-  isDeleting = false
+  isDeleting = false,
+  isPermanent = false
 }) {
   if (!isOpen) return null;
+
+  const isSoftTrash = (itemType === 'report' || itemType === 'reports' || itemType === 'bulk_reports' || itemType === 'rma') && !isPermanent;
+  const resolvedTitle = title || (isSoftTrash ? 'Move to Trash (30-Day Recovery)?' : 'Confirm Deletion');
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/65 backdrop-blur-sm animate-in fade-in">
@@ -26,14 +30,18 @@ export default function DeleteConfirmationModal({
 
         {/* Header with Hazard Icon */}
         <div className="p-5 sm:p-6 pb-4 flex items-start gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 shadow-inner">
+          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-inner ${
+            isSoftTrash 
+              ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-400' 
+              : 'bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400'
+          }`}>
             <Trash2 className="w-6 h-6" />
           </div>
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between">
               <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                {title}
+                {resolvedTitle}
               </h3>
               <button
                 type="button"
@@ -46,25 +54,41 @@ export default function DeleteConfirmationModal({
               </button>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Please confirm if you want to permanently remove this {itemType}.
+              {isSoftTrash 
+                ? 'Item will be safely stored in the 30-Day Trash Bin before permanent purge.'
+                : `Please confirm if you want to permanently remove this ${itemType}.`}
             </p>
           </div>
         </div>
 
         {/* Item Info Callout */}
         <div className="px-6 pb-2">
-          <div className="p-4 bg-rose-50/70 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl space-y-1.5">
-            <div className="text-xs font-black text-rose-950 dark:text-rose-200 break-words">
+          <div className={`p-4 border rounded-2xl space-y-1.5 ${
+            isSoftTrash
+              ? 'bg-amber-50/70 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/60'
+              : 'bg-rose-50/70 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900/60'
+          }`}>
+            <div className={`text-xs font-black break-words ${
+              isSoftTrash ? 'text-amber-950 dark:text-amber-200' : 'text-rose-950 dark:text-rose-200'
+            }`}>
               {itemName || `Selected ${itemType}`}
             </div>
             {itemDetails && (
-              <div className="text-[11px] font-mono text-rose-800/80 dark:text-rose-300/80">
+              <div className={`text-[11px] font-mono ${
+                isSoftTrash ? 'text-amber-800/80 dark:text-amber-300/80' : 'text-rose-800/80 dark:text-rose-300/80'
+              }`}>
                 {itemDetails}
               </div>
             )}
-            <div className="text-[11px] text-rose-700 dark:text-rose-400 pt-1 font-semibold flex items-center gap-1.5">
+            <div className={`text-[11px] pt-1 font-semibold flex items-center gap-1.5 ${
+              isSoftTrash ? 'text-amber-700 dark:text-amber-400' : 'text-rose-700 dark:text-rose-400'
+            }`}>
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-              <span>This record will be permanently deleted from the database.</span>
+              <span>
+                {isSoftTrash 
+                  ? '⏳ Can be fully restored from the Archive & Trash Vault within 30 days.' 
+                  : 'This record will be permanently deleted from the database.'}
+              </span>
             </div>
           </div>
         </div>
@@ -84,14 +108,22 @@ export default function DeleteConfirmationModal({
             type="button"
             disabled={isDeleting}
             onClick={onConfirm}
-            className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-md shadow-rose-600/25 flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+            className={`px-5 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-md flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50 ${
+              isSoftTrash
+                ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/25'
+                : 'bg-rose-600 hover:bg-rose-700 shadow-rose-600/25'
+            }`}
           >
             {isDeleting ? (
               <RefreshCw className="w-4 h-4 animate-spin" />
             ) : (
               <Trash2 className="w-4 h-4" />
             )}
-            <span>{isDeleting ? 'Deleting...' : 'Yes, Delete Permanently'}</span>
+            <span>
+              {isDeleting 
+                ? (isSoftTrash ? 'Moving to Trash...' : 'Deleting...') 
+                : (isSoftTrash ? '🗑️ Move to Trash (30-Day Recovery)' : 'Yes, Delete Permanently')}
+            </span>
           </button>
         </div>
       </div>

@@ -59,7 +59,8 @@ import {
   Building,
   Truck,
   Ticket,
-  Clock
+  Clock,
+  Archive
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
 import { catalogService } from './services/catalogService';
@@ -76,6 +77,8 @@ import SavedProductsTab from './components/SavedProductsTab';
 import SettingsTab from './components/SettingsTab';
 import CreditMemosTab from './components/CreditMemosTab';
 import SupplierClaimsTab from './components/SupplierClaimsTab';
+import TestModeSandboxTab from './components/TestModeSandboxTab';
+import ArchiveAndTrashTab from './components/ArchiveAndTrashTab';
 import ThermalBoxLabelModal from './components/ThermalBoxLabelModal';
 import { exportRMAReportsToCSV, exportCustomerInboundRMAsToCSV, exportSupplierOutboundClaimsToCSV } from './utils/exportCsv';
 import CreditMemoModal from './components/CreditMemoModal';
@@ -111,7 +114,13 @@ import {
   formatLifecycleStage as formatLifecycleStageHelper,
   generateUnlabeledBarcode,
   isUnlabeledBarcode,
-  mapReasonToConditionGrade
+  mapReasonToConditionGrade,
+  isTestRecord,
+  isTrashedRecord,
+  isArchivedRecord,
+  getTrashDaysRemaining,
+  getRealPhotos,
+  normalizeWarehouseLocation
 } from './utils/rmaHelpers';
 
 const DEFECT_REASONS = [
@@ -788,8 +797,9 @@ export default function App() {
   }, [currentUser]);
 
   const toggleTestMode = () => {
-    if (currentUser?.role !== 'super_admin') {
-      showToast('Simulation / Test Mode is strictly restricted to Super Admin.', 'error');
+    const isAllowed = currentUser?.role === 'super_admin' || currentUser?.role === 'admin' || currentUser?.role === 'inventory_staff';
+    if (!isAllowed) {
+      showToast('Simulation / Test Mode is restricted to authorized staff.', 'error');
       setIsTestMode(false);
       try {
         localStorage.setItem('rma_portal_test_mode', 'false');
@@ -928,11 +938,32 @@ export default function App() {
       id,
       rmaNumber,
       item: resolvedItem,
-      title: 'Delete RMA Return Report?',
+      title: 'Move to Trash (30-Day Recovery)?',
       itemName: `RMA #${rmaNumber}`,
       itemType: 'report',
-      itemDetails: `ID: ${id || 'N/A'} • Return Ticket`
+      itemDetails: `ID: ${id || 'N/A'} • Return Ticket (Retained in 30-day trash bin before auto-purge)`
     });
+  };
+
+  const handleArchiveReport = async (id, rmaNumber, item) => {
+    try {
+      await catalogService.archiveReport(id, rmaNumber, currentUser?.name || 'Staff');
+      showToast(`Archived RMA #${rmaNumber} to Archive Vault.`, 'success');
+      refreshAllData();
+    } catch (e) {
+      showToast(`Could not archive report: ${e.message}`, 'error');
+    }
+  };
+
+  const handleBulkArchiveReports = async (reportsList) => {
+    try {
+      await catalogService.archiveMultipleReports(reportsList, currentUser?.name || 'Staff');
+      setSelectedReportIds(new Set());
+      showToast(`Archived ${reportsList.length} return reports to Archive Vault.`, 'success');
+      refreshAllData();
+    } catch (e) {
+      showToast(`Could not archive reports: ${e.message}`, 'error');
+    }
   };
 
   const requestBulkDeleteProducts = (productsList) => {
@@ -962,8 +993,8 @@ export default function App() {
     setDeleteModalState({
       type: 'bulk_reports',
       items: reportsList,
-      title: `Delete ${reportsList.length} Selected Return Reports?`,
-      itemName: `${reportsList.length} Return reports will be permanently removed`,
+      title: `Move ${reportsList.length} Selected Reports to Trash?`,
+      itemName: `${reportsList.length} Return reports will be moved to 30-Day Trash Bin`,
       itemType: 'reports',
       itemDetails: reportsList.slice(0, 3).map(r => r.rma_number || `#${r.id}`).join(', ') + (reportsList.length > 3 ? '...' : '')
     });
@@ -1119,15 +1150,14 @@ export default function App() {
         refreshAllData();
       } else if (deleteModalState.type === 'report') {
         const { id, rmaNumber, item } = deleteModalState;
-        await catalogService.deleteReport(id, rmaNumber, item);
+        await catalogService.moveReportToTrash(id, rmaNumber, currentUser?.name || 'Staff');
         setSelectedReportIds(prev => {
           const next = new Set(prev);
           if (id) next.delete(id);
           if (rmaNumber) next.delete(rmaNumber);
           return next;
         });
-        setRecentReportsList(prev => prev.filter(r => (id ? r.id !== id : r.rma_number !== rmaNumber)));
-        showToast(`Deleted return report RMA #${rmaNumber}.`, 'success');
+        showToast(`Moved RMA #${rmaNumber} to 30-Day Trash Bin.`, 'success');
         refreshAllData();
       } else if (deleteModalState.type === 'bulk_products') {
         const items = deleteModalState.items || [];
@@ -1139,12 +1169,9 @@ export default function App() {
         refreshAllData();
       } else if (deleteModalState.type === 'bulk_reports') {
         const items = deleteModalState.items || [];
-        await catalogService.deleteMultipleReports(items);
+        await catalogService.moveMultipleReportsToTrash(items, currentUser?.name || 'Staff');
         setSelectedReportIds(new Set());
-        const deletedIds = new Set(items.map(r => r.id));
-        const deletedRmas = new Set(items.map(r => r.rma_number));
-        setRecentReportsList(prev => prev.filter(r => !deletedIds.has(r.id) && !deletedRmas.has(r.rma_number)));
-        showToast(`Successfully deleted ${items.length} return reports.`, 'success');
+        showToast(`Moved ${items.length} return reports to 30-Day Trash Bin.`, 'success');
         refreshAllData();
       } else if (deleteModalState.type === 'credit_memo') {
         const memo = deleteModalState.item;
@@ -1450,39 +1477,65 @@ export default function App() {
     }
   };
 
-  // Operational Segregation: Inbound Customer Returns vs Outbound Supplier Claims
-  const customerInboundReports = React.useMemo(() => {
-    return recentReportsList.filter(r => (r.rma_type === 'customer_inbound' || !r.rma_type) && !isManifestSubItem(r, recentReportsList));
+  // Operational Segregation & Enterprise Partitioning:
+  // 1. Trashed Reports (30-day auto-purge retention)
+  const trashedReportsList = React.useMemo(() => {
+    return recentReportsList.filter(r => isTrashedRecord(r));
   }, [recentReportsList]);
+
+  // 2. Archived Reports (Enterprise Vault)
+  const archivedReportsList = React.useMemo(() => {
+    return recentReportsList.filter(r => !isTrashedRecord(r) && isArchivedRecord(r));
+  }, [recentReportsList]);
+
+  // 3. Active Records (non-trashed, non-archived)
+  const activeReportsList = React.useMemo(() => {
+    return recentReportsList.filter(r => !isTrashedRecord(r) && !isArchivedRecord(r));
+  }, [recentReportsList]);
+
+  // 4. Test Mode Sandbox Records
+  const testReportsList = React.useMemo(() => {
+    return activeReportsList.filter(r => isTestRecord(r));
+  }, [activeReportsList]);
+
+  // 5. Live Production Records (Strictly non-test, non-trashed, non-archived)
+  const liveReportsList = React.useMemo(() => {
+    return activeReportsList.filter(r => !isTestRecord(r));
+  }, [activeReportsList]);
+
+  // Operational Segregation: Inbound Customer Returns vs Outbound Supplier Claims (Filtered on liveReportsList)
+  const customerInboundReports = React.useMemo(() => {
+    return liveReportsList.filter(r => (r.rma_type === 'customer_inbound' || !r.rma_type) && !isManifestSubItem(r, liveReportsList));
+  }, [liveReportsList]);
 
   const readyToRestockReports = React.useMemo(() => {
-    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemReadyToRestock(r, recentReportsList));
-  }, [recentReportsList]);
+    return liveReportsList.filter(r => !isManifestSubItem(r, liveReportsList) && isItemReadyToRestock(r, liveReportsList));
+  }, [liveReportsList]);
 
   const reorderNeededReports = React.useMemo(() => {
-    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemReorderNeeded(r, recentReportsList));
-  }, [recentReportsList]);
+    return liveReportsList.filter(r => !isManifestSubItem(r, liveReportsList) && isItemReorderNeeded(r, liveReportsList));
+  }, [liveReportsList]);
 
   const scrappedNoReorderReports = React.useMemo(() => {
-    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemScrappedNoReorder(r, recentReportsList));
-  }, [recentReportsList]);
+    return liveReportsList.filter(r => !isManifestSubItem(r, liveReportsList) && isItemScrappedNoReorder(r, liveReportsList));
+  }, [liveReportsList]);
 
   const onHoldReports = React.useMemo(() => {
-    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemOnHold(r, recentReportsList));
-  }, [recentReportsList]);
+    return liveReportsList.filter(r => !isManifestSubItem(r, liveReportsList) && isItemOnHold(r, liveReportsList));
+  }, [liveReportsList]);
 
   const rejectedReports = React.useMemo(() => {
-    return recentReportsList.filter(r => !isManifestSubItem(r, recentReportsList) && isItemRejected(r, recentReportsList));
-  }, [recentReportsList]);
+    return liveReportsList.filter(r => !isManifestSubItem(r, liveReportsList) && isItemRejected(r, liveReportsList));
+  }, [liveReportsList]);
 
   const supplierOutboundReports = React.useMemo(() => {
     const unpacked = [];
-    recentReportsList.forEach(r => {
-      if (isManifestSubItem(r, recentReportsList)) return;
+    liveReportsList.forEach(r => {
+      if (isManifestSubItem(r, liveReportsList)) return;
       const isExplicitSupplierOutbound = r.rma_type === 'supplier_outbound';
       const disp = String(r.disposition || '').toLowerCase();
-      const isManifest = isBatchManifest(r, recentReportsList);
-      const manifestChildren = isManifest ? getReportManifestItems(r, recentReportsList) : [];
+      const isManifest = isBatchManifest(r, liveReportsList);
+      const manifestChildren = isManifest ? getReportManifestItems(r, liveReportsList) : [];
       const hasRtvChild = manifestChildren.some(c => {
         const cDisp = String(c.disposition || '').toLowerCase();
         return c.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
@@ -1510,7 +1563,7 @@ export default function App() {
       unpacked.push(r);
     });
     return unpacked;
-  }, [recentReportsList]);
+  }, [liveReportsList]);
 
   // Hub-scoped Coworker Inventory & Procurement Queues
   const activeHubReports = React.useMemo(() => {
@@ -1521,21 +1574,21 @@ export default function App() {
   }, [adminActiveTab, supplierOutboundReports, customerInboundReports]);
 
   const hubReadyToRestockCount = React.useMemo(() => {
-    return activeHubReports.filter(r => isItemReadyToRestock(r, recentReportsList)).length;
-  }, [activeHubReports, recentReportsList]);
+    return activeHubReports.filter(r => isItemReadyToRestock(r, liveReportsList)).length;
+  }, [activeHubReports, liveReportsList]);
 
   const hubReorderNeededCount = React.useMemo(() => {
-    return activeHubReports.filter(r => isItemReorderNeeded(r, recentReportsList)).length;
-  }, [activeHubReports, recentReportsList]);
+    return activeHubReports.filter(r => isItemReorderNeeded(r, liveReportsList)).length;
+  }, [activeHubReports, liveReportsList]);
 
   const hubScrappedNoReorderCount = React.useMemo(() => {
-    return activeHubReports.filter(r => isItemScrappedNoReorder(r, recentReportsList)).length;
-  }, [activeHubReports, recentReportsList]);
+    return activeHubReports.filter(r => isItemScrappedNoReorder(r, liveReportsList)).length;
+  }, [activeHubReports, liveReportsList]);
 
   // Filter and sort return reports - strictly isolated to Customer Inbound Returns
   const processedReports = React.useMemo(() => {
     const q = reportsSearchQuery.toLowerCase().trim();
-    let list = recentReportsList.filter(item => {
+    let list = liveReportsList.filter(item => {
       // Customer RMA Hub strictly isolates to Customer Inbound Returns at ALL times
       if (item.rma_type === 'supplier_outbound') {
         return false;
@@ -2078,7 +2131,12 @@ export default function App() {
     try {
       await Promise.allSettled([
         catalogService.getPendingBarcodes().then(pending => setPendingBarcodesList(pending || [])),
-        catalogService.getRecentReports(50).then(reports => setRecentReportsList(reports || [])),
+        catalogService.getRecentReports(100).then(reports => {
+          setRecentReportsList(reports || []);
+          if (Array.isArray(reports) && reports.length > 0) {
+            catalogService.autoPurgeExpiredTrash(reports).catch(() => {});
+          }
+        }),
         catalogService.getSavedProducts().then(saved => setSavedProductsList(saved || [])),
         authService.getEmployees().then(staff => setStaffList(staff || [])),
         creditMemoService.getCreditMemos().then(memos => setCreditMemosList(memos || []))
@@ -2563,16 +2621,30 @@ export default function App() {
             for (const p of item.photoFiles) {
               if (!p?.file) continue;
               const meta = { ...photoMeta, targetFolderId: rmaDamagedFolderId };
-              const res = await catalogService.uploadPhotoWithDetails(p.file, rmaNumber, 'damaged_items', meta);
-              if (res) {
-                if (res.url) {
-                  uploadedPhotosByItem[item.id].push(res.url);
-                  allUploadedDamagedUrls.push(res.url);
+              let res = null;
+              try {
+                res = await catalogService.uploadPhotoWithDetails(p.file, rmaNumber, 'damaged_items', meta);
+              } catch (upErr) {
+                console.warn('Drive upload error, falling back to base64:', upErr);
+              }
+              if (res?.url) {
+                uploadedPhotosByItem[item.id].push(res.url);
+                allUploadedDamagedUrls.push(res.url);
+              } else {
+                // Fallback to base64 so user's real photo is NEVER lost!
+                try {
+                  const b64 = await catalogService.fileToBase64(p.file);
+                  if (b64) {
+                    uploadedPhotosByItem[item.id].push(b64);
+                    allUploadedDamagedUrls.push(b64);
+                  }
+                } catch (b64Err) {
+                  console.warn('Base64 fallback error:', b64Err);
                 }
-                if (res.rmaFolderId && !rmaDamagedFolderId) {
-                  rmaDamagedFolderId = res.rmaFolderId;
-                  rmaDamagedFolderUrl = res.rmaFolderUrl;
-                }
+              }
+              if (res?.rmaFolderId && !rmaDamagedFolderId) {
+                rmaDamagedFolderId = res.rmaFolderId;
+                rmaDamagedFolderUrl = res.rmaFolderUrl;
               }
             }
           }
@@ -2586,13 +2658,27 @@ export default function App() {
         for (const item of capturedPaperworkPhotos) {
           if (!item.file) continue;
           const meta = { ...photoMeta, targetFolderId: rmaPaperworkFolderId };
-          const res = await catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'official_paperwork', meta);
-          if (res) {
+          let res = null;
+          try {
+            res = await catalogService.uploadPhotoWithDetails(item.file, rmaNumber, 'official_paperwork', meta);
+          } catch (upErr) {
+            console.warn('Paperwork upload error, falling back to base64:', upErr);
+          }
+          if (res?.url) {
             paperworkResults.push(res);
-            if (res.rmaFolderId && !rmaPaperworkFolderId) {
-              rmaPaperworkFolderId = res.rmaFolderId;
-              rmaPaperworkFolderUrl = res.rmaFolderUrl;
+          } else {
+            try {
+              const b64 = await catalogService.fileToBase64(item.file);
+              if (b64) {
+                paperworkResults.push({ url: b64 });
+              }
+            } catch (b64Err) {
+              console.warn('Paperwork base64 fallback error:', b64Err);
             }
+          }
+          if (res?.rmaFolderId && !rmaPaperworkFolderId) {
+            rmaPaperworkFolderId = res.rmaFolderId;
+            rmaPaperworkFolderUrl = res.rmaFolderUrl;
           }
         }
 
@@ -2632,7 +2718,7 @@ export default function App() {
           reporterContact: capturedReporterContact,
           reason: primaryReason,
           explanation: primaryExplanation,
-          photos: allUploadedDamagedUrls.length > 0 ? allUploadedDamagedUrls : ['https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800&auto=format&fit=crop&q=80'],
+          photos: allUploadedDamagedUrls.length > 0 ? allUploadedDamagedUrls : [],
           paperwork_photos: uploadedPaperworkUrls,
           si_number: capturedSiNumber,
           dr_number: capturedDrNumber,
@@ -2643,9 +2729,11 @@ export default function App() {
           expiry_date: capturedItems[0]?.expiry_date || null,
           batch_lot_number: capturedBatchLotNumber,
           condition_grade: mapReasonToConditionGrade(primaryReason),
+          notes: isTestMode ? '[TEST_MODE] Sandbox Return' : null,
           ai_document_metadata: {
             ...(capturedPaperworkMetadata || {}),
-            ...((isUnlabeledItem || isUnlabeledBarcode(primaryBarcode)) ? { is_unlabeled: true, provisional_barcode: primaryBarcode } : {})
+            ...((isUnlabeledItem || isUnlabeledBarcode(primaryBarcode)) ? { is_unlabeled: true, provisional_barcode: primaryBarcode } : {}),
+            ...(isTestMode ? { is_test: true, test_mode: true } : {})
           },
           google_drive_folder_url: gdriveFolderUrl,
           google_drive_folder_id: gdriveFolderId,
@@ -3168,14 +3256,19 @@ export default function App() {
                         type="text"
                         required={manifestItems.length === 0}
                         value={barcodeInput}
+                        readOnly={isUnlabeledItem}
                         onChange={(e) => setBarcodeInput(e.target.value.replace(/[\r\n]/g, ''))}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             e.preventDefault();
                           }
                         }}
-                        placeholder={manifestItems.length > 0 ? "Scan or type another product barcode / SKU..." : "Scan or type product barcode / SKU here..."}
-                        className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold font-mono text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 transition-colors shadow-2xs"
+                        placeholder={isUnlabeledItem ? "🏷️ Missing / Damaged Barcode (Auto-Assigned System Tag)" : (manifestItems.length > 0 ? "Scan or type another product barcode / SKU..." : "Scan or type product barcode / SKU here...")}
+                        className={`w-full pl-10 pr-4 py-2.5 rounded-2xl text-xs font-bold font-mono transition-colors shadow-2xs ${
+                          isUnlabeledItem
+                            ? 'bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-400 text-amber-900 dark:text-amber-200 cursor-not-allowed select-none'
+                            : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-blue-600'
+                        }`}
                       />
                     </div>
 
@@ -4261,7 +4354,33 @@ export default function App() {
                 <span>Credit Memos ({creditMemosList.length})</span>
               </button>
 
-              {/* Tab 5: Settings & SMTP (Super Admin Only) */}
+              {/* Tab 5: Dedicated Test Mode Sandbox */}
+              <button
+                type="button"
+                onClick={() => setAdminActiveTab('sandbox')}
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'sandbox'
+                  ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-sm ring-1 ring-amber-400'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+              >
+                <FlaskConical className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span>🧪 Test Mode Sandbox ({testReportsList.length})</span>
+              </button>
+
+              {/* Tab 6: Enterprise Archive & 30-Day Trash Bin */}
+              <button
+                type="button"
+                onClick={() => setAdminActiveTab('archive_trash')}
+                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'archive_trash'
+                  ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 shadow-sm ring-1 ring-slate-400'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+              >
+                <Archive className="w-4 h-4 text-slate-600 dark:text-slate-400 shrink-0" />
+                <span>🗄️ Archive & Trash ({archivedReportsList.length + trashedReportsList.length})</span>
+              </button>
+
+              {/* Tab 7: Settings & SMTP (Super Admin Only) */}
               {currentUser?.role === 'super_admin' && (
                 <button
                   type="button"
@@ -4811,9 +4930,7 @@ export default function App() {
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
                           {paginatedReports.map((item, index) => {
-                            const photoList = Array.isArray(item.photos)
-                              ? item.photos
-                              : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
+                            const photoList = getRealPhotos(item.photos);
                             const isSelected = selectedReportIds.has(item.id || item.rma_number);
                             const matchedProduct = savedProductsList.find(p => p.barcode && String(p.barcode) === String(item.barcode));
                             const resolvedName = (item.name && !item.name.toLowerCase().startsWith('unidentified'))
@@ -5158,7 +5275,7 @@ export default function App() {
                                   <td className="py-3 px-3.5 text-center font-mono whitespace-nowrap">
                                     {item.warehouse_location ? (
                                       <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 text-[11px] font-extrabold inline-block shadow-2xs">
-                                        {item.warehouse_location}
+                                        {normalizeWarehouseLocation(item.warehouse_location, item)}
                                       </span>
                                     ) : (
                                       <span className="text-slate-300 dark:text-slate-600 text-xs font-bold">—</span>
@@ -5367,12 +5484,22 @@ export default function App() {
                                         return null;
                                       })()}
 
+                                      {/* Archive to Vault */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleArchiveReport(item.id, item.rma_number, item)}
+                                        className="p-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                                        title={`Archive RMA #${item.rma_number} to Enterprise Vault`}
+                                      >
+                                        <Archive className="w-4 h-4 text-slate-500 hover:text-slate-700" />
+                                      </button>
+
                                       {canDeleteReports && (
                                         <button
                                           type="button"
                                           onClick={() => requestDeleteReport(item.id, item.rma_number, item)}
                                           className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer"
-                                          title={`Delete RMA #${item.rma_number}`}
+                                          title={`Move RMA #${item.rma_number} to 30-Day Trash Bin`}
                                         >
                                           <Trash2 className="w-4 h-4" />
                                         </button>
@@ -5745,6 +5872,14 @@ export default function App() {
                           >
                             Deselect
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => handleBulkArchiveReports(selectedReportsList)}
+                            className="px-3.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                          >
+                            <Archive className="w-3.5 h-3.5 text-slate-300" />
+                            <span>Archive Selected ({selectedReportIds.size})</span>
+                          </button>
                           {canDeleteReports && (
                             <button
                               type="button"
@@ -5752,7 +5887,7 @@ export default function App() {
                               className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
-                              <span>Delete Selected ({selectedReportIds.size})</span>
+                              <span>Move to Trash ({selectedReportIds.size})</span>
                             </button>
                           )}
                         </div>
@@ -5777,9 +5912,7 @@ export default function App() {
                   <div className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {paginatedReports.map((item, index) => {
-                        const photoList = Array.isArray(item.photos)
-                          ? item.photos
-                          : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
+                        const photoList = getRealPhotos(item.photos);
                         const isSelected = selectedReportIds.has(item.id || item.rma_number);
                         const matchedProduct = savedProductsList.find(p => p.barcode && String(p.barcode) === String(item.barcode));
                         const resolvedName = (item.name && !item.name.toLowerCase().startsWith('unidentified'))
@@ -6075,12 +6208,20 @@ export default function App() {
                                 <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300">
                                   {item.reason || 'Damaged'}
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleArchiveReport(item.id, item.rma_number, item)}
+                                  className="p-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
+                                  title={`Archive RMA #${item.rma_number} to Enterprise Vault`}
+                                >
+                                  <Archive className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
+                                </button>
                                 {canDeleteReports && (
                                   <button
                                     type="button"
                                     onClick={() => requestDeleteReport(item.id, item.rma_number, item)}
                                     className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 dark:hover:bg-rose-900/50 rounded-xl transition-colors cursor-pointer"
-                                    title={`Delete RMA #${item.rma_number}`}
+                                    title={`Move RMA #${item.rma_number} to 30-Day Trash Bin`}
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -6380,6 +6521,14 @@ export default function App() {
                           >
                             Deselect
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => handleBulkArchiveReports(selectedReportsList)}
+                            className="px-3.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                          >
+                            <Archive className="w-3.5 h-3.5 text-slate-300" />
+                            <span>Archive Selected ({selectedReportIds.size})</span>
+                          </button>
                           {canDeleteReports && (
                             <button
                               type="button"
@@ -6387,7 +6536,7 @@ export default function App() {
                               className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
-                              <span>Delete Selected ({selectedReportIds.size})</span>
+                              <span>Move to Trash ({selectedReportIds.size})</span>
                             </button>
                           )}
                         </div>
@@ -6412,8 +6561,8 @@ export default function App() {
             {/* TAB 3: FINANCE CREDIT MEMO SECTION */}
             {adminActiveTab === 'credit_memos' && (
               <CreditMemosTab
-                creditMemosList={creditMemosList}
-                recentReportsList={recentReportsList}
+                creditMemosList={creditMemosList.filter(m => !isTestRecord(m))}
+                recentReportsList={liveReportsList}
                 currentUser={currentUser}
                 onOpenCreateModal={handleOpenCreateCreditMemo}
                 onEditCreditMemo={handleEditCreditMemo}
@@ -6427,12 +6576,14 @@ export default function App() {
             {/* TAB 4: SUPPLIER RECOVERY / CHARGEBACK BATCHING (RTV CLAIMS) */}
             {adminActiveTab === 'supplier_claims' && (
               <SupplierClaimsTab
-                reportsList={recentReportsList}
+                reportsList={liveReportsList}
                 currentUser={currentUser}
                 onRefresh={refreshAllData}
                 onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
                 onRequestDeleteReport={requestDeleteReport}
                 onRequestBulkDeleteReports={requestBulkDeleteReports}
+                onArchiveReport={handleArchiveReport}
+                onBulkArchiveReports={handleBulkArchiveReports}
                 onAssignSku={(report) => handleEditProductFromReport(report)}
                 onEditProductFromReport={handleEditProductFromReport}
                 onOpenQuickAction={(rmaNumber) => {
@@ -6446,7 +6597,42 @@ export default function App() {
               />
             )}
 
-            {/* TAB 5: SETTINGS & GOOGLE SMTP NOTIFICATION SERVICE (Super Admin Only) */}
+            {/* TAB 5: DEDICATED TEST MODE SANDBOX */}
+            {adminActiveTab === 'sandbox' && (
+              <TestModeSandboxTab
+                testReportsList={testReportsList}
+                currentUser={currentUser}
+                onRefresh={refreshAllData}
+                onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
+                onRequestDeleteReport={requestDeleteReport}
+                onRequestBulkDeleteReports={requestBulkDeleteReports}
+                onArchiveReport={handleArchiveReport}
+                onBulkArchiveReports={handleBulkArchiveReports}
+                onAssignSku={(report) => handleEditProductFromReport(report)}
+                onOpenQuickAction={(rmaNumber) => {
+                  setQuickRmaNumber(rmaNumber);
+                  setIsQuickRmaModalOpen(true);
+                }}
+                onPrintLabel={(report) => setThermalPrintReport(report)}
+                onViewExplanation={(info) => setViewingExplanationModal(info)}
+                savedProductsList={savedProductsList}
+                coworkerQueueFilter={coworkerQueueFilter}
+              />
+            )}
+
+            {/* TAB 6: ENTERPRISE ARCHIVE & 30-DAY TRASH BIN */}
+            {adminActiveTab === 'archive_trash' && (
+              <ArchiveAndTrashTab
+                archivedReportsList={archivedReportsList}
+                trashedReportsList={trashedReportsList}
+                currentUser={currentUser}
+                onRefresh={refreshAllData}
+                onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
+                savedProductsList={savedProductsList}
+              />
+            )}
+
+            {/* TAB 7: SETTINGS & GOOGLE SMTP NOTIFICATION SERVICE (Super Admin Only) */}
             {adminActiveTab === 'settings' && currentUser?.role === 'super_admin' && (
               <SettingsTab
                 isTestMode={isTestMode}
@@ -6566,7 +6752,7 @@ export default function App() {
                   ...updated,
                   name: isManifestParent ? rep.name : (name || rep.name),
                   code: code || rep.code,
-                  status: 'logged',
+                  status: 'under_inspection',
                   supplier_name: supplierName,
                   price: price,
                   price_with_vat: priceWithVat,
@@ -6720,7 +6906,7 @@ export default function App() {
                   unit_name: unitName,
                   ae_name: aeName,
                   ae_email: aeEmail,
-                  status: 'logged'
+                  status: 'under_inspection'
                 })
                 .eq('barcode', barcode);
 
@@ -6746,7 +6932,7 @@ export default function App() {
                     unit_name: unitName,
                     ae_name: aeName,
                     ae_email: aeEmail,
-                    status: 'logged'
+                    status: 'under_inspection'
                   };
                   notificationService.sendRMANotification(enrichedReport, isTestActive).catch(e => {
                     console.warn('Background RMA report notification notice on SKU assignment:', e);

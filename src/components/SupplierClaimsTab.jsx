@@ -33,7 +33,10 @@ import {
   isManifestSubItem, 
   formatQuantityWithPackSize, 
   formatManifestBreakdown,
-  hasAssignedSku 
+  hasAssignedSku,
+  getRealPhotos,
+  normalizeWarehouseLocation,
+  isUnlabeledBarcode
 } from '../utils/rmaHelpers';
 import {
   getItemNeedsReorder,
@@ -52,6 +55,8 @@ export default function SupplierClaimsTab({
   onViewPhoto,
   onRequestDeleteReport,
   onRequestBulkDeleteReports,
+  onRequestArchiveReport,
+  onRequestBulkArchiveReports,
   onAssignSku,
   onEditProductFromReport,
   onOpenQuickAction,
@@ -529,19 +534,9 @@ export default function SupplierClaimsTab({
     return clean || 'Warehouse Staff';
   };
 
-  // Helper to safely extract photo URLs
+  // Helper to safely extract photo URLs (ignoring fake Unsplash stock photos)
   const getPhotos = (report) => {
-    if (!report?.photos) return [];
-    if (Array.isArray(report.photos)) return report.photos.filter(Boolean);
-    if (typeof report.photos === 'string') {
-      try {
-        const parsed = JSON.parse(report.photos);
-        if (Array.isArray(parsed)) return parsed.filter(Boolean);
-      } catch (e) {
-        return [report.photos];
-      }
-    }
-    return [];
+    return getRealPhotos(report?.photos);
   };
 
   const handleOpenPhotoPreview = (report) => {
@@ -682,6 +677,16 @@ export default function SupplierClaimsTab({
   const handleGenerateBatchClaim = async () => {
     if (selectedItems.length === 0) {
       alert('Please select at least 1 RMA item to bundle into a supplier claim.');
+      return;
+    }
+
+    // Exclude rows with Restock to Inventory or Scrap / Dispose from batch RTV Debit Claim voucher generation
+    const nonRtvItems = selectedItems.filter(i => {
+      const d = String(i.disposition || '').toLowerCase();
+      return d.includes('restock') || d.includes('scrap') || d.includes('dispose') || d.includes('replacement');
+    });
+    if (nonRtvItems.length > 0) {
+      alert(`Cannot bundle items with disposition 'Restock to Inventory' or 'Scrap / Dispose' into an RTV Debit Claim voucher.\n\nPlease uncheck restocked or scrapped items before issuing a debit claim.`);
       return;
     }
 
@@ -1075,13 +1080,25 @@ export default function SupplierClaimsTab({
                   <span>Print Vouchers</span>
                 </button>
 
-                {/* 2. Delete Selected */}
+                {/* 2. Archive Selected */}
+                {onRequestBulkArchiveReports && (
+                  <button
+                    type="button"
+                    onClick={() => onRequestBulkArchiveReports(selectedItems)}
+                    className="px-3 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                    title="Archive selected records to Archive Vault"
+                  >
+                    <span>🗄️ Archive Selected ({selectedRmaIds.size})</span>
+                  </button>
+                )}
+
+                {/* 3. Delete Selected */}
                 {canDeleteReports && onRequestBulkDeleteReports && (
                   <button
                     type="button"
                     onClick={handleBulkDelete}
                     className="px-3 py-1 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/70 dark:hover:bg-rose-900/70 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                    title="Permanently delete selected records and remove proof images"
+                    title="Move selected records to 30-day trash bin"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>Delete Selected ({selectedRmaIds.size})</span>
@@ -1415,7 +1432,7 @@ export default function SupplierClaimsTab({
                             {res.supplier}
                           </div>
                           <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                            Bin: <strong className="text-slate-600 dark:text-slate-300">{r.warehouse_location || 'DOCK'}</strong>
+                            Bin: <strong className="text-slate-600 dark:text-slate-300">{normalizeWarehouseLocation(r.warehouse_location, r)}</strong>
                             {r.batch_lot_number && (
                               <span className="text-purple-600 dark:text-purple-400 font-bold ml-1.5">• Lot: {r.batch_lot_number}</span>
                             )}
@@ -1438,7 +1455,16 @@ export default function SupplierClaimsTab({
                                 </span>
                               </span>
                             ) : (
-                              <span>Qty: <strong className="text-slate-800 dark:text-slate-200 font-bold">{formatQuantityWithPackSize(res.qty, r.unit_name, r.pieces_per_case || res.matchedProduct?.pieces_per_case)}</strong> • SKU: <strong className={res.code ? 'text-slate-600 dark:text-slate-300' : 'text-amber-600 dark:text-amber-400'}>{res.code || 'Unassigned'}</strong> • BC: {r.barcode}</span>
+                              <span className="inline-flex items-center gap-1 flex-wrap">
+                                <span>Qty: <strong className="text-slate-800 dark:text-slate-200 font-bold">{formatQuantityWithPackSize(res.qty, r.unit_name, r.pieces_per_case || res.matchedProduct?.pieces_per_case)}</strong> • SKU: <strong className={res.code ? 'text-slate-600 dark:text-slate-300' : 'text-amber-600 dark:text-amber-400'}>{res.code || 'Unassigned'}</strong> • </span>
+                                {(isUnlabeledBarcode(r.barcode) || r.ai_document_metadata?.is_unlabeled) ? (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 font-bold text-[9px] border border-amber-300 dark:border-amber-700">
+                                    🏷️ Missing Barcode
+                                  </span>
+                                ) : (
+                                  <span>BC: {r.barcode}</span>
+                                )}
+                              </span>
                             )}
                           </div>
                         </td>
@@ -1645,8 +1671,8 @@ export default function SupplierClaimsTab({
                                 onClick={async () => {
                                   try {
                                     setUpdatingQueueId(r.id || r.rma_number);
-                                    await catalogService.resetReportToPending(r.id, r.rma_number, verifiedAdmin?.name || 'Staff');
-                                    if (onRefreshAllData) onRefreshAllData();
+                                    await catalogService.resetReportToPending(r.id, r.rma_number, currentUser?.name || 'Staff');
+                                    if (onRefresh) onRefresh();
                                   } catch (e) {
                                     alert('Could not reset report: ' + e.message);
                                   } finally {
@@ -1661,18 +1687,91 @@ export default function SupplierClaimsTab({
                               </button>
                             )}
 
-                            {/* 4. Official Debit Claim Generation or Viewing */}
-                            {existingClaim ? (
-                              <button
-                                type="button"
-                                onClick={() => setActiveClaimBatch(existingClaim)}
-                                className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                title={`View Official RTV Debit Claim Voucher: ${existingClaim.claimNumber || existingClaim.claim_number}`}
-                              >
-                                <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                <span>RTV Voucher Active</span>
-                              </button>
-                            ) : (() => {
+                            {/* 4. Stream-Specific Coworker Actions (Restock vs Scrap vs RTV Debit Claim) */}
+                            {(() => {
+                              const isRestockItem = isItemReadyToRestock(r) ||
+                                String(r.disposition || '').toLowerCase().includes('restock') ||
+                                String(r.disposition || '').toLowerCase().includes('replacement stock received');
+
+                              const isScrapItem = isItemReorderNeeded(r) || isItemScrappedNoReorder(r) ||
+                                String(r.disposition || '').toLowerCase().includes('scrap') ||
+                                String(r.disposition || '').toLowerCase().includes('dispose');
+
+                              if (isRestockItem) {
+                                return (
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="px-2 py-0.5 rounded-md bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300 font-extrabold text-[10px] border border-teal-200 dark:border-teal-800">
+                                      📦 Restock to Shelf
+                                    </span>
+                                    {Boolean(r.ai_document_metadata?.workflow_resolution === 'restocked' || r.status === 'resolved' || r.status === 'closed') ? (
+                                      <span className="px-2 py-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-bold">
+                                        ✓ Restocked
+                                      </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        disabled={updatingQueueId === (r.id || r.rma_number)}
+                                        onClick={() => handleConfirmCoworkerAction(r, 'restocked')}
+                                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                                        title="Confirm physical inventory added into WMS/ERP and route to Restocked"
+                                      >
+                                        <CheckCircle2 className="w-3 h-3" />
+                                        <span>[ ✓ Confirm Restocked in WMS ]</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              }
+
+                              if (isScrapItem) {
+                                const isReorder = getItemNeedsReorder(r);
+                                return (
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    {Boolean(r.ai_document_metadata?.workflow_resolution === 'reordered' || r.ai_document_metadata?.workflow_resolution === 'scrapped_no_reorder' || r.status === 'resolved' || r.status === 'closed') ? (
+                                      <span className="px-2 py-1 bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border border-rose-300 dark:border-rose-700 rounded-lg text-[10px] font-bold">
+                                        {r.ai_document_metadata?.workflow_resolution === 'reordered' ? '✓ PO Placed' : '✓ Written Off'}
+                                      </span>
+                                    ) : isReorder ? (
+                                      <button
+                                        type="button"
+                                        disabled={updatingQueueId === (r.id || r.rma_number)}
+                                        onClick={() => handleConfirmCoworkerAction(r, 'reordered')}
+                                        className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                                        title="Confirm replacement PO issued to vendor and acknowledge replenishment"
+                                      >
+                                        <CheckCircle2 className="w-3 h-3" />
+                                        <span>[ ✓ Confirm Re-Ordered (PO Placed) ]</span>
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        disabled={updatingQueueId === (r.id || r.rma_number)}
+                                        onClick={() => handleConfirmCoworkerAction(r, 'scrapped_no_reorder')}
+                                        className="px-2.5 py-1 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                                        title="Confirm item written off without replacement PO"
+                                      >
+                                        <CheckCircle2 className="w-3 h-3" />
+                                        <span>[ ✓ Confirm Written Off ]</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              }
+
+                              if (existingClaim) {
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveClaimBatch(existingClaim)}
+                                    className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                    title={`View Official RTV Debit Claim Voucher: ${existingClaim.claimNumber || existingClaim.claim_number}`}
+                                  >
+                                    <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                    <span>RTV Voucher Active</span>
+                                  </button>
+                                );
+                              }
+
                               const isRowOnHold = isItemOnHold(r);
                               const isRowRejected = isItemRejected(r);
                               const isVendorRefused = String(r.disposition || '').toLowerCase().includes('claim rejected by vendor');
@@ -1722,7 +1821,7 @@ export default function SupplierClaimsTab({
                                     className="px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-2xs hover:border-amber-400 hover:text-amber-600"
                                     title="Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Click 'Assign SKU' first."
                                   >
-                                    <AlertTriangle className="w-3 h-3 text-amber-500" />
+                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
                                     <span>+ Debit Claim (₱0.00 / Unassigned)</span>
                                   </button>
                                 );
@@ -1742,7 +1841,22 @@ export default function SupplierClaimsTab({
                               );
                             })()}
 
-                            {/* 5. Delete Report */}
+                            {/* 5. Archive Report */}
+                            {onRequestArchiveReport && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const targetArchiveId = r.is_unpacked_manifest_item ? (r.parent_rma_id || r.id) : r.id;
+                                  onRequestArchiveReport(targetArchiveId, r.rma_number, r);
+                                }}
+                                className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                                title={`Archive RMA #${r.rma_number} to Archive Vault`}
+                              >
+                                <span className="text-xs">🗄️</span>
+                              </button>
+                            )}
+
+                            {/* 6. Delete Report */}
                             {canDeleteReports && onRequestDeleteReport && (
                               <button
                                 type="button"

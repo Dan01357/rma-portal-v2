@@ -717,3 +717,155 @@ export function isItemRejected(item, allReports = []) {
   const st = String(item.status || '').toLowerCase();
   return (st === 'rejected' || disp.includes('8- rejected') || disp.includes('claim rejected by vendor')) && !['closed', 'resolved', 'deleted'].includes(st);
 }
+
+/**
+ * Filter out fake Unsplash stock photos and parse input cleanly.
+ */
+export function getRealPhotos(photosInput) {
+  if (!photosInput) return [];
+  let list = [];
+  if (Array.isArray(photosInput)) {
+    list = photosInput;
+  } else if (typeof photosInput === 'string') {
+    const trimmed = photosInput.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        list = JSON.parse(trimmed);
+      } catch (e) {
+        list = [trimmed];
+      }
+    } else if (trimmed) {
+      list = [trimmed];
+    }
+  }
+  return list.filter(url => typeof url === 'string' && url.trim().length > 0 && !url.includes('images.unsplash.com'));
+}
+
+/**
+ * Standardized, Plain-English Warehouse Locations
+ */
+export const DEFAULT_WAREHOUSE_LOCATIONS = [
+  'Receiving Area',
+  'Good Stock Area',
+  'Supplier Return Area (RTV)',
+  'Customer Return Area',
+  'Hold / Inspection Area',
+  'Disposal / Scrap Area'
+];
+
+/**
+ * Map legacy or messy location strings to clean, standard names.
+ */
+export function normalizeWarehouseLocation(loc, item = null) {
+  const raw = String(loc || '').trim();
+  const isSupplierOutbound = item?.rma_type === 'supplier_outbound' || 
+    String(item?.disposition || '').toLowerCase().includes('rtv') || 
+    String(item?.disposition || '').toLowerCase().includes('vendor');
+
+  if (!raw || raw === '—' || raw === 'N/A' || raw.toLowerCase() === 'dock' || raw.toLowerCase() === 'dock-intake' || raw.toLowerCase() === 'rtv-dock') {
+    return isSupplierOutbound ? 'Supplier Return Area (RTV)' : 'Receiving Area';
+  }
+
+  const upper = raw.toUpperCase();
+  if (upper.includes('SCRAP') || upper.includes('DISPOS')) return 'Disposal / Scrap Area';
+  if (upper.includes('QUARANTINE') || upper.includes('HOLD') || upper.includes('INSPECT')) return 'Hold / Inspection Area';
+  if (upper.includes('OUTBOUND-RETURN') || upper.includes('CUSTOMER RETURN') || upper.includes('STORE')) return 'Customer Return Area';
+  if (upper.includes('GOOD STOCK') || upper.includes('SHELF') || upper.includes('RESTOCK')) return 'Good Stock Area';
+  if (upper.includes('SUPPLIER') || upper.includes('RTV') || upper.includes('VENDOR')) return 'Supplier Return Area (RTV)';
+  if (upper.includes('RECEIV') || upper.includes('DOCK')) return 'Receiving Area';
+
+  return raw;
+}
+
+/**
+ * Load customized warehouse locations from localStorage (with fallback).
+ */
+export function getWarehouseLocations() {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('rma_warehouse_locations');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse stored warehouse locations:', e);
+    }
+  }
+  return [...DEFAULT_WAREHOUSE_LOCATIONS];
+}
+
+/**
+ * Save customized warehouse locations to localStorage and broadcast change.
+ */
+export function saveWarehouseLocations(list) {
+  if (!Array.isArray(list) || list.length === 0) return;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('rma_warehouse_locations', JSON.stringify(list));
+      window.dispatchEvent(new CustomEvent('rma-locations-changed', { detail: { locations: list } }));
+    } catch (e) {
+      console.warn('Failed to save warehouse locations:', e);
+    }
+  }
+}
+
+/**
+ * Test Mode helper: Check if an RMA report is a sandbox test record.
+ */
+export function isTestRecord(item) {
+  if (!item) return false;
+  return Boolean(
+    item.is_test === true ||
+    item.ai_document_metadata?.is_test === true ||
+    String(item.notes || '').includes('[TEST_MODE]')
+  );
+}
+
+/**
+ * Trash helper: Check if an item is moved to 30-day soft trash bin.
+ */
+export function isTrashedRecord(item) {
+  if (!item) return false;
+  return Boolean(
+    item.is_trashed === true ||
+    item.ai_document_metadata?.is_trashed === true ||
+    String(item.notes || '').includes('[TRASHED]')
+  );
+}
+
+/**
+ * Archive helper: Check if an item is stored in the Enterprise Archive Vault.
+ */
+export function isArchivedRecord(item) {
+  if (!item) return false;
+  if (isTrashedRecord(item)) return false;
+  return Boolean(
+    item.is_archived === true ||
+    item.ai_document_metadata?.is_archived === true ||
+    String(item.notes || '').includes('[ARCHIVED]')
+  );
+}
+
+/**
+ * Calculate remaining days before 30-day auto-purge for trashed items.
+ */
+export function getTrashDaysRemaining(item) {
+  if (!item) return 0;
+  const purgeAfterStr = item.purge_after || item.ai_document_metadata?.purge_after;
+  const trashedAtStr = item.trashed_at || item.ai_document_metadata?.trashed_at;
+  let targetDate;
+  if (purgeAfterStr) {
+    targetDate = new Date(purgeAfterStr).getTime();
+  } else if (trashedAtStr) {
+    targetDate = new Date(trashedAtStr).getTime() + (30 * 24 * 60 * 60 * 1000);
+  } else {
+    return 30;
+  }
+  const diffMs = targetDate - Date.now();
+  const days = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
+  return days > 0 ? days : 0;
+}
+

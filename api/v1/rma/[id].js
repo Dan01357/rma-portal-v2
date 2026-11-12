@@ -1,6 +1,21 @@
 import { supabase } from '../../_lib/supabase.js';
 import { requireApiKey, sendJson, setCorsHeaders } from '../../_lib/auth.js';
 
+function normalizeWarehouseLocation(loc, rmaType = 'customer_inbound') {
+  const raw = String(loc || '').trim();
+  const isSupplier = rmaType === 'supplier_outbound';
+  if (!raw || raw === '—' || raw === 'N/A' || raw.toLowerCase() === 'dock' || raw.toLowerCase() === 'dock-intake' || raw.toLowerCase() === 'rtv-dock') {
+    return isSupplier ? 'Supplier Return Area (RTV)' : 'Receiving Area';
+  }
+  const upper = raw.toUpperCase();
+  if (upper.includes('SCRAP') || upper.includes('DISPOS')) return 'Disposal / Scrap Area';
+  if (upper.includes('QUARANTINE') || upper.includes('HOLD') || upper.includes('INSPECT')) return 'Hold / Inspection Area';
+  if (upper.includes('OUTBOUND') || upper.includes('CUSTOMER RETURN') || upper.includes('RETURN-TO-STORE')) return 'Customer Return Area';
+  if (upper.includes('RTV') || upper.includes('SUPPLIER') || upper.includes('VENDOR')) return 'Supplier Return Area (RTV)';
+  if (upper.includes('RESTOCK') || upper.includes('GOOD STOCK') || upper.includes('SHELF') || upper.includes('RACK') || upper.includes('BIN')) return 'Good Stock Area';
+  return raw;
+}
+
 function mapReasonToConditionGrade(reason) {
   if (!reason) return 'B - Damaged Packaging Only';
   const r = String(reason).toLowerCase();
@@ -69,10 +84,12 @@ export default async function handler(req, res) {
   // 2. PATCH / PUT: Update RMA status or fields
   if (req.method === 'PATCH' || req.method === 'PUT') {
     try {
-      let body = req.body;
-      if (typeof body === 'string') {
-        try { body = JSON.parse(body); } catch (e) {}
+      // Support both JSON request body and query parameters (for Scalar & URL parameter testing)
+      let body = { ...req.query, ...(typeof req.body === 'object' && req.body !== null ? req.body : {}) };
+      if (typeof req.body === 'string') {
+        try { body = { ...body, ...JSON.parse(req.body) }; } catch (e) {}
       }
+      delete body.id;
 
       const allowedFields = [
         'rma_type', 'status', 'notes', 'explanation', 'price', 'price_with_vat',
@@ -88,7 +105,10 @@ export default async function handler(req, res) {
         }
       }
 
-      if (Object.keys(updateData).length === 0) {
+      // Check lifecycle action (archive, trash, restore)
+      const lifecycleAction = body?.lifecycle || body?.action || null;
+
+      if (Object.keys(updateData).length === 0 && !lifecycleAction) {
         return sendJson(res, 400, {
           success: false,
           error: 'BAD_REQUEST',
@@ -135,14 +155,27 @@ export default async function handler(req, res) {
       }
 
       if (updateData.warehouse_location) {
-        updateData.warehouse_location = String(updateData.warehouse_location).trim().toUpperCase();
+        updateData.warehouse_location = normalizeWarehouseLocation(updateData.warehouse_location);
       }
 
       if (updateData.disposition) {
         const d = String(updateData.disposition).trim();
         if (d === 'Restock to Inventory' || d === '2- Restock to Inventory' || /restock/i.test(d)) {
           updateData.disposition = '2- Restock to Inventory';
+          if (!updateData.warehouse_location) updateData.warehouse_location = 'Good Stock Area';
         } else if (d === 'Scrap / Dispose' || d === '5- Scrap / Dispose' || /scrap|dispose/i.test(d)) {
+          updateData.disposition = '5- Scrap / Dispose';
+          if (!updateData.warehouse_location) updateData.warehouse_location = 'Disposal / Scrap Area';
+        } else if (d === 'Return to Vendor (RTV)' || d === '3- Return to Vendor (RTV)' || /rtv|vendor/i.test(d)) {
+          updateData.disposition = '3- Return to Vendor (RTV)';
+          if (!updateData.status) updateData.status = 'vendor_claimed';
+          if (!updateData.warehouse_location) updateData.warehouse_location = 'Supplier Return Area (RTV)';
+        } else if (d === 'Quarantine' || d === '4- Quarantine' || /quarantine|hold/i.test(d)) {
+          updateData.disposition = '4- Quarantine';
+          if (!updateData.status) updateData.status = 'under_inspection';
+          if (!updateData.warehouse_location) updateData.warehouse_location = 'Hold / Inspection Area';
+        }
+      }
           updateData.disposition = '5- Scrap / Dispose';
           if (!updateData.warehouse_location) updateData.warehouse_location = 'SCRAP-BIN';
         } else if (d === 'Return to Vendor (RTV)' || d === '3- Return to Vendor (RTV)' || /rtv|vendor/i.test(d)) {
@@ -238,6 +271,27 @@ export default async function handler(req, res) {
           delete updatedMeta.resolved_by;
         }
 
+        if (lifecycleAction === 'archive' || lifecycleAction === 'archived') {
+          updatedMeta.is_archived = true;
+          updatedMeta.is_trashed = false;
+          updatedMeta.archived_at = new Date().toISOString();
+          updatedMeta.archived_by = actorName;
+        } else if (lifecycleAction === 'trash' || lifecycleAction === 'trashed') {
+          updatedMeta.is_trashed = true;
+          updatedMeta.is_archived = false;
+          updatedMeta.trashed_at = new Date().toISOString();
+          updatedMeta.trashed_by = actorName;
+          updatedMeta.purge_after = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+        } else if (lifecycleAction === 'restore' || lifecycleAction === 'active') {
+          delete updatedMeta.is_trashed;
+          delete updatedMeta.trashed_at;
+          delete updatedMeta.trashed_by;
+          delete updatedMeta.purge_after;
+          delete updatedMeta.is_archived;
+          delete updatedMeta.archived_at;
+          delete updatedMeta.archived_by;
+        }
+
         // Clean operational tags from notes (avoid raw internal tags showing to customers)
         let updatedNotes = row.notes || '';
         updatedNotes = updatedNotes
@@ -261,6 +315,8 @@ export default async function handler(req, res) {
         delete rowPayload.user;
         delete rowPayload.updated_by;
         delete rowPayload.barcode;
+        delete rowPayload.lifecycle;
+        delete rowPayload.action;
 
         // If this row is a parent batch manifest, also update its child items inside row.items
         let parsedRowItems = [];

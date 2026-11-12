@@ -18,13 +18,15 @@ import {
   AtSign,
   Shield,
   KeyRound,
-  ExternalLink
+  ExternalLink,
+  MapPin
 } from 'lucide-react';
 import { rmaApi, supabase } from '../supabaseClient';
-import { applyEmailTestMode } from '../utils/rmaHelpers';
+import { applyEmailTestMode, getWarehouseLocations } from '../utils/rmaHelpers';
 import { notificationService } from '../services/notificationService';
 import { purchaseOrdersApi } from '../services/purchaseOrdersApi';
 import ApiKeysManagementSection from './ApiKeysManagementSection';
+import WarehouseLocationsModal from './WarehouseLocationsModal';
 
 export default function SettingsTab({ 
   isTestMode, 
@@ -72,8 +74,18 @@ export default function SettingsTab({
   const [isSavingPoKey, setIsSavingPoKey] = useState(false);
   const [poKeyFeedback, setPoKeyFeedback] = useState(null);
 
+  // Warehouse Locations Management State
+  const [isLocationsModalOpen, setIsLocationsModalOpen] = useState(false);
+  const [locationsList, setLocationsList] = useState(() => getWarehouseLocations());
+
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://lschluviltzsknptwgrz.supabase.co';
   const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_Jrv9ZNgGXJ4PZoNWCJSHxQ_7hZtQqd3';
+
+  useEffect(() => {
+    const handleLocs = () => setLocationsList(getWarehouseLocations());
+    window.addEventListener('rma-locations-changed', handleLocs);
+    return () => window.removeEventListener('rma-locations-changed', handleLocs);
+  }, []);
 
   useEffect(() => {
     handleCheckConnection();
@@ -728,8 +740,60 @@ export default function SettingsTab({
         </div>
       </div>
 
-      {/* 5. MULTI-SYSTEM REST API KEYS & INTEGRATION (SHA-256 HASHED) */}
+      {/* 5. WAREHOUSE LOCATIONS MANAGEMENT (CUSTOMIZABLE DROPDOWN) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-xs space-y-4">
+        <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 rounded-2xl shadow-inner">
+              <MapPin className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                Standard Warehouse Locations
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Customizable rack, bin, and staging areas used across triage, coworker queues, and label printing.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsLocationsModalOpen(true)}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-extrabold flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+          >
+            <span>⚙️ Manage Locations</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+          {locationsList.map((loc, idx) => (
+            <div
+              key={loc}
+              className="p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl flex items-center gap-2.5"
+            >
+              <span className="w-6 h-6 rounded-lg bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 font-mono text-[10px] font-black flex items-center justify-center shrink-0">
+                #{idx + 1}
+              </span>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate font-mono">
+                {loc}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 6. MULTI-SYSTEM REST API KEYS & INTEGRATION (SHA-256 HASHED) */}
       <ApiKeysManagementSection />
+
+      {/* Warehouse Locations Modal */}
+      <WarehouseLocationsModal
+        isOpen={isLocationsModalOpen}
+        onClose={() => {
+          setIsLocationsModalOpen(false);
+          setLocationsList(getWarehouseLocations());
+        }}
+        onLocationsUpdated={(newLocs) => setLocationsList(newLocs)}
+      />
 
     </div>
   );

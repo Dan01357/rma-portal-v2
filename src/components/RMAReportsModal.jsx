@@ -28,7 +28,7 @@ import {
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import { exportRMAReportsToCSV } from '../utils/exportCsv';
-import { formatLifecycleStage } from '../utils/rmaHelpers';
+import { formatLifecycleStage, getRealPhotos, normalizeWarehouseLocation } from '../utils/rmaHelpers';
 
 export default function RMAReportsModal({ 
   isOpen, 
@@ -567,9 +567,7 @@ export default function RMAReportsModal({
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60 font-medium">
                   {paginatedReports.map((item, idx) => {
-                    const photoList = Array.isArray(item.photos) 
-                      ? item.photos 
-                      : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
+                    const photoList = getRealPhotos(item.photos);
 
                     const reporterName = item.reporter_name || (item.reported_by && !item.reported_by.includes('(') ? item.reported_by : '') || 'Reporter';
                     const reporterContact = item.reporter_contact || (item.reported_by && item.reported_by.includes('(') ? item.reported_by.replace(/.*\((.*)\).*/, '$1') : '');
@@ -871,9 +869,7 @@ export default function RMAReportsModal({
           <div className="space-y-3.5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
               {paginatedReports.map((item, idx) => {
-                const photoList = Array.isArray(item.photos) 
-                  ? item.photos 
-                  : (typeof item.photos === 'string' ? JSON.parse(item.photos || '[]') : []);
+                const photoList = getRealPhotos(item.photos);
 
                 const reporterName = item.reporter_name || (item.reported_by && !item.reported_by.includes('(') ? item.reported_by : '') || 'Reporter';
                 const reporterContact = item.reporter_contact || (item.reported_by && item.reported_by.includes('(') ? item.reported_by.replace(/.*\((.*)\).*/, '$1') : '');

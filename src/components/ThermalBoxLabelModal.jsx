@@ -15,7 +15,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import { supabase } from '../supabaseClient';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
-import { formatQuantityWithPackSize, formatManifestBreakdown } from '../utils/rmaHelpers';
+import { formatQuantityWithPackSize, formatManifestBreakdown, normalizeWarehouseLocation } from '../utils/rmaHelpers';
 
 /**
  * Generates pseudo-Code128 SVG Barcode pattern based on string input
@@ -87,7 +87,7 @@ export default function ThermalBoxLabelModal({
   const quantity = report?.quantity || 1;
   const unit = report?.unit_name || report?.unit || 'pc';
   const supplier = report?.supplier_name || report?.supplier || 'Wholesale Distribution';
-  const location = report?.warehouse_location || 'DOCK-INTAKE';
+  const location = normalizeWarehouseLocation(report?.warehouse_location, report);
   const grade = report?.condition_grade || 'B - Damaged Packaging Only';
   const disposition = report?.disposition || 'Pending Triage';
   const inspectedBy = report?.inspected_by || report?.reported_by || 'Warehouse Dock';

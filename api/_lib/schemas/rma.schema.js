@@ -115,12 +115,16 @@ export const CreateRMAReportSchema = z.object({
 }).openapi('CreateRMAReportRequest');
 
 export const UpdateRMAReportSchema = z.object({
-  rma_type: RMATypeEnum.optional().openapi({ example: 'supplier_outbound', description: 'Reclassify logistics type between customer_inbound and supplier_outbound' }),
-  status: RMAStatusEnum.optional().openapi({ example: 'under_inspection' }),
-  condition_grade: RMAConditionGradeEnum.optional().openapi({ example: 'A - Like New / Resellable' }),
+  status: RMAStatusEnum.optional().openapi({ example: 'restocked', description: 'Lifecycle status update. Use "restocked" (WMS restocking), "reordered" (supplier PO placed), "scrapped", or "pending" (re-open for continuous queue testing)' }),
+  warehouse_location: z.string().optional().openapi({ example: 'Good Stock Area', description: 'Standardized warehouse area (e.g. Good Stock Area, Supplier Return Area (RTV), Disposal / Scrap Area, Receiving Area)' }),
+  notes: z.string().optional().openapi({ example: 'Confirmed restocked into WMS' }),
   disposition: RMADispositionEnum.optional().openapi({ example: 'Restock to Inventory' }),
-  warehouse_location: z.string().optional().openapi({ example: 'RACK-03-BIN-A' }),
-  inspected_by: z.string().optional().openapi({ example: 'Supervisor Danilo' }),
+  condition_grade: RMAConditionGradeEnum.optional().openapi({ example: 'A - Like New / Resellable' }),
+  rma_type: RMATypeEnum.optional().openapi({ example: 'customer_inbound', description: 'Reclassify logistics type between customer_inbound and supplier_outbound' }),
+  workflow_resolution: z.enum(['restocked', 'reordered', 'scrapped_no_reorder']).optional().openapi({ example: 'restocked', description: 'Resolution workflow flag stored safely in ai_document_metadata' }),
+  needs_reorder: z.boolean().optional().openapi({ example: true, description: 'Purchasing replenishment switch: true flags for supplier re-order, false marks as write-off' }),
+  hold_reason: z.string().optional().openapi({ example: 'Packaging seal torn during transit' }),
+  rejection_reason: z.string().optional().openapi({ example: 'Outside return window' }),
   quantity: z.number().int().min(1).optional().openapi({ example: 3 }),
   store_branch: z.string().optional().openapi({ example: 'Savemore Taguig - Branch 14' }),
   invoice_dr_number: z.string().optional().openapi({ example: 'DR-2026-8891' }),
@@ -129,13 +133,9 @@ export const UpdateRMAReportSchema = z.object({
   po_number: z.string().optional().openapi({ example: 'PO-2026-4401' }),
   expiry_date: z.string().optional().openapi({ example: '2026-12-31' }),
   batch_lot_number: z.string().optional().openapi({ example: 'LOT-B42' }),
-  notes: z.string().optional().openapi({ example: 'Inspection verified by supervisor' }),
   explanation: z.string().optional().openapi({ example: 'Replacement voucher issued' }),
   price: z.number().optional().openapi({ example: 25.00 }),
-  price_with_vat: z.number().optional().openapi({ example: 28.00 }),
-  needs_reorder: z.boolean().optional().openapi({ example: true, description: 'Purchasing replenishment switch: true flags for supplier re-order, false marks as write-off' }),
-  workflow_resolution: z.enum(['restocked', 'reordered', 'scrapped_no_reorder']).optional().openapi({ example: 'restocked', description: 'Resolution workflow flag stored safely in ai_document_metadata' }),
-  hold_reason: z.string().optional().openapi({ example: 'Packaging seal torn during transit' })
+  price_with_vat: z.number().optional().openapi({ example: 28.00 })
 }).openapi('UpdateRMAReportRequest');
 
 export function registerRMARoutes(registry) {
@@ -150,54 +150,71 @@ Individual line items are automatically returned and generic parent manifest con
 ### 🟢 Queue 1: Ready to Restock Queue (?queue=restock)
 To fetch all goods approved for warehouse restocking:
 \`\`\`bash
-curl -X GET "https://rma-portal-v2.vercel.app/api/v1/rma?queue=restock" \\
+curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?queue=restock" \\
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
 After restocking into ERP, confirm via PATCH:
 \`\`\`bash
-curl -X PATCH "https://rma-portal-v2.vercel.app/api/v1/rma/{id}" \\
+curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/{id}" \\
   -H "x-api-key: sk_live_rma_..." \\
   -H "Content-Type: application/json" \\
-  -d '{"status": "restocked", "warehouse_location": "RACK-03-BIN-A"}'
+  -d '{"status": "restocked", "warehouse_location": "Good Stock Area"}'
 \`\`\`
 
 ### 🔴 Queue 2: Re-Order Needed / Scrapped (?queue=reorder)
 To fetch all goods deemed total loss / scrapped so your ERP can re-order replacement stock from suppliers:
 \`\`\`bash
-curl -X GET "https://rma-portal-v2.vercel.app/api/v1/rma?queue=reorder" \\
+curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?queue=reorder" \\
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
 After re-ordering from suppliers, confirm via PATCH:
 \`\`\`bash
-curl -X PATCH "https://rma-portal-v2.vercel.app/api/v1/rma/{id}" \\
+curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/{id}" \\
   -H "x-api-key: sk_live_rma_..." \\
   -H "Content-Type: application/json" \\
-  -d '{"status": "scrapped"}'
+  -d '{"status": "scrapped", "warehouse_location": "Disposal / Scrap Area"}'
 \`\`\`
 
 ### 🟣 Queue 3: Vendor Recovery / RTV (?queue=rtv_debit)
 To fetch all merchandise scheduled for outbound Return to Vendor (RTV) claims:
 \`\`\`bash
-curl -X GET "https://rma-portal-v2.vercel.app/api/v1/rma?queue=rtv_debit" \\
+curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?queue=rtv_debit" \\
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
 
 ### 🟡 Queue 4: Hold / Quarantine (?queue=quarantine)
 To fetch all merchandise currently frozen on Hold / Quarantine awaiting investigation:
 \`\`\`bash
-curl -X GET "https://rma-portal-v2.vercel.app/api/v1/rma?queue=quarantine" \\
+curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?queue=quarantine" \\
   -H "x-api-key: sk_live_rma_..."
-\`\`\``,
+\`\`\`
+
+### 🧪 Test Mode Sandbox (?test_mode=true)
+Pass \`test_mode=true\` to isolate queries and updates strictly within the Sandbox environment without altering live records:
+\`\`\`bash
+curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?test_mode=true&queue=restock" \\
+  -H "x-api-key: sk_live_rma_..."
+\`\`\`
+Reset any ticket back to pending for re-testing:
+\`\`\`bash
+curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/{id}" \\
+  -H "x-api-key: sk_live_rma_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"status": "pending"}'
+\`\`\`
+`,
     tags: ['RMA Reports'],
     request: {
       query: PaginationQuerySchema.extend({
         rma_type: z.enum(['customer_inbound', 'supplier_outbound']).optional().openapi({ description: 'Filter by logistics type: customer_inbound or supplier_outbound', example: 'customer_inbound' }),
         queue: z.enum(['restock', 'reorder', 'scrap', 'rtv_debit', 'quarantine']).optional().openapi({ description: 'Filter by 4-pillar operational queue: "restock" (ready to restock in WMS), "reorder" or "scrap" (re-order replacement from supplier), "rtv_debit" (vendor recovery / outbound RTV claims), "quarantine" (items on hold)', example: 'restock' }),
+        test_mode: z.enum(['true', 'false']).optional().openapi({ description: 'Filter by test mode: "true" returns sandbox test records only, "false" or omitted returns live production records only', example: 'false' }),
+        lifecycle: z.enum(['active', 'archived', 'trashed']).optional().openapi({ description: 'Filter by lifecycle state: "active" (default), "archived" (Enterprise Archive Vault), "trashed" (30-day soft trash bin)', example: 'active' }),
         status: z.string().optional().openapi({ description: 'Filter by status (pending, open, restocked, scrapped). "pending" and "open" return all pre-finalized active returns.', example: 'pending' }),
         barcode: z.string().optional().openapi({ description: 'Filter by exact product barcode', example: '4800016644833' }),
         disposition: z.string().optional().openapi({ description: 'Filter by warehouse triage disposition (e.g. "Restock to Inventory", "Return to Vendor (RTV)", "Scrap / Dispose")', example: 'Restock to Inventory' }),
         condition_grade: z.string().optional().openapi({ description: 'Filter by item grade condition', example: 'A - Like New / Resellable' }),
-        warehouse_location: z.string().optional().openapi({ description: 'Filter by bin or rack storage location', example: 'RACK-03-BIN-A' }),
+        warehouse_location: z.string().optional().openapi({ description: 'Filter by standardized warehouse area (e.g. "Good Stock Area", "Supplier Return Area (RTV)", "Disposal / Scrap Area")', example: 'Good Stock Area' }),
         is_parent: z.string().optional().openapi({ description: 'Filter by parent manifest container (true) or individual items (false, default)', example: 'false' }),
         search: z.string().optional().openapi({ description: 'Search term across RMA #, name, SKU, or reporter', example: 'Oishi' })
       })

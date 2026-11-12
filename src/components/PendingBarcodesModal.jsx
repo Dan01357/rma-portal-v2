@@ -22,7 +22,7 @@ import {
 import { catalogService } from '../services/catalogService';
 import { authService } from '../services/authService';
 import { notificationService } from '../services/notificationService';
-import { isUnlabeledBarcode } from '../utils/rmaHelpers';
+import { isUnlabeledBarcode, getRealPhotos } from '../utils/rmaHelpers';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import SupplierInput from './SupplierInput';
@@ -79,9 +79,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     const itemBarcode = String(item.barcode || '').trim();
     const rawCode = String(item.code || item.sku || '').trim();
     const isCodeValid = rawCode && rawCode !== itemBarcode && !rawCode.toLowerCase().includes('awaiting') && !rawCode.toLowerCase().includes('unidentified');
-    const photoList = Array.isArray(item.photos)
-      ? item.photos
-      : (typeof item.photos === 'string' && item.photos.startsWith('[') ? JSON.parse(item.photos || '[]') : []);
+    const photoList = getRealPhotos(item.photos);
 
     setFormData({
       code: isCodeValid ? rawCode : '',
@@ -389,9 +387,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                     </div>
                   ) : (
                     paginatedList.map((item, idx) => {
-                      const photoList = Array.isArray(item.photos)
-                        ? item.photos
-                        : (typeof item.photos === 'string' && item.photos.startsWith('[') ? JSON.parse(item.photos || '[]') : []);
+                      const photoList = getRealPhotos(item.photos);
                       const isUnlabeled = isUnlabeledBarcode(item.barcode) || item.ai_document_metadata?.is_unlabeled;
 
                       return (
