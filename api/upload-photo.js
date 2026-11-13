@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { setCorsHeaders } from './_lib/auth.js';
-import { inspectPaperworkWithGemini } from './_lib/geminiInspector.js';
+import { inspectPaperworkWithGemini, inspectDriverLicenseWithGemini } from './_lib/geminiInspector.js';
 
 /**
  * Cache access token across warm lambda invocations
@@ -667,6 +667,26 @@ export default async function handler(req, res) {
         confidence: 0,
         error: err.message,
         rejection_reason: `AI inspection error: ${err.message}`
+      });
+    }
+  }
+
+  // 1b. Handle Gemini Flash Driver License OCR
+  if (req.query?.action === 'inspect-license' || parsedBody?.action === 'inspect-license') {
+    try {
+      const { fileData, imageUrl, mimeType } = parsedBody || {};
+      const result = await inspectDriverLicenseWithGemini({
+        fileData: fileData || parsedBody?.image || parsedBody?.photo,
+        imageUrl: imageUrl || parsedBody?.url,
+        mimeType: mimeType || 'image/jpeg'
+      });
+      return res.status(200).json(result);
+    } catch (err) {
+      return res.status(200).json({
+        is_valid_license: false,
+        driver_name: null,
+        license_number: null,
+        rejection_reason: `License OCR notice: ${err.message}`
       });
     }
   }

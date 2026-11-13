@@ -446,3 +446,115 @@ export function exportCreditMemosToCSV(memos, filename = null) {
   const actualFilename = resolveFilenameWithTimestamp('Pingcon_Credit_Memos_Export', filename);
   downloadCsvBlob(csv, actualFilename);
 }
+
+/**
+ * Exports a Daily/Weekly RMA Matrix Report modeled after the coworker's Daily Ordered Pieces Report.
+ * Separated by streamType ('customer_inbound' | 'supplier_outbound'), filtered by startDate..endDate.
+ * Columns: SKU, Description, YYYY-MM-DD daily piece counts, "Week total (pcs)" at each Sunday/end, and "Grand Total (pcs)".
+ */
+export function exportRmaMatrixCsv({
+  reports = [],
+  streamType = 'supplier_outbound',
+  startDate,
+  endDate,
+  isTestMode = false
+}) {
+  const start = startDate ? new Date(`${startDate}T00:00:00`) : new Date(Date.now() - 14 * 86400000);
+  const end = endDate ? new Date(`${endDate}T23:59:59`) : new Date();
+
+  // Build ordered list of YYYY-MM-DD dates from start to end
+  const dates = [];
+  const cursor = new Date(start);
+  cursor.setHours(0, 0, 0, 0);
+  const endDay = new Date(end);
+  endDay.setHours(0, 0, 0, 0);
+  while (cursor <= endDay && dates.length < 180) {
+    const yyyy = cursor.getFullYear();
+    const mm = String(cursor.getMonth() + 1).padStart(2, '0');
+    const dd = String(cursor.getDate()).padStart(2, '0');
+    dates.push(`${yyyy}-${mm}-${dd}`);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  // Filter reports by streamType, test mode, and date range
+  const filtered = (reports || []).filter((r) => {
+    const rTest = Boolean(r?.is_test || r?.ai_document_metadata?.is_test || r?.ai_document_metadata?.test_mode);
+    if (rTest !== Boolean(isTestMode)) return false;
+    const rType = r?.rma_type || 'customer_inbound';
+    if (rType !== streamType) return false;
+    const dStr = formatCleanDateOnly(r.created_at);
+    return dStr >= dates[0] && dStr <= dates[dates.length - 1];
+  });
+
+  // Aggregate pieces per SKU + Description + Date
+  const skuMap = new Map();
+  const addEntry = (sku, desc, dateStr, qty, unit, pcsPerCase) => {
+    if (!dateStr) return;
+    const key = `${sku || 'NO-SKU'}||${desc || 'Unnamed Item'}`;
+    if (!skuMap.has(key)) {
+      skuMap.set(key, { sku: sku || 'N/A', desc: desc || 'Unnamed Item', byDate: {} });
+    }
+    const u = String(unit || 'pc').trim().toLowerCase();
+    const ppc = Number(pcsPerCase || 0);
+    const pieces = (u === 'case' || u === 'cases' || u === 'cs') && ppc > 0 ? Number(qty || 1) * ppc : Number(qty || 1);
+    const row = skuMap.get(key);
+    row.byDate[dateStr] = (row.byDate[dateStr] || 0) + pieces;
+  };
+
+  filtered.forEach((r) => {
+    const dStr = formatCleanDateOnly(r.created_at);
+    if (Array.isArray(r.items) && r.items.length > 0) {
+      r.items.forEach((it) => {
+        addEntry(it.code || it.barcode || r.code, it.name || it.product_name || r.name, dStr, it.quantity || it.qty, it.unit_name || it.unit, it.pieces_per_case || r.pieces_per_case);
+      });
+    } else {
+      addEntry(r.code || r.barcode, r.name || r.product_name, dStr, r.quantity, r.unit_name, r.pieces_per_case);
+    }
+  });
+
+  // Build columns with "Week total (pcs)" after every Sunday (day === 0) or at the end of the range
+  const columns = [];
+  let weekBucket = [];
+  dates.forEach((dStr, idx) => {
+    columns.push({ type: 'day', date: dStr, label: dStr });
+    weekBucket.push(dStr);
+    const dayOfWeek = new Date(`${dStr}T00:00:00`).getDay();
+    if (dayOfWeek === 0 || idx === dates.length - 1) {
+      columns.push({ type: 'week', dates: [...weekBucket], label: 'Week total (pcs)' });
+      weekBucket = [];
+    }
+  });
+
+  const streamLabel = streamType === 'supplier_outbound' ? 'SUPPLIER RTV' : 'CUSTOMER HUB';
+  const titleRow = [escapeCsvCell(`${streamLabel} — DAILY RMA PIECES MATRIX REPORT (${isTestMode ? 'TEST MODE' : 'LIVE'})`)];
+  const metaRow = [escapeCsvCell(`Range: ${dates[0] || ''} to ${dates[dates.length - 1] || ''} | SKUs: ${skuMap.size}`)];
+  const headerRow = [
+    escapeCsvCell('SKU'),
+    escapeCsvCell('Description'),
+    ...columns.map((c) => escapeCsvCell(c.label)),
+    escapeCsvCell('Grand Total (pcs)')
+  ];
+
+  const dataRows = Array.from(skuMap.values()).map((entry) => {
+    let grandTotal = 0;
+    const cells = columns.map((col) => {
+      if (col.type === 'day') {
+        const val = entry.byDate[col.date] || 0;
+        grandTotal += val;
+        return escapeCsvCell(val);
+      }
+      const weekSum = col.dates.reduce((s, d) => s + (entry.byDate[d] || 0), 0);
+      return escapeCsvCell(weekSum);
+    });
+    return [
+      escapeCsvTextFormula(entry.sku),
+      escapeCsvCell(entry.desc),
+      ...cells,
+      escapeCsvCell(grandTotal)
+    ].join(',');
+  });
+
+  const csv = [titleRow.join(','), metaRow.join(','), headerRow.join(','), ...dataRows].join('\r\n');
+  const prefix = streamType === 'supplier_outbound' ? 'Supplier_RTV_Matrix' : 'Customer_Hub_Matrix';
+  downloadCsvBlob(csv, resolveFilenameWithTimestamp(prefix));
+}

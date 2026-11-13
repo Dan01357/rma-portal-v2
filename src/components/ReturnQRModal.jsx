@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
+import { printIsolatedElement } from '../utils/printIsolatedElement';
 import { 
   X, 
   Printer, 
@@ -48,32 +49,66 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
   });
   const dateTimeFormatted = `${dateFormatted} • ${timeFormatted}`;
 
-  // Clean RMA URL payload: when scanned by smartphone camera or barcode gun, opens Driver Delivery Handover widget
-  const qrPayload = typeof window !== 'undefined'
-    ? `${window.location.origin}/?rma=${encodeURIComponent(rmaNumber)}&action=delivery`
-    : rmaNumber;
+  const [stickerWidth, setStickerWidth] = useState(320); // px (~3.3 in)
+  const [stickerHeight, setStickerHeight] = useState(380); // px (~4.0 in)
+  const [sizePreset, setSizePreset] = useState('medium');
+  const dragStateRef = useRef(null);
+
+  const applyPreset = (preset) => {
+    setSizePreset(preset);
+    if (preset === 'small') { setStickerWidth(210); setStickerHeight(240); }
+    else if (preset === 'medium') { setStickerWidth(320); setStickerHeight(380); }
+    else if (preset === 'large') { setStickerWidth(420); setStickerHeight(480); }
+    else if (preset === 'xl') { setStickerWidth(520); setStickerHeight(600); }
+  };
+
+  const startResize = (direction, e) => {
+    e.preventDefault();
+    const startX = e.clientX || e.touches?.[0]?.clientX || 0;
+    const startY = e.clientY || e.touches?.[0]?.clientY || 0;
+    dragStateRef.current = { direction, startX, startY, startW: stickerWidth, startH: stickerHeight };
+
+    const onMove = (ev) => {
+      if (!dragStateRef.current) return;
+      const curX = ev.clientX || ev.touches?.[0]?.clientX || 0;
+      const curY = ev.clientY || ev.touches?.[0]?.clientY || 0;
+      const dx = curX - dragStateRef.current.startX;
+      const dy = curY - dragStateRef.current.startY;
+      setSizePreset('custom');
+      if (dragStateRef.current.direction === 'x' || dragStateRef.current.direction === 'xy') {
+        setStickerWidth(Math.max(180, Math.min(600, dragStateRef.current.startW + dx)));
+      }
+      if (dragStateRef.current.direction === 'y' || dragStateRef.current.direction === 'xy') {
+        setStickerHeight(Math.max(200, Math.min(720, dragStateRef.current.startH + dy)));
+      }
+    };
+    const onUp = () => {
+      dragStateRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove);
+    window.addEventListener('touchend', onUp);
+  };
+
+  const isTestReport = Boolean(report?.is_test || report?.ai_document_metadata?.is_test || report?.ai_document_metadata?.test_mode);
+  // Private In-App QR Payload: NOT a public URL, so Google Lens / external phone cameras cannot open it
+  const qrPayload = `PINGCON-RTV:${rmaNumber}:${isTestReport ? 'TEST' : 'LIVE'}`;
 
   const handlePrint = async () => {
     setIsPrinting(true);
     try {
-      await printBoxSticker({
-        svgElementOrId: 'rma-sticker-qr-svg',
-        rmaNumber,
-        supplier,
-        itemName,
-        barcode,
-        sku,
-        quantity,
-        unit,
-        reason,
-        reporter,
-        reporterContact,
-        dateFormatted: dateTimeFormatted,
-        storeBranch,
-        totalItems,
-        totalQuantity,
-        items: manifestItems,
-        documentTitle: `RMA-Verification-Label-${rmaNumber}`
+      const wIn = (stickerWidth / 96).toFixed(2);
+      const hIn = (stickerHeight / 96).toFixed(2);
+      printIsolatedElement({
+        elementId: 'rma-resizable-sticker-print',
+        documentTitle: `RMA-Sticker-${rmaNumber}`,
+        pageSize: `${wIn}in ${hIn}in`,
+        pageMargin: '0.05in',
       });
     } catch (err) {
       console.error('Failed to print sticker directly:', err);
@@ -181,12 +216,71 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
           </div>
         )}
 
-        {/* Scrollable Body: Printable Box Sticker Card */}
+        {/* Scrollable Body: Size Controls + Printable Box Sticker Card */}
         <div className="flex-1 overflow-y-auto overscroll-contain p-3.5 sm:p-6 bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-start">
-          <div 
-            id="rma-qr-box-sticker"
-            className="w-full max-w-md bg-white border-2 border-slate-900 rounded-2xl p-4 sm:p-5 shadow-sm text-slate-900 space-y-3.5 my-auto shrink-0"
+          {/* Size Presets + Drag Instructions */}
+          <div className="w-full max-w-md mb-3 space-y-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-1.5">
+              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                Sticker Size ({(stickerWidth / 96).toFixed(1)}" × {(stickerHeight / 96).toFixed(1)}"):
+              </span>
+              <div className="flex items-center gap-1 flex-wrap">
+                {[
+                  { id: 'small', label: 'Small (Can)' },
+                  { id: 'medium', label: 'Medium' },
+                  { id: 'large', label: 'Large' },
+                  { id: 'xl', label: 'XL' },
+                ].map(p => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => applyPreset(p.id)}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                      sizePreset === p.id
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="text-[10px] text-slate-500 dark:text-slate-400">
+              Drag the blue edges or corner on the sticker below to resize freely for small cans or large boxes.
+            </p>
+          </div>
+
+          <div
+            id="rma-resizable-sticker-print"
+            style={{ width: `${stickerWidth}px`, minHeight: `${stickerHeight}px` }}
+            className="relative bg-white border-2 border-slate-900 rounded-2xl p-3 sm:p-4 shadow-sm text-slate-900 space-y-2.5 my-auto shrink-0 select-none"
           >
+            {/* Drag Right Edge */}
+            <div
+              onMouseDown={(e) => startResize('x', e)}
+              onTouchStart={(e) => startResize('x', e)}
+              title="Drag horizontally to resize width"
+              className="no-print absolute top-2 bottom-2 -right-1.5 w-3 cursor-ew-resize flex items-center justify-center group"
+            >
+              <div className="w-1 h-8 rounded-full bg-blue-500/70 group-hover:bg-blue-600" />
+            </div>
+            {/* Drag Bottom Edge */}
+            <div
+              onMouseDown={(e) => startResize('y', e)}
+              onTouchStart={(e) => startResize('y', e)}
+              title="Drag vertically to resize height"
+              className="no-print absolute left-2 right-2 -bottom-1.5 h-3 cursor-ns-resize flex items-center justify-center group"
+            >
+              <div className="h-1 w-8 rounded-full bg-blue-500/70 group-hover:bg-blue-600" />
+            </div>
+            {/* Drag Corner */}
+            <div
+              onMouseDown={(e) => startResize('xy', e)}
+              onTouchStart={(e) => startResize('xy', e)}
+              title="Drag corner to resize both"
+              className="no-print absolute -right-1.5 -bottom-1.5 w-4 h-4 rounded-full bg-blue-600 border-2 border-white shadow cursor-nwse-resize"
+            />
             {/* Top Bar: Company & Badge */}
             <div className="flex items-center justify-between border-b-2 border-slate-900 pb-2">
               <div>

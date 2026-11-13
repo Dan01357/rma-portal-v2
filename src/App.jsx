@@ -89,6 +89,7 @@ import NotificationBell from './components/NotificationBell';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
 import ReturnQRModal from './components/ReturnQRModal';
 import QuickRMAActionModal from './components/QuickRMAActionModal';
+import SupplierRtvSimpleModal from './components/SupplierRtvSimpleModal';
 import DriverDeliveryHandoverModal from './components/DriverDeliveryHandoverModal';
 import GatekeeperPinModal from './components/GatekeeperPinModal';
 import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
@@ -494,6 +495,21 @@ export default function App() {
   const parseRmaFromScan = (rawText) => {
     if (!rawText) return null;
     const str = String(rawText).trim();
+    // Private In-App QR format: PINGCON-RTV:<RMA_NUMBER>:<TEST|LIVE>
+    if (str.toUpperCase().startsWith('PINGCON-RTV:')) {
+      const parts = str.split(':');
+      const rmaCode = parts[1]?.trim();
+      const qrMode = (parts[2] || 'LIVE').toUpperCase();
+      if (qrMode === 'TEST' && !isTestMode) {
+        showToast('This is a TEST MODE QR sticker. Switch to Test Mode to scan it.', 'warning');
+        return null;
+      }
+      if (qrMode === 'LIVE' && isTestMode) {
+        showToast('This is a LIVE RMA QR sticker. Switch to Live Mode to scan it.', 'warning');
+        return null;
+      }
+      return rmaCode || null;
+    }
     if (str.includes('rma=')) {
       try {
         const url = new URL(str.startsWith('http') ? str : `https://example.com/${str.replace(/^\/?/, '')}`);
@@ -1409,6 +1425,7 @@ export default function App() {
 
   // Modals & Queues
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [simpleRtvRmaNumber, setSimpleRtvRmaNumber] = useState(null);
   const [isPendingModalOpen, setIsPendingModalOpen] = useState(false);
   const [isReportsModalOpen, setIsReportsModalOpen] = useState(false);
   const [pendingBarcodesList, setPendingBarcodesList] = useState([]);
@@ -2468,8 +2485,9 @@ export default function App() {
       return;
     }
 
-    if (!expiryDate) {
-      showToast('Product expiration date is required before adding item to manifest.', 'warning');
+    const isSupplierRtvSubmission = gateSession?.stream_type === 'supplier_outbound' || (isTestMode && testModeStreamType === 'supplier_outbound');
+    if (isSupplierRtvSubmission && !expiryDate) {
+      showToast('Product expiration date is required for Supplier RTV before adding item to manifest.', 'warning');
       return;
     }
 
@@ -2582,8 +2600,9 @@ export default function App() {
         showToast('Photo of damaged product is required before submitting return report.', 'warning');
         return;
       }
-      if (!expiryDate) {
-        showToast('Product expiration date is required before submitting return report.', 'warning');
+      const isSupplierRtvSubmission = gateSession?.stream_type === 'supplier_outbound' || (isTestMode && testModeStreamType === 'supplier_outbound');
+      if (isSupplierRtvSubmission && !expiryDate) {
+        showToast('Product expiration date is required for Supplier RTV before submitting return report.', 'warning');
         return;
       }
       const effectiveItemName = customItemName.trim() || detectedProduct?.name || (activeBarcode ? `Unidentified Item (${activeBarcode})` : 'General Return Item');
@@ -6876,11 +6895,34 @@ export default function App() {
           setIsScannerOpen(false);
           const rma = parseRmaFromScan(code);
           if (rma) {
-            setQuickRmaNumber(rma);
-            setIsQuickRmaModalOpen(true);
-          } else {
+            const isSupplierRtvSession = gateSession?.stream_type === 'supplier_outbound' || (isTestMode && testModeStreamType === 'supplier_outbound') || currentUser;
+            if (isSupplierRtvSession && (gateSession?.stream_type === 'supplier_outbound' || String(code).toUpperCase().startsWith('PINGCON-RTV:'))) {
+              setSimpleRtvRmaNumber(rma);
+            } else {
+              setQuickRmaNumber(rma);
+              setIsQuickRmaModalOpen(true);
+            }
+          } else if (!String(code).toUpperCase().startsWith('PINGCON-RTV:')) {
             setBarcodeInput(code);
           }
+        }}
+      />
+
+      {/* Simple 4-Option Supplier RTV Modal (For Invited Staff & Admin) */}
+      <SupplierRtvSimpleModal
+        isOpen={Boolean(simpleRtvRmaNumber)}
+        onClose={() => setSimpleRtvRmaNumber(null)}
+        rmaNumber={simpleRtvRmaNumber}
+        currentUser={currentUser}
+        gateSession={gateSession}
+        onCompleted={({ rmaNumber: doneRma, status }) => {
+          refreshAllData();
+          showToast(
+            status === 'picked_up'
+              ? `${doneRma} tagged as Picked Up by Supplier!`
+              : `${doneRma} updated successfully!`,
+            'success'
+          );
         }}
       />
 

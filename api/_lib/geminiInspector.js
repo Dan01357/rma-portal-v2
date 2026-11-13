@@ -195,3 +195,111 @@ Return ONLY valid JSON matching this schema:
   throw new Error(`Gemini inspection failed: ${lastError?.message || 'Unknown error'}`);
 }
 
+/**
+ * Extracts Driver's Name and License / ID Number from a Driver's License photo using Gemini Vision.
+ */
+export async function inspectDriverLicenseWithGemini({ fileData, imageUrl, mimeType = 'image/jpeg' }) {
+  const apiKey = process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_AI_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY;
+
+  let cleanMimeType = mimeType || 'image/jpeg';
+  let base64String = '';
+
+  if (fileData) {
+    if (fileData.includes(';base64,')) {
+      const parts = fileData.split(';base64,');
+      cleanMimeType = parts[0].replace('data:', '') || cleanMimeType;
+      base64String = parts[1];
+    } else if (fileData.includes(',')) {
+      base64String = fileData.split(',')[1];
+    } else {
+      base64String = fileData;
+    }
+  } else if (imageUrl) {
+    const imgRes = await fetch(imageUrl);
+    if (!imgRes.ok) throw new Error(`Failed to fetch image: ${imgRes.statusText}`);
+    const arrayBuf = await imgRes.arrayBuffer();
+    cleanMimeType = imgRes.headers.get('content-type') || cleanMimeType;
+    base64String = Buffer.from(arrayBuf).toString('base64');
+  } else {
+    throw new Error('Either fileData (Base64) or imageUrl must be provided.');
+  }
+
+  if (!apiKey) {
+    return {
+      is_valid_license: false,
+      driver_name: null,
+      license_number: null,
+      error: 'MISSING_GEMINI_API_KEY',
+      rejection_reason: 'GEMINI_API_KEY is not configured. Please enter Driver Name and License # manually.'
+    };
+  }
+
+  const promptText = `
+You are an Identity & Logistics Verification OCR Specialist.
+Examine the provided photo and extract the Driver's Full Name and Driver's License / Government ID Number.
+- "is_valid_license": true if this is a readable Driver's License or Government ID card, false if blurry, blank, or not an ID.
+- "driver_name": Full name printed on the ID (e.g. "JUAN DELA CRUZ"), or null if unreadable.
+- "license_number": Exact License / ID number (e.g. "N01-23-456789"), or null if unreadable.
+- "rejection_reason": Brief reason if is_valid_license is false, otherwise null.
+
+NEVER invent or guess fake names or numbers. Return ONLY valid JSON:
+{
+  "is_valid_license": boolean,
+  "driver_name": string | null,
+  "license_number": string | null,
+  "rejection_reason": string | null
+}
+`;
+
+  const configuredModel = process.env.GEMINI_MODEL;
+  const modelsToTry = [
+    configuredModel || 'gemini-3.5-flash-lite',
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-flash-latest'
+  ].filter(Boolean);
+
+  let lastError = null;
+  for (const modelName of modelsToTry) {
+    try {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: promptText },
+              { inline_data: { mime_type: cleanMimeType, data: base64String } }
+            ]
+          }],
+          generationConfig: { temperature: 0.1, responseMimeType: 'application/json' }
+        })
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errText}`);
+      }
+      const data = await response.json();
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          is_valid_license: Boolean(parsed.is_valid_license),
+          driver_name: parsed.driver_name ? String(parsed.driver_name).trim() : null,
+          license_number: parsed.license_number ? String(parsed.license_number).trim() : null,
+          rejection_reason: parsed.is_valid_license ? null : (parsed.rejection_reason || 'Could not read Driver License clearly.')
+        };
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw new Error(`Gemini license OCR failed: ${lastError?.message || 'Unknown error'}`);
+}
+
+
