@@ -1682,6 +1682,62 @@ Each test scenario defines:
 
 ---
 
+## Section 21: Video 4 QA Audit Resolution (Driver Handover Proof, Test Sequence Isolation, Mandatory Expiration Date, Restitution Schema Fix)
+
+- [ ] **TC-V4-01 (Driver Delivery Handover QR Widget & Proof Photos Verification)**
+  * **Location**: Mobile Device / QR Scanner or `/?rma=[RMA_NUMBER]&action=delivery`
+  * **Action**:
+    1. As a delivery driver or courier, scan the QR code printed on the RMA Box Label or Return Gate Pass.
+    2. The dedicated **Driver Delivery Handover Widget** opens directly without requiring an admin password.
+    3. Verify destination counterparty is prominently displayed (e.g. *Deliver Directly to Vendor: Mondelez Philippines* or *Deliver to Pingcon Receiving Dock*).
+    4. Attempt to confirm delivery without photos: verify warning appears requiring proof photos.
+    5. Attach **Photo 1 (Required)**: Photo of the delivery driver / courier handling the delivery.
+    6. Attach **Photo 2 (Required)**: Photo of the delivered items placed on the counterparty / supplier receiving dock counter.
+    7. Enter driver name / vehicle plate number and tap the large green **`[ 🚚 Confirm Delivered to Supplier ]`** button.
+  * **Expected Behavior**:
+    1. System automatically compresses both photos (WebP) and records handover proof in `rma_reports.ai_document_metadata.delivery_handover`.
+    2. RMA lifecycle status updates to `vendor_claimed` (for Supplier RTV) or `received_at_dock` (for customer inbound).
+    3. Celebration screen displays with handover summary, timestamp, and photo thumbnails.
+    4. Admin Portal instantly receives real-time broadcast and displays `🚚 Delivered (Driver Juan)` badge and side-by-side photos in Triage modal.
+
+- [ ] **TC-V4-02 (Strict RMA ID Sequence Isolation: Test Mode Never Consumes Live Ascending Sequence)**
+  * **Location**: Test Mode Sandbox vs. Live Production Inbound
+  * **Action**:
+    1. Turn **Test Mode: ON** in top bar.
+    2. Submit 3 test returns sequentially.
+    3. Observe the generated RMA numbers: `RMA-TEST-2026-0001-XXXX`, `RMA-TEST-2026-0002-YYYY`, `RMA-TEST-2026-0003-ZZZZ`.
+    4. Turn **Test Mode: OFF** (Live Mode).
+    5. Submit a live return.
+  * **Expected Behavior**:
+    1. Test mode RMA numbers ALWAYS have the `RMA-TEST-` prefix.
+    2. The live return sequence is **completely unaffected** by the 3 test returns. If the highest live RMA was `0005`, the new live return receives sequence `0006`, NOT `0009`.
+    3. Test mode and live mode sequences operate on independent ascending counters and can never collide or share the same RMA ID.
+
+- [ ] **TC-V4-03 (Mandatory Product Expiration Date Across Customer Hub & Supplier RTV)**
+  * **Location**: Single Return Intake & Multi-Item Batch Manifest Table
+  * **Action**:
+    1. Open return report intake on Customer Inbound or Supplier RTV.
+    2. Notice the **Product Expiration Date** field is always visible and marked **Required \*** with a badge.
+    3. Select a defect reason other than "Expired" (e.g. "Damaged Box / Crushed Packaging").
+    4. Leave the Expiration Date blank and click **"Add to Manifest"** or **"Submit Return Report"**.
+  * **Expected Behavior**:
+    1. Submission is blocked with warning toast: *"Product expiration date is required before adding item to manifest."* / *"Product expiration date is required before submitting return report."*
+    2. Selecting a date satisfies validation and allows submission.
+    3. Every item in multi-item manifest displays its verified expiration date badge.
+
+- [ ] **TC-V4-04 (Super Admin Silent Restitution Saves Cleanly Without `is_test` Column Error)**
+  * **Location**: `QuickRMAActionModal` -> `[ Edit Details & Documents ]`
+  * **Action**:
+    1. Open any RMA ticket in `QuickRMAActionModal` and click **"Edit Details & Documents"**.
+    2. Change the historical timestamp, commercial SI/DR/PO numbers, or toggle between Test Mode Sandbox and Live Production Hub.
+    3. Click **"Save & Apply Restitution"**.
+  * **Expected Behavior**:
+    1. Changes save immediately without throwing `PGRST204: Could not find the 'is_test' column of 'rma_reports' in the schema cache`.
+    2. Test/Live mode state is safely preserved inside `ai_document_metadata.is_test` and notes `[TEST_MODE]`.
+    3. Dynamic fallback automatically strips non-existent root columns from Postgres update payloads.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -1706,4 +1762,5 @@ Each test scenario defines:
 | **Phase 18: Enterprise Upgrade (Zero Stock Photos, Locations, CSV, Sandbox, Trash & Archive)** | Full Platform & REST API | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 19: Video QA Audit Resolution & Workflow Refinements** | Full Platform & REST API | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 20: Senior RMA Audit, SI/DR/PO Standardization & Silent Restitution** | Full Platform, REST API & Docs | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 21: Driver Delivery Handover, Test Sequence Isolation & Mandatory Expiration Date** | Full Platform, Mobile Driver Widget & REST API | `READY FOR TESTING` | *Lead QA Director* |
 

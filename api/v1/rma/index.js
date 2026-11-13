@@ -459,12 +459,30 @@ export default async function handler(req, res) {
         });
       }
 
-      // Standardized Unique RMA Number: RMA-[YEAR]-[4-DIGIT-ASCENDING]-[4-CHAR-ALPHANUMERIC]
-      // Example: RMA-2026-0001-6TYH
+      // Mandatory Expiration Date across Customer Hub & Supplier RTV
+      if (!expiry_date || !String(expiry_date).trim()) {
+        return sendJson(res, 400, {
+          success: false,
+          error: 'MISSING_EXPIRY_DATE',
+          message: 'Product expiration date ("expiry_date") is mandatory for all RMA reports across Customer Hub and Supplier RTV.'
+        });
+      }
+
+      const isTestMode = Boolean(body?.is_test === true || req.query.test_mode === 'true' || req.query.is_test === 'true' || req.headers['x-test-mode'] === 'true');
+
+      // Standardized Unique RMA Number with Complete Sequence Isolation:
+      // Live: RMA-[YEAR]-[4-DIGIT-ASCENDING]-[4-CHAR-ALPHANUMERIC] (e.g. RMA-2026-0001-6TYH)
+      // Test: RMA-TEST-[YEAR]-[4-DIGIT-ASCENDING]-[4-CHAR-ALPHANUMERIC] (e.g. RMA-TEST-2026-0001-6TYH)
       const currentYear = new Date().getFullYear();
       let nextSeq = 1;
       try {
-        const { count } = await supabase.from('rma_reports').select('*', { count: 'exact', head: true });
+        let countQuery = supabase.from('rma_reports').select('*', { count: 'exact', head: true });
+        if (isTestMode) {
+          countQuery = countQuery.or('notes.ilike.%[TEST_MODE]%,rma_number.ilike.%TEST%');
+        } else {
+          countQuery = countQuery.not('notes', 'ilike', '%[TEST_MODE]%').not('rma_number', 'ilike', '%TEST%');
+        }
+        const { count } = await countQuery;
         if (typeof count === 'number' && count >= 0) {
           nextSeq = count + 1;
         }
@@ -478,9 +496,16 @@ export default async function handler(req, res) {
       for (let i = 0; i < 4; i++) {
         randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
       }
-      const rmaNumber = `RMA-${currentYear}-${seqStr}-${randomSuffix}`;
+      const rmaPrefix = isTestMode ? `RMA-TEST-${currentYear}` : `RMA-${currentYear}`;
+      const rmaNumber = body.rma_number ? String(body.rma_number).trim() : `${rmaPrefix}-${seqStr}-${randomSuffix}`;
 
-      const isTestMode = Boolean(body?.is_test === true || req.query.test_mode === 'true' || req.query.is_test === 'true' || req.headers['x-test-mode'] === 'true');
+      if (!isTestMode && rmaNumber.includes('TEST')) {
+        return sendJson(res, 400, {
+          success: false,
+          error: 'INVALID_LIVE_RMA_NUMBER',
+          message: "Live mode RMA IDs cannot contain 'TEST' prefix. Please use standard RMA-[YEAR]-[SEQ]-[RAND] format."
+        });
+      }
 
       const reportPayload = {
         rma_number: rmaNumber,

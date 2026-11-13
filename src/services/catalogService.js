@@ -1106,19 +1106,41 @@ export const catalogService = {
   },
 
   /**
-   * GENERATE UNIQUE RMA NUMBER INSTANTLY
-   * Standard Enterprise Format: "RMA-[YEAR]-[4-DIGIT-ASCENDING]-[4-CHAR-ALPHANUMERIC]"
-   * Example: RMA-2026-0001-6TYH
+   * GENERATE UNIQUE RMA NUMBER INSTANTLY WITH COMPLETE SEQUENCE ISOLATION
+   * - Live Mode: "RMA-[YEAR]-[4-DIGIT-ASCENDING]-[4-CHAR-ALPHANUMERIC]" (e.g. RMA-2026-0001-6TYH)
+   * - Test Mode: "RMA-TEST-[YEAR]-[4-DIGIT-ASCENDING]-[4-CHAR-ALPHANUMERIC]" (e.g. RMA-TEST-2026-0001-A9YB)
+   * 
+   * Guarantees:
+   * 1. Test mode RMA IDs never consume numbers from live ascending sequence.
+   * 2. Live mode and test mode never share or collide on RMA IDs.
    */
-  generateRMANumber(existingOrHint = null) {
+  generateRMANumber(existingOrHint = null, isTestMode = false) {
     const currentYear = new Date().getFullYear();
+    const isTest = Boolean(isTestMode === true || isTestMode === 'true');
     let maxSeq = 0;
 
-    // 1. If an array of reports was passed, find the highest existing sequence number
+    const isTestRecord = (r) => {
+      if (!r || typeof r !== 'object') return false;
+      const num = String(r.rma_number || r.rmaNumber || r.id || '');
+      return Boolean(
+        r.is_test === true ||
+        r.ai_document_metadata?.is_test === true ||
+        (r.notes && typeof r.notes === 'string' && r.notes.includes('[TEST_MODE]')) ||
+        num.includes('TEST')
+      );
+    };
+
+    // 1. If an array of reports was passed, find the highest existing sequence number strictly within current mode
     if (Array.isArray(existingOrHint)) {
       existingOrHint.forEach(r => {
+        const itemIsTest = isTestRecord(r);
+        if (isTest !== itemIsTest) return; // Strict mode isolation: ignore cross-mode reports!
+
         const num = r.rma_number || r.rmaNumber || r.id || '';
-        const match = String(num).match(/RMA-\d{4}-(\d+)-/i);
+        const match = isTest
+          ? (String(num).match(/RMA-TEST-\d{4}-(\d+)-/i) || String(num).match(/RMA-\d{4}-T(\d+)-/i) || String(num).match(/RMA-\d{4}-(\d+)-/i))
+          : String(num).match(/^RMA-\d{4}-(\d+)-/i);
+
         if (match && match[1]) {
           const parsed = parseInt(match[1], 10);
           if (!isNaN(parsed) && parsed > maxSeq) {
@@ -1127,13 +1149,14 @@ export const catalogService = {
         }
       });
       if (maxSeq === 0 && existingOrHint.length > 0) {
-        maxSeq = existingOrHint.length;
+        const modeCount = existingOrHint.filter(r => isTestRecord(r) === isTest).length;
+        if (modeCount > 0) maxSeq = modeCount;
       }
     } else if (typeof existingOrHint === 'number' && existingOrHint > 0) {
       maxSeq = existingOrHint - 1;
     }
 
-    // 2. Fallback to localStorage cache if existing array was not supplied
+    // 2. Fallback to localStorage cache if existing array was not supplied or empty
     if (maxSeq === 0) {
       try {
         const rawReports = localStorage.getItem('cached_recent_reports') || localStorage.getItem('rma_reports_cache');
@@ -1141,22 +1164,27 @@ export const catalogService = {
           const parsed = JSON.parse(rawReports);
           if (Array.isArray(parsed)) {
             parsed.forEach(r => {
+              const itemIsTest = isTestRecord(r);
+              if (isTest !== itemIsTest) return;
+
               const num = r.rma_number || r.rmaNumber || '';
-              const match = String(num).match(/RMA-\d{4}-(\d+)-/i);
+              const match = isTest
+                ? (String(num).match(/RMA-TEST-\d{4}-(\d+)-/i) || String(num).match(/RMA-\d{4}-T(\d+)-/i) || String(num).match(/RMA-\d{4}-(\d+)-/i))
+                : String(num).match(/^RMA-\d{4}-(\d+)-/i);
+
               if (match && match[1]) {
                 const p = parseInt(match[1], 10);
                 if (!isNaN(p) && p > maxSeq) maxSeq = p;
               }
             });
-            if (maxSeq === 0) maxSeq = parsed.length;
           }
         }
       } catch {}
     }
 
-    // 3. Increment persistent local counter
+    // 3. Isolated persistent local counters (Test Mode counter vs Live Mode counter)
+    const storageKey = isTest ? `rma_last_test_seq_${currentYear}` : `rma_last_live_seq_${currentYear}`;
     try {
-      const storageKey = `rma_last_seq_${currentYear}`;
       const stored = parseInt(localStorage.getItem(storageKey) || '0', 10);
       if (!isNaN(stored) && stored > maxSeq) {
         maxSeq = stored;
@@ -1165,7 +1193,7 @@ export const catalogService = {
 
     const nextSeq = maxSeq + 1;
     try {
-      localStorage.setItem(`rma_last_seq_${currentYear}`, String(nextSeq));
+      localStorage.setItem(storageKey, String(nextSeq));
     } catch {}
 
     const seqStr = String(nextSeq).padStart(4, '0');
@@ -1175,7 +1203,9 @@ export const catalogService = {
       rand += chars.charAt(Math.floor(Math.random() * chars.length));
     }
 
-    return `RMA-${currentYear}-${seqStr}-${rand}`;
+    return isTest
+      ? `RMA-TEST-${currentYear}-${seqStr}-${rand}`
+      : `RMA-${currentYear}-${seqStr}-${rand}`;
   },
 
   /**
@@ -1247,48 +1277,12 @@ export const catalogService = {
 
     let rmaNumber = explicitRmaNumber;
     if (!rmaNumber) {
-      // Format: "RMA-YYYY-XXXX-RAND" (e.g. RMA-2026-0001-A14R)
-      // RMA + Current Year + Serial Number of this RMA - Random unique alphanumeric
-      let nextSeq = 1;
-      try {
-        const { data: latestRows } = await supabase
-          .from('rma_reports')
-          .select('id, rma_number')
-          .order('id', { ascending: false })
-          .limit(10);
-
-        let maxNum = 0;
-        if (latestRows && latestRows.length > 0) {
-          for (const row of latestRows) {
-            if (row.id && !isNaN(Number(row.id))) {
-              maxNum = Math.max(maxNum, Number(row.id));
-            }
-            if (row.rma_number) {
-              const m = String(row.rma_number).match(/RMA-\d{4}-(\d+)-/i);
-              if (m && m[1]) {
-                maxNum = Math.max(maxNum, parseInt(m[1], 10));
-              }
-            }
-          }
-        }
-        if (maxNum > 0) {
-          nextSeq = maxNum + 1;
-        } else {
-          const { count } = await supabase.from('rma_reports').select('id', { count: 'exact', head: true });
-          nextSeq = (count || 0) + 1;
-        }
-      } catch (e) {
-        nextSeq = 1;
-      }
-
-      const currentYear = new Date().getFullYear();
-      const seqStr = String(nextSeq).padStart(4, '0');
-      const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-      let randomSuffix = '';
-      for (let i = 0; i < 4; i++) {
-        randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      rmaNumber = `RMA-${currentYear}-${seqStr}-${randomSuffix}`;
+      const isTestSubmission = Boolean(
+        notes?.includes('[TEST_MODE]') ||
+        ai_document_metadata?.is_test ||
+        ai_document_metadata?.test_mode
+      );
+      rmaNumber = this.generateRMANumber(null, isTestSubmission);
     }
 
     // Auto-resolve product from database if not passed in or still pending client-side detection
@@ -1725,7 +1719,7 @@ export const catalogService = {
     if (payload.reason !== undefined) updates.reason = String(payload.reason).trim();
     if (payload.rma_type !== undefined) updates.rma_type = String(payload.rma_type).trim();
 
-    updates.is_test = finalIsTest;
+    // Mode is preserved inside ai_document_metadata and notes (rma_reports table has no direct is_test column)
     updates.ai_document_metadata = updatedMeta;
     updates.notes = updatedNotes;
 
@@ -1744,8 +1738,20 @@ export const catalogService = {
     if (cleanId) updateQuery = updateQuery.eq('id', cleanId);
     else updateQuery = updateQuery.eq('rma_number', existing?.rma_number || rmaLookup);
 
-    const { data: updatedData, error: updateErr } = await updateQuery.select().single();
-    if (updateErr) throw updateErr;
+    let { data: updatedData, error: updateErr } = await updateQuery.select().single();
+    if (updateErr) {
+      console.warn('Initial update failed in reconstructRMARecord, applying fallback:', updateErr.message);
+      const fallback = { ...updates };
+      delete fallback.is_test;
+      const colMatch = updateErr.message.match(/Could not find the '([^']+)' column/i) || updateErr.message.match(/column rma_reports\.([a-zA-Z0-9_]+) does not exist/i);
+      if (colMatch && colMatch[1]) delete fallback[colMatch[1]];
+      let retryQuery = supabase.from('rma_reports').update(fallback);
+      if (cleanId) retryQuery = retryQuery.eq('id', cleanId);
+      else retryQuery = retryQuery.eq('rma_number', existing?.rma_number || rmaLookup);
+      const { data: retryData, error: retryErr } = await retryQuery.select().single();
+      if (retryErr) throw retryErr;
+      updatedData = retryData;
+    }
 
     // Cascade to split children or items if rma_number or supplier changed
     if (updates.rma_number && existing?.id) {

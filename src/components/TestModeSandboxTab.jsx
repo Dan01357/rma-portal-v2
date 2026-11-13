@@ -277,6 +277,13 @@ export default function TestModeSandboxTab({
                         <div className="text-[10px] text-slate-400">
                           {new Date(item.created_at).toLocaleDateString()}
                         </div>
+                        {item.ai_document_metadata?.delivery_handover && (
+                          <div className="mt-0.5">
+                            <span className="px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[9px] font-bold inline-flex items-center gap-0.5">
+                              🚚 Delivered ({item.ai_document_metadata.delivery_handover.driver_name || 'Driver'})
+                            </span>
+                          </div>
+                        )}
                         {(item.si_number || item.dr_number || item.po_number || item.invoice_dr_number) && (
                           <div className="flex items-center gap-1 flex-wrap mt-1 text-[9px] font-mono leading-tight">
                             {item.si_number && (

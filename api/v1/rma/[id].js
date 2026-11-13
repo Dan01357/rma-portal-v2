@@ -325,6 +325,8 @@ export default async function handler(req, res) {
         delete rowPayload.actor;
         delete rowPayload.user;
         delete rowPayload.updated_by;
+        delete rowPayload.is_test;
+        delete rowPayload.test_mode;
         if (!updateData.barcode) {
           delete rowPayload.barcode;
         }

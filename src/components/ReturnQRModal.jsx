@@ -48,9 +48,9 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
   });
   const dateTimeFormatted = `${dateFormatted} • ${timeFormatted}`;
 
-  // Clean RMA URL payload: when scanned by smartphone camera or barcode gun, opens RMA Quick Action
+  // Clean RMA URL payload: when scanned by smartphone camera or barcode gun, opens Driver Delivery Handover widget
   const qrPayload = typeof window !== 'undefined'
-    ? `${window.location.origin}/?rma=${encodeURIComponent(rmaNumber)}&rep=${encodeURIComponent(reporter)}&contact=${encodeURIComponent(reporterContact)}&dt=${encodeURIComponent(dateTimeFormatted)}`
+    ? `${window.location.origin}/?rma=${encodeURIComponent(rmaNumber)}&action=delivery`
     : rmaNumber;
 
   const handlePrint = async () => {

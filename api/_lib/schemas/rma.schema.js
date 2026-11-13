@@ -109,7 +109,7 @@ export const CreateRMAReportSchema = z.object({
   si_number: z.string().optional().openapi({ example: 'SI-2026-9021' }),
   dr_number: z.string().optional().openapi({ example: 'DR-2026-8891' }),
   po_number: z.string().optional().openapi({ example: 'PO-2026-4401' }),
-  expiry_date: z.string().optional().openapi({ example: '2026-12-31' }),
+  expiry_date: z.string().min(1, 'Product expiration date is required').openapi({ example: '2026-12-31', description: 'Mandatory product expiration date across Customer Hub and Supplier RTV' }),
   batch_lot_number: z.string().optional().openapi({ example: 'LOT-B42' }),
   notes: z.string().optional().openapi({ example: 'Submitted via REST API' })
 }).openapi('CreateRMAReportRequest');

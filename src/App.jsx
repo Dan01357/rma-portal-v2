@@ -89,6 +89,7 @@ import NotificationBell from './components/NotificationBell';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
 import ReturnQRModal from './components/ReturnQRModal';
 import QuickRMAActionModal from './components/QuickRMAActionModal';
+import DriverDeliveryHandoverModal from './components/DriverDeliveryHandoverModal';
 import GatekeeperPinModal from './components/GatekeeperPinModal';
 import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
 import { inviteService, formatRemainingCountdown } from './services/inviteService';
@@ -335,6 +336,10 @@ export default function App() {
   const [isCustomerInvitesModalOpen, setIsCustomerInvitesModalOpen] = useState(false);
   const [viewingExplanationModal, setViewingExplanationModal] = useState(null);
 
+  // Delivery Driver Handover QR Modal State (mobile widget for delivery personnel)
+  const [isDriverDeliveryModalOpen, setIsDriverDeliveryModalOpen] = useState(false);
+  const [driverDeliveryRma, setDriverDeliveryRma] = useState(null);
+
   // 1-Click Google Identity Lock Gatekeeper Session
   const [intakeSlug, setIntakeSlug] = useState(() => getIntakeSlugFromUrl());
   const [gateSession, setGateSession] = useState(() => {
@@ -527,9 +532,20 @@ export default function App() {
     const checkRmaParam = () => {
       const params = new URLSearchParams(window.location.search);
       const rmaParam = params.get('rma') || params.get('rma_number');
+      const actionParam = params.get('action') || params.get('mode');
       if (rmaParam) {
-        setQuickRmaNumber(rmaParam);
-        setIsQuickRmaModalOpen(true);
+        const isDeliveryAction = actionParam === 'delivery' || actionParam === 'driver';
+        const hasAdminAuth = Boolean(authService.getCurrentUser());
+        const onAdminPath = window.location.pathname.startsWith('/admin') || window.location.hash.includes('/admin');
+
+        // If explicitly requested as delivery handover OR if visitor is unauthenticated (mobile driver scanning box QR)
+        if (isDeliveryAction || (!hasAdminAuth && !onAdminPath)) {
+          setDriverDeliveryRma(rmaParam);
+          setIsDriverDeliveryModalOpen(true);
+        } else {
+          setQuickRmaNumber(rmaParam);
+          setIsQuickRmaModalOpen(true);
+        }
       }
     };
 
@@ -2452,8 +2468,8 @@ export default function App() {
       return;
     }
 
-    if (selectedReason.toLowerCase().includes('expired') && !expiryDate) {
-      showToast('Product expiry date is required when returning expired items.', 'warning');
+    if (!expiryDate) {
+      showToast('Product expiration date is required before adding item to manifest.', 'warning');
       return;
     }
 
@@ -2566,8 +2582,8 @@ export default function App() {
         showToast('Photo of damaged product is required before submitting return report.', 'warning');
         return;
       }
-      if (selectedReason.toLowerCase().includes('expired') && !expiryDate) {
-        showToast('Product expiry date is required when returning expired items.', 'warning');
+      if (!expiryDate) {
+        showToast('Product expiration date is required before submitting return report.', 'warning');
         return;
       }
       const effectiveItemName = customItemName.trim() || detectedProduct?.name || (activeBarcode ? `Unidentified Item (${activeBarcode})` : 'General Return Item');
@@ -2607,11 +2623,15 @@ export default function App() {
       return;
     }
 
-    // Strictly enforce at least 1 photo for every returned product
+    // Strictly enforce at least 1 photo and mandatory expiration date for every returned product
     for (let i = 0; i < itemsToSubmit.length; i++) {
       const it = itemsToSubmit[i];
       if (!it.photoFiles || it.photoFiles.length === 0) {
         showToast(`Photo of damaged product is required for item "${it.name || it.barcode}". Please attach proof photo.`, 'warning');
+        return;
+      }
+      if (!it.expiry_date) {
+        showToast(`Product expiration date is required for item "${it.name || it.barcode}". Please select expiry date.`, 'warning');
         return;
       }
     }
@@ -2650,8 +2670,8 @@ export default function App() {
       ? 'supplier_outbound'
       : 'customer_inbound';
 
-    // 3. Generate ONE unique RMA Number for the batch ticket
-    const rmaNumber = catalogService.generateRMANumber(recentReportsList);
+    // 3. Generate ONE unique RMA Number with isolated sequence (Test Mode vs Live Mode)
+    const rmaNumber = catalogService.generateRMANumber(recentReportsList, isTestMode);
     const totalItemsCount = itemsToSubmit.length;
     const totalQuantityCount = itemsToSubmit.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0);
     const commonUnit = itemsToSubmit.every(it => it.unit_name === itemsToSubmit[0].unit_name) ? itemsToSubmit[0].unit_name : 'mixed';
@@ -3165,7 +3185,7 @@ export default function App() {
                     <QRCodeSVG
                       id="filed-report-qr-svg"
                       value={typeof window !== 'undefined'
-                        ? `${window.location.origin}/?rma=${encodeURIComponent(submitSuccessReport.rmaNumber)}&rep=${encodeURIComponent(submitSuccessReport.reporter_name || 'Staff')}&contact=${encodeURIComponent(submitSuccessReport.reporter_contact || '')}&dt=${encodeURIComponent(new Date(submitSuccessReport.created_at || Date.now()).toLocaleString())}`
+                        ? `${window.location.origin}/?rma=${encodeURIComponent(submitSuccessReport.rmaNumber)}&action=delivery`
                         : submitSuccessReport.rmaNumber}
                       size={110}
                       level="H"
@@ -3579,26 +3599,42 @@ export default function App() {
                       ))}
                     </select>
 
-                    {/* Smart Conditional Expiry Date when Expired reason is selected */}
-                    {selectedReason.toLowerCase().includes('expired') && (
-                      <div className="p-3 bg-amber-50/90 dark:bg-amber-950/40 border-2 border-amber-300 dark:border-amber-700/80 rounded-2xl space-y-1.5 animate-in fade-in slide-in-from-top-1">
-                        <div className="flex items-center justify-between">
-                          <label className="text-xs font-black text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
-                            <Calendar className="w-4 h-4 text-amber-600" />
-                            <span>Product Expiry Date *</span>
-                          </label>
-                          <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-200/60 dark:bg-amber-900/60 px-2 py-0.5 rounded-full">
-                            Required for Expiry Claims
-                          </span>
-                        </div>
-                        <input
-                          type="date"
-                          value={expiryDate}
-                          onChange={(e) => setExpiryDate(e.target.value)}
-                          className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                        />
+                    {/* Mandatory Expiration Date for all returns across Customer Hub & Supplier RTV */}
+                    <div className={`p-3 rounded-2xl border-2 space-y-1.5 transition-all ${
+                      !expiryDate 
+                        ? 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-400 dark:border-amber-700/90' 
+                        : 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800'
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                          <Calendar className={`w-4 h-4 ${!expiryDate ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`} />
+                          <span>Product Expiration Date <span className="text-rose-500 font-black">*</span></span>
+                        </label>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          !expiryDate
+                            ? 'bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
+                            : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
+                        }`}>
+                          {!expiryDate ? 'Required *' : '✓ Verified'}
+                        </span>
                       </div>
-                    )}
+                      <input
+                        type="date"
+                        required
+                        value={expiryDate}
+                        onChange={(e) => setExpiryDate(e.target.value)}
+                        className={`w-full px-3.5 py-2 bg-white dark:bg-slate-900 border rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 transition-all ${
+                          !expiryDate
+                            ? 'border-amber-400 dark:border-amber-600 focus:ring-amber-500'
+                            : 'border-emerald-400 dark:border-emerald-600 focus:ring-emerald-500'
+                        }`}
+                      />
+                      {!expiryDate && (
+                        <p className="text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                          * Required for both Customer Hub and Supplier RTV claims
+                        </p>
+                      )}
+                    </div>
 
                     <div className="space-y-1 pt-1">
                       <div className="flex items-center justify-between text-[10px]">
@@ -3802,6 +3838,11 @@ export default function App() {
                                 <span className="font-black text-blue-600 dark:text-blue-400">
                                   Qty: {formatQuantityWithPackSize(item.quantity, item.unit_name || item.unit, item.pieces_per_case || item.piecesPerCase)}
                                 </span>
+                                {item.expiry_date && (
+                                  <span className="bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-1.5 py-0.2 rounded-full font-bold">
+                                    Exp: {item.expiry_date}
+                                  </span>
+                                )}
                                 <span className="bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 px-1.5 py-0.2 rounded-full font-bold">
                                   {item.reason}
                                 </span>
@@ -5139,6 +5180,12 @@ export default function App() {
                                       >
                                         <QrCode className="w-3.5 h-3.5" />
                                       </button>
+                                      {item.ai_document_metadata?.delivery_handover && (
+                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 inline-flex items-center gap-1 shadow-2xs">
+                                          <Truck className="w-2.5 h-2.5" />
+                                          <span>Delivered ({item.ai_document_metadata.delivery_handover.driver_name || 'Driver'})</span>
+                                        </span>
+                                      )}
                                     </div>
                                     {/* Split, Buffer, and Manifest Quick Badges */}
                                     <div className="flex items-center gap-1 flex-wrap mt-0.5">
@@ -7280,6 +7327,10 @@ export default function App() {
           setQrModalReport(rep);
         }}
         onOpenLightbox={setLightboxPhoto}
+        onOpenDriverHandover={(rma) => {
+          setDriverDeliveryRma(rma);
+          setIsDriverDeliveryModalOpen(true);
+        }}
         onRefresh={(updated, newChild) => {
           if (newChild) {
             setRecentReportsList(prev => {
@@ -7310,6 +7361,19 @@ export default function App() {
               return r;
             }));
           }
+          refreshAllData();
+        }}
+      />
+
+      {/* Driver Delivery Handover Proof Modal & QR Mobile Widget */}
+      <DriverDeliveryHandoverModal
+        isOpen={isDriverDeliveryModalOpen}
+        onClose={() => {
+          setIsDriverDeliveryModalOpen(false);
+          setDriverDeliveryRma(null);
+        }}
+        rmaNumber={driverDeliveryRma}
+        onDeliveryConfirmed={() => {
           refreshAllData();
         }}
       />

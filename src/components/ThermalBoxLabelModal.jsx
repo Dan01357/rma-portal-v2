@@ -464,18 +464,12 @@ export default function ThermalBoxLabelModal({
                 </div>
               </div>
 
-              {/* 2D QR Code */}
+              {/* 2D QR Code: Scannable by delivery drivers to immediately log delivery handover proof */}
               <div className="p-0.5 border border-black bg-white shrink-0">
                 <QRCodeSVG
-                  value={JSON.stringify({
-                    rma: rmaNumber,
-                    sku,
-                    bc: barcode,
-                    loc: location,
-                    rep: reporterName,
-                    contact: reporterContact,
-                    time: createdDateTime
-                  })}
+                  value={typeof window !== 'undefined'
+                    ? `${window.location.origin}/?rma=${encodeURIComponent(rmaNumber)}&action=delivery`
+                    : rmaNumber}
                   size={54}
                   level="M"
                 />

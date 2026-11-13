@@ -160,6 +160,7 @@ export default function QuickRMAActionModal({
   onViewCreditMemoVoucher,
   onViewReportQR,
   onOpenLightbox,
+  onOpenDriverHandover,
   onRefresh
 }) {
   const [report, setReport] = useState(null);
@@ -1423,16 +1424,16 @@ export default function QuickRMAActionModal({
         if (adminPrice !== undefined && adminPrice !== '') updates.price = parseFloat(adminPrice) || 0;
 
         // Mode switch: Test Mode Sandbox <-> Live Production (100% silent, 0 emails)
+        // Note: rma_reports has no root is_test column in Postgres; mode is strictly stored in ai_document_metadata and notes
         const currentMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object') ? { ...report.ai_document_metadata } : {};
         let currentNotes = report.notes || '';
         if (adminIsTest === false) {
-          updates.is_test = false;
           delete currentMeta.is_test;
+          delete currentMeta.test_mode;
           currentNotes = currentNotes.replace(/\[TEST_MODE\]/gi, '').trim();
           updates.notes = currentNotes;
           updates.ai_document_metadata = currentMeta;
         } else if (adminIsTest === true) {
-          updates.is_test = true;
           currentMeta.is_test = true;
           if (!currentNotes.includes('[TEST_MODE]')) {
             currentNotes = `[TEST_MODE] ${currentNotes}`.trim();
@@ -1461,9 +1462,18 @@ export default function QuickRMAActionModal({
       if (error) {
         console.warn('Initial update failed, falling back to core columns:', error.message);
         const fallback = { ...updates };
+        delete fallback.is_test;
+        delete fallback.test_mode;
+        const colMatch = error.message.match(/Could not find the '([^']+)' column/i) || error.message.match(/column rma_reports\.([a-zA-Z0-9_]+) does not exist/i);
+        if (colMatch && colMatch[1]) {
+          delete fallback[colMatch[1]];
+        }
         if (error.message.includes('si_number')) delete fallback.si_number;
         if (error.message.includes('dr_number')) delete fallback.dr_number;
         if (error.message.includes('po_number')) delete fallback.po_number;
+        if (error.message.includes('invoice_dr_number')) delete fallback.invoice_dr_number;
+        if (error.message.includes('store_branch')) delete fallback.store_branch;
+        if (error.message.includes('batch_lot_number')) delete fallback.batch_lot_number;
         const { error: fbErr } = await supabase.from('rma_reports').update(fallback).eq('id', report.id);
         if (fbErr) throw fbErr;
       }
@@ -1934,6 +1944,125 @@ export default function QuickRMAActionModal({
                 </div>
               )}
 
+              {/* Driver Delivery Handover Proof & QR Mobile Action */}
+              <div className="pt-2.5 border-t border-slate-200 dark:border-slate-700 space-y-2">
+                {report.ai_document_metadata?.delivery_handover ? (
+                  <div className="p-3 bg-emerald-50/80 dark:bg-emerald-950/40 border-2 border-emerald-300 dark:border-emerald-800 rounded-2xl space-y-2">
+                    <div className="flex items-center justify-between flex-wrap gap-1">
+                      <div className="flex items-center gap-1.5 text-xs font-black text-emerald-900 dark:text-emerald-200">
+                        <Truck className="w-4 h-4 text-emerald-600" />
+                        <span>🚚 Verified Driver Delivery Handover</span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-200">
+                        ✓ Handed Over at Dock
+                      </span>
+                    </div>
+
+                    <div className="text-xs space-y-1 text-slate-700 dark:text-slate-300">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 text-[11px]">Delivered By:</span>
+                        <strong className="text-slate-900 dark:text-white">
+                          {report.ai_document_metadata.delivery_handover.driver_name} ({report.ai_document_metadata.delivery_handover.driver_vehicle || 'Vehicle'})
+                        </strong>
+                      </div>
+                      {report.ai_document_metadata.delivery_handover.receiver_name && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 text-[11px]">Received By:</span>
+                          <strong className="text-slate-900 dark:text-white">
+                            {report.ai_document_metadata.delivery_handover.receiver_name}
+                          </strong>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 text-[11px]">Timestamp:</span>
+                        <span className="font-mono text-[11px] text-slate-800 dark:text-slate-200">
+                          {new Date(report.ai_document_metadata.delivery_handover.completed_at).toLocaleString()}
+                        </span>
+                      </div>
+                      {report.ai_document_metadata.delivery_handover.notes && (
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400 italic pt-0.5">
+                          "{report.ai_document_metadata.delivery_handover.notes}"
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Driver Proof Photos Strip */}
+                    <div className="pt-2 border-t border-emerald-200 dark:border-emerald-800/80 grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                          Driver / Courier Photo:
+                        </span>
+                        {report.ai_document_metadata.delivery_handover.driver_photo_url && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenLightbox && onOpenLightbox({
+                              images: [report.ai_document_metadata.delivery_handover.driver_photo_url],
+                              initialIndex: 0,
+                              url: report.ai_document_metadata.delivery_handover.driver_photo_url,
+                              title: 'Driver Delivery Proof Photo',
+                              subtitle: `Driver: ${report.ai_document_metadata.delivery_handover.driver_name}`
+                            })}
+                            className="w-full h-20 rounded-xl overflow-hidden border border-emerald-300 dark:border-emerald-700 hover:scale-102 transition-transform cursor-zoom-in block"
+                            title="Click to zoom driver photo"
+                          >
+                            <img
+                              src={report.ai_document_metadata.delivery_handover.driver_photo_url}
+                              alt="Driver"
+                              className="w-full h-full object-cover"
+                            />
+                          </button>
+                        )}
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                          Delivered Dock Photo:
+                        </span>
+                        {report.ai_document_metadata.delivery_handover.item_dock_photo_url && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenLightbox && onOpenLightbox({
+                              images: [report.ai_document_metadata.delivery_handover.item_dock_photo_url],
+                              initialIndex: 0,
+                              url: report.ai_document_metadata.delivery_handover.item_dock_photo_url,
+                              title: 'Delivered Dock Proof Photo',
+                              subtitle: `Dock Item: ${report.name || report.rma_number}`
+                            })}
+                            className="w-full h-20 rounded-xl overflow-hidden border border-emerald-300 dark:border-emerald-700 hover:scale-102 transition-transform cursor-zoom-in block"
+                            title="Click to zoom delivered item photo"
+                          >
+                            <img
+                              src={report.ai_document_metadata.delivery_handover.item_dock_photo_url}
+                              alt="Delivered Dock"
+                              className="w-full h-full object-cover"
+                            />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-2xl flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 min-w-0">
+                      <Truck className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span className="truncate">Driver Handover: Pending delivery & photos</span>
+                    </div>
+                    {typeof onOpenDriverHandover === 'function' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onOpenDriverHandover(report.rma_number);
+                        }}
+                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold shrink-0 cursor-pointer flex items-center gap-1 shadow-2xs"
+                        title="Open Driver Delivery Handover Mobile Screen"
+                      >
+                        <Truck className="w-3.5 h-3.5" />
+                        <span>Driver QR Widget</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Official Logistics Paperwork & Document Details */}
               {(paperworkList.length > 0 || report.invoice_dr_number || report.si_number || report.dr_number || report.po_number || report.store_branch || report.supplier_name || aiMetadata || isEditingAiDetails) && (
                 <div className="pt-2.5 border-t border-slate-200 dark:border-slate-700 space-y-2">
@@ -2134,9 +2263,22 @@ export default function QuickRMAActionModal({
                       {(currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin') && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 bg-blue-50/60 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl">
                           <div>
-                            <label className="text-[10px] font-black uppercase text-blue-900 dark:text-blue-300 block mb-0.5">
-                              RMA Identifier (Ticket ID)
-                            </label>
+                            <div className="flex items-center justify-between mb-0.5">
+                              <label className="text-[10px] font-black uppercase text-blue-900 dark:text-blue-300">
+                                RMA Identifier (Ticket ID)
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const nextId = catalogService.generateRMANumber(null, adminIsTest);
+                                  setAdminRmaNumber(nextId);
+                                }}
+                                className="text-[9px] font-bold text-blue-700 dark:text-blue-300 hover:underline flex items-center gap-0.5 cursor-pointer"
+                                title="Auto-generate next sequential RMA ID for current mode"
+                              >
+                                ⚡ Generate {adminIsTest ? 'Test' : 'Live'} ID
+                              </button>
+                            </div>
                             <input
                               type="text"
                               value={adminRmaNumber}
@@ -2144,7 +2286,14 @@ export default function QuickRMAActionModal({
                               placeholder="e.g. RMA-2026-0099-6KKW"
                               className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl text-xs font-mono font-black text-blue-700 dark:text-blue-300 shadow-2xs"
                             />
-                            <span className="text-[9.5px] text-blue-700/80 dark:text-blue-400">Match the exact deleted RMA ID</span>
+                            <div className="flex items-center justify-between mt-0.5">
+                              <span className="text-[9.5px] text-blue-700/80 dark:text-blue-400">Match the exact deleted RMA ID</span>
+                              {!adminIsTest && adminRmaNumber.includes('TEST') && (
+                                <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400">
+                                  ⚠️ Contains 'TEST'
+                                </span>
+                              )}
+                            </div>
                           </div>
                           <div>
                             <label className="text-[10px] font-black uppercase text-blue-900 dark:text-blue-300 block mb-0.5">
