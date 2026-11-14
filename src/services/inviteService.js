@@ -20,13 +20,22 @@ function saveLocalInvites(invites) {
   }
 }
 
-export function generateInviteToken() {
+export function generateInviteToken(isTest = false) {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let rand = '';
   for (let i = 0; i < 16; i++) {
     rand += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  return `inv_${Date.now().toString(36)}_${rand}`;
+  const prefix = isTest ? 'inv_test' : 'inv';
+  return `${prefix}_${Date.now().toString(36)}_${rand}`;
+}
+
+export function isTestInviteToken(inviteOrToken) {
+  if (!inviteOrToken) return false;
+  if (typeof inviteOrToken === 'string') {
+    return inviteOrToken.startsWith('inv_test_');
+  }
+  return Boolean(inviteOrToken.is_test || String(inviteOrToken.token || '').startsWith('inv_test_'));
 }
 
 export function maskEmail(email) {
@@ -132,6 +141,7 @@ export const inviteService = {
           return {
             ...i,
             stream_type: i.stream_type || 'customer_inbound',
+            is_test: isTestInviteToken(i),
             entity_name: ent,
             store_branch: ent
           };
@@ -157,6 +167,7 @@ export const inviteService = {
           return {
             ...i,
             stream_type: i.stream_type || 'customer_inbound',
+            is_test: isTestInviteToken(i),
             entity_name: ent,
             store_branch: ent
           };
@@ -182,7 +193,8 @@ export const inviteService = {
     durationValue = 24,
     durationUnit = 'hours',
     durationHours = null,
-    createdBy = 'Staff'
+    createdBy = 'Staff',
+    isTest = false
   }) {
     if (!authorizedEmail || !authorizedEmail.trim()) {
       throw new Error('Authorized Google Email is required.');
@@ -212,7 +224,8 @@ export const inviteService = {
 
     const now = new Date();
     const expiresAt = new Date(now.getTime() + durationMs).toISOString();
-    const token = generateInviteToken();
+    const cleanIsTest = Boolean(isTest);
+    const token = generateInviteToken(cleanIsTest);
 
     const displayUnit = unit.startsWith('min') ? 'min(s)' : unit.startsWith('day') ? 'day(s)' : 'hour(s)';
     const durationDisplay = `${num} ${displayUnit}`;
@@ -246,6 +259,7 @@ export const inviteService = {
         createdRecord = {
           ...data,
           stream_type: data.stream_type || cleanStream,
+          is_test: cleanIsTest || isTestInviteToken(data),
           entity_name: cleanEntity,
           store_branch: cleanEntity
         };
@@ -257,6 +271,7 @@ export const inviteService = {
     const newInvite = createdRecord || {
       id: `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       ...insertPayload,
+      is_test: cleanIsTest,
       entity_name: cleanEntity,
       store_branch: cleanEntity
     };
@@ -323,6 +338,7 @@ export const inviteService = {
           invite = {
             ...data,
             stream_type: data.stream_type || 'customer_inbound',
+            is_test: isTestInviteToken(data),
             entity_name: ent,
             store_branch: ent
           };
@@ -354,6 +370,7 @@ export const inviteService = {
               invite = {
                 ...found,
                 stream_type: found.stream_type || 'customer_inbound',
+                is_test: isTestInviteToken(found),
                 entity_name: ent,
                 store_branch: ent
               };

@@ -60,11 +60,15 @@ import {
   Truck,
   Ticket,
   Clock,
-  Archive
+  Archive,
+  FileSpreadsheet,
+  FileCheck2
 } from 'lucide-react';
 import { downloadQrCodePng, downloadBoxStickerPng } from './utils/qrDownload';
+import { downloadCustomSizedStickerPng } from './utils/customStickerCanvas';
 import { catalogService } from './services/catalogService';
 import { creditMemoService } from './services/creditMemoService';
+import { supplierClaimService } from './services/supplierClaimService';
 import TablePagination from './components/TablePagination';
 import { authService } from './services/authService';
 import { supabase } from './supabaseClient';
@@ -78,6 +82,7 @@ import SettingsTab from './components/SettingsTab';
 import CreditMemosTab from './components/CreditMemosTab';
 import SupplierClaimsTab from './components/SupplierClaimsTab';
 import TestModeSandboxTab from './components/TestModeSandboxTab';
+import CustomerHubTab from './components/CustomerHubTab';
 import ArchiveAndTrashTab from './components/ArchiveAndTrashTab';
 import ThermalBoxLabelModal from './components/ThermalBoxLabelModal';
 import { exportRMAReportsToCSV, exportCustomerInboundRMAsToCSV, exportSupplierOutboundClaimsToCSV } from './utils/exportCsv';
@@ -89,8 +94,10 @@ import NotificationBell from './components/NotificationBell';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
 import ReturnQRModal from './components/ReturnQRModal';
 import QuickRMAActionModal from './components/QuickRMAActionModal';
-import SupplierRtvSimpleModal from './components/SupplierRtvSimpleModal';
 import DriverDeliveryHandoverModal from './components/DriverDeliveryHandoverModal';
+import SimpleSupplierRtvWizardModal from './components/SimpleSupplierRtvWizardModal';
+import SupplierPickupFormModal from './components/SupplierPickupFormModal';
+import RMAMatrixExportModal from './components/RMAMatrixExportModal';
 import GatekeeperPinModal from './components/GatekeeperPinModal';
 import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
 import { inviteService, formatRemainingCountdown } from './services/inviteService';
@@ -122,17 +129,13 @@ import {
   isArchivedRecord,
   getTrashDaysRemaining,
   getRealPhotos,
-  normalizeWarehouseLocation
+  normalizeWarehouseLocation,
+  buildPortalQrPayload,
+  parsePortalQrPayload,
+  DEFECT_REASONS,
+  getDocumentNumbers
 } from './utils/rmaHelpers';
 
-const DEFECT_REASONS = [
-  '1- Damaged Box / Crushed Packaging',
-  '2- Expired / Near Expiry Date',
-  '3- Spoiled / Broken Seal / Leaking',
-  '4- Wrong Item / Incorrect Shipment',
-  '5- Customer Pull-out / Unsold',
-  '6- Other Defect'
-];
 
 /**
  * Helper to identify whether a row is a manifest line-item child row.
@@ -165,34 +168,6 @@ function formatLifecycleStage(status, item = null) {
   return formatLifecycleStageHelper(status, item);
 }
 
-/**
- * Resolves SI, DR, and PO numbers cleanly.
- * Strictly avoids mistaking an SI number for a DR number.
- */
-export function getDocumentNumbers(item) {
-  if (!item) return { si: 'N/A', dr: 'N/A', po: 'N/A' };
-
-  let si = item.si_number ? String(item.si_number).trim() : null;
-  let dr = item.dr_number ? String(item.dr_number).trim() : null;
-  let po = item.po_number ? String(item.po_number).trim() : null;
-
-  const legacy = item.invoice_dr_number ? String(item.invoice_dr_number).trim() : null;
-  if (legacy) {
-    if (!si && /^SI/i.test(legacy)) {
-      si = legacy;
-    } else if (!po && /^PO/i.test(legacy)) {
-      po = legacy;
-    } else if (!dr && !si && !po) {
-      dr = legacy;
-    }
-  }
-
-  return {
-    si: si || 'N/A',
-    dr: dr || 'N/A',
-    po: po || 'N/A'
-  };
-}
 
 
 /**
@@ -304,6 +279,9 @@ export default function App() {
   // Admin Dashboard Active Tab: 'products' | 'reports' | 'search'
   const [adminActiveTab, setAdminActiveTab] = useState('products');
   const [testModeStreamType, setTestModeStreamType] = useState('customer_inbound');
+  const [sandboxSubTab, setSandboxSubTab] = useState('customer');
+  const [customerHubResetTick, setCustomerHubResetTick] = useState(0);
+  const [customerHubExternalStatus, setCustomerHubExternalStatus] = useState(null);
 
   // Strict role gate: Only Super Admin can view Settings & SMTP
   useEffect(() => {
@@ -493,40 +471,8 @@ export default function App() {
   };
 
   const parseRmaFromScan = (rawText) => {
-    if (!rawText) return null;
-    const str = String(rawText).trim();
-    // Private In-App QR format: PINGCON-RTV:<RMA_NUMBER>:<TEST|LIVE>
-    if (str.toUpperCase().startsWith('PINGCON-RTV:')) {
-      const parts = str.split(':');
-      const rmaCode = parts[1]?.trim();
-      const qrMode = (parts[2] || 'LIVE').toUpperCase();
-      if (qrMode === 'TEST' && !isTestMode) {
-        showToast('This is a TEST MODE QR sticker. Switch to Test Mode to scan it.', 'warning');
-        return null;
-      }
-      if (qrMode === 'LIVE' && isTestMode) {
-        showToast('This is a LIVE RMA QR sticker. Switch to Live Mode to scan it.', 'warning');
-        return null;
-      }
-      return rmaCode || null;
-    }
-    if (str.includes('rma=')) {
-      try {
-        const url = new URL(str.startsWith('http') ? str : `https://example.com/${str.replace(/^\/?/, '')}`);
-        const val = url.searchParams.get('rma') || url.searchParams.get('rma_number');
-        if (val) return val;
-      } catch { }
-    }
-    if (str.startsWith('{') && str.endsWith('}')) {
-      try {
-        const parsed = JSON.parse(str);
-        if (parsed.rma) return parsed.rma;
-      } catch { }
-    }
-    if (/^RMA-\d{4}-\d+-[A-Z0-9]+/i.test(str) || /^RMA-/i.test(str)) {
-      return str;
-    }
-    return null;
+    const parsed = parsePortalQrPayload(rawText);
+    return parsed?.rmaNumber || null;
   };
 
   const handleCloseQuickRma = () => {
@@ -548,17 +494,26 @@ export default function App() {
     const checkRmaParam = () => {
       const params = new URLSearchParams(window.location.search);
       const rmaParam = params.get('rma') || params.get('rma_number');
-      const actionParam = params.get('action') || params.get('mode');
       if (rmaParam) {
-        const isDeliveryAction = actionParam === 'delivery' || actionParam === 'driver';
         const hasAdminAuth = Boolean(authService.getCurrentUser());
-        const onAdminPath = window.location.pathname.startsWith('/admin') || window.location.hash.includes('/admin');
+        let activeGate = null;
+        try {
+          const raw = localStorage.getItem('rma_portal_gate_session');
+          if (raw) activeGate = JSON.parse(raw);
+        } catch { }
+        const hasValidGate = Boolean(
+          activeGate &&
+          (activeGate.authorized_email || activeGate.stream_type === 'supplier_outbound') &&
+          (!activeGate.expires_at || new Date(activeGate.expires_at) > new Date())
+        );
 
-        // If explicitly requested as delivery handover OR if visitor is unauthenticated (mobile driver scanning box QR)
-        if (isDeliveryAction || (!hasAdminAuth && !onAdminPath)) {
-          setDriverDeliveryRma(rmaParam);
-          setIsDriverDeliveryModalOpen(true);
-        } else {
+        // Block unauthenticated external camera / Google Lens scans
+        if (!hasAdminAuth && !hasValidGate) {
+          showToast('🔒 Private RMA QR/link: Open your approved portal invite link and use the in-app Barcode/QR Scanner.', 'warning');
+          return;
+        }
+
+        if (hasAdminAuth) {
           setQuickRmaNumber(rmaParam);
           setIsQuickRmaModalOpen(true);
         }
@@ -578,7 +533,7 @@ export default function App() {
           sessionStorage.removeItem('rma_oauth_in_progress');
           localStorage.removeItem('rma_pending_oauth_token');
           localStorage.removeItem('rma_oauth_in_progress');
-        } catch {}
+        } catch { }
       }
 
       const newSlug = getIntakeSlugFromUrl();
@@ -599,7 +554,7 @@ export default function App() {
               localStorage.getItem('rma_pending_oauth_token') ||
               sessionStorage.getItem('rma_pending_oauth_token');
           }
-        } catch {}
+        } catch { }
       }
 
       if (urlToken) {
@@ -649,7 +604,7 @@ export default function App() {
             sessionStorage.getItem('rma_oauth_in_progress') === 'true') &&
           Boolean(
             localStorage.getItem('rma_pending_oauth_token') ||
-              sessionStorage.getItem('rma_pending_oauth_token')
+            sessionStorage.getItem('rma_pending_oauth_token')
           );
         const hasInviteToken = urlParams.has('token') || isInviteOAuthReturn;
 
@@ -729,7 +684,7 @@ export default function App() {
     window.history.pushState({}, '', path);
     const onAdmin = path === '/admin' || path === '#/admin';
     setIsAdminView(onAdmin);
-    setSelectedReportIds(new Set());
+    setCustomerHubResetTick(t => t + 1);
     const nextSlug = getIntakeSlugFromUrl();
     setIntakeSlug(nextSlug);
     setGateSession(accessKeyService.getActiveSession(nextSlug));
@@ -791,6 +746,98 @@ export default function App() {
     }
   });
 
+  // Derived portal stream & environment flags (honors invited Test Mode Sandbox links safely)
+  const effectiveIsTestMode = Boolean(isTestMode || gateSession?.is_test);
+  const isSupplierRtvPortal = Boolean(
+    (currentUser?.role === 'super_admin' && !gateSession && testModeStreamType === 'supplier_outbound') ||
+    gateSession?.stream_type === 'supplier_outbound' ||
+    (!gateSession?.stream_type && gateSession?.type === 'internal_warehouse')
+  );
+
+  // Simple 4-Option Supplier RTV Wizard, A4 Pickup Validation Form & Daily Matrix Exporter State
+  const [simpleRtvWizard, setSimpleRtvWizard] = useState({ isOpen: false, report: null, initialMode: 'wizard' });
+  const [pickupFormReport, setPickupFormReport] = useState(null);
+  const [matrixExportModal, setMatrixExportModal] = useState({ isOpen: false, stream: 'customer_inbound', isTestMode: false });
+
+  // Unified QR Scan Handler for in-app ScannerModal (with strict Test vs Live isolation + zero double OTP login)
+  const handlePortalQrScanResult = async (rawCode) => {
+    const parsedQr = parsePortalQrPayload(rawCode);
+    if (!parsedQr?.rmaNumber) {
+      setBarcodeInput(rawCode);
+      return;
+    }
+
+    const scannedRma = parsedQr.rmaNumber;
+    const hasAdminAuth = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin'));
+    const hasValidGate = Boolean(
+      gateSession &&
+      (gateSession.authorized_email || gateSession.stream_type === 'supplier_outbound') &&
+      (!gateSession.expires_at || new Date(gateSession.expires_at) > new Date())
+    );
+
+    if (!hasAdminAuth && !hasValidGate) {
+      playBeep('error');
+      showToast('🔒 Please enter the portal using your verified invite link or admin login to scan RMA QR stickers.', 'error');
+      return;
+    }
+
+    const activeContextIsTest = isAdminView
+      ? (adminActiveTab === 'sandbox' || isTestMode)
+      : effectiveIsTestMode;
+
+    // Resolve the actual report record first so legacy/unprefixed scans also honor Test vs Live isolation
+    let matchedReport = recentReportsList.find(
+      (r) => String(r.rma_number || r.rmaNumber || '').toUpperCase() === scannedRma.toUpperCase()
+    ) || null;
+
+    if (!matchedReport) {
+      try {
+        const { data } = await supabase
+          .from('rma_reports')
+          .select('*')
+          .eq('rma_number', scannedRma)
+          .maybeSingle();
+        if (data) matchedReport = data;
+      } catch { }
+    }
+
+    const qrIsTest =
+      parsedQr.qrMode === 'test' ||
+      Boolean(matchedReport && isTestRecord(matchedReport)) ||
+      scannedRma.toUpperCase().startsWith('RMA-TEST-');
+
+    if (qrIsTest && !activeContextIsTest) {
+      playBeep('error');
+      showToast('🔒 Security Block: This is a TEST MODE QR sticker and cannot be scanned inside Live Production!', 'error');
+      return;
+    }
+    if (!qrIsTest && activeContextIsTest) {
+      playBeep('error');
+      showToast('🔒 Security Block: This is a LIVE PRODUCTION QR sticker and cannot be scanned inside Test Mode Sandbox!', 'error');
+      return;
+    }
+
+    if (!matchedReport) {
+      playBeep('error');
+      showToast(`RMA "${scannedRma}" was not found in database yet.`, 'warning');
+      return;
+    }
+
+    playBeep('success');
+    const isSupplierRtvItem =
+      matchedReport.rma_type === 'supplier_outbound' ||
+      (!isAdminView && isSupplierRtvPortal);
+
+    if (isSupplierRtvItem) {
+      setSimpleRtvWizard({ isOpen: true, report: matchedReport, initialMode: 'wizard' });
+    } else if (hasAdminAuth) {
+      setQuickRmaNumber(scannedRma);
+      setIsQuickRmaModalOpen(true);
+    } else {
+      showToast('Customer Hub RMA QR editing is restricted to Warehouse Admins.', 'warning');
+    }
+  };
+
   // Strict Role Enforcement: Only Super Admin can have Test Mode enabled.
   // For all other roles (inventory staff, warehouse, admin, viewer, public), Test Mode is ALWAYS FALSE.
   useEffect(() => {
@@ -817,7 +864,7 @@ export default function App() {
     const handleRmaDataEvent = (e) => {
       handleSyncTestMode();
       if (e?.detail?.type === 'item-split' || e?.detail?.type === 'triage-updated' || e?.detail?.type === 'buffer-closed') {
-        refreshAllData();
+        scheduleBackgroundRefresh();
       }
     };
     window.addEventListener('storage', handleSyncTestMode);
@@ -839,20 +886,18 @@ export default function App() {
       return;
     }
 
-    setIsTestMode(prev => {
-      const next = !prev;
-      try {
-        localStorage.setItem('rma_portal_test_mode', String(next));
-        window.dispatchEvent(new Event('storage'));
-        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'test-mode-toggled', isTestMode: next } }));
-      } catch (e) { }
-      if (next) {
-        showToast('🧪 Test Mode Enabled: Emails safely sent exclusively to finance2@keysysincorporated.com', 'success');
-      } else {
-        showToast('Live Mode Enabled: Real email delivery active.', 'success');
-      }
-      return next;
-    });
+    const next = !isTestMode;
+    setIsTestMode(next);
+    try {
+      localStorage.setItem('rma_portal_test_mode', String(next));
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'test-mode-toggled', isTestMode: next } }));
+    } catch (e) { }
+    if (next) {
+      showToast('🧪 Test Mode Enabled: Emails safely sent exclusively to finance2@keysysincorporated.com', 'success');
+    } else {
+      showToast('Live Mode Enabled: Real email delivery active.', 'success');
+    }
   };
 
   // Facebook-Style Notifications System
@@ -917,13 +962,11 @@ export default function App() {
     } else if (notif.type === 'unknown') {
       if (isAdminView) {
         setAdminActiveTab('customer_reports');
-        setReportsStatusFilter('pending_admin_details');
-        setReportsCurrentPage(1);
+        setCustomerHubExternalStatus({ value: 'pending_admin_details', tick: Date.now() });
       } else {
         navigateTo('/admin');
         setAdminActiveTab('customer_reports');
-        setReportsStatusFilter('pending_admin_details');
-        setReportsCurrentPage(1);
+        setCustomerHubExternalStatus({ value: 'pending_admin_details', tick: Date.now() });
       }
     } else if (notif.type === 'product' || notif.type === 'delete') {
       if (isAdminView) {
@@ -1022,7 +1065,7 @@ export default function App() {
         return r;
       }));
       await catalogService.archiveMultipleReports(reportsList, currentUser?.name || 'Staff');
-      setSelectedReportIds(new Set());
+      setCustomerHubResetTick(t => t + 1);
       showToast(`Archived ${reportsList.length} return reports to Archive Vault.`, 'success');
       refreshAllData();
     } catch (e) {
@@ -1265,6 +1308,23 @@ export default function App() {
     });
   };
 
+  const requestClearAllSandbox = () => {
+    if (!canDeleteReports) {
+      showToast('You do not have permission to clear sandbox records.', 'error');
+      return;
+    }
+    const totalCount = testReportsList.length + testCreditMemosList.length;
+    if (totalCount === 0) return;
+
+    setDeleteModalState({
+      type: 'clear_sandbox',
+      title: 'Clear All Sandbox Test Records?',
+      itemName: `${testReportsList.length} Sandbox RMA(s) & ${testCreditMemosList.length} Test Credit Memo(s)`,
+      itemType: 'sandbox records',
+      itemDetails: 'Permanently removes all simulated test tickets, test RTV claims, and test Credit Memos without affecting Live data.'
+    });
+  };
+
   const handleConfirmDelete = async () => {
     if (!deleteModalState) return;
     setIsDeleteModalLoading(true);
@@ -1300,12 +1360,7 @@ export default function App() {
           return r;
         }));
         await catalogService.moveReportToTrash(id, rmaNumber, currentUser?.name || 'Staff');
-        setSelectedReportIds(prev => {
-          const next = new Set(prev);
-          if (id) next.delete(id);
-          if (rmaNumber) next.delete(rmaNumber);
-          return next;
-        });
+        setCustomerHubResetTick(t => t + 1);
         showToast(`Moved RMA #${rmaNumber} to 30-Day Trash Bin.`, 'success');
         refreshAllData();
       } else if (deleteModalState.type === 'bulk_products') {
@@ -1336,7 +1391,7 @@ export default function App() {
           return r;
         }));
         await catalogService.moveMultipleReportsToTrash(items, currentUser?.name || 'Staff');
-        setSelectedReportIds(new Set());
+        setCustomerHubResetTick(t => t + 1);
         showToast(`Moved ${items.length} return reports to 30-Day Trash Bin.`, 'success');
         refreshAllData();
       } else if (deleteModalState.type === 'credit_memo') {
@@ -1353,6 +1408,25 @@ export default function App() {
         setCreditMemosList(prev => prev.filter(m => !numSet.has(m.credit_memo_number)));
         showToast(`Successfully voided and deleted ${items.length} credit memos from database.`, 'success');
         refreshAllData();
+      } else if (deleteModalState.type === 'clear_sandbox') {
+        if (testReportsList.length > 0) {
+          await catalogService.deleteMultipleReports(testReportsList);
+        }
+        if (testCreditMemosList.length > 0) {
+          await creditMemoService.deleteMultipleCreditMemos(testCreditMemosList.map(m => m.credit_memo_number));
+        }
+        try {
+          const allClaims = await supplierClaimService.getClaims();
+          const testClaims = (allClaims || []).filter(c => isTestRecord(c));
+          for (const claim of testClaims) {
+            await supplierClaimService.deleteClaim(claim.claim_number || claim.claimNumber);
+          }
+        } catch (claimErr) {
+          console.warn('Clearing sandbox RTV claims notice:', claimErr);
+        }
+        setCustomerHubResetTick(t => t + 1);
+        showToast('All Sandbox Test Mode records, memos, and RTV claims permanently cleared.', 'success');
+        await refreshAllData();
       }
       setDeleteModalState(null);
     } catch (e) {
@@ -1412,6 +1486,10 @@ export default function App() {
   const [isInspectingPaperwork, setIsInspectingPaperwork] = useState(false);
   const [paperworkInspectionProgress, setPaperworkInspectionProgress] = useState(null); // { current: 1, total: 3 }
   const paperworkAbortControllerRef = useRef(null);
+  const refreshInFlightRef = useRef(null);
+  const refreshQueuedRef = useRef(false);
+  const bgRefreshTimerRef = useRef(null);
+  const lastAutoPurgeRef = useRef(0);
   const [paperworkShake, setPaperworkShake] = useState(false);
   const [paperworkError, setPaperworkError] = useState(null);
   const [siNumber, setSiNumber] = useState('');
@@ -1425,39 +1503,12 @@ export default function App() {
 
   // Modals & Queues
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [simpleRtvRmaNumber, setSimpleRtvRmaNumber] = useState(null);
   const [isPendingModalOpen, setIsPendingModalOpen] = useState(false);
   const [isReportsModalOpen, setIsReportsModalOpen] = useState(false);
   const [pendingBarcodesList, setPendingBarcodesList] = useState([]);
   const [recentReportsList, setRecentReportsList] = useState([]);
   const [toastMessage, setToastMessage] = useState(null);
-  const [reportsViewMode, setReportsViewMode] = useState(() => {
-    return localStorage.getItem('rma_admin_reports_view_mode') || 'table';
-  });
-
-  // Return Reports Filtering, Sorting & Pagination State
-  const [reportsSearchQuery, setReportsSearchQuery] = useState('');
-  const [reportsReasonFilter, setReportsReasonFilter] = useState('all');
-  const [reportsStatusFilter, setReportsStatusFilter] = useState('all');
-  const [reportsDispositionFilter, setReportsDispositionFilter] = useState('all');
-  const [reportsConditionGradeFilter, setReportsConditionGradeFilter] = useState('all');
-  const [reportsDateFrom, setReportsDateFrom] = useState('');
-  const [reportsDateTo, setReportsDateTo] = useState('');
   const [thermalPrintReport, setThermalPrintReport] = useState(null);
-  const [reportsSortField, setReportsSortField] = useState('id');
-  const [reportsSortDirection, setReportsSortDirection] = useState('desc');
-  const [reportsCurrentPage, setReportsCurrentPage] = useState(1);
-  const [reportsPageSize, setReportsPageSize] = useState(10);
-  const [selectedReportIds, setSelectedReportIds] = useState(new Set());
-  const [expandedManifestIds, setExpandedManifestIds] = useState(new Set());
-  const toggleManifestExpand = (id) => {
-    setExpandedManifestIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
 
   // Automatically prune orphan report selection IDs whenever recentReportsList updates
   useEffect(() => {
@@ -1472,54 +1523,30 @@ export default function App() {
     }
   }, [reporterContact]);
 
-  useEffect(() => {
-    setSelectedReportIds(prev => {
-      if (prev.size === 0) return prev;
-      const valid = new Set(recentReportsList.flatMap(r => [r.id, r.rma_number].filter(Boolean)));
-      const next = new Set([...prev].filter(id => valid.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [recentReportsList]);
 
-  // Clear selections whenever the active tab changes (e.g. Products <-> Reports <-> Credit Memos)
-  useEffect(() => {
-    setSelectedReportIds(new Set());
-  }, [adminActiveTab]);
 
   // Fullscreen Image Lightbox Modal State
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
 
-  const handleSetReportsViewMode = (mode) => {
-    setReportsViewMode(mode);
-    try {
-      localStorage.setItem('rma_admin_reports_view_mode', mode);
-    } catch (e) { }
-  };
-
-  const handleReportsSort = (field) => {
-    setReportsCurrentPage(1);
-    if (reportsSortField === field) {
-      setReportsSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setReportsSortField(field);
-      setReportsSortDirection('asc');
-    }
-  };
-
-  const [coworkerQueueFilter, setCoworkerQueueFilter] = useState('all'); // 'all' | 'restock' | 'scrap'
+  const [coworkerQueueFilter, setCoworkerQueueFilter] = useState('all'); // 'all' | 'restock' | 'reorder' | 'scrap_no_reorder'
   const [updatingQueueId, setUpdatingQueueId] = useState(null);
 
-  const resetReportsFilters = () => {
-    setReportsSearchQuery('');
-    setReportsReasonFilter('all');
-    setReportsStatusFilter('all');
-    setReportsDispositionFilter('all');
-    setReportsConditionGradeFilter('all');
+  useEffect(() => {
     setCoworkerQueueFilter('all');
-    setReportsDateFrom('');
-    setReportsDateTo('');
-    setReportsCurrentPage(1);
-    setSelectedReportIds(new Set());
+  }, [adminActiveTab, sandboxSubTab]);
+
+  const handleResetReportToPending = async (item) => {
+    if (!item) return;
+    try {
+      setUpdatingQueueId(item.id || item.rma_number);
+      await catalogService.resetReportToPending(item.id, item.rma_number, currentUser?.name || 'Staff');
+      await refreshAllData();
+      showToast(`Reset ${item.rma_number} to pending / under inspection.`, 'success');
+    } catch (e) {
+      showToast('Could not reset report: ' + e.message, 'error');
+    } finally {
+      setUpdatingQueueId(null);
+    }
   };
 
   // Helpers to check whether an item (or batch manifest) is in the pending Ready to Restock or Supplier Re-Order queue
@@ -1670,6 +1697,15 @@ export default function App() {
     return activeReportsList.filter(r => !isTestRecord(r));
   }, [activeReportsList]);
 
+  // 6. Test vs Live Credit Memos
+  const testCreditMemosList = React.useMemo(() => {
+    return creditMemosList.filter(m => isTestRecord(m));
+  }, [creditMemosList]);
+
+  const liveCreditMemosList = React.useMemo(() => {
+    return creditMemosList.filter(m => !isTestRecord(m));
+  }, [creditMemosList]);
+
   // Operational Segregation: Inbound Customer Returns vs Outbound Supplier Claims (Filtered on liveReportsList)
   const customerInboundReports = React.useMemo(() => {
     return liveReportsList.filter(r => (r.rma_type === 'customer_inbound' || !r.rma_type) && !isManifestSubItem(r, liveReportsList));
@@ -1695,14 +1731,14 @@ export default function App() {
     return liveReportsList.filter(r => !isManifestSubItem(r, liveReportsList) && isItemRejected(r, liveReportsList));
   }, [liveReportsList]);
 
-  const supplierOutboundReports = React.useMemo(() => {
+  const extractSupplierOutboundReports = React.useCallback((sourceReports = []) => {
     const unpacked = [];
-    liveReportsList.forEach(r => {
-      if (isManifestSubItem(r, liveReportsList)) return;
+    sourceReports.forEach(r => {
+      if (isManifestSubItem(r, sourceReports)) return;
       const isExplicitSupplierOutbound = r.rma_type === 'supplier_outbound';
       const disp = String(r.disposition || '').toLowerCase();
-      const isManifest = isBatchManifest(r, liveReportsList);
-      const manifestChildren = isManifest ? getReportManifestItems(r, liveReportsList) : [];
+      const isManifest = isBatchManifest(r, sourceReports);
+      const manifestChildren = isManifest ? getReportManifestItems(r, sourceReports) : [];
       const hasRtvChild = manifestChildren.some(c => {
         const cDisp = String(c.disposition || '').toLowerCase();
         return c.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
@@ -1730,269 +1766,45 @@ export default function App() {
       unpacked.push(r);
     });
     return unpacked;
-  }, [liveReportsList]);
+  }, []);
 
-  // Hub-scoped Coworker Inventory & Procurement Queues
+  const supplierOutboundReports = React.useMemo(() => {
+    return extractSupplierOutboundReports(liveReportsList);
+  }, [liveReportsList, extractSupplierOutboundReports]);
+
+  const sandboxCustomerReports = React.useMemo(() => {
+    return testReportsList.filter(r => (r.rma_type === 'customer_inbound' || !r.rma_type) && !isManifestSubItem(r, testReportsList));
+  }, [testReportsList]);
+
+  const sandboxSupplierOutboundReports = React.useMemo(() => {
+    return extractSupplierOutboundReports(testReportsList);
+  }, [testReportsList, extractSupplierOutboundReports]);
+
+  // Hub-scoped Coworker Inventory & Procurement Queues (Full Parity for Live & Sandbox)
+  const scopeSourceReports = adminActiveTab === 'sandbox' ? testReportsList : liveReportsList;
+
   const activeHubReports = React.useMemo(() => {
+    if (adminActiveTab === 'sandbox') {
+      return sandboxSubTab === 'supplier' ? sandboxSupplierOutboundReports : sandboxCustomerReports;
+    }
     if (adminActiveTab === 'supplier_claims') {
       return supplierOutboundReports;
     }
     return customerInboundReports;
-  }, [adminActiveTab, supplierOutboundReports, customerInboundReports]);
+  }, [adminActiveTab, sandboxSubTab, sandboxSupplierOutboundReports, sandboxCustomerReports, supplierOutboundReports, customerInboundReports]);
 
   const hubReadyToRestockCount = React.useMemo(() => {
-    return activeHubReports.filter(r => isItemReadyToRestock(r, liveReportsList)).length;
-  }, [activeHubReports, liveReportsList]);
+    return activeHubReports.filter(r => isItemReadyToRestock(r, scopeSourceReports)).length;
+  }, [activeHubReports, scopeSourceReports, isItemReadyToRestock]);
 
   const hubReorderNeededCount = React.useMemo(() => {
-    return activeHubReports.filter(r => isItemReorderNeeded(r, liveReportsList)).length;
-  }, [activeHubReports, liveReportsList]);
+    return activeHubReports.filter(r => isItemReorderNeeded(r, scopeSourceReports)).length;
+  }, [activeHubReports, scopeSourceReports]);
 
   const hubScrappedNoReorderCount = React.useMemo(() => {
-    return activeHubReports.filter(r => isItemScrappedNoReorder(r, liveReportsList)).length;
-  }, [activeHubReports, liveReportsList]);
+    return activeHubReports.filter(r => isItemScrappedNoReorder(r, scopeSourceReports)).length;
+  }, [activeHubReports, scopeSourceReports]);
 
-  // Filter and sort return reports - strictly isolated to Customer Inbound Returns
-  const processedReports = React.useMemo(() => {
-    const q = reportsSearchQuery.toLowerCase().trim();
-    let list = liveReportsList.filter(item => {
-      // Customer RMA Hub strictly isolates to Customer Inbound Returns at ALL times
-      if (item.rma_type === 'supplier_outbound') {
-        return false;
-      }
-      // Omit child rows of manifest returns (which share identical rma_number with parent)
-      // BUT keep Split tickets (which have their own unique rma_number like -B, -C)
-      if (isManifestSubItem(item, recentReportsList)) {
-        return false;
-      }
-
-      if (q) {
-        const matchesChild = Array.isArray(item.items) && item.items.some(child => (
-          (child.barcode || '').toLowerCase().includes(q) ||
-          (child.name || '').toLowerCase().includes(q) ||
-          (child.sku || child.code || '').toLowerCase().includes(q)
-        ));
-
-        const matches = (
-          matchesChild ||
-          String(item.id || '').includes(q) ||
-          (item.rma_number || '').toLowerCase().includes(q) ||
-          (item.barcode || '').toLowerCase().includes(q) ||
-          (item.name || '').toLowerCase().includes(q) ||
-          (item.reporter_name || item.reported_by || '').toLowerCase().includes(q) ||
-          (item.reporter_contact || '').toLowerCase().includes(q) ||
-          (item.reason || '').toLowerCase().includes(q) ||
-          (item.warehouse_location || '').toLowerCase().includes(q) ||
-          (item.store_branch || '').toLowerCase().includes(q) ||
-          (item.invoice_dr_number || '').toLowerCase().includes(q) ||
-          (item.si_number || '').toLowerCase().includes(q) ||
-          (item.dr_number || '').toLowerCase().includes(q) ||
-          (item.po_number || '').toLowerCase().includes(q) ||
-          (item.batch_lot_number || '').toLowerCase().includes(q)
-        );
-        if (!matches) return false;
-      }
-
-      if (reportsReasonFilter !== 'all') {
-        const itemReasonNorm = (item.reason || '').replace(/^\d+-\s*/, '').toLowerCase().trim();
-        const filterReasonNorm = reportsReasonFilter.replace(/^\d+-\s*/, '').toLowerCase().trim();
-        if (itemReasonNorm !== filterReasonNorm) return false;
-      }
-
-      if (reportsStatusFilter !== 'all') {
-        const s = String(item.status || 'received_at_dock').toLowerCase();
-        if (reportsStatusFilter === 'pending_admin_details') {
-          const isManifestRow = isBatchManifest(item, recentReportsList);
-          if (isManifestRow) {
-            const children = getReportManifestItems(item, recentReportsList);
-            const hasUnmappedChild = children.some(child => !hasAssignedSku(child, savedProductsList));
-            if (!hasUnmappedChild) return false;
-          } else {
-            const isUnmappedStandalone = !hasAssignedSku(item, savedProductsList) || s === 'pending_admin_details';
-            if (!isUnmappedStandalone) return false;
-          }
-        } else if (reportsStatusFilter === 'received_at_dock') {
-          if (s !== 'pending' && s !== 'received_at_dock') return false;
-        } else if (reportsStatusFilter === 'draft') {
-          if (s !== 'draft') return false;
-        } else if (reportsStatusFilter === 'restocked') {
-          if (s !== 'restocked' && s !== 'closed' && s !== 'resolved') return false;
-        } else if (reportsStatusFilter === 'scrapped') {
-          if (s !== 'scrapped' && s !== 'disposed') return false;
-        } else if (s !== reportsStatusFilter.toLowerCase()) {
-          return false;
-        }
-      }
-
-      // Disposition filter (supports numbered prefix e.g. "1- Pending Triage")
-      if (reportsDispositionFilter !== 'all') {
-        const itemDispNorm = (item.disposition || 'Pending Triage').replace(/^\d+-\s*/, '').toLowerCase().trim();
-        const filterDispNorm = reportsDispositionFilter.replace(/^\d+-\s*/, '').toLowerCase().trim();
-        if (itemDispNorm !== filterDispNorm) return false;
-      }
-
-      // Condition Grade filter
-      if (reportsConditionGradeFilter !== 'all') {
-        const itemGrade = item.condition_grade || 'Unassessed';
-        if (!itemGrade.toLowerCase().startsWith(reportsConditionGradeFilter.toLowerCase().charAt(0))) return false;
-      }
-
-      // Date Range filters
-      // Unified Coworker Workstation Queue Filters
-      if (coworkerQueueFilter === 'restock') {
-        if (!isItemReadyToRestock(item, recentReportsList)) return false;
-      } else if (coworkerQueueFilter === 'reorder' || coworkerQueueFilter === 'scrap') {
-        if (!isItemReorderNeeded(item, recentReportsList)) return false;
-      } else if (coworkerQueueFilter === 'scrap_no_reorder') {
-        if (!isItemScrappedNoReorder(item, recentReportsList)) return false;
-      } else if (coworkerQueueFilter === 'hold' || coworkerQueueFilter === 'quarantine') {
-        if (!isItemOnHold(item, recentReportsList)) return false;
-      } else if (coworkerQueueFilter === 'rejected') {
-        if (!isItemRejected(item, recentReportsList)) return false;
-      }
-
-      if (reportsDateFrom) {
-        const itemDate = new Date(item.created_at || 0).toISOString().slice(0, 10);
-        if (itemDate < reportsDateFrom) return false;
-      }
-
-      if (reportsDateTo) {
-        const itemDate = new Date(item.created_at || 0).toISOString().slice(0, 10);
-        if (itemDate > reportsDateTo) return false;
-      }
-
-      return true;
-    });
-
-    list.sort((a, b) => {
-      let valA, valB;
-      switch (reportsSortField) {
-        case 'id':
-          valA = Number(a.id) || 0;
-          valB = Number(b.id) || 0;
-          break;
-        case 'rma_number':
-          valA = String(a.rma_number || '').toLowerCase();
-          valB = String(b.rma_number || '').toLowerCase();
-          break;
-        case 'barcode':
-          valA = String(a.barcode || '').toLowerCase();
-          valB = String(b.barcode || '').toLowerCase();
-          break;
-        case 'name':
-          valA = String(a.name || '').toLowerCase();
-          valB = String(b.name || '').toLowerCase();
-          break;
-        case 'quantity':
-          valA = Number(a.quantity) || 1;
-          valB = Number(b.quantity) || 1;
-          break;
-        case 'reason':
-          valA = String(a.reason || '').toLowerCase();
-          valB = String(b.reason || '').toLowerCase();
-          break;
-        case 'reporter':
-          valA = String(a.reporter_name || a.reported_by || '').toLowerCase();
-          valB = String(b.reporter_name || b.reported_by || '').toLowerCase();
-          break;
-        case 'store_branch':
-          valA = String(a.store_branch || '').toLowerCase();
-          valB = String(b.store_branch || '').toLowerCase();
-          break;
-        case 'invoice_dr_number':
-          valA = String(a.invoice_dr_number || a.dr_number || a.si_number || a.po_number || '').toLowerCase();
-          valB = String(b.invoice_dr_number || b.dr_number || b.si_number || b.po_number || '').toLowerCase();
-          break;
-        case 'status':
-        case 'lifecycle_stage':
-          valA = String(a.status || 'received_at_dock').toLowerCase();
-          valB = String(b.status || 'received_at_dock').toLowerCase();
-          break;
-        case 'disposition':
-          valA = String(a.disposition || 'Pending Triage').toLowerCase();
-          valB = String(b.disposition || 'Pending Triage').toLowerCase();
-          break;
-        case 'warehouse_location':
-          valA = String(a.warehouse_location || '').toLowerCase();
-          valB = String(b.warehouse_location || '').toLowerCase();
-          break;
-        case 'created_at':
-          valA = new Date(a.created_at || 0).getTime();
-          valB = new Date(b.created_at || 0).getTime();
-          break;
-        default:
-          valA = a.id;
-          valB = b.id;
-      }
-
-      if (valA < valB) return reportsSortDirection === 'asc' ? -1 : 1;
-      if (valA > valB) return reportsSortDirection === 'asc' ? 1 : -1;
-      return 0;
-    });
-
-    return list;
-  }, [
-    recentReportsList,
-    reportsSearchQuery,
-    reportsReasonFilter,
-    reportsStatusFilter,
-    reportsDispositionFilter,
-    reportsConditionGradeFilter,
-    coworkerQueueFilter,
-    isItemReadyToRestock,
-    isItemReadyForSupplierReorder,
-    reportsDateFrom,
-    reportsDateTo,
-    reportsSortField,
-    reportsSortDirection
-  ]);
-
-  // Paginated Return Reports Slice
-  const paginatedReports = React.useMemo(() => {
-    const start = (reportsCurrentPage - 1) * reportsPageSize;
-    return processedReports.slice(start, start + reportsPageSize);
-  }, [processedReports, reportsCurrentPage, reportsPageSize]);
-
-  // Bulk Selection Helpers for Reports (Strictly defined AFTER paginatedReports)
-  const isAllReportsPageSelected = React.useMemo(() => {
-    if (paginatedReports.length === 0) return false;
-    return paginatedReports.every(r => selectedReportIds.has(r.id || r.rma_number));
-  }, [paginatedReports, selectedReportIds]);
-
-  const toggleSelectReport = (id) => {
-    setSelectedReportIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleSelectAllReportsPage = () => {
-    setSelectedReportIds(prev => {
-      const next = new Set(prev);
-      if (isAllReportsPageSelected) {
-        paginatedReports.forEach(r => next.delete(r.id || r.rma_number));
-      } else {
-        paginatedReports.forEach(r => next.add(r.id || r.rma_number));
-      }
-      return next;
-    });
-  };
-
-  const selectAllFilteredReports = () => {
-    const next = new Set();
-    processedReports.forEach(r => next.add(r.id || r.rma_number));
-    setSelectedReportIds(next);
-  };
-
-  const clearReportsSelection = () => {
-    setSelectedReportIds(new Set());
-  };
-
-  const selectedReportsList = React.useMemo(() => {
-    return recentReportsList.filter(r => selectedReportIds.has(r.id || r.rma_number));
-  }, [recentReportsList, selectedReportIds]);
 
   // Real-time synchronization & initial load
   useEffect(() => {
@@ -2007,12 +1819,12 @@ export default function App() {
         const incoming = evt.payload.report;
         setRecentReportsList(prev => prev.map(r => (
           (r.id && incoming.id && String(r.id) === String(incoming.id)) ||
-          (r.rma_number && incoming.rma_number && r.rma_number === incoming.rma_number && !r.parent_rma_id)
+            (r.rma_number && incoming.rma_number && r.rma_number === incoming.rma_number && !r.parent_rma_id)
             ? { ...r, ...incoming }
             : r
         )));
       }
-      refreshAllData();
+      scheduleBackgroundRefresh();
 
       if (evt.type === 'report-submitted') {
         const rep = evt.payload?.report;
@@ -2082,7 +1894,7 @@ export default function App() {
       realtimeChannel = supabase
         .channel('rma_realtime_stream')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'rma_reports' }, (payload) => {
-          refreshAllData();
+          scheduleBackgroundRefresh();
           if (payload?.eventType === 'INSERT' && payload.new) {
             const rep = payload.new;
             addNotification({
@@ -2115,10 +1927,10 @@ export default function App() {
           }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
-          refreshAllData();
+          scheduleBackgroundRefresh();
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'admin_users' }, () => {
-          refreshAllData();
+          scheduleBackgroundRefresh();
         })
         .subscribe((status) => {
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
@@ -2186,10 +1998,10 @@ export default function App() {
     // 4. Immediate instant update when returning to tab/window
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        refreshAllData();
+        scheduleBackgroundRefresh();
       }
     };
-    const handleFocus = () => refreshAllData();
+    const handleFocus = () => scheduleBackgroundRefresh();
     window.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', handleFocus);
 
@@ -2209,6 +2021,10 @@ export default function App() {
       window.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleFocus);
       clearInterval(pollInterval);
+      if (bgRefreshTimerRef.current) {
+        clearTimeout(bgRefreshTimerRef.current);
+        bgRefreshTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -2294,23 +2110,61 @@ export default function App() {
     } catch (e) { }
   };
 
-  const refreshAllData = async () => {
-    try {
-      await Promise.allSettled([
-        catalogService.getPendingBarcodes().then(pending => setPendingBarcodesList(pending || [])),
-        catalogService.getRecentReports(100).then(reports => {
-          setRecentReportsList(reports || []);
-          if (Array.isArray(reports) && reports.length > 0) {
-            catalogService.autoPurgeExpiredTrash(reports).catch(() => {});
+  const executeRefreshBatch = async () => {
+    await Promise.allSettled([
+      catalogService.getPendingBarcodes().then(pending => setPendingBarcodesList(pending || [])),
+      catalogService.getRecentReports(100).then(reports => {
+        setRecentReportsList(reports || []);
+        if (Array.isArray(reports) && reports.length > 0) {
+          const nowMs = Date.now();
+          if (nowMs - lastAutoPurgeRef.current > 60_000) {
+            lastAutoPurgeRef.current = nowMs;
+            catalogService.autoPurgeExpiredTrash(reports).catch(() => { });
           }
-        }),
-        catalogService.getSavedProducts().then(saved => setSavedProductsList(saved || [])),
-        authService.getEmployees().then(staff => setStaffList(staff || [])),
-        creditMemoService.getCreditMemos().then(memos => setCreditMemosList(memos || []))
-      ]);
-    } catch (e) {
-      console.warn('Sync notice:', e);
+        }
+      }),
+      catalogService.getSavedProducts().then(saved => setSavedProductsList(saved || [])),
+      authService.getEmployees().then(staff => setStaffList(staff || [])),
+      creditMemoService.getCreditMemos().then(memos => setCreditMemosList(memos || []))
+    ]);
+  };
+
+  // Coalesce concurrent refreshes so at most one Supabase sync batch runs at a time.
+  const refreshAllData = async () => {
+    if (bgRefreshTimerRef.current) {
+      clearTimeout(bgRefreshTimerRef.current);
+      bgRefreshTimerRef.current = null;
     }
+    if (refreshInFlightRef.current) {
+      refreshQueuedRef.current = true;
+      return refreshInFlightRef.current;
+    }
+    const runLoop = async () => {
+      try {
+        do {
+          refreshQueuedRef.current = false;
+          await executeRefreshBatch();
+        } while (refreshQueuedRef.current);
+      } catch (e) {
+        console.warn('Sync notice:', e);
+      } finally {
+        refreshInFlightRef.current = null;
+      }
+    };
+    const promise = runLoop();
+    refreshInFlightRef.current = promise;
+    return promise;
+  };
+
+  // Debounce passive background notifications (Realtime, EventBus, focus) into one sync.
+  const scheduleBackgroundRefresh = () => {
+    if (bgRefreshTimerRef.current) {
+      clearTimeout(bgRefreshTimerRef.current);
+    }
+    bgRefreshTimerRef.current = setTimeout(() => {
+      bgRefreshTimerRef.current = null;
+      refreshAllData();
+    }, 250);
   };
 
   const fetchReports = refreshAllData;
@@ -2485,9 +2339,8 @@ export default function App() {
       return;
     }
 
-    const isSupplierRtvSubmission = gateSession?.stream_type === 'supplier_outbound' || (isTestMode && testModeStreamType === 'supplier_outbound');
-    if (isSupplierRtvSubmission && !expiryDate) {
-      showToast('Product expiration date is required for Supplier RTV before adding item to manifest.', 'warning');
+    if (isSupplierRtvPortal && !expiryDate) {
+      showToast('Product expiration date is required for Supplier RTV items before adding to manifest.', 'warning');
       return;
     }
 
@@ -2530,6 +2383,7 @@ export default function App() {
     setManifestItems(prev => [...prev, newItem]);
 
     // Reset item-specific fields
+    setIsUnlabeledItem(false);
     setBarcodeInput('');
     setCustomItemName('');
     setDetectedProduct(null);
@@ -2584,8 +2438,8 @@ export default function App() {
           check.error === 'REVOKED'
             ? 'Submission blocked: Your return authorization has been revoked by Pingcon Operations.'
             : check.error === 'EXPIRED'
-            ? 'Submission blocked: Your return authorization link has expired.'
-            : 'Submission blocked: Your return authorization link is invalid or deleted.',
+              ? 'Submission blocked: Your return authorization link has expired.'
+              : 'Submission blocked: Your return authorization link is invalid or deleted.',
           'error'
         );
         return;
@@ -2600,9 +2454,8 @@ export default function App() {
         showToast('Photo of damaged product is required before submitting return report.', 'warning');
         return;
       }
-      const isSupplierRtvSubmission = gateSession?.stream_type === 'supplier_outbound' || (isTestMode && testModeStreamType === 'supplier_outbound');
-      if (isSupplierRtvSubmission && !expiryDate) {
-        showToast('Product expiration date is required for Supplier RTV before submitting return report.', 'warning');
+      if (isSupplierRtvPortal && !expiryDate) {
+        showToast('Product expiration date is required for Supplier RTV reports before submitting.', 'warning');
         return;
       }
       const effectiveItemName = customItemName.trim() || detectedProduct?.name || (activeBarcode ? `Unidentified Item (${activeBarcode})` : 'General Return Item');
@@ -2649,8 +2502,8 @@ export default function App() {
         showToast(`Photo of damaged product is required for item "${it.name || it.barcode}". Please attach proof photo.`, 'warning');
         return;
       }
-      if (!it.expiry_date) {
-        showToast(`Product expiration date is required for item "${it.name || it.barcode}". Please select expiry date.`, 'warning');
+      if (isSupplierRtvPortal && !it.expiry_date) {
+        showToast(`Product expiration date is required for Supplier RTV item "${it.name || it.barcode}". Please select expiry date.`, 'warning');
         return;
       }
     }
@@ -2690,7 +2543,7 @@ export default function App() {
       : 'customer_inbound';
 
     // 3. Generate ONE unique RMA Number with isolated sequence (Test Mode vs Live Mode)
-    const rmaNumber = catalogService.generateRMANumber(recentReportsList, isTestMode);
+    const rmaNumber = catalogService.generateRMANumber(recentReportsList, effectiveIsTestMode);
     const totalItemsCount = itemsToSubmit.length;
     const totalQuantityCount = itemsToSubmit.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0);
     const commonUnit = itemsToSubmit.every(it => it.unit_name === itemsToSubmit[0].unit_name) ? itemsToSubmit[0].unit_name : 'mixed';
@@ -2737,7 +2590,12 @@ export default function App() {
       items: itemsToSubmit,
       expiry_date: itemsToSubmit[0]?.expiry_date || null,
       batch_lot_number: batchLotNumber ? batchLotNumber.trim() : null,
-      ai_document_metadata: paperworkMetadata || null,
+      ai_document_metadata: {
+        ...(paperworkMetadata || {}),
+        ...(effectiveIsTestMode ? { is_test: true, test_mode: true } : {})
+      },
+      is_test: effectiveIsTestMode,
+      notes: effectiveIsTestMode ? '[TEST_MODE] Sandbox Return' : null,
       photoCount: itemsToSubmit.reduce((acc, it) => acc + (it.photoFiles?.length || 0), 0),
       paperworkCount: paperworkPhotos.length,
       hasGps: gpsLocation.isAccurate,
@@ -2781,7 +2639,7 @@ export default function App() {
     setBatchLotNumber('');
     setIsUnlabeledItem(false);
     setPaperworkError(null);
-    setSelectedReportIds(new Set());
+    setCustomerHubResetTick(t => t + 1);
     setIsSubmitting(false);
 
     // 6. Background execution: hierarchical Google Drive upload, Supabase insertion, email
@@ -2915,11 +2773,11 @@ export default function App() {
           expiry_date: capturedItems[0]?.expiry_date || null,
           batch_lot_number: capturedBatchLotNumber,
           condition_grade: mapReasonToConditionGrade(primaryReason),
-          notes: isTestMode ? '[TEST_MODE] Sandbox Return' : null,
+          notes: effectiveIsTestMode ? '[TEST_MODE] Sandbox Return' : null,
           ai_document_metadata: {
             ...(capturedPaperworkMetadata || {}),
             ...((isUnlabeledItem || isUnlabeledBarcode(primaryBarcode)) ? { is_unlabeled: true, provisional_barcode: primaryBarcode } : {}),
-            ...(isTestMode ? { is_test: true, test_mode: true } : {})
+            ...(effectiveIsTestMode ? { is_test: true, test_mode: true } : {})
           },
           google_drive_folder_url: gdriveFolderUrl,
           google_drive_folder_id: gdriveFolderId,
@@ -2969,13 +2827,12 @@ export default function App() {
                   </div>
                   {sessionCountdown.text ? (
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border transition-all ${
-                        sessionCountdown.totalSeconds < 300
-                          ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-300 dark:border-rose-800 animate-pulse'
-                          : sessionCountdown.totalSeconds < 1800
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border transition-all ${sessionCountdown.totalSeconds < 300
+                        ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-300 dark:border-rose-800 animate-pulse'
+                        : sessionCountdown.totalSeconds < 1800
                           ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-300 dark:border-amber-800'
                           : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
-                      }`}>
+                        }`}>
                         <Clock className="w-3 h-3 shrink-0" />
                         <span>Link expires in: <strong>{sessionCountdown.text}</strong></span>
                       </span>
@@ -2989,6 +2846,16 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsScannerOpen(true)}
+                  className="touch-target px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  title="Scan product barcode or printed RMA sticker QR"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Scan RMA QR</span>
+                </button>
+
                 {gateSession && (
                   <button
                     type="button"
@@ -3022,99 +2889,96 @@ export default function App() {
               const p = new URLSearchParams(window.location.search);
               return p.has('token') || Boolean(gateSession);
             })() && (
-              <div className={`p-4 sm:p-5 rounded-3xl border transition-all text-xs space-y-3.5 shadow-xs ${isTestMode
-                ? 'bg-amber-500/10 dark:bg-amber-950/40 border-amber-500/40 text-amber-900 dark:text-amber-200'
-                : 'bg-emerald-500/10 dark:bg-emerald-950/40 border-emerald-500/40 text-emerald-900 dark:text-emerald-200'
-                }`}>
-                {/* Row 1: Identity & Mode Controls */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
-                    <div className={`p-2.5 rounded-2xl shrink-0 shadow-xs ${isTestMode ? 'bg-amber-500 text-slate-950 font-black' : 'bg-emerald-600 text-white'
-                      }`}>
-                      {isTestMode ? <FlaskConical className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
-                    </div>
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <strong className="font-black text-xs sm:text-sm">
-                          {isTestMode ? '🧪 Super Admin Sandbox Active' : '🟢 Live Delivery Mode Active'}
-                        </strong>
-                        <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-white/80 dark:bg-slate-900/80 border border-current/20 font-bold whitespace-nowrap">
-                          {currentUser.name || 'Danilo Alvaro (Super Admin)'}
-                        </span>
+                <div className={`p-4 sm:p-5 rounded-3xl border transition-all text-xs space-y-3.5 shadow-xs ${isTestMode
+                  ? 'bg-amber-500/10 dark:bg-amber-950/40 border-amber-500/40 text-amber-900 dark:text-amber-200'
+                  : 'bg-emerald-500/10 dark:bg-emerald-950/40 border-emerald-500/40 text-emerald-900 dark:text-emerald-200'
+                  }`}>
+                  {/* Row 1: Identity & Mode Controls */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+                      <div className={`p-2.5 rounded-2xl shrink-0 shadow-xs ${isTestMode ? 'bg-amber-500 text-slate-950 font-black' : 'bg-emerald-600 text-white'
+                        }`}>
+                        {isTestMode ? <FlaskConical className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
                       </div>
-                      <p className="text-[11px] opacity-85 leading-relaxed">
-                        {isTestMode
-                          ? 'Test emails routed safely to finance2@keysysincorporated.com • Reports saved to database.'
-                          : 'Official return reports saved to database & sent directly to supplier & Assigned AEs.'}
-                      </p>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <strong className="font-black text-xs sm:text-sm">
+                            {isTestMode ? '🧪 Super Admin Sandbox Active' : '🟢 Live Delivery Mode Active'}
+                          </strong>
+                          <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-white/80 dark:bg-slate-900/80 border border-current/20 font-bold whitespace-nowrap">
+                            {currentUser.name || 'Danilo Alvaro (Super Admin)'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] opacity-85 leading-relaxed">
+                          {isTestMode
+                            ? 'Test emails routed safely to finance2@keysysincorporated.com • Reports saved to database.'
+                            : 'Official return reports saved to database & sent directly to supplier & Assigned AEs.'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0 self-stretch sm:self-center justify-end">
+                      <button
+                        type="button"
+                        onClick={toggleTestMode}
+                        className={`touch-target px-3.5 py-2 rounded-xl font-black text-xs transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 whitespace-nowrap ${isTestMode
+                          ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
+                          : 'bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700'
+                          }`}
+                        title="Toggle Test / Sandbox Mode"
+                      >
+                        {isTestMode ? <ToggleRight className="w-4 h-4 text-slate-950" /> : <ToggleLeft className="w-4 h-4 text-slate-400" />}
+                        <span>{isTestMode ? 'Test Mode: ON' : 'Test Mode: OFF'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => navigateTo('/admin')}
+                        className="touch-target px-3.5 py-2 rounded-xl text-xs font-bold bg-white/90 hover:bg-white dark:bg-slate-800/90 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 shadow-2xs transition-all cursor-pointer active:scale-95 flex items-center gap-1 whitespace-nowrap"
+                        title="Return to Admin Dashboard"
+                      >
+                        <span>Admin Portal</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0 self-stretch sm:self-center justify-end">
-                    <button
-                      type="button"
-                      onClick={toggleTestMode}
-                      className={`touch-target px-3.5 py-2 rounded-xl font-black text-xs transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 whitespace-nowrap ${isTestMode
-                        ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
-                        : 'bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700'
-                        }`}
-                      title="Toggle Test / Sandbox Mode"
-                    >
-                      {isTestMode ? <ToggleRight className="w-4 h-4 text-slate-950" /> : <ToggleLeft className="w-4 h-4 text-slate-400" />}
-                      <span>{isTestMode ? 'Test Mode: ON' : 'Test Mode: OFF'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => navigateTo('/admin')}
-                      className="touch-target px-3.5 py-2 rounded-xl text-xs font-bold bg-white/90 hover:bg-white dark:bg-slate-800/90 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 shadow-2xs transition-all cursor-pointer active:scale-95 flex items-center gap-1 whitespace-nowrap"
-                      title="Return to Admin Dashboard"
-                    >
-                      <span>Admin Portal</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Row 2: Report Destination Hub Selector (Always available for Super Admin whether Test Mode is ON or OFF) */}
-                <div className={`pt-3 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
-                  isTestMode ? 'border-amber-400/40 dark:border-amber-800/60' : 'border-emerald-400/40 dark:border-emerald-800/60'
-                }`}>
-                  <div className="space-y-0.5">
-                    <span className="text-[11px] font-black uppercase tracking-wider block">
-                      Report Destination Hub:
-                    </span>
-                    <span className="text-[10px] opacity-80 block">
-                      Choose whether this return goes to Customer RMA Hub or Supplier RTV Hub
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-white/80 dark:bg-slate-900/90 border border-current/20 sm:w-auto w-full shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setTestModeStreamType('customer_inbound')}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
-                        testModeStreamType === 'customer_inbound'
+                  {/* Row 2: Report Destination Hub Selector (Always available for Super Admin whether Test Mode is ON or OFF) */}
+                  <div className={`pt-3 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${isTestMode ? 'border-amber-400/40 dark:border-amber-800/60' : 'border-emerald-400/40 dark:border-emerald-800/60'
+                    }`}>
+                    <div className="space-y-0.5">
+                      <span className="text-[11px] font-black uppercase tracking-wider block">
+                        Report Destination Hub:
+                      </span>
+                      <span className="text-[10px] opacity-80 block">
+                        Choose whether this return goes to Customer RMA Hub or Supplier RTV Hub
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-white/80 dark:bg-slate-900/90 border border-current/20 sm:w-auto w-full shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setTestModeStreamType('customer_inbound')}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${testModeStreamType === 'customer_inbound'
                           ? 'bg-blue-600 text-white shadow-sm'
                           : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      <span>📥 Customer RMA Hub</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTestModeStreamType('supplier_outbound')}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
-                        testModeStreamType === 'supplier_outbound'
+                          }`}
+                      >
+                        <span>📥 Customer RMA Hub</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTestModeStreamType('supplier_outbound')}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${testModeStreamType === 'supplier_outbound'
                           ? 'bg-purple-600 text-white shadow-sm'
                           : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      <span>📤 Supplier RTV Hub</span>
-                    </button>
+                          }`}
+                      >
+                        <span>📤 Supplier RTV Hub</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
             {/* Fluid Header Typography */}
             <div className="text-center space-y-1.5 pb-1">
@@ -3203,15 +3067,16 @@ export default function App() {
                   <div className="p-2.5 bg-white rounded-xl border border-slate-300 dark:border-slate-700 shadow-xs shrink-0 text-center">
                     <QRCodeSVG
                       id="filed-report-qr-svg"
-                      value={typeof window !== 'undefined'
-                        ? `${window.location.origin}/?rma=${encodeURIComponent(submitSuccessReport.rmaNumber)}&action=delivery`
-                        : submitSuccessReport.rmaNumber}
+                      value={buildPortalQrPayload(
+                        submitSuccessReport.rmaNumber,
+                        Boolean(submitSuccessReport.is_test || isTestRecord(submitSuccessReport) || effectiveIsTestMode)
+                      )}
                       size={110}
                       level="H"
                       includeMargin={false}
                     />
                     <span className="text-[8px] font-mono font-black text-slate-700 block mt-1 tracking-wider">
-                      SCAN FOR RMA
+                      PORTAL SCANNER ONLY
                     </span>
                   </div>
 
@@ -3224,10 +3089,10 @@ export default function App() {
                         {submitSuccessReport.total_items > 1
                           ? formatManifestBreakdown(submitSuccessReport.items, true)
                           : formatQuantityWithPackSize(
-                              submitSuccessReport.quantity || 1,
-                              submitSuccessReport.unit_name || 'pc',
-                              submitSuccessReport.items?.[0]?.pieces_per_case || submitSuccessReport.items?.[0]?.piecesPerCase
-                            )}
+                            submitSuccessReport.quantity || 1,
+                            submitSuccessReport.unit_name || 'pc',
+                            submitSuccessReport.items?.[0]?.pieces_per_case || submitSuccessReport.items?.[0]?.piecesPerCase
+                          )}
                       </span>
                       {submitSuccessReport.store_branch && (
                         <span className="text-[10px] text-blue-700 dark:text-blue-300 font-bold truncate">
@@ -3281,19 +3146,25 @@ export default function App() {
                           hour: '2-digit',
                           minute: '2-digit'
                         });
-                        await downloadBoxStickerPng({
+                        await downloadCustomSizedStickerPng({
                           svgElementOrId: 'filed-report-qr-svg',
+                          widthMm: 95,
+                          heightMm: 112,
                           rmaNumber: submitSuccessReport.rmaNumber,
+                          isTestMode: Boolean(submitSuccessReport.is_test || isTestRecord(submitSuccessReport) || effectiveIsTestMode),
+                          streamType: submitSuccessReport.rma_type || 'customer_inbound',
                           supplier: submitSuccessReport.supplier || submitSuccessReport.supplier_name || 'Pending Assignment',
                           itemName: submitSuccessReport.productName || submitSuccessReport.name || 'Returned Merchandise',
                           barcode: submitSuccessReport.barcode,
                           sku: submitSuccessReport.sku || submitSuccessReport.code || '',
                           quantity: submitSuccessReport.quantity || 1,
                           unit: submitSuccessReport.unit_name || submitSuccessReport.unit || 'pc',
+                          piecesPerCase: submitSuccessReport.items?.[0]?.pieces_per_case || submitSuccessReport.items?.[0]?.piecesPerCase || 1,
+                          expiryDate: submitSuccessReport.expiry_date || submitSuccessReport.items?.[0]?.expiry_date || '',
                           reason: submitSuccessReport.reason || 'Defective / Return',
                           reporter: submitSuccessReport.reporter_name || submitSuccessReport.reporter || 'Staff',
                           reporterContact: submitSuccessReport.reporter_contact || '',
-                          dateFormatted,
+                          dateTimeFormatted: dateFormatted,
                           storeBranch: submitSuccessReport.store_branch,
                           totalItems: submitSuccessReport.total_items,
                           totalQuantity: submitSuccessReport.total_quantity,
@@ -3316,11 +3187,23 @@ export default function App() {
                     type="button"
                     onClick={() => setQrModalReport(submitSuccessReport)}
                     className="touch-target w-full py-3 px-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-2xl shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                    title="Open print preview and sticker formatting options"
+                    title="Open drag-to-resize print studio (Small Tuna Can to Extra Large)"
                   >
                     <Printer className="w-4 h-4 shrink-0" />
-                    <span>Print Box Sticker</span>
+                    <span>Resize / Print Sticker</span>
                   </button>
+
+                  {submitSuccessReport.rma_type === 'supplier_outbound' && (
+                    <button
+                      type="button"
+                      onClick={() => setSimpleRtvWizard({ isOpen: true, report: submitSuccessReport, initialMode: 'wizard' })}
+                      className="touch-target w-full py-3 px-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-2xl shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 sm:col-span-3"
+                      title="Open the 4 simple Supplier RTV choices or log Driver Pickup & print A4 form"
+                    >
+                      <Truck className="w-4 h-4 shrink-0" />
+                      <span>Choose Disposition / Log Driver Pickup →</span>
+                    </button>
+                  )}
 
                   <button
                     type="button"
@@ -3339,16 +3222,20 @@ export default function App() {
                 {gateSession && (
                   <div className="p-3.5 sm:p-4 rounded-2xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-inner ${
-                        gateSession.stream_type === 'supplier_outbound'
-                          ? 'bg-purple-100 dark:bg-purple-900/60 text-purple-600 dark:text-purple-400'
-                          : 'bg-blue-100 dark:bg-blue-900/60 text-blue-600 dark:text-blue-400'
-                      }`}>
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-inner ${gateSession.stream_type === 'supplier_outbound'
+                        ? 'bg-purple-100 dark:bg-purple-900/60 text-purple-600 dark:text-purple-400'
+                        : 'bg-blue-100 dark:bg-blue-900/60 text-blue-600 dark:text-blue-400'
+                        }`}>
                         {gateSession.stream_type === 'supplier_outbound' ? <Truck className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
                       </div>
                       <div className="min-w-0">
                         <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5 flex-wrap">
                           <span>{gateSession.entity_name || gateSession.store_branch || 'Authorized Partner'}</span>
+                          {gateSession.is_test && (
+                            <span className="text-[10px] font-black uppercase bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full">
+                              🧪 Test Mode Sandbox
+                            </span>
+                          )}
                           {gateSession.authorized_email && (
                             <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400 bg-emerald-100/70 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full font-bold">
                               ✓ {gateSession.authorized_email}
@@ -3356,19 +3243,20 @@ export default function App() {
                           )}
                         </div>
                         <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">
-                          {gateSession.stream_type === 'supplier_outbound' ? 'Authorized Supplier Return to Vendor (RTV)' : 'Customer Return Authorization'}
+                          {gateSession.stream_type === 'supplier_outbound'
+                            ? `Authorized Supplier Return to Vendor (RTV)${gateSession.is_test ? ' • Test Sandbox Only' : ''}`
+                            : 'Customer Return Authorization'}
                         </p>
                       </div>
                     </div>
 
                     {sessionCountdown.text && (
-                      <div className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 shrink-0 self-start sm:self-auto border transition-all ${
-                        sessionCountdown.totalSeconds < 300
-                          ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-300 dark:border-rose-800 animate-pulse'
-                          : sessionCountdown.totalSeconds < 1800
+                      <div className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 shrink-0 self-start sm:self-auto border transition-all ${sessionCountdown.totalSeconds < 300
+                        ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-300 dark:border-rose-800 animate-pulse'
+                        : sessionCountdown.totalSeconds < 1800
                           ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-300 dark:border-amber-800'
                           : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
-                      }`}>
+                        }`}>
                         <Clock className="w-3.5 h-3.5 shrink-0" />
                         <span>Link expires in: <strong>{sessionCountdown.text}</strong></span>
                       </div>
@@ -3396,7 +3284,7 @@ export default function App() {
                     className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 transition-all active:scale-[0.99] cursor-pointer"
                   >
                     <Camera className="w-5 h-5" />
-                    <span>Scan with Camera / Google Lens</span>
+                    <span>Scan Product Barcode or RMA Sticker QR</span>
                   </button>
 
                   {/* Missing Barcode / Unlabeled Item Action Strip */}
@@ -3450,11 +3338,10 @@ export default function App() {
                           }
                         }}
                         placeholder={isUnlabeledItem ? "🏷️ Missing / Damaged Barcode (Auto-Assigned System Tag)" : (manifestItems.length > 0 ? "Scan or type another product barcode / SKU..." : "Scan or type product barcode / SKU here...")}
-                        className={`w-full pl-10 pr-4 py-2.5 rounded-2xl text-xs font-bold font-mono transition-colors shadow-2xs ${
-                          isUnlabeledItem
-                            ? 'bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-400 text-amber-900 dark:text-amber-200 cursor-not-allowed select-none'
-                            : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-blue-600'
-                        }`}
+                        className={`w-full pl-10 pr-4 py-2.5 rounded-2xl text-xs font-bold font-mono transition-colors shadow-2xs ${isUnlabeledItem
+                          ? 'bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-400 text-amber-900 dark:text-amber-200 cursor-not-allowed select-none'
+                          : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-blue-600'
+                          }`}
                       />
                     </div>
 
@@ -3547,8 +3434,8 @@ export default function App() {
                         onChange={(e) => setCustomItemName(e.target.value)}
                         placeholder={detectedProduct?.name || "e.g. Oishi Prawn Crackers 60g, MSH12 Ballpen (helps warehouse identify unlisted items)"}
                         className={`w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-800 border rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 transition-colors shadow-2xs ${detectedProduct
-                            ? 'border-emerald-300 dark:border-emerald-800/80 bg-emerald-50/20'
-                            : 'border-slate-300 dark:border-slate-700'
+                          ? 'border-emerald-300 dark:border-emerald-800/80 bg-emerald-50/20'
+                          : 'border-slate-300 dark:border-slate-700'
                           }`}
                       />
                     </div>
@@ -3618,39 +3505,47 @@ export default function App() {
                       ))}
                     </select>
 
-                    {/* Mandatory Expiration Date for all returns across Customer Hub & Supplier RTV */}
-                    <div className={`p-3 rounded-2xl border-2 space-y-1.5 transition-all ${
-                      !expiryDate 
-                        ? 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-400 dark:border-amber-700/90' 
-                        : 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800'
-                    }`}>
+                    {/* Product Expiration Date: Required for Supplier RTV, Optional for Customer Hub */}
+                    <div className={`p-3 rounded-2xl border-2 space-y-1.5 transition-all ${isSupplierRtvPortal && !expiryDate
+                      ? 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-400 dark:border-amber-700/90'
+                      : expiryDate
+                        ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800'
+                        : 'bg-slate-50/80 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700'
+                      }`}>
                       <div className="flex items-center justify-between">
                         <label className="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                          <Calendar className={`w-4 h-4 ${!expiryDate ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`} />
-                          <span>Product Expiration Date <span className="text-rose-500 font-black">*</span></span>
+                          <Calendar className={`w-4 h-4 ${expiryDate ? 'text-emerald-600 dark:text-emerald-400' : isSupplierRtvPortal ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500'}`} />
+                          <span>
+                            Product Expiration Date{' '}
+                            {isSupplierRtvPortal && <span className="text-rose-500 font-black">*</span>}
+                          </span>
                         </label>
-                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
-                          !expiryDate
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${expiryDate
+                          ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
+                          : isSupplierRtvPortal
                             ? 'bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
-                            : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
-                        }`}>
-                          {!expiryDate ? 'Required *' : '✓ Verified'}
+                            : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                          }`}>
+                          {expiryDate ? '✓ Verified' : isSupplierRtvPortal ? 'Required *' : 'Optional'}
                         </span>
                       </div>
                       <input
                         type="date"
-                        required
+                        required={isSupplierRtvPortal}
                         value={expiryDate}
                         onChange={(e) => setExpiryDate(e.target.value)}
-                        className={`w-full px-3.5 py-2 bg-white dark:bg-slate-900 border rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 transition-all ${
-                          !expiryDate
+                        className={`w-full px-3.5 py-2 bg-white dark:bg-slate-900 border rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 transition-all ${expiryDate
+                          ? 'border-emerald-400 dark:border-emerald-600 focus:ring-emerald-500'
+                          : isSupplierRtvPortal
                             ? 'border-amber-400 dark:border-amber-600 focus:ring-amber-500'
-                            : 'border-emerald-400 dark:border-emerald-600 focus:ring-emerald-500'
-                        }`}
+                            : 'border-slate-300 dark:border-slate-700 focus:ring-blue-500'
+                          }`}
                       />
                       {!expiryDate && (
-                        <p className="text-[10px] font-bold text-amber-700 dark:text-amber-300">
-                          * Required for both Customer Hub and Supplier RTV claims
+                        <p className={`text-[10px] font-bold ${isSupplierRtvPortal ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500 dark:text-slate-400'}`}>
+                          {isSupplierRtvPortal
+                            ? '* Required for Supplier RTV claims (both Live & Test Mode)'
+                            : 'Optional for Customer Hub returns — fill in if batch/expiry is visible.'}
                         </p>
                       )}
                     </div>
@@ -3660,13 +3555,12 @@ export default function App() {
                         <span className="font-bold text-slate-600 dark:text-slate-400">
                           Optional Explanation / Notes
                         </span>
-                        <span className={`font-mono font-bold ${
-                          explanation.length >= 250
-                            ? 'text-rose-600 dark:text-rose-400'
-                            : explanation.length >= 200
+                        <span className={`font-mono font-bold ${explanation.length >= 250
+                          ? 'text-rose-600 dark:text-rose-400'
+                          : explanation.length >= 200
                             ? 'text-amber-600 dark:text-amber-400'
                             : 'text-slate-400 dark:text-slate-500'
-                        }`}>
+                          }`}>
                           {explanation.length}/250 chars
                         </span>
                       </div>
@@ -3705,8 +3599,8 @@ export default function App() {
                           type="button"
                           onClick={() => setPhotoCaptureMode('single')}
                           className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${photoCaptureMode === 'single'
-                              ? 'bg-rose-600 text-white shadow-xs'
-                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                            ? 'bg-rose-600 text-white shadow-xs'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                             }`}
                           title="Direct camera snap (solo photo)"
                         >
@@ -3717,8 +3611,8 @@ export default function App() {
                           type="button"
                           onClick={() => setPhotoCaptureMode('batch')}
                           className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${photoCaptureMode === 'batch'
-                              ? 'bg-rose-600 text-white shadow-xs'
-                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                            ? 'bg-rose-600 text-white shadow-xs'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                             }`}
                           title="Select multiple photos from gallery"
                         >
@@ -3908,9 +3802,9 @@ export default function App() {
 
                   {/* Paperwork Photo Box (Zone 2) */}
                   <div className={`p-4 rounded-2xl border-2 transition-all flex flex-col justify-between space-y-3 ${paperworkShake ? 'animate-shake border-rose-500 bg-rose-50 dark:bg-rose-950/40' :
-                      paperworkPhotos.length > 0
-                        ? 'bg-emerald-50/30 dark:bg-slate-900 border-emerald-400 dark:border-emerald-800/80 shadow-2xs'
-                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-violet-400 dark:hover:border-violet-700 shadow-2xs'
+                    paperworkPhotos.length > 0
+                      ? 'bg-emerald-50/30 dark:bg-slate-900 border-emerald-400 dark:border-emerald-800/80 shadow-2xs'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-violet-400 dark:hover:border-violet-700 shadow-2xs'
                     }`}>
                     <div>
                       {/* Header Row */}
@@ -3929,8 +3823,8 @@ export default function App() {
                           </div>
                         </div>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${paperworkPhotos.length > 0
-                            ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
-                            : 'bg-violet-100 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800'
+                          ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                          : 'bg-violet-100 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800'
                           }`}>
                           {paperworkPhotos.length > 0 ? `✓ ${paperworkPhotos.length}/3 Verified` : 'Optional / Recommended'}
                         </span>
@@ -3946,8 +3840,8 @@ export default function App() {
                             type="button"
                             onClick={() => setPaperworkCaptureMode('single')}
                             className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${paperworkCaptureMode === 'single'
-                                ? 'bg-violet-600 text-white shadow-xs'
-                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                              ? 'bg-violet-600 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                               }`}
                             title="Direct camera snap (solo photo)"
                           >
@@ -3958,8 +3852,8 @@ export default function App() {
                             type="button"
                             onClick={() => setPaperworkCaptureMode('batch')}
                             className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${paperworkCaptureMode === 'batch'
-                                ? 'bg-violet-600 text-white shadow-xs'
-                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                              ? 'bg-violet-600 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                               }`}
                             title="Select multiple photos from gallery"
                           >
@@ -4183,8 +4077,8 @@ export default function App() {
                     </label>
                     {inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch) ? (
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${gateSession?.stream_type === 'supplier_outbound'
-                          ? 'text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 border-purple-200 dark:border-purple-800'
-                          : 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800'
+                        ? 'text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 border-purple-200 dark:border-purple-800'
+                        : 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800'
                         }`}>
                         <CheckCircle className="w-3 h-3" />
                         <span>Auto-Populated via {gateSession?.stream_type === 'supplier_outbound' ? 'Supplier RTV' : 'Customer'} Invite</span>
@@ -4271,8 +4165,8 @@ export default function App() {
                         readOnly={Boolean(gateSession?.authorized_email)}
                         placeholder="Phone No. or Email *"
                         className={`w-full pl-10 pr-3.5 py-2.5 border rounded-2xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none shadow-2xs ${gateSession?.authorized_email
-                            ? 'bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 cursor-not-allowed text-emerald-950 dark:text-emerald-200'
-                            : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 focus:border-blue-600'
+                          ? 'bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 cursor-not-allowed text-emerald-950 dark:text-emerald-200'
+                          : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 focus:border-blue-600'
                           }`}
                       />
                       {gateSession?.authorized_email && (
@@ -4426,7 +4320,7 @@ export default function App() {
                 </div>
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Customer Inbound</div>
                 <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">
-                  {customerInboundReports.filter(r => !creditMemosList.some(m => m.rma_number === r.rma_number || m.report_id === r.id)).length} pending credit
+                  {customerInboundReports.filter(r => !liveCreditMemosList.some(m => m.rma_number === r.rma_number || m.report_id === r.id)).length} pending credit
                 </div>
               </div>
 
@@ -4458,12 +4352,12 @@ export default function App() {
                   <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">Finance</span>
                 </div>
                 <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
-                  {creditMemosList.length}
+                  {liveCreditMemosList.length}
                 </div>
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Credit Memos</div>
                 <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">
-                  {creditMemosList.length > 0
-                    ? `₱${creditMemosList.reduce((acc, m) => acc + Number(m.credit_amount || m.amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} credited`
+                  {liveCreditMemosList.length > 0
+                    ? `₱${liveCreditMemosList.reduce((acc, m) => acc + Number(m.credit_amount || m.amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} credited`
                     : 'Customer deductions'}
                 </div>
               </div>
@@ -4558,7 +4452,7 @@ export default function App() {
                   }`}
               >
                 <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                <span>Credit Memos ({creditMemosList.length})</span>
+                <span>Credit Memos ({liveCreditMemosList.length})</span>
               </button>
 
               {/* Tab 5: Dedicated Test Mode Sandbox */}
@@ -4645,7 +4539,7 @@ export default function App() {
             )}
 
             {/* COWORKER INVENTORY & PROCUREMENT WORKSTATION QUICK-ACTION VIEW FILTERS */}
-            {(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports' || adminActiveTab === 'supplier_claims') && (
+            {(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports' || adminActiveTab === 'supplier_claims' || (adminActiveTab === 'sandbox' && sandboxSubTab !== 'memos')) && (
               <div className="bg-slate-900 dark:bg-slate-950 border border-slate-800 rounded-2xl p-3 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider shrink-0">
@@ -4653,10 +4547,12 @@ export default function App() {
                   </span>
                   <div className="min-w-0">
                     <h4 className="text-xs font-black text-white tracking-tight">
-                      Coworker Inventory & Procurement Queues
+                      Coworker Inventory & Procurement Queues {adminActiveTab === 'sandbox' ? '(Sandbox)' : ''}
                     </h4>
                     <p className="text-[11px] text-slate-400 truncate">
-                      Live workstation queues for Warehouse WMS restocking and Purchasing supplier re-orders.
+                      {adminActiveTab === 'sandbox'
+                        ? 'Simulated sandbox queues for Warehouse WMS restocking and Purchasing supplier re-orders.'
+                        : 'Live workstation queues for Warehouse WMS restocking and Purchasing supplier re-orders.'}
                     </p>
                   </div>
                 </div>
@@ -4665,13 +4561,11 @@ export default function App() {
                     type="button"
                     onClick={() => {
                       setCoworkerQueueFilter(coworkerQueueFilter === 'restock' ? 'all' : 'restock');
-                      setReportsCurrentPage(1);
                     }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                      coworkerQueueFilter === 'restock'
-                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-400/40'
-                        : 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-emerald-500/40'
-                    }`}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${coworkerQueueFilter === 'restock'
+                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-400/40'
+                      : 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-emerald-500/40'
+                      }`}
                     title="Filter table to items triaged as Restock to Inventory or Replacement Received"
                   >
                     <span>📦 Ready to Restock ({hubReadyToRestockCount})</span>
@@ -4681,13 +4575,11 @@ export default function App() {
                     type="button"
                     onClick={() => {
                       setCoworkerQueueFilter(coworkerQueueFilter === 'reorder' ? 'all' : 'reorder');
-                      setReportsCurrentPage(1);
                     }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                      coworkerQueueFilter === 'reorder'
-                        ? 'bg-amber-600 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
-                        : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/40'
-                    }`}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${coworkerQueueFilter === 'reorder'
+                      ? 'bg-amber-600 text-white border-amber-500 shadow-sm ring-2 ring-amber-400/40'
+                      : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/40'
+                      }`}
                     title="Filter table to items flagged for Supplier Replacement PO re-order"
                   >
                     <span>🔄 Supplier Re-Order ({hubReorderNeededCount})</span>
@@ -4697,13 +4589,11 @@ export default function App() {
                     type="button"
                     onClick={() => {
                       setCoworkerQueueFilter(coworkerQueueFilter === 'scrap_no_reorder' ? 'all' : 'scrap_no_reorder');
-                      setReportsCurrentPage(1);
                     }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                      coworkerQueueFilter === 'scrap_no_reorder'
-                        ? 'bg-rose-700 text-white border-rose-600 shadow-sm ring-2 ring-rose-400/40'
-                        : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-rose-500/40'
-                    }`}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${coworkerQueueFilter === 'scrap_no_reorder'
+                      ? 'bg-rose-700 text-white border-rose-600 shadow-sm ring-2 ring-rose-400/40'
+                      : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-rose-500/40'
+                      }`}
                     title="Filter table to items marked as Scrap / Write-Off without supplier re-order"
                   >
                     <span>🚫 No Re-Order / Write-Off ({hubScrappedNoReorderCount})</span>
@@ -4714,7 +4604,6 @@ export default function App() {
                       type="button"
                       onClick={() => {
                         setCoworkerQueueFilter('all');
-                        setReportsCurrentPage(1);
                       }}
                       className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer"
                     >
@@ -4727,2054 +4616,40 @@ export default function App() {
 
             {/* TAB 2: CUSTOMER RMA HUB (INBOUND LOGISTICS) */}
             {(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports') && (
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 w-full min-w-0 box-border">
-                {/* Header & Responsive Action Toolbar */}
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 w-full min-w-0">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
-                        Customer RMA Hub (Inbound Logistics)
-                      </h3>
-                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0">
-                        {processedReports.length} Returns Active
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                      Store & branch merchandise returns, billing document matching, and customer credit memo vouchers.
-                    </p>
-                  </div>
-
-                  {/* Responsive Action Toolbar */}
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 w-full lg:w-auto min-w-0">
-                    {/* View Switcher: Rows vs Cards */}
-                    <div className="flex items-center self-start sm:self-auto bg-slate-100 dark:bg-slate-800 p-0.5 sm:p-1 rounded-xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-700 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => handleSetReportsViewMode('table')}
-                        className={`px-3 py-1.5 rounded-lg sm:rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${reportsViewMode === 'table'
-                          ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
-                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                          }`}
-                        title="Rows / Table View"
-                      >
-                        <List className="w-3.5 h-3.5 shrink-0" />
-                        <span>Rows List</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSetReportsViewMode('grid')}
-                        className={`px-3 py-1.5 rounded-lg sm:rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${reportsViewMode === 'grid'
-                          ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-sm'
-                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                          }`}
-                        title="Grid / Cards View"
-                      >
-                        <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-                        <span>Cards</span>
-                      </button>
-                    </div>
-
-                    {/* Action Buttons: 2-column grid on mobile (< sm), flex on sm+ */}
-                    <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto min-w-0">
-                      <button
-                        type="button"
-                        onClick={() => setIsReportsModalOpen(true)}
-                        className="w-full sm:w-auto justify-center px-3 py-2 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-                        title="Open Full Audit Log"
-                      >
-                        <FileText className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate">Full Audit Log</span>
-                        <ChevronRight className="w-3.5 h-3.5 shrink-0 hidden sm:inline" />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => exportCustomerInboundRMAsToCSV(processedReports, null, savedProductsList)}
-                        className="w-full sm:w-auto justify-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
-                        title="Export Customer Inbound RMAs to CSV with Store Branch, Customer Name, DR#, AE Name, and Credit Memo #"
-                      >
-                        <Download className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate">Export Inbound CSV</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Filter / Search & Sort Controls Toolbar */}
-                <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 sm:p-3.5 space-y-2.5 w-full min-w-0 box-border">
-
-                  {/* Search Input: Full width row */}
-                  <div className="relative w-full min-w-0">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 shrink-0" />
-                    <input
-                      type="text"
-                      value={reportsSearchQuery}
-                      onChange={(e) => {
-                        setReportsSearchQuery(e.target.value);
-                        setReportsCurrentPage(1);
-                      }}
-                      placeholder="Search by SN (#), RMA #, barcode, item name, reporter, or bin location..."
-                      className="w-full min-w-0 pl-10 pr-9 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600 transition-all box-border"
-                    />
-                    {reportsSearchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setReportsSearchQuery('');
-                          setReportsCurrentPage(1);
-                        }}
-                        className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Dropdown Filters & Date Pickers in responsive grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-2 w-full min-w-0">
-                    {/* Reason Filter Dropdown */}
-                    <select
-                      value={reportsReasonFilter}
-                      onChange={(e) => {
-                        setReportsReasonFilter(e.target.value);
-                        setReportsCurrentPage(1);
-                      }}
-                      className="w-full min-w-0 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer truncate box-border"
-                    >
-                      <option value="all">All Reasons</option>
-                      {DEFECT_REASONS.map(r => (
-                        <option key={r} value={r}>{r}</option>
-                      ))}
-                    </select>
-
-                    {/* Condition Grade Filter Dropdown */}
-                    <select
-                      value={reportsConditionGradeFilter}
-                      onChange={(e) => {
-                        setReportsConditionGradeFilter(e.target.value);
-                        setReportsCurrentPage(1);
-                      }}
-                      className="w-full min-w-0 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer truncate box-border"
-                    >
-                      <option value="all">All Grades</option>
-                      <option value="A">Grade A - Like New</option>
-                      <option value="B">Grade B - Damaged Pkg</option>
-                      <option value="C">Grade C - Defective / Parts</option>
-                      <option value="D">Grade D - Total Loss / Scrap</option>
-                    </select>
-
-                    {/* Status Filter Dropdown */}
-                    <select
-                      value={reportsStatusFilter}
-                      onChange={(e) => {
-                        setReportsStatusFilter(e.target.value);
-                        setReportsCurrentPage(1);
-                      }}
-                      className="w-full min-w-0 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer truncate box-border"
-                    >
-                      <option value="all">All Status &amp; Stages</option>
-                      <option value="pending_admin_details">Awaiting SKU</option>
-                      <option value="draft">1- Draft / Intake</option>
-                      <option value="received_at_dock">2- Received at Dock</option>
-                      <option value="under_inspection">3- Under Inspection</option>
-                      <option value="pending_finance_approval">4- Pending Finance Approval</option>
-                      <option value="credit_memo_issued">5- Credit Memo Issued</option>
-                      <option value="restocked">6- Restocked</option>
-                      <option value="scrapped">7- Scrapped / Disposed</option>
-                      <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
-                      <option value="rejected">8- Rejected / Invalid Claim</option>
-                    </select>
-
-                    {/* Date Range Picker: Neatly split in 2 columns */}
-                    <div className="grid grid-cols-2 gap-1.5 w-full min-w-0 col-span-1 sm:col-span-2 md:col-span-1 lg:col-span-1">
-                      <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1.5 rounded-xl text-xs min-w-0 box-border">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">From</span>
-                        <input
-                          type="date"
-                          value={reportsDateFrom}
-                          onChange={(e) => {
-                            setReportsDateFrom(e.target.value);
-                            setReportsCurrentPage(1);
-                          }}
-                          className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
-                          title="Filter records from date"
-                        />
-                      </div>
-                      <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1.5 rounded-xl text-xs min-w-0 box-border">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">To</span>
-                        <input
-                          type="date"
-                          value={reportsDateTo}
-                          onChange={(e) => {
-                            setReportsDateTo(e.target.value);
-                            setReportsCurrentPage(1);
-                          }}
-                          className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
-                          title="Filter records to date"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Reset Filters */}
-                    {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
-                      <button
-                        type="button"
-                        onClick={resetReportsFilters}
-                        className="w-full sm:w-auto px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-colors shrink-0 cursor-pointer box-border"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                        <span>Reset</span>
-                      </button>
-                    )}
-                  </div>
-
-
-
-                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1 font-medium">
-                    <span>
-                      Showing <strong className="text-slate-900 dark:text-white font-bold">{processedReports.length}</strong> of {recentReportsList.length} reports
-                      {(reportsSearchQuery || reportsReasonFilter !== 'all' || reportsStatusFilter !== 'all' || reportsDispositionFilter !== 'all' || reportsConditionGradeFilter !== 'all' || coworkerQueueFilter !== 'all' || reportsDateFrom || reportsDateTo) && (
-                        <span className="text-blue-600 dark:text-blue-400 font-bold ml-1.5">• Filters active</span>
-                      )}
-                    </span>
-                    <span className="text-slate-400 dark:text-slate-500">
-                      Click column headers to sort (<strong className="text-slate-700 dark:text-slate-300 capitalize">{reportsSortField}</strong> {reportsSortDirection === 'asc' ? '▲' : '▼'})
-                    </span>
-                  </div>
-                </div>
-
-                {recentReportsList.length === 0 ? (
-                  <p className="text-xs text-slate-400 py-8 text-center">No return reports filed yet.</p>
-                ) : processedReports.length === 0 ? (
-                  <div className="text-center py-10 space-y-2 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
-                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">No return reports match the selected filters.</p>
-                    <button
-                      type="button"
-                      onClick={resetReportsFilters}
-                      className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
-                    >
-                      Clear filters
-                    </button>
-                  </div>
-                ) : reportsViewMode === 'table' ? (
-                  /* ============================================================ */
-                  /* ROWS / TABLE VIEW: WITH SORTABLE COLUMNS & LIGHTBOX PHOTOS   */
-                  /* ============================================================ */
-                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-xs">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse text-xs">
-                        <thead>
-                          <tr className="bg-slate-50/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                            {/* Select All Checkbox Header */}
-                            <th className="py-3 px-3 w-10 text-center">
-                              <input
-                                type="checkbox"
-                                checked={isAllReportsPageSelected}
-                                onChange={toggleSelectAllReportsPage}
-                                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 cursor-pointer"
-                                title={isAllReportsPageSelected ? "Deselect all on this page" : "Select all on this page"}
-                              />
-                            </th>
-                            <th
-                              onClick={() => handleReportsSort('id')}
-                              className="py-3 px-3.5 font-black text-slate-900 dark:text-white w-16 cursor-pointer select-none hover:text-blue-600 dark:hover:text-blue-400 transition-colors group"
-                              title="Click to sort by Serial Number"
-                            >
-                              <div className="flex items-center">
-                                <span>SN</span>
-                                {reportsSortField === 'id' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
-                            <th
-                              onClick={() => handleReportsSort('rma_number')}
-                              className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by RMA #"
-                            >
-                              <div className="flex items-center">
-                                <span>RMA #</span>
-                                {reportsSortField === 'rma_number' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
-                            <th className="py-3 px-3 w-14 text-center select-none">Photo</th>
-                            <th
-                              onClick={() => handleReportsSort('barcode')}
-                              className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Barcode"
-                            >
-                              <div className="flex items-center">
-                                <span>Barcode</span>
-                                {reportsSortField === 'barcode' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
-                            <th
-                              onClick={() => handleReportsSort('name')}
-                              className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Item Name"
-                            >
-                              <div className="flex items-center">
-                                <span>Item Name</span>
-                                {reportsSortField === 'name' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
-                            {/* Quantity & Unit Header */}
-                            <th
-                              onClick={() => handleReportsSort('quantity')}
-                              className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Quantity & Unit"
-                            >
-                              <div className="flex items-center justify-center">
-                                <span>Qty & Unit</span>
-                                {reportsSortField === 'quantity' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
-                            <th
-                              onClick={() => handleReportsSort('reason')}
-                              className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Reason"
-                            >
-                              <div className="flex items-center">
-                                <span>Reason</span>
-                                {reportsSortField === 'reason' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
-                            {/* 7. Customer Branch Header */}
-                            <th
-                              onClick={() => handleReportsSort('store_branch')}
-                              className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Customer Branch"
-                            >
-                              <div className="flex items-center">
-                                <span>Customer Branch</span>
-                                {reportsSortField === 'store_branch' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
-
-                            {/* 8. Commercial Documents (SI / DR / PO #) Header */}
-                            <th
-                              onClick={() => handleReportsSort('invoice_dr_number')}
-                              className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Commercial Documents (Sales Invoice, Delivery Receipt, Purchase Order)"
-                            >
-                              <div className="flex items-center">
-                                <span>Commercial Docs (SI, DR, PO)</span>
-                                {reportsSortField === 'invoice_dr_number' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
-
-                            {/* 8. Lifecycle Stage Header */}
-                            <th
-                              onClick={() => handleReportsSort('lifecycle_stage')}
-                              className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Lifecycle Stage"
-                            >
-                              <div className="flex items-center justify-center">
-                                <span>Lifecycle Stage</span>
-                                {reportsSortField === 'lifecycle_stage' || reportsSortField === 'status' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
-
-                            {/* 10. Disposition Header */}
-                            <th
-                              onClick={() => handleReportsSort('disposition')}
-                              className="py-3 px-3.5 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Disposition"
-                            >
-                              <div className="flex items-center justify-center">
-                                <span>Disposition</span>
-                                {reportsSortField === 'disposition' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
-
-                            {/* 11. Warehouse Location Header */}
-                            <th
-                              onClick={() => handleReportsSort('warehouse_location')}
-                              className="py-3 px-3 text-center font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Warehouse Rack/Bin Location"
-                            >
-                              <div className="flex items-center justify-center">
-                                <span>Location</span>
-                                {reportsSortField === 'warehouse_location' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
-                            <th
-                              onClick={() => handleReportsSort('created_at')}
-                              className="py-3 px-3.5 text-right font-bold cursor-pointer select-none hover:text-blue-600 transition-colors group"
-                              title="Click to sort by Date"
-                            >
-                              <div className="flex items-center justify-end">
-                                <span>Date & GPS</span>
-                                {reportsSortField === 'created_at' ? (
-                                  reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
-                                ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
-                              </div>
-                            </th>
-                            <th className="py-3 px-3.5 text-center font-bold select-none text-slate-500 dark:text-slate-400">
-                              Finance & Actions
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                          {paginatedReports.map((item, index) => {
-                            const photoList = getRealPhotos(item.photos);
-                            const isSelected = selectedReportIds.has(item.id || item.rma_number);
-                            const matchedProduct = savedProductsList.find(p => p.barcode && String(p.barcode) === String(item.barcode));
-                            const resolvedName = (item.name && !item.name.toLowerCase().startsWith('unidentified'))
-                              ? item.name
-                              : (matchedProduct?.name || item.name || `Unidentified (${item.barcode})`);
-                            const isPendingUnknown = !matchedProduct && item.status === 'pending_admin_details';
-
-                            const isManifest = isBatchManifest(item, recentReportsList);
-                            const manifestChildren = isManifest ? getReportManifestItems(item, recentReportsList) : [];
-                            const manifestKey = item.id || item.rma_number;
-                            const isManifestExpanded = expandedManifestIds.has(manifestKey);
-
-                            return (
-                              <React.Fragment key={manifestKey}>
-                                <tr
-                                  onClick={(e) => {
-                                    if (e.target.closest('input, button, a')) return;
-                                    handleInspectTriageForReport(item);
-                                  }}
-                                  className={`transition-colors cursor-pointer ${isSelected
-                                    ? 'bg-blue-50/80 dark:bg-blue-950/50'
-                                    : 'hover:bg-blue-50/50 dark:hover:bg-slate-800/60'
-                                    }`}
-                                  title={`Click row to inspect & triage RMA #${item.rma_number}`}
-                                >
-                                  {/* Row Selection Checkbox */}
-                                  <td className="py-3 px-3 text-center">
-                                    <input
-                                      type="checkbox"
-                                      checked={isSelected}
-                                      onChange={() => toggleSelectReport(item.id || item.rma_number)}
-                                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 cursor-pointer"
-                                    />
-                                  </td>
-
-                                  {/* 1. SN COLUMN AT FAR LEFT */}
-                                  <td className="py-3 px-3.5 font-mono">
-                                    <span className="font-black text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg text-xs">
-                                      #{(reportsCurrentPage - 1) * reportsPageSize + index + 1}
-                                    </span>
-                                  </td>
-
-                                  {/* 2. RMA # + QR Sticker Button */}
-                                  <td className="py-3 px-3.5 font-mono font-bold text-blue-700 dark:text-blue-400">
-                                    <div className="flex items-center gap-1.5">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleInspectTriageForReport(item)}
-                                        className="font-mono font-bold text-blue-700 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-200 hover:underline text-left cursor-pointer"
-                                        title={`Inspect, triage, and process RMA #${item.rma_number}`}
-                                      >
-                                        {item.rma_number}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => setQrModalReport({ ...item, name: resolvedName })}
-                                        className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-md transition-colors cursor-pointer"
-                                        title={`View & Print Box QR Sticker for ${item.rma_number}`}
-                                      >
-                                        <QrCode className="w-3.5 h-3.5" />
-                                      </button>
-                                      {item.ai_document_metadata?.delivery_handover && (
-                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 inline-flex items-center gap-1 shadow-2xs">
-                                          <Truck className="w-2.5 h-2.5" />
-                                          <span>Delivered ({item.ai_document_metadata.delivery_handover.driver_name || 'Driver'})</span>
-                                        </span>
-                                      )}
-                                    </div>
-                                    {/* Split, Buffer, and Manifest Quick Badges */}
-                                    <div className="flex items-center gap-1 flex-wrap mt-0.5">
-                                      {isManifest && (
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            toggleManifestExpand(manifestKey);
-                                          }}
-                                          className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 shadow-2xs transition-colors cursor-pointer ${isManifestExpanded
-                                              ? 'bg-purple-600 text-white border border-purple-700'
-                                              : 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 dark:hover:bg-purple-900/80 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800'
-                                            }`}
-                                          title={isManifestExpanded ? "Collapse Manifest Items" : "Expand Manifest Items"}
-                                        >
-                                          <span>📦 Manifest ({manifestChildren.length})</span>
-                                          <ChevronDown className={`w-2.5 h-2.5 transform transition-transform ${isManifestExpanded ? 'rotate-180' : ''}`} />
-                                        </button>
-                                      )}
-                                      {isSplitChildTicket(item) ? (
-                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
-                                          <span>✂️ Part 2</span>
-                                        </span>
-                                      ) : isSplitParentTicket(item, recentReportsList) ? (
-                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Parent Ticket (Part 1)">
-                                          <span>✂️ Part 1</span>
-                                        </span>
-                                      ) : null}
-
-                                      {(item.status === 'buffer_replacement_dispatched' || (item.disposition && item.disposition.includes('Buffer'))) && (
-                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800 inline-flex items-center gap-0.5 shadow-2xs" title="1-to-1 Buffer Stock Replacement Dispatched">
-                                          <span>🚚 Buffer</span>
-                                        </span>
-                                      )}
-                                    </div>
-                                  </td>
-
-                                  {/* 3. Photo Thumbnail with Lightbox */}
-                                  <td className="py-2.5 px-3 text-center">
-                                    {photoList.length > 0 ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => setLightboxPhoto({
-                                          images: photoList,
-                                          initialIndex: 0,
-                                          url: photoList[0],
-                                          title: resolvedName || `Return ${item.rma_number}`,
-                                          subtitle: `RMA #${item.rma_number} • Reported by ${item.reporter_name || item.reported_by || 'Staff'} • ${item.reason || 'Damaged'}`
-                                        })}
-                                        className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 inline-block hover:opacity-85 hover:scale-105 transition-all shadow-xs cursor-zoom-in"
-                                        title="Click to view full-size proof photo"
-                                      >
-                                        <img
-                                          src={photoList[0]}
-                                          alt="Proof"
-                                          className="w-full h-full object-cover"
-                                        />
-                                      </button>
-                                    ) : (
-                                      <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
-                                        <ImageIcon className="w-4 h-4" />
-                                      </div>
-                                    )}
-                                  </td>
-
-                                  {/* 4. Barcode */}
-                                  <td className="py-3 px-3.5 font-mono">
-                                    {isManifest ? (
-                                      <span className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 font-bold text-[10px] border border-purple-200 dark:border-purple-800">
-                                        📦 Manifest Items
-                                      </span>
-                                    ) : (
-                                      <>
-                                        <div className="font-bold text-slate-800 dark:text-slate-200">{item.barcode}</div>
-                                        {(item.code || matchedProduct?.code) && (
-                                          <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.code || matchedProduct?.code}</div>
-                                        )}
-                                        {(isUnlabeledBarcode(item.barcode) || item.ai_document_metadata?.is_unlabeled) && (
-                                          <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
-                                            🏷️ Missing Barcode
-                                          </span>
-                                        )}
-                                      </>
-                                    )}
-                                  </td>
-
-                                  {/* 5. Item Name */}
-                                  <td className="py-3 px-3.5 font-bold text-slate-900 dark:text-white max-w-[200px]" title={resolvedName}>
-                                    <div className="flex items-center gap-1.5">
-                                      <div className="truncate">{resolvedName}</div>
-                                      {isManifest && manifestChildren.length > 0 && (
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            toggleManifestExpand(manifestKey);
-                                          }}
-                                          className="p-0.5 text-purple-600 hover:text-purple-800 dark:text-purple-400 dark:hover:text-purple-300 rounded hover:bg-purple-50 dark:hover:bg-purple-950/60 transition-colors shrink-0"
-                                          title={isManifestExpanded ? "Collapse Manifest Items" : "Expand Manifest Items"}
-                                        >
-                                          <ChevronDown className={`w-3.5 h-3.5 transform transition-transform ${isManifestExpanded ? 'rotate-180' : ''}`} />
-                                        </button>
-                                      )}
-                                    </div>
-                                    {((item.supplier_name && item.supplier_name !== 'Pending Assignment') || (matchedProduct?.supplier_name && matchedProduct.supplier_name !== 'Pending Assignment')) && (
-                                      <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate mt-0.5">
-                                        Vendor: <span className="font-semibold text-slate-700 dark:text-slate-300">{item.supplier_name || matchedProduct?.supplier_name}</span>
-                                      </div>
-                                    )}
-                                    {(item.batch_lot_number || item.expiry_date) && (
-                                      <div className="flex items-center gap-1.5 flex-wrap mt-0.5 font-normal">
-                                        {item.batch_lot_number && (
-                                          <span className="text-[10px] font-mono text-amber-700 dark:text-amber-300 font-semibold bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.2 rounded border border-amber-200/80 dark:border-amber-800">
-                                            Lot: {item.batch_lot_number}
-                                          </span>
-                                        )}
-                                        {item.expiry_date && (
-                                          <span className="text-[10px] font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-1.5 py-0.2 rounded border border-rose-200/80 dark:border-rose-800">
-                                            Exp: {item.expiry_date}
-                                          </span>
-                                        )}
-                                      </div>
-                                    )}
-                                  </td>
-
-                                  {/* Quantity & Unit Column */}
-                                  <td className="py-3 px-3 text-center whitespace-nowrap">
-                                    <span className="font-mono font-black text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs inline-flex items-center gap-1">
-                                      <span>
-                                        {isManifest
-                                          ? formatManifestBreakdown(manifestChildren, false)
-                                          : formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}
-                                      </span>
-                                    </span>
-                                  </td>
-
-                                  {/* 6. Reason & Truncated Reporter Explanation */}
-                                  <td className="py-3 px-3.5 max-w-[180px]">
-                                    <div className="space-y-1">
-                                      <span className="px-2 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[10px] inline-block">
-                                        {item.reason || 'Damaged'}
-                                      </span>
-                                      {(() => {
-                                        const rawNote = String(
-                                          item.explanation ||
-                                          item.notes ||
-                                          (!isManifest && item.items?.[0]?.explanation ? item.items[0].explanation : '') ||
-                                          ''
-                                        ).trim();
-                                        const cleanNote = cleanExplanationText(rawNote);
-                                        if (!cleanNote) return null;
-                                        return (
-                                          <div className="flex items-center gap-1 max-w-[165px]">
-                                            <button
-                                              type="button"
-                                              onClick={() => setViewingExplanationModal({
-                                                rmaNumber: item.rma_number,
-                                                productName: resolvedName,
-                                                reason: item.reason || 'Damaged',
-                                                explanation: cleanNote,
-                                                reporter: item.reporter_name || item.reported_by || 'Staff'
-                                              })}
-                                              className="group text-left flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-100/90 hover:bg-blue-50 dark:bg-slate-800/80 dark:hover:bg-blue-950/60 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors cursor-pointer max-w-full"
-                                              title="Click to read full reporter explanation"
-                                            >
-                                              <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate max-w-[110px]">
-                                                "{cleanNote}"
-                                              </span>
-                                              <span className="text-[9px] font-black text-blue-600 dark:text-blue-400 shrink-0 group-hover:underline">
-                                                Read
-                                              </span>
-                                            </button>
-                                          </div>
-                                        );
-                                      })()}
-                                    </div>
-                                  </td>
-
-                                  {/* 7. Customer Branch & Reporter */}
-                                  <td className="py-3 px-3.5">
-                                    <div className="font-bold text-slate-900 dark:text-slate-200 text-[11px] flex items-center gap-1" title={item.store_branch || 'Direct Return'}>
-                                      <span className="text-blue-600 dark:text-blue-400">📍</span>
-                                      <span className="truncate max-w-[130px] font-extrabold text-blue-900 dark:text-blue-300">
-                                        {item.store_branch || 'Direct Return'}
-                                      </span>
-                                    </div>
-                                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5 truncate max-w-[130px]">
-                                      {item.reporter_name || item.reported_by || 'Staff'}
-                                      {item.reporter_contact ? ` • ${item.reporter_contact}` : ''}
-                                    </div>
-                                  </td>
-
-                                  {/* 8. Commercial Document (SI / DR / PO) */}
-                                  <td className="py-3 px-3.5 font-mono">
-                                    {(() => {
-                                      const docs = getDocumentNumbers(item);
-                                      return (
-                                        <div className="space-y-0.5 text-[9px] font-mono leading-tight">
-                                          <span className={`px-1.5 py-0.5 rounded block truncate max-w-[125px] ${docs.si !== 'N/A'
-                                              ? 'bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold'
-                                              : 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 border border-slate-200/50 dark:border-slate-700/50 font-medium'
-                                            }`}>
-                                            SI: {docs.si}
-                                          </span>
-                                          <span className={`px-1.5 py-0.5 rounded block truncate max-w-[125px] ${docs.dr !== 'N/A'
-                                              ? 'bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-bold'
-                                              : 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 border border-slate-200/50 dark:border-slate-700/50 font-medium'
-                                            }`}>
-                                            DR: {docs.dr}
-                                          </span>
-                                          <span className={`px-1.5 py-0.5 rounded block truncate max-w-[125px] ${docs.po !== 'N/A'
-                                              ? 'bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold'
-                                              : 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 border border-slate-200/50 dark:border-slate-700/50 font-medium'
-                                            }`}>
-                                            PO: {docs.po}
-                                          </span>
-                                        </div>
-                                      );
-                                    })()}
-                                  </td>
-
-                                  {/* 8. Lifecycle Stage */}
-                                  <td className="py-3 px-3 text-center whitespace-nowrap">
-                                    {isManifest ? (() => {
-                                      const dynStage = resolveBatchManifestLifecycle(item, recentReportsList);
-                                      return (
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            toggleManifestExpand(manifestKey);
-                                          }}
-                                          className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border inline-flex items-center gap-1 hover:opacity-90 cursor-pointer shadow-2xs ${dynStage.color}`}
-                                          title="Dynamically resolved from child item dispositions (click to open drawer)"
-                                        >
-                                          <span>{dynStage.label}</span>
-                                        </button>
-                                      );
-                                    })() : (() => {
-                                      const stageInfo = formatLifecycleStage(item.status, item);
-                                      return (
-                                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-block shadow-2xs ${stageInfo.color}`}>
-                                          {stageInfo.label}
-                                        </span>
-                                      );
-                                    })()}
-                                  </td>
-
-                                  {/* 10. Disposition (Full text without truncation) */}
-                                  <td className="py-3 px-3.5 text-center whitespace-nowrap">
-                                    {isManifest ? (
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          toggleManifestExpand(manifestKey);
-                                        }}
-                                        className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1 hover:bg-purple-200 cursor-pointer shadow-2xs"
-                                        title="Click to view child line items in drawer"
-                                      >
-                                        <span>📦 Multi-Item Status (See Drawer)</span>
-                                      </button>
-                                    ) : (() => {
-                                      const disp = item.disposition || 'Pending Triage';
-                                      let color = 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
-                                      if (disp === 'Restock to Inventory') color = 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800';
-                                      else if (disp === 'Return to Vendor (RTV)') color = 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/70 dark:text-purple-300 dark:border-purple-800';
-                                      else if (disp === 'Quarantine') color = 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800';
-                                      else if (disp === 'Scrap / Dispose') color = 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800';
-                                      else if (disp.includes('Buffer')) color = 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/70 dark:text-indigo-300 dark:border-indigo-800';
-                                      return (
-                                        <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${color}`}>
-                                          {disp}
-                                        </span>
-                                      );
-                                    })()}
-                                  </td>
-
-                                  {/* 11. Warehouse Rack/Bin Location */}
-                                  <td className="py-3 px-3.5 text-center font-mono whitespace-nowrap">
-                                    {item.warehouse_location ? (
-                                      <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 text-[11px] font-extrabold inline-block shadow-2xs">
-                                        {normalizeWarehouseLocation(item.warehouse_location, item)}
-                                      </span>
-                                    ) : (
-                                      <span className="text-slate-300 dark:text-slate-600 text-xs font-bold">—</span>
-                                    )}
-                                  </td>
-
-                                  {/* 9. Date & GPS */}
-                                  <td className="py-3 px-3.5 text-right font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                                    <div>{new Date(item.created_at).toLocaleDateString()}</div>
-                                    {item.gps_latitude && item.gps_longitude ? (
-                                      <a
-                                        href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 text-[10px] font-bold"
-                                      >
-                                        <MapPin className="w-3 h-3 text-rose-500" />
-                                        <span>Map</span>
-                                      </a>
-                                    ) : (
-                                      <span className="text-slate-300 dark:text-slate-600 text-[10px]">No GPS</span>
-                                    )}
-                                  </td>
-
-                                  {/* 10. Actions: Assign SKU / Save Product, Credit Memo, Thermal Print & Delete */}
-                                  <td className="py-2.5 px-3.5 text-center">
-                                    <div className="flex items-center justify-center gap-1.5">
-                                      {/* Print 4x6 Thermal Box Label */}
-                                      <button
-                                        type="button"
-                                        onClick={() => setThermalPrintReport(item)}
-                                        className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                                        title="Print 4x6 inch Thermal Box Label"
-                                      >
-                                        <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
-                                      </button>
-
-                                      {/* Inspect & Triage Physical Return */}
-                                      <button
-                                        type="button"
-                                        onClick={() => handleInspectTriageForReport(item)}
-                                        className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                        title={`Inspect, triage condition grade, and assign rack/bin location for ${item.rma_number}`}
-                                      >
-                                        <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                                        <span>Inspect / Triage</span>
-                                      </button>
-
-                                      {/* 1-Click Coworker WMS Restock Action */}
-                                      {isItemReadyToRestock(item, recentReportsList) && (
-                                        <button
-                                          type="button"
-                                          disabled={updatingQueueId === (item.id || item.rma_number)}
-                                          onClick={() => handleConfirmCoworkerAction(item, 'restocked')}
-                                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
-                                          title="1-click confirm that this item has been stocked in WMS (updates status to 6- Restocked)"
-                                        >
-                                          <span>✓ Restocked in WMS</span>
-                                        </button>
-                                      )}
-
-                                      {/* 1-Click Coworker Supplier Re-Order Action */}
-                                      {isItemReadyForSupplierReorder(item, recentReportsList) && (
-                                        <button
-                                          type="button"
-                                          disabled={updatingQueueId === (item.id || item.rma_number)}
-                                          onClick={() => handleConfirmCoworkerAction(item, 'scrapped')}
-                                          className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
-                                          title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
-                                        >
-                                          <span>✓ PO Placed</span>
-                                        </button>
-                                      )}
-
-                                      {/* Re-open / Reset to Pending Action for Testing Coworker Actions */}
-                                      {Boolean(item.ai_document_metadata?.workflow_resolution || item.status === 'resolved' || item.status === 'closed') && (
-                                        <button
-                                          type="button"
-                                          disabled={updatingQueueId === (item.id || item.rma_number)}
-                                          onClick={async () => {
-                                            try {
-                                              setUpdatingQueueId(item.id || item.rma_number);
-                                              await catalogService.resetReportToPending(item.id, item.rma_number, currentUser?.name || 'Staff');
-                                              refreshAllData();
-                                              showToast(`Reset ${item.rma_number} to pending / under inspection.`, 'success');
-                                            } catch (e) {
-                                              showToast('Could not reset report: ' + e.message, 'error');
-                                            } finally {
-                                              setUpdatingQueueId(null);
-                                            }
-                                          }}
-                                          className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
-                                          title="Re-open item and reset to pending so coworker queues can test restocking/reordering again"
-                                        >
-                                          <RotateCcw className="w-3 h-3 text-slate-500" />
-                                          <span>↩️ Reset to Pending</span>
-                                        </button>
-                                      )}
-
-                                      {/* Release Hold Action */}
-                                      {isItemOnHold(item, recentReportsList) && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleInspectTriageForReport(item)}
-                                          className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
-                                          title="Release hold and re-triage to Restock, RTV, or Scrap"
-                                        >
-                                          <Unlock className="w-3 h-3" />
-                                          <span>🔓 Release Hold</span>
-                                        </button>
-                                      )}
-
-                                      {/* Do NOT render Assign SKU on parent row if batch manifest */}
-                                      {!isManifest && canEditProducts && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleEditProductFromReport(item)}
-                                          className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                          title={`Assign official SKU and save "${item.name || item.barcode}" to Products catalog`}
-                                        >
-                                          <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                                          <span>Assign SKU</span>
-                                        </button>
-                                      )}
-
-                                      {(() => {
-                                        if (isManifest) {
-                                          const linkedMemos = creditMemosList.filter(m => m.rma_number === item.rma_number || m.report_id === item.id);
-                                          if (linkedMemos.length > 0) {
-                                            return (
-                                              <button
-                                                type="button"
-                                                onClick={() => handleViewCreditMemoVoucher(linkedMemos.length === 1 ? linkedMemos[0] : linkedMemos)}
-                                                className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                                title={`View ${linkedMemos.length} Credit Memo Voucher(s) for this batch`}
-                                              >
-                                                <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                                <span>CM Voucher{linkedMemos.length > 1 ? ` (${linkedMemos.length})` : ''}</span>
-                                              </button>
-                                            );
-                                          }
-                                          return (
-                                            <button
-                                              type="button"
-                                              onClick={() => toggleManifestExpand(manifestKey)}
-                                              className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/70 dark:hover:bg-purple-900/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                              title="View manifest line items to issue individual Credit Memos"
-                                            >
-                                              <Receipt className="w-3 h-3 text-purple-600 dark:text-purple-400" />
-                                              <span>CM in Drawer</span>
-                                            </button>
-                                          );
-                                        }
-
-                                        const existingMemo = creditMemosList.find(m => m.rma_number === item.rma_number || m.report_id === item.id);
-                                        if (existingMemo) {
-                                          return (
-                                            <button
-                                              type="button"
-                                              onClick={() => handleViewCreditMemoVoucher(existingMemo)}
-                                              className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                              title={`View Official Credit Memo Voucher: ${existingMemo.credit_memo_number}`}
-                                            >
-                                              <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                              <span>CM Voucher</span>
-                                            </button>
-                                          );
-                                        }
-                                        if (item.status === 'buffer_replacement_dispatched' || (item.disposition && item.disposition.includes('Buffer'))) {
-                                          return (
-                                            <span
-                                              className="px-2 py-1 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 shadow-2xs whitespace-nowrap"
-                                              title="This return was resolved via 1-to-1 Buffer Stock Replacement. No Credit Memo refund is due."
-                                            >
-                                              <Truck className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
-                                              <span>Buffer Swapped</span>
-                                            </span>
-                                          );
-                                        }
-                                        const isReportOnHold = isItemOnHold(item, recentReportsList);
-                                        const isReportRejected = isItemRejected(item, recentReportsList);
-                                        if (canEditProducts) {
-                                          return (
-                                            <button
-                                              type="button"
-                                              disabled={isReportOnHold || isReportRejected}
-                                              onClick={() => {
-                                                if (isReportOnHold) {
-                                                  alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
-                                                  return;
-                                                }
-                                                handleOpenCreditMemoForReport(item);
-                                              }}
-                                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all shadow-2xs ${
-                                                isReportOnHold
-                                                  ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed border border-slate-300 dark:border-slate-700 opacity-70'
-                                                  : 'bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 cursor-pointer'
-                                              }`}
-                                              title={isReportOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : "Issue Finance Credit Memo for this Return"}
-                                            >
-                                              {isReportOnHold ? <Lock className="w-3 h-3 text-amber-500" /> : <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
-                                              <span>{isReportOnHold ? 'On Hold' : '+ Credit Memo'}</span>
-                                            </button>
-                                          );
-                                        }
-                                        return null;
-                                      })()}
-
-                                      {/* Archive to Vault */}
-                                      <button
-                                        type="button"
-                                        onClick={() => handleArchiveReport(item.id, item.rma_number, item)}
-                                        className="p-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-                                        title={`Archive RMA #${item.rma_number} to Enterprise Vault`}
-                                      >
-                                        <Archive className="w-4 h-4 text-slate-500 hover:text-slate-700" />
-                                      </button>
-
-                                      {canDeleteReports && (
-                                        <button
-                                          type="button"
-                                          onClick={() => requestDeleteReport(item.id, item.rma_number, item)}
-                                          className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer"
-                                          title={`Move RMA #${item.rma_number} to 30-Day Trash Bin`}
-                                        >
-                                          <Trash2 className="w-4 h-4" />
-                                        </button>
-                                      )}
-                                    </div>
-                                  </td>
-                                </tr>
-
-                                {/* Expandable Multi-Item Manifest Sub-Table Drawer */}
-                                {isManifest && isManifestExpanded && (
-                                  <tr className="bg-purple-50/40 dark:bg-slate-900/90 border-y-2 border-purple-200 dark:border-purple-900/60">
-                                    <td colSpan={15} className="p-3 sm:p-4">
-                                      <div className="bg-white dark:bg-slate-800/90 rounded-xl border border-purple-200 dark:border-purple-800/60 shadow-sm overflow-hidden">
-                                        {/* Manifest Header */}
-                                        <div className="p-3 bg-purple-50/70 dark:bg-purple-950/40 border-b border-purple-200/80 dark:border-purple-900/50 flex flex-wrap items-center justify-between gap-2">
-                                          <div className="flex items-center gap-2">
-                                            <span className="p-1 rounded-md bg-purple-600 text-white">
-                                              <Package className="w-3.5 h-3.5" />
-                                            </span>
-                                            <span className="font-extrabold text-xs text-purple-900 dark:text-purple-200 uppercase tracking-wider">
-                                              Batch Return Manifest Items ({manifestChildren.length})
-                                            </span>
-                                            <span className="text-[11px] text-purple-700 dark:text-purple-300 font-mono">
-                                              RMA: {item.rma_number}
-                                            </span>
-                                          </div>
-                                          <div className="flex items-center gap-3">
-                                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                                              Total manifest breakdown: <strong className="text-slate-900 dark:text-white font-bold">{formatManifestBreakdown(manifestChildren, true)}</strong>
-                                            </span>
-                                            <button
-                                              type="button"
-                                              onClick={() => toggleManifestExpand(manifestKey)}
-                                              className="text-xs text-purple-700 dark:text-purple-300 hover:text-purple-900 font-bold px-2 py-0.5 rounded hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors"
-                                            >
-                                              Collapse ▲
-                                            </button>
-                                          </div>
-                                        </div>
-
-                                        {/* Child Items Table */}
-                                        <div className="overflow-x-auto lg:overflow-x-visible">
-                                          <table className="table-fixed w-full text-left text-xs border-collapse">
-                                            <thead>
-                                              <tr className="bg-slate-50/80 dark:bg-slate-800/50 text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
-                                                <th className="py-2 px-1 text-center w-[50px]">Item</th>
-                                                <th className="py-2 px-3 min-w-[200px]">Product Description / Name</th>
-                                                <th className="py-2 px-3 font-mono w-[140px]">Barcode</th>
-                                                <th className="py-2 px-3 font-mono w-[120px]">Assigned SKU</th>
-                                                <th className="py-2 px-3 text-center w-[80px]">Qty &amp; Unit</th>
-                                                <th className="py-2 px-3 w-[170px]">Triage &amp; Reason</th>
-                                                <th className="py-2 px-2 text-center w-[170px]">Actions</th>
-                                              </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                                              {manifestChildren.length === 0 ? (
-                                                <tr>
-                                                  <td colSpan={7} className="py-4 text-center text-slate-400 italic">
-                                                    No line item breakdown records found for this batch manifest.
-                                                  </td>
-                                                </tr>
-                                              ) : (
-                                                manifestChildren.map((child, cIdx) => {
-                                                  const childName = (child.name || child.item_name || child.productName || `Item #${cIdx + 1}`).trim();
-                                                  const childBarcode = (child.barcode || child.item_barcode || '').trim();
-                                                  const childSku = (child.sku || child.code || '').trim();
-                                                  const childQty = Number(child.quantity || child.qty) || 1;
-                                                  const childUnit = child.unit_name || child.unit || item.unit_name || 'pc';
-                                                  const childReason = child.reason || child.defect_reason || item.reason || 'Damaged';
-                                                  const childLocation = (child.warehouse_location || child.location || '').trim();
-                                                  const childDisposition = child.disposition || '1- Pending Triage';
-                                                  const matchedChild = savedProductsList.find(p => p.barcode && String(p.barcode) === String(childBarcode));
-                                                  const isSkuAssigned = Boolean(
-                                                    (matchedChild?.code && String(matchedChild.code) !== String(childBarcode) && !matchedChild.code.toLowerCase().includes('awaiting')) ||
-                                                    (childSku && String(childSku) !== String(childBarcode) && !childSku.toLowerCase().includes('awaiting'))
-                                                  );
-                                                  const effectiveSku = (matchedChild?.code && String(matchedChild.code) !== String(childBarcode))
-                                                    ? matchedChild.code
-                                                    : (childSku && String(childSku) !== String(childBarcode) && !childSku.toLowerCase().includes('awaiting') ? childSku : '—');
-
-                                                  // Extract child photos
-                                                  const cPhotos = Array.isArray(child.photos)
-                                                    ? child.photos
-                                                    : (Array.isArray(child.photoFiles) ? child.photoFiles : (child.photo_url ? [child.photo_url] : []));
-                                                  const cPhotoUrl = cPhotos[0] || (photoList[cIdx] || null);
-
-                                                  const childExistingMemo = creditMemosList.find(m =>
-                                                  (m.rma_number === item.rma_number && (
-                                                    (childBarcode && String(m.barcode).trim() === childBarcode) ||
-                                                    (child.id && String(m.report_id) === String(child.id)) ||
-                                                    (m.product_name && m.product_name === childName)
-                                                  ))
-                                                  );
-
-                                                  const childReportObject = {
-                                                    id: child.id || `${item.id || item.rma_number}_${childBarcode}`,
-                                                    rma_number: item.rma_number,
-                                                    barcode: childBarcode,
-                                                    code: effectiveSku !== '—' ? effectiveSku : (childSku || ''),
-                                                    sku: effectiveSku !== '—' ? effectiveSku : (childSku || ''),
-                                                    name: childName,
-                                                    product_name: childName,
-                                                    quantity: childQty,
-                                                    unit_name: childUnit,
-                                                    price: Number(child.price || matchedChild?.price || 0),
-                                                    price_with_vat: Number(child.price_with_vat || child.price || matchedChild?.price_with_vat || matchedChild?.price || 0),
-                                                    supplier_name: child.supplier_name || matchedChild?.supplier_name || item.supplier_name || 'Savemore',
-                                                    store_branch: item.store_branch,
-                                                    customer_branch: item.store_branch,
-                                                    ae_name: item.ae_name,
-                                                    ae_email: item.ae_email,
-                                                    child_id: child.id,
-                                                    is_manifest_child: true,
-                                                    parent_rma_id: item.id
-                                                  };
-
-                                                  return (
-                                                    <tr key={child.id || `child_${cIdx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                                                      {/* Line # / Photo: 50px */}
-                                                      <td className="py-2 px-1 text-center w-[50px]">
-                                                        <div className="flex flex-col items-center justify-center gap-1">
-                                                          <span className="text-[10px] text-slate-400 font-mono font-bold leading-none">#{cIdx + 1}</span>
-                                                          {cPhotoUrl ? (
-                                                            <button
-                                                              type="button"
-                                                              onClick={() => setLightboxPhoto({
-                                                                images: [cPhotoUrl],
-                                                                initialIndex: 0,
-                                                                url: cPhotoUrl,
-                                                                title: childName,
-                                                                subtitle: `Manifest item #${cIdx + 1} of ${item.rma_number} • ${childReason}`
-                                                              })}
-                                                              className="w-7 h-7 rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 inline-block hover:scale-105 transition-transform cursor-zoom-in"
-                                                              title="Click to zoom image"
-                                                            >
-                                                              <img src={cPhotoUrl} alt={childName} className="w-full h-full object-cover" />
-                                                            </button>
-                                                          ) : (
-                                                            <div className="w-7 h-7 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 dark:border-slate-700">
-                                                              <ImageIcon className="w-3 h-3" />
-                                                            </div>
-                                                          )}
-                                                        </div>
-                                                      </td>
-                                                      {/* Product Description: min-w-[200px] with truncate and title={it.name} */}
-                                                      <td className="py-2 px-3 font-bold text-slate-900 dark:text-white min-w-[200px] truncate" title={childName}>
-                                                        <div className="truncate">{childName}</div>
-                                                        {child.defect_details && (
-                                                          <div className="text-[10px] text-slate-400 font-normal italic truncate" title={child.defect_details}>{child.defect_details}</div>
-                                                        )}
-                                                      </td>
-                                                      {/* Barcode: 140px font-mono */}
-                                                      <td className="py-2 px-3 font-mono font-bold text-slate-700 dark:text-slate-300 w-[140px] truncate" title={childBarcode || '—'}>
-                                                        {childBarcode || '—'}
-                                                      </td>
-                                                      {/* Assigned SKU: 120px */}
-                                                      <td className="py-2 px-3 font-mono text-slate-600 dark:text-slate-400 w-[120px] truncate">
-                                                        {isSkuAssigned ? (
-                                                          <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800 text-[11px]">
-                                                            {effectiveSku}
-                                                          </span>
-                                                        ) : (
-                                                          <span className="text-amber-600 dark:text-amber-400 font-semibold text-[10px]">
-                                                            Awaiting SKU
-                                                          </span>
-                                                        )}
-                                                      </td>
-                                                      {/* Qty & Unit: 80px */}
-                                                      <td className="py-2 px-3 text-center font-mono w-[80px]">
-                                                        <div className="flex flex-col items-center gap-0.5">
-                                                          <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded-md text-[11px] truncate" title={formatQuantityWithPackSize(childQty, childUnit, child.pieces_per_case || matchedChild?.pieces_per_case)}>
-                                                            {formatQuantityWithPackSize(childQty, childUnit, child.pieces_per_case || matchedChild?.pieces_per_case)}
-                                                          </span>
-                                                          {childLocation && (
-                                                            <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold truncate max-w-[75px]" title={childLocation}>
-                                                              📍 {childLocation}
-                                                            </span>
-                                                          )}
-                                                        </div>
-                                                      </td>
-                                                      {/* Triage & Reason: 170px */}
-                                                      <td className="py-2 px-3 w-[170px]">
-                                                        <div className="space-y-1">
-                                                          <div className="truncate" title={childReason}>
-                                                            <span className="px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-semibold text-[10px] inline-block truncate max-w-[160px]">
-                                                              {childReason}
-                                                            </span>
-                                                          </div>
-                                                          <div className="truncate" title={childDisposition}>
-                                                            <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-medium text-[10px] inline-block truncate max-w-[160px]">
-                                                              {childDisposition}
-                                                            </span>
-                                                          </div>
-                                                          {(() => {
-                                                            const childNote = String(child.explanation || child.notes || '').trim();
-                                                            if (!childNote) return null;
-                                                            return (
-                                                              <button
-                                                                type="button"
-                                                                onClick={() => setViewingExplanationModal({
-                                                                  rmaNumber: item.rma_number,
-                                                                  productName: childName,
-                                                                  reason: childReason,
-                                                                  explanation: childNote,
-                                                                  reporter: item.reporter_name || item.reported_by || 'Staff'
-                                                                })}
-                                                                className="group text-left flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 hover:bg-blue-50 dark:bg-slate-800 dark:hover:bg-blue-950/60 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer max-w-[160px]"
-                                                                title="Click to read full explanation"
-                                                              >
-                                                                <span className="text-[9.5px] text-slate-600 dark:text-slate-300 italic truncate max-w-[110px]">
-                                                                  "{childNote}"
-                                                                </span>
-                                                                <span className="text-[9px] font-black text-blue-600 dark:text-blue-400 shrink-0 group-hover:underline">
-                                                                  Read
-                                                                </span>
-                                                              </button>
-                                                            );
-                                                          })()}
-                                                        </div>
-                                                      </td>
-                                                      {/* Actions: 170px */}
-                                                      <td className="py-2 px-2 text-center w-[170px]">
-                                                        <div className="flex items-center justify-center gap-1 flex-wrap">
-                                                          {String(childDisposition || '').toLowerCase().includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(String(child.status || '').toLowerCase()) && (
-                                                            <button
-                                                              type="button"
-                                                              disabled={updatingQueueId === (childReportObject.id || item.rma_number)}
-                                                              onClick={() => handleConfirmCoworkerAction({ ...childReportObject, is_unpacked_manifest_item: true, warehouse_location: childLocation || item.warehouse_location }, 'restocked')}
-                                                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
-                                                              title="1-click confirm stocked in WMS (updates status to 6- Restocked)"
-                                                            >
-                                                              <span>✓ Restocked in WMS</span>
-                                                            </button>
-                                                          )}
-                                                          {(String(childDisposition || '').toLowerCase().includes('scrap') || String(childDisposition || '').toLowerCase().includes('dispose')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(String(child.status || '').toLowerCase()) && (
-                                                            <button
-                                                              type="button"
-                                                              disabled={updatingQueueId === (childReportObject.id || item.rma_number)}
-                                                              onClick={() => handleConfirmCoworkerAction({ ...childReportObject, is_unpacked_manifest_item: true, warehouse_location: childLocation || item.warehouse_location }, 'scrapped')}
-                                                              className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
-                                                              title="1-click confirm replacement order placed with supplier (updates status to 7- Scrapped / Disposed)"
-                                                            >
-                                                              <span>✓ PO Placed</span>
-                                                            </button>
-                                                          )}
-                                                          {(String(childDisposition || '').toLowerCase().includes('quarantine') || String(childDisposition || '').toLowerCase().includes('hold') || String(child.status || '').toLowerCase() === 'quarantine') && (
-                                                            <button
-                                                              type="button"
-                                                              onClick={() => handleInspectTriageForReport(item)}
-                                                              className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
-                                                              title="Release hold and re-triage to Restock, RTV, or Scrap"
-                                                            >
-                                                              <Unlock className="w-3 h-3" />
-                                                              <span>🔓 Release Hold</span>
-                                                            </button>
-                                                          )}
-                                                          {canEditProducts && (
-                                                            <button
-                                                              type="button"
-                                                              onClick={() => {
-                                                                handleEditProductFromReport({
-                                                                  id: child.id,
-                                                                  child_id: child.id,
-                                                                  name: childName,
-                                                                  barcode: childBarcode,
-                                                                  code: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
-                                                                  sku: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
-                                                                  price: child.price || 0,
-                                                                  price_with_vat: child.price_with_vat || child.price || 0,
-                                                                  unit_name: childUnit,
-                                                                  supplier_name: child.supplier_name || item.supplier_name || 'Savemore',
-                                                                  rma_number: item.rma_number,
-                                                                  is_manifest_child: true,
-                                                                  parent_rma_id: item.id
-                                                                });
-                                                              }}
-                                                              className={`px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs border ${isSkuAssigned
-                                                                  ? 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                                                                  : 'bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
-                                                                }`}
-                                                              title={`Assign or edit official catalog SKU for "${childName}"`}
-                                                            >
-                                                              <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                                                              <span>{isSkuAssigned ? 'Edit SKU' : 'Assign SKU'}</span>
-                                                            </button>
-                                                          )}
-                                                          {childExistingMemo ? (
-                                                            <button
-                                                              type="button"
-                                                              onClick={() => handleViewCreditMemoVoucher(childExistingMemo)}
-                                                              className="px-2 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                                              title={`View Official Credit Memo Voucher: ${childExistingMemo.credit_memo_number}`}
-                                                            >
-                                                              <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                                              <span>CM Voucher</span>
-                                                            </button>
-                                                          ) : (
-                                                            canEditProducts && (() => {
-                                                              const isChildOnHold = Boolean(String(childDisposition || '').toLowerCase().includes('quarantine') || String(childDisposition || '').toLowerCase().includes('hold') || String(child.status || '').toLowerCase() === 'quarantine');
-                                                              return (
-                                                                <button
-                                                                  type="button"
-                                                                  disabled={isChildOnHold}
-                                                                  onClick={() => {
-                                                                    if (isChildOnHold) {
-                                                                      alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
-                                                                      return;
-                                                                    }
-                                                                    handleOpenCreditMemoForReport(childReportObject);
-                                                                  }}
-                                                                  className={`px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition-all shadow-2xs ${
-                                                                    isChildOnHold
-                                                                      ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed border border-slate-300 dark:border-slate-700 opacity-70'
-                                                                      : 'bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-300 border border-slate-300 dark:border-slate-700 hover:border-emerald-400 cursor-pointer'
-                                                                  }`}
-                                                                  title={isChildOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : `Issue Finance Credit Memo for ${childName} (${childQty} ${childUnit})`}
-                                                                >
-                                                                  {isChildOnHold ? <Lock className="w-3 h-3 text-amber-500" /> : <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
-                                                                  <span>{isChildOnHold ? 'On Hold' : '+ Credit Memo'}</span>
-                                                                </button>
-                                                              );
-                                                            })()
-                                                          )}
-                                                        </div>
-                                                      </td>
-                                                    </tr>
-                                                  );
-                                                })
-                                              )}
-                                            </tbody>
-                                          </table>
-                                        </div>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                )}
-                              </React.Fragment>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Floating Bulk Action Bar for Return Reports Table */}
-                    {selectedReportIds.size > 0 && (
-                      <div className="p-3 sm:px-4 bg-slate-900/95 dark:bg-slate-950/95 text-white border-t border-slate-700 flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
-                        <div className="flex items-center gap-2.5">
-                          <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black">
-                            {selectedReportIds.size}
-                          </span>
-                          <span className="text-xs font-bold text-slate-200">
-                            {selectedReportIds.size} report{selectedReportIds.size > 1 ? 's' : ''} selected
-                          </span>
-                          {selectedReportIds.size < processedReports.length && (
-                            <button
-                              type="button"
-                              onClick={selectAllFilteredReports}
-                              className="text-xs text-blue-300 hover:text-white underline font-semibold ml-1 cursor-pointer"
-                            >
-                              Select all {processedReports.length} filtered
-                            </button>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={clearReportsSelection}
-                            className="px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-                          >
-                            Deselect
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleBulkArchiveReports(selectedReportsList)}
-                            className="px-3.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-                          >
-                            <Archive className="w-3.5 h-3.5 text-slate-300" />
-                            <span>Archive Selected ({selectedReportIds.size})</span>
-                          </button>
-                          {canDeleteReports && (
-                            <button
-                              type="button"
-                              onClick={() => requestBulkDeleteReports(selectedReportsList)}
-                              className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              <span>Move to Trash ({selectedReportIds.size})</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    <TablePagination
-                      currentPage={reportsCurrentPage}
-                      pageSize={reportsPageSize}
-                      totalItems={processedReports.length}
-                      onPageChange={setReportsCurrentPage}
-                      onPageSizeChange={(newSize) => {
-                        setReportsPageSize(newSize);
-                        setReportsCurrentPage(1);
-                      }}
-                    />
-                  </div>
-                ) : (
-                  /* ============================================================ */
-                  /* GRID / CARDS VIEW (With SN badge and clickable photos)       */
-                  /* ============================================================ */
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {paginatedReports.map((item, index) => {
-                        const photoList = getRealPhotos(item.photos);
-                        const isSelected = selectedReportIds.has(item.id || item.rma_number);
-                        const matchedProduct = savedProductsList.find(p => p.barcode && String(p.barcode) === String(item.barcode));
-                        const resolvedName = (item.name && !item.name.toLowerCase().startsWith('unidentified'))
-                          ? item.name
-                          : (matchedProduct?.name || item.name || `Unidentified (${item.barcode})`);
-                        const isPendingUnknown = !matchedProduct && item.status === 'pending_admin_details';
-
-                        const isManifest = isBatchManifest(item, recentReportsList);
-                        const manifestChildren = isManifest ? getReportManifestItems(item, recentReportsList) : [];
-                        const manifestKey = item.id || item.rma_number;
-                        const isManifestExpanded = expandedManifestIds.has(manifestKey);
-
-                        return (
-                          <div
-                            key={item.id || item.rma_number}
-                            className={`p-4 border rounded-2xl space-y-2 transition-all shadow-sm ${isSelected
-                              ? 'bg-blue-50/90 dark:bg-blue-950/60 border-blue-500'
-                              : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-                              }`}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <div className="flex items-center gap-2 mb-1">
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={() => toggleSelectReport(item.id || item.rma_number)}
-                                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 cursor-pointer"
-                                  />
-                                  <span className="font-mono font-black text-xs text-blue-900 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-800 px-2 py-0.5 rounded-lg">
-                                    SN #{(reportsCurrentPage - 1) * reportsPageSize + index + 1}
-                                  </span>
-                                  <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                                    📥 Inbound
-                                  </span>
-                                  <span className="font-mono font-black text-xs text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 px-2 py-0.5 rounded-md shadow-2xs">
-                                    Qty: <strong className="text-blue-600 dark:text-blue-400 font-black">
-                                      {isManifest
-                                        ? formatManifestBreakdown(manifestChildren, false)
-                                        : formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}
-                                    </strong>
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleInspectTriageForReport(item)}
-                                    className="font-mono font-black text-blue-700 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-200 hover:underline text-sm cursor-pointer"
-                                    title={`Inspect & Triage RMA #${item.rma_number}`}
-                                  >
-                                    {item.rma_number}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setQrModalReport({ ...item, name: resolvedName })}
-                                    className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-md transition-colors cursor-pointer"
-                                    title={`View & Print Box QR Sticker for ${item.rma_number}`}
-                                  >
-                                    <QrCode className="w-3.5 h-3.5" />
-                                  </button>
-                                  {isManifest ? (
-                                    <>
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleManifestExpand(manifestKey)}
-                                        className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 shadow-2xs cursor-pointer ${isManifestExpanded
-                                            ? 'bg-purple-600 text-white border border-purple-700'
-                                            : 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800'
-                                          }`}
-                                        title={isManifestExpanded ? "Collapse Manifest Items" : "Expand Manifest Items"}
-                                      >
-                                        <span>📦 Manifest ({manifestChildren.length})</span>
-                                        <ChevronDown className={`w-2.5 h-2.5 transform transition-transform ${isManifestExpanded ? 'rotate-180' : ''}`} />
-                                      </button>
-                                      {(() => {
-                                        const dynStage = resolveBatchManifestLifecycle(item, recentReportsList);
-                                        return (
-                                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider border inline-flex items-center gap-0.5 shadow-2xs ${dynStage.color}`}>
-                                            {dynStage.label}
-                                          </span>
-                                        );
-                                      })()}
-                                    </>
-                                  ) : (() => {
-                                    const stageInfo = formatLifecycleStage(item.status, item);
-                                    return (
-                                      <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider border inline-flex items-center gap-0.5 shadow-2xs ${stageInfo.color}`}>
-                                        {stageInfo.label}
-                                      </span>
-                                    );
-                                  })()}
-                                  {isSplitChildTicket(item) ? (
-                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
-                                      <span>✂️ Part 2</span>
-                                    </span>
-                                  ) : isSplitParentTicket(item, recentReportsList) ? (
-                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Parent Ticket (Part 1)">
-                                      <span>✂️ Part 1</span>
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <h4 className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm mt-0.5 truncate" title={resolvedName}>
-                                  {resolvedName}
-                                </h4>
-                                <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                                  {isManifest ? (
-                                    <span className="inline-flex items-center gap-1.5 flex-wrap">
-                                      <span className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 font-bold text-[10px] border border-purple-200 dark:border-purple-800">
-                                        📦 Manifest Items
-                                      </span>
-                                      <span className="text-slate-600 dark:text-slate-300 font-bold">
-                                        {formatManifestBreakdown(manifestChildren, true)}
-                                      </span>
-                                    </span>
-                                  ) : (
-                                    <>
-                                      Qty: <strong className="text-slate-900 dark:text-white font-bold">{formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case || matchedProduct?.pieces_per_case)}</strong> • Barcode: <strong className="text-slate-800 dark:text-slate-200">{item.barcode}</strong>
-                                      {(item.code || matchedProduct?.code) && <span> • SKU: {item.code || matchedProduct?.code}</span>}
-                                      {(isUnlabeledBarcode(item.barcode) || item.ai_document_metadata?.is_unlabeled) && (
-                                        <span className="inline-flex items-center gap-1 ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
-                                          🏷️ Missing Barcode
-                                        </span>
-                                      )}
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                {/* Print 4x6 Thermal Box Label */}
-                                <button
-                                  type="button"
-                                  onClick={() => setThermalPrintReport(item)}
-                                  className="p-1 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                                  title="Print 4x6 inch Thermal Box Label"
-                                >
-                                  <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
-                                </button>
-
-                                {/* Inspect & Triage Physical Return */}
-                                <button
-                                  type="button"
-                                  onClick={() => handleInspectTriageForReport(item)}
-                                  className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                                  title={`Inspect condition and set warehouse disposition for ${item.rma_number}`}
-                                >
-                                  <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                                  <span>Triage</span>
-                                </button>
-
-                                {/* 1-Click Coworker WMS Restock Action */}
-                                {isItemReadyToRestock(item, recentReportsList) && (
-                                  <button
-                                    type="button"
-                                    disabled={updatingQueueId === (item.id || item.rma_number)}
-                                    onClick={() => handleConfirmCoworkerAction(item, 'restocked')}
-                                    className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
-                                    title="1-click confirm that this item has been stocked in WMS (updates status to 6- Restocked)"
-                                  >
-                                    <span>✓ Restocked in WMS</span>
-                                  </button>
-                                )}
-
-                                {/* 1-Click Coworker Supplier Re-Order Action */}
-                                {isItemReadyForSupplierReorder(item, recentReportsList) && (
-                                  <button
-                                    type="button"
-                                    disabled={updatingQueueId === (item.id || item.rma_number)}
-                                    onClick={() => handleConfirmCoworkerAction(item, 'scrapped')}
-                                    className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white border border-rose-500 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
-                                    title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
-                                  >
-                                    <span>✓ PO Placed</span>
-                                  </button>
-                                )}
-
-                                {/* Re-open / Reset to Pending Action for Testing Coworker Actions */}
-                                {Boolean(item.ai_document_metadata?.workflow_resolution || item.status === 'resolved' || item.status === 'closed') && (
-                                  <button
-                                    type="button"
-                                    disabled={updatingQueueId === (item.id || item.rma_number)}
-                                    onClick={async () => {
-                                      try {
-                                        setUpdatingQueueId(item.id || item.rma_number);
-                                        await catalogService.resetReportToPending(item.id, item.rma_number, currentUser?.name || 'Staff');
-                                        refreshAllData();
-                                        showToast(`Reset ${item.rma_number} to pending / under inspection.`, 'success');
-                                      } catch (e) {
-                                        showToast('Could not reset report: ' + e.message, 'error');
-                                      } finally {
-                                        setUpdatingQueueId(null);
-                                      }
-                                    }}
-                                    className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap shadow-2xs"
-                                    title="Re-open item and reset to pending so coworker queues can test restocking/reordering again"
-                                  >
-                                    <RotateCcw className="w-3 h-3 text-slate-500" />
-                                    <span>↩️ Reset to Pending</span>
-                                  </button>
-                                )}
-
-                                {/* Release Hold Action */}
-                                {isItemOnHold(item, recentReportsList) && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleInspectTriageForReport(item)}
-                                    className="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                                    title="Release hold and re-triage to Restock, RTV, or Scrap"
-                                  >
-                                    <Unlock className="w-3 h-3" />
-                                    <span>🔓 Release Hold</span>
-                                  </button>
-                                )}
-
-                                {canEditProducts && !isManifest && !savedProductsList.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleEditProductFromReport(item)}
-                                    className="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                                    title="Assign official SKU and save to Products catalog"
-                                  >
-                                    <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                                    <span>Assign SKU</span>
-                                  </button>
-                                )}
-                                {(() => {
-                                  if (isManifest) {
-                                    const linkedMemos = creditMemosList.filter(m => m.rma_number === item.rma_number || m.report_id === item.id);
-                                    if (linkedMemos.length > 0) {
-                                      return (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleViewCreditMemoVoucher(linkedMemos.length === 1 ? linkedMemos[0] : linkedMemos)}
-                                          className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer"
-                                          title={`View ${linkedMemos.length} Credit Memo Voucher(s) for this batch`}
-                                        >
-                                          <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                          <span>Vouchers ({linkedMemos.length})</span>
-                                        </button>
-                                      );
-                                    }
-                                    return (
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleManifestExpand(manifestKey)}
-                                        className="px-2 py-0.5 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                                        title="View manifest line items in drawer"
-                                      >
-                                        <Receipt className="w-3 h-3 text-purple-600 dark:text-purple-400" />
-                                        <span>CM Drawer</span>
-                                      </button>
-                                    );
-                                  }
-
-                                  const existingMemo = creditMemosList.find(m => m.rma_number === item.rma_number || m.report_id === item.id);
-                                  if (existingMemo) {
-                                    return (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleViewCreditMemoVoucher(existingMemo)}
-                                        className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer"
-                                        title={`View Voucher: ${existingMemo.credit_memo_number}`}
-                                      >
-                                        <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                        <span>Voucher</span>
-                                      </button>
-                                    );
-                                  }
-                                  const isCardOnHold = isItemOnHold(item, recentReportsList);
-                                  if (canEditProducts) {
-                                    return (
-                                      <button
-                                        type="button"
-                                        disabled={isCardOnHold}
-                                        onClick={() => {
-                                          if (isCardOnHold) {
-                                            alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
-                                            return;
-                                          }
-                                          handleOpenCreditMemoForReport(item);
-                                        }}
-                                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1 ${
-                                          isCardOnHold
-                                            ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed border border-slate-300 dark:border-slate-700 opacity-70'
-                                            : 'bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 cursor-pointer'
-                                        }`}
-                                        title={isCardOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : "Issue Credit Memo"}
-                                      >
-                                        {isCardOnHold ? <Lock className="w-3 h-3 text-amber-500" /> : <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
-                                        <span>{isCardOnHold ? 'On Hold' : '+ CM'}</span>
-                                      </button>
-                                    );
-                                  }
-                                  return null;
-                                })()}
-                                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300">
-                                  {item.reason || 'Damaged'}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleArchiveReport(item.id, item.rma_number, item)}
-                                  className="p-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
-                                  title={`Archive RMA #${item.rma_number} to Enterprise Vault`}
-                                >
-                                  <Archive className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
-                                </button>
-                                {canDeleteReports && (
-                                  <button
-                                    type="button"
-                                    onClick={() => requestDeleteReport(item.id, item.rma_number, item)}
-                                    className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 dark:hover:bg-rose-900/50 rounded-xl transition-colors cursor-pointer"
-                                    title={`Move RMA #${item.rma_number} to 30-Day Trash Bin`}
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Reporter Details & Truncated Explanation */}
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200/60 dark:border-slate-700/60 space-y-1">
-                              <div className="flex items-center justify-between">
-                                <span>Reported by: <strong className="text-slate-800 dark:text-slate-200">{item.reporter_name || item.reported_by}</strong></span>
-                                <span className="font-mono text-slate-600 dark:text-slate-400">{item.reporter_contact || ''}</span>
-                              </div>
-                              {(() => {
-                                const rawNote = String(
-                                  item.explanation ||
-                                  item.notes ||
-                                  (!isManifest && item.items?.[0]?.explanation ? item.items[0].explanation : '') ||
-                                  ''
-                                ).trim();
-                                const cleanNote = cleanExplanationText(rawNote);
-                                if (!cleanNote) return null;
-                                return (
-                                  <div className="flex items-center justify-between gap-2 bg-white/80 dark:bg-slate-900/60 px-2.5 py-1 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
-                                    <span className="text-[10px] text-slate-600 dark:text-slate-300 italic truncate">
-                                      Note: "{cleanNote}"
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => setViewingExplanationModal({
-                                        rmaNumber: item.rma_number,
-                                        productName: resolvedName,
-                                        reason: item.reason || 'Damaged',
-                                        explanation: cleanNote,
-                                        reporter: item.reporter_name || item.reported_by || 'Staff'
-                                      })}
-                                      className="text-[10px] font-black text-blue-600 dark:text-blue-400 hover:underline shrink-0 cursor-pointer"
-                                    >
-                                      Read Full
-                                    </button>
-                                  </div>
-                                );
-                              })()}
-                            </div>
-
-                            {/* Enterprise Logistics Badges (Store Branch, DR#, Batch/Lot, Expiry) */}
-                            {(item.store_branch || item.invoice_dr_number || item.batch_lot_number || item.expiry_date) && (
-                              <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[10px]">
-                                {item.store_branch && (
-                                  <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-semibold flex items-center gap-1">
-                                    📍 {item.store_branch}
-                                  </span>
-                                )}
-                                {(() => {
-                                  const docs = getDocumentNumbers(item);
-                                  return (
-                                    <>
-                                      {docs.si !== 'N/A' && (
-                                        <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-mono font-bold">
-                                          SI: {docs.si}
-                                        </span>
-                                      )}
-                                      {docs.dr !== 'N/A' && (
-                                        <span className="px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-mono font-bold">
-                                          DR: {docs.dr}
-                                        </span>
-                                      )}
-                                      {docs.po !== 'N/A' && (
-                                        <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-mono font-bold">
-                                          PO: {docs.po}
-                                        </span>
-                                      )}
-                                    </>
-                                  );
-                                })()}
-                                {item.batch_lot_number && (
-                                  <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-mono font-semibold">
-                                    Lot: {item.batch_lot_number}
-                                  </span>
-                                )}
-                                {item.expiry_date && (
-                                  <span className="px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-medium">
-                                    Exp: {item.expiry_date}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-
-                            {/* Photos preview with click-to-zoom multi-image */}
-                            {photoList.length > 0 && (
-                              <div className="flex items-center gap-2 pt-1">
-                                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold">
-                                  {photoList.length} Photo{photoList.length > 1 ? 's' : ''}:
-                                </span>
-                                <div className="flex gap-1.5 overflow-x-auto py-0.5">
-                                  {photoList.map((url, i) => (
-                                    <button
-                                      key={i}
-                                      type="button"
-                                      onClick={() => setLightboxPhoto({
-                                        images: photoList,
-                                        initialIndex: i,
-                                        url,
-                                        title: item.name || `Return ${item.rma_number}`,
-                                        subtitle: `Photo ${i + 1} of ${photoList.length} • RMA #${item.rma_number}`
-                                      })}
-                                      className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 cursor-zoom-in hover:opacity-85 transition-opacity shrink-0"
-                                      title="Click to zoom proof photo"
-                                    >
-                                      <img
-                                        src={url}
-                                        alt="Proof"
-                                        className="w-full h-full object-cover"
-                                      />
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Expandable Multi-Item Manifest Line Items for Cards View */}
-                            {isManifest && isManifestExpanded && (
-                              <div className="mt-3 pt-3 border-t border-purple-200 dark:border-purple-900/50 space-y-2">
-                                <div className="flex items-center justify-between text-[11px] font-bold text-purple-900 dark:text-purple-200">
-                                  <span>📦 Manifest Items Breakdown ({manifestChildren.length})</span>
-                                  <span className="text-slate-500 font-normal">Line-Item SKU & Credit Memo</span>
-                                </div>
-                                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                                  {manifestChildren.map((child, cIdx) => {
-                                    const childName = (child.name || child.item_name || child.productName || `Item #${cIdx + 1}`).trim();
-                                    const childBarcode = (child.barcode || child.item_barcode || '').trim();
-                                    const childSku = (child.sku || child.code || '').trim();
-                                    const childQty = Number(child.quantity || child.qty) || 1;
-                                    const childUnit = child.unit_name || child.unit || item.unit_name || 'pc';
-                                    const childReason = child.reason || child.defect_reason || item.reason || 'Damaged';
-                                    const childLocation = (child.warehouse_location || child.location || '').trim();
-                                    const childDisposition = child.disposition || '1- Pending Triage';
-                                    const matchedChild = savedProductsList.find(p => p.barcode && String(p.barcode) === String(childBarcode));
-                                    const isSkuAssigned = Boolean(
-                                      (matchedChild?.code && String(matchedChild.code) !== String(childBarcode) && !matchedChild.code.toLowerCase().includes('awaiting')) ||
-                                      (childSku && String(childSku) !== String(childBarcode) && !childSku.toLowerCase().includes('awaiting'))
-                                    );
-                                    const effectiveSku = (matchedChild?.code && String(matchedChild.code) !== String(childBarcode))
-                                      ? matchedChild.code
-                                      : (childSku && String(childSku) !== String(childBarcode) && !childSku.toLowerCase().includes('awaiting') ? childSku : '—');
-
-                                    const childExistingMemo = creditMemosList.find(m =>
-                                    (m.rma_number === item.rma_number && (
-                                      (childBarcode && String(m.barcode).trim() === childBarcode) ||
-                                      (child.id && String(m.report_id) === String(child.id)) ||
-                                      (m.product_name && m.product_name === childName)
-                                    ))
-                                    );
-
-                                    const childReportObject = {
-                                      id: child.id || `${item.id || item.rma_number}_${childBarcode}`,
-                                      rma_number: item.rma_number,
-                                      barcode: childBarcode,
-                                      code: effectiveSku !== '—' ? effectiveSku : (childSku || ''),
-                                      sku: effectiveSku !== '—' ? effectiveSku : (childSku || ''),
-                                      name: childName,
-                                      product_name: childName,
-                                      quantity: childQty,
-                                      unit_name: childUnit,
-                                      price: Number(child.price || matchedChild?.price || 0),
-                                      price_with_vat: Number(child.price_with_vat || child.price || matchedChild?.price_with_vat || matchedChild?.price || 0),
-                                      supplier_name: child.supplier_name || matchedChild?.supplier_name || item.supplier_name || 'Savemore',
-                                      store_branch: item.store_branch,
-                                      customer_branch: item.store_branch,
-                                      ae_name: item.ae_name,
-                                      ae_email: item.ae_email,
-                                      child_id: child.id,
-                                      is_manifest_child: true,
-                                      parent_rma_id: item.id
-                                    };
-
-                                    return (
-                                      <div key={child.id || `card_child_${cIdx}`} className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1.5 shadow-2xs">
-                                        <div className="flex items-center justify-between gap-2">
-                                          <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
-                                            #{cIdx + 1} {childName}
-                                          </div>
-                                          <span className="font-mono font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700/60 px-1.5 py-0.5 rounded text-[10px]">
-                                            {formatQuantityWithPackSize(childQty, childUnit, child.pieces_per_case || matchedChild?.pieces_per_case)}
-                                          </span>
-                                        </div>
-                                        <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 font-mono">
-                                          <span>BC: {childBarcode || '—'}</span>
-                                          <span>•</span>
-                                          <span>SKU: <span className={isSkuAssigned ? "font-bold text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400 font-semibold"}>{effectiveSku}</span></span>
-                                          {childLocation && (
-                                            <>
-                                              <span>•</span>
-                                              <span className="text-indigo-600 dark:text-indigo-400 font-bold">📍 {childLocation}</span>
-                                            </>
-                                          )}
-                                        </div>
-                                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100 dark:border-slate-700/50">
-                                          <div className="flex items-center gap-1 text-[10px]">
-                                            <span className="text-rose-600 dark:text-rose-400 font-medium">{childReason}</span>
-                                            <span className="text-slate-400">•</span>
-                                            <span className="text-blue-600 dark:text-blue-400 font-semibold">{childDisposition}</span>
-                                          </div>
-                                          <div className="flex items-center gap-1.5">
-                                            {canEditProducts && (
-                                              <button
-                                                type="button"
-                                                onClick={() => {
-                                                  handleEditProductFromReport({
-                                                    id: child.id,
-                                                    child_id: child.id,
-                                                    name: childName,
-                                                    barcode: childBarcode,
-                                                    code: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
-                                                    sku: (childSku && String(childSku) !== String(childBarcode)) ? childSku : '',
-                                                    price: child.price || 0,
-                                                    price_with_vat: child.price_with_vat || child.price || 0,
-                                                    unit_name: childUnit,
-                                                    supplier_name: child.supplier_name || item.supplier_name || 'Savemore',
-                                                    rma_number: item.rma_number,
-                                                    is_manifest_child: true,
-                                                    parent_rma_id: item.id
-                                                  });
-                                                }}
-                                                className={`px-2 py-0.5 rounded text-[10px] font-bold border inline-flex items-center gap-1 cursor-pointer transition-all ${isSkuAssigned
-                                                    ? 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                                                    : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300'
-                                                  }`}
-                                                title={`Assign or edit official catalog SKU for "${childName}"`}
-                                              >
-                                                <Package className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                                                <span>{isSkuAssigned ? 'Edit SKU' : 'Assign SKU'}</span>
-                                              </button>
-                                            )}
-                                            {childExistingMemo ? (
-                                              <button
-                                                type="button"
-                                                onClick={() => handleViewCreditMemoVoucher(childExistingMemo)}
-                                                className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded text-[10px] font-black inline-flex items-center gap-1 cursor-pointer shadow-2xs"
-                                                title={`View Voucher: ${childExistingMemo.credit_memo_number}`}
-                                              >
-                                                <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                                <span>Voucher</span>
-                                              </button>
-                                            ) : (
-                                              canEditProducts && (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleOpenCreditMemoForReport(childReportObject)}
-                                                  className="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-emerald-950/50 text-slate-700 hover:text-emerald-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer shadow-2xs"
-                                                  title={`Issue Credit Memo for ${childName}`}
-                                                >
-                                                  <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                                  <span>+ CM</span>
-                                                </button>
-                                              )
-                                            )}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Floating Bulk Action Bar for Grid Cards */}
-                    {selectedReportIds.size > 0 && (
-                      <div className="p-3 sm:px-4 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-2xl border border-slate-700 flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
-                        <div className="flex items-center gap-2.5">
-                          <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black">
-                            {selectedReportIds.size}
-                          </span>
-                          <span className="text-xs font-bold text-slate-200">
-                            {selectedReportIds.size} report{selectedReportIds.size > 1 ? 's' : ''} selected
-                          </span>
-                          {selectedReportIds.size < processedReports.length && (
-                            <button
-                              type="button"
-                              onClick={selectAllFilteredReports}
-                              className="text-xs text-blue-300 hover:text-white underline font-semibold ml-1 cursor-pointer"
-                            >
-                              Select all {processedReports.length} filtered
-                            </button>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={clearReportsSelection}
-                            className="px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-                          >
-                            Deselect
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleBulkArchiveReports(selectedReportsList)}
-                            className="px-3.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-                          >
-                            <Archive className="w-3.5 h-3.5 text-slate-300" />
-                            <span>Archive Selected ({selectedReportIds.size})</span>
-                          </button>
-                          {canDeleteReports && (
-                            <button
-                              type="button"
-                              onClick={() => requestBulkDeleteReports(selectedReportsList)}
-                              className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              <span>Move to Trash ({selectedReportIds.size})</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    <TablePagination
-                      currentPage={reportsCurrentPage}
-                      pageSize={reportsPageSize}
-                      totalItems={processedReports.length}
-                      onPageChange={setReportsCurrentPage}
-                      onPageSizeChange={(newSize) => {
-                        setReportsPageSize(newSize);
-                        setReportsCurrentPage(1);
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
+              <CustomerHubTab
+                reportsList={liveReportsList}
+                creditMemosList={liveCreditMemosList}
+                savedProductsList={savedProductsList}
+                currentUser={currentUser}
+                coworkerQueueFilter={coworkerQueueFilter}
+                onClearCoworkerQueueFilter={() => setCoworkerQueueFilter('all')}
+                updatingQueueId={updatingQueueId}
+                isTestMode={false}
+                onOpenReportsModal={() => setIsReportsModalOpen(true)}
+                onOpenMatrixExport={() => setMatrixExportModal({ isOpen: true, stream: 'customer_inbound', isTestMode: false })}
+                onInspectTriage={handleInspectTriageForReport}
+                onViewQR={(reportObj) => setQrModalReport(reportObj)}
+                onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
+                onViewExplanation={(info) => setViewingExplanationModal(info)}
+                onPrintLabel={(reportObj) => setThermalPrintReport(reportObj)}
+                onEditProductFromReport={handleEditProductFromReport}
+                onOpenCreditMemo={handleOpenCreditMemoForReport}
+                onViewCreditMemoVoucher={handleViewCreditMemoVoucher}
+                onConfirmCoworkerAction={handleConfirmCoworkerAction}
+                onResetToPending={handleResetReportToPending}
+                onArchiveReport={handleArchiveReport}
+                onBulkArchiveReports={handleBulkArchiveReports}
+                onRequestDeleteReport={requestDeleteReport}
+                onRequestBulkDeleteReports={requestBulkDeleteReports}
+                selectionResetTick={customerHubResetTick}
+                externalStatusFilter={customerHubExternalStatus}
+              />
             )}
 
             {/* TAB 3: FINANCE CREDIT MEMO SECTION */}
             {adminActiveTab === 'credit_memos' && (
               <CreditMemosTab
-                creditMemosList={creditMemosList.filter(m => !isTestRecord(m))}
+                creditMemosList={liveCreditMemosList}
                 recentReportsList={liveReportsList}
                 currentUser={currentUser}
                 onOpenCreateModal={handleOpenCreateCreditMemo}
@@ -6783,6 +4658,7 @@ export default function App() {
                 onPrintBulk={handleViewCreditMemoVoucher}
                 onRequestDeleteCreditMemo={requestDeleteCreditMemo}
                 onRequestBulkDeleteCreditMemo={requestBulkDeleteCreditMemos}
+                isTestMode={false}
               />
             )}
 
@@ -6795,6 +4671,8 @@ export default function App() {
                 onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
                 onRequestDeleteReport={requestDeleteReport}
                 onRequestBulkDeleteReports={requestBulkDeleteReports}
+                onRequestArchiveReport={handleArchiveReport}
+                onRequestBulkArchiveReports={handleBulkArchiveReports}
                 onArchiveReport={handleArchiveReport}
                 onBulkArchiveReports={handleBulkArchiveReports}
                 onAssignSku={(report) => handleEditProductFromReport(report)}
@@ -6804,9 +4682,14 @@ export default function App() {
                   setIsQuickRmaModalOpen(true);
                 }}
                 onPrintLabel={(report) => setThermalPrintReport(report)}
+                onViewQR={(report) => setQrModalReport(report)}
                 onViewExplanation={(info) => setViewingExplanationModal(info)}
+                onOpenSimpleWizard={(report) => setSimpleRtvWizard({ isOpen: true, report, initialMode: 'wizard' })}
+                onOpenPickupForm={(report) => setPickupFormReport(report)}
+                onOpenMatrixExport={() => setMatrixExportModal({ isOpen: true, stream: 'supplier_outbound', isTestMode: false })}
                 savedProductsList={savedProductsList}
                 coworkerQueueFilter={coworkerQueueFilter}
+                isTestMode={false}
               />
             )}
 
@@ -6814,22 +4697,47 @@ export default function App() {
             {adminActiveTab === 'sandbox' && (
               <TestModeSandboxTab
                 testReportsList={testReportsList}
+                testCreditMemosList={testCreditMemosList}
+                savedProductsList={savedProductsList}
                 currentUser={currentUser}
+                coworkerQueueFilter={coworkerQueueFilter}
+                onClearCoworkerQueueFilter={() => setCoworkerQueueFilter('all')}
+                updatingQueueId={updatingQueueId}
+                activeSubTab={sandboxSubTab}
+                onSubTabChange={setSandboxSubTab}
                 onRefresh={refreshAllData}
+                onInspectTriage={handleInspectTriageForReport}
+                onViewQR={(report) => setQrModalReport(report)}
                 onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
                 onRequestDeleteReport={requestDeleteReport}
                 onRequestBulkDeleteReports={requestBulkDeleteReports}
                 onArchiveReport={handleArchiveReport}
                 onBulkArchiveReports={handleBulkArchiveReports}
+                onClearAllSandbox={requestClearAllSandbox}
                 onAssignSku={(report) => handleEditProductFromReport(report)}
+                onEditProductFromReport={handleEditProductFromReport}
+                onResetToPending={handleResetReportToPending}
+                onConfirmCoworkerAction={handleConfirmCoworkerAction}
+                onOpenReportsModal={() => setIsReportsModalOpen(true)}
+                onOpenCreateCreditMemo={handleOpenCreateCreditMemo}
+                onOpenCreditMemoForReport={handleOpenCreditMemoForReport}
+                onEditCreditMemo={handleEditCreditMemo}
+                onViewCreditMemoVoucher={handleViewCreditMemoVoucher}
+                onRequestDeleteCreditMemo={requestDeleteCreditMemo}
+                onRequestBulkDeleteCreditMemos={requestBulkDeleteCreditMemos}
                 onOpenQuickAction={(rmaNumber) => {
                   setQuickRmaNumber(rmaNumber);
                   setIsQuickRmaModalOpen(true);
                 }}
                 onPrintLabel={(report) => setThermalPrintReport(report)}
                 onViewExplanation={(info) => setViewingExplanationModal(info)}
-                savedProductsList={savedProductsList}
-                coworkerQueueFilter={coworkerQueueFilter}
+                onOpenSimpleWizard={(report) => setSimpleRtvWizard({ isOpen: true, report, initialMode: 'wizard' })}
+                onOpenPickupForm={(report) => setPickupFormReport(report)}
+                onOpenMatrixExport={(subStream) => setMatrixExportModal({
+                  isOpen: true,
+                  stream: subStream === 'supplier' ? 'supplier_outbound' : 'customer_inbound',
+                  isTestMode: true
+                })}
               />
             )}
 
@@ -6893,36 +4801,7 @@ export default function App() {
         onClose={() => setIsScannerOpen(false)}
         onScanSuccess={(code) => {
           setIsScannerOpen(false);
-          const rma = parseRmaFromScan(code);
-          if (rma) {
-            const isSupplierRtvSession = gateSession?.stream_type === 'supplier_outbound' || (isTestMode && testModeStreamType === 'supplier_outbound') || currentUser;
-            if (isSupplierRtvSession && (gateSession?.stream_type === 'supplier_outbound' || String(code).toUpperCase().startsWith('PINGCON-RTV:'))) {
-              setSimpleRtvRmaNumber(rma);
-            } else {
-              setQuickRmaNumber(rma);
-              setIsQuickRmaModalOpen(true);
-            }
-          } else if (!String(code).toUpperCase().startsWith('PINGCON-RTV:')) {
-            setBarcodeInput(code);
-          }
-        }}
-      />
-
-      {/* Simple 4-Option Supplier RTV Modal (For Invited Staff & Admin) */}
-      <SupplierRtvSimpleModal
-        isOpen={Boolean(simpleRtvRmaNumber)}
-        onClose={() => setSimpleRtvRmaNumber(null)}
-        rmaNumber={simpleRtvRmaNumber}
-        currentUser={currentUser}
-        gateSession={gateSession}
-        onCompleted={({ rmaNumber: doneRma, status }) => {
-          refreshAllData();
-          showToast(
-            status === 'picked_up'
-              ? `${doneRma} tagged as Picked Up by Supplier!`
-              : `${doneRma} updated successfully!`,
-            'success'
-          );
+          handlePortalQrScanResult(code);
         }}
       />
 
@@ -6942,12 +4821,13 @@ export default function App() {
       <RMAReportsModal
         isOpen={isReportsModalOpen}
         onClose={() => setIsReportsModalOpen(false)}
-        reports={recentReportsList}
+        reports={adminActiveTab === 'sandbox' ? testReportsList : liveReportsList}
         currentUser={currentUser}
         onDeleteReport={requestDeleteReport}
         onBulkDeleteReport={requestBulkDeleteReports}
-        creditMemosList={creditMemosList}
+        creditMemosList={adminActiveTab === 'sandbox' ? testCreditMemosList : liveCreditMemosList}
         savedProductsList={savedProductsList}
+        isTestMode={adminActiveTab === 'sandbox'}
         onEditProductFromReport={handleEditProductFromReport}
         onViewReportQR={(rep) => setQrModalReport(rep)}
         onOpenCreditMemo={(rep) => {
@@ -7069,7 +4949,6 @@ export default function App() {
                     .from('rma_items')
                     .update({
                       sku: code,
-                      code: code,
                       name: name,
                       price: price,
                       price_with_vat: priceWithVat,
@@ -7087,7 +4966,6 @@ export default function App() {
                     .from('rma_items')
                     .update({
                       sku: code,
-                      code: code,
                       name: name,
                       price: price,
                       price_with_vat: priceWithVat,
@@ -7171,8 +5049,8 @@ export default function App() {
 
               // If this return was waiting for SKU assignment, dispatch the official RMA report notification email!
               if (matchedPending && matchedPending.length > 0) {
-                const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
                 for (const rep of matchedPending) {
+                  const isTestActive = isTestRecord(rep) || effectiveIsTestMode || (typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true');
                   const enrichedReport = {
                     ...rep,
                     name: name,
@@ -7217,9 +5095,22 @@ export default function App() {
         report={selectedCreditMemoReport}
         creditMemo={editingCreditMemo}
         currentUser={currentUser}
-        reportsList={customerInboundReports}
+        isTestMode={Boolean(
+          adminActiveTab === 'sandbox' ||
+          isTestRecord(editingCreditMemo) ||
+          isTestRecord(selectedCreditMemoReport)
+        )}
+        reportsList={
+          Boolean(adminActiveTab === 'sandbox' || isTestRecord(editingCreditMemo) || isTestRecord(selectedCreditMemoReport))
+            ? testReportsList.filter(r => (r.rma_type === 'customer_inbound' || !r.rma_type) && !isManifestSubItem(r, testReportsList))
+            : customerInboundReports
+        }
         savedProductsList={savedProductsList}
-        creditMemosCount={creditMemosList?.length || 0}
+        creditMemosCount={
+          Boolean(adminActiveTab === 'sandbox' || isTestRecord(editingCreditMemo) || isTestRecord(selectedCreditMemoReport))
+            ? testCreditMemosList.length
+            : liveCreditMemosList.length
+        }
         onAssignSku={(targetRep) => {
           setIsCreditMemoModalOpen(false);
           handleEditProductFromReport(targetRep);
@@ -7320,10 +5211,22 @@ export default function App() {
           restoreQuickRmaIfPending();
         }}
         report={qrModalReport}
-        onOpenQuickAction={(rma) => {
+        onOpenQuickAction={(rmaOrReport) => {
           setPendingQuickRmaNumber(null);
-          setQuickRmaNumber(rma);
-          setIsQuickRmaModalOpen(true);
+          const repObj = typeof rmaOrReport === 'object' && rmaOrReport !== null
+            ? rmaOrReport
+            : recentReportsList.find((r) => r.rma_number === rmaOrReport) || null;
+          const rmaStr = typeof rmaOrReport === 'string'
+            ? rmaOrReport
+            : (rmaOrReport?.rma_number || rmaOrReport?.rmaNumber || '');
+
+          setQrModalReport(null);
+          if (repObj?.rma_type === 'supplier_outbound' || isSupplierRtvPortal) {
+            setSimpleRtvWizard({ isOpen: true, report: repObj || { rma_number: rmaStr }, initialMode: 'wizard' });
+          } else {
+            setQuickRmaNumber(rmaStr);
+            setIsQuickRmaModalOpen(true);
+          }
         }}
       />
 
@@ -7333,18 +5236,35 @@ export default function App() {
         onClose={handleCloseQuickRma}
         rmaNumber={quickRmaNumber}
         currentUser={currentUser}
+        gateSession={gateSession}
         onAdminVerified={(admin) => setCurrentUser(admin)}
         savedProductsList={savedProductsList}
         creditMemosList={creditMemosList}
         recentReportsList={recentReportsList}
+        onOpenSimpleSupplierWizard={(rep) => {
+          const currentRma = rep?.rma_number || quickRmaNumber;
+          setQuickRmaNumber(currentRma);
+          setPendingQuickRmaNumber(currentRma);
+          setIsQuickRmaModalOpen(false);
+          setSimpleRtvWizard({ isOpen: true, report: rep, initialMode: 'wizard' });
+        }}
+        onOpenSupplierPickupForm={(rep) => {
+          const currentRma = rep?.rma_number || quickRmaNumber;
+          setQuickRmaNumber(currentRma);
+          setPendingQuickRmaNumber(currentRma);
+          setIsQuickRmaModalOpen(false);
+          setPickupFormReport(rep);
+        }}
         onAssignSku={(reportToEdit) => {
-          const currentRma = quickRmaNumber || reportToEdit?.rma_number;
+          const currentRma = reportToEdit?.rma_number || quickRmaNumber;
+          setQuickRmaNumber(currentRma);
           setPendingQuickRmaNumber(currentRma);
           setIsQuickRmaModalOpen(false);
           handleEditProductFromReport(reportToEdit);
         }}
         onOpenCreditMemo={(rep, existing) => {
-          const currentRma = quickRmaNumber || rep?.rma_number;
+          const currentRma = rep?.rma_number || quickRmaNumber;
+          setQuickRmaNumber(currentRma);
           setPendingQuickRmaNumber(currentRma);
           setIsQuickRmaModalOpen(false);
           if (existing) {
@@ -7356,14 +5276,16 @@ export default function App() {
           }
         }}
         onViewCreditMemoVoucher={(memo) => {
-          const currentRma = quickRmaNumber || memo?.rma_number;
+          const currentRma = memo?.rma_number || quickRmaNumber;
+          setQuickRmaNumber(currentRma);
           setPendingQuickRmaNumber(currentRma);
           setIsQuickRmaModalOpen(false);
           setVoucherModalMemo(memo);
           setIsVoucherModalOpen(true);
         }}
         onViewReportQR={(rep) => {
-          const currentRma = quickRmaNumber || rep?.rma_number;
+          const currentRma = rep?.rma_number || quickRmaNumber;
+          setQuickRmaNumber(currentRma);
           setPendingQuickRmaNumber(currentRma);
           setIsQuickRmaModalOpen(false);
           setQrModalReport(rep);
@@ -7372,6 +5294,18 @@ export default function App() {
         onOpenDriverHandover={(rma) => {
           setDriverDeliveryRma(rma);
           setIsDriverDeliveryModalOpen(true);
+        }}
+        onReportUpdated={(updated) => {
+          if (updated?.rma_number) {
+            setQuickRmaNumber(updated.rma_number);
+          }
+          if (updated && (updated.id || updated.rma_number)) {
+            setRecentReportsList(prev => prev.map(r => {
+              const idMatch = r && r.id && updated.id && String(r.id) === String(updated.id);
+              const rmaMatch = r && r.rma_number && updated.rma_number && String(r.rma_number) === String(updated.rma_number) && !r.parent_rma_id;
+              return (idMatch || rmaMatch) ? { ...r, ...updated } : r;
+            }));
+          }
         }}
         onRefresh={(updated, newChild) => {
           if (newChild) {
@@ -7386,6 +5320,9 @@ export default function App() {
               return [newChild, ...updatedList];
             });
           } else if (updated && (updated.id || updated.rma_number)) {
+            if (updated.rma_number) {
+              setQuickRmaNumber(updated.rma_number);
+            }
             setRecentReportsList(prev => prev.map(r => {
               const idMatch = r && r.id && updated.id && String(r.id) === String(updated.id);
               const rmaMatch = r && r.rma_number && updated.rma_number && String(r.rma_number) === String(updated.rma_number) && !r.parent_rma_id;
@@ -7418,6 +5355,54 @@ export default function App() {
         onDeliveryConfirmed={() => {
           refreshAllData();
         }}
+      />
+
+      {/* Simple 4-Option Supplier RTV & Driver Pickup Wizard (Zero OTP Re-login + Drive Upload + A4 Form) */}
+      <SimpleSupplierRtvWizardModal
+        isOpen={simpleRtvWizard.isOpen}
+        onClose={() => {
+          setSimpleRtvWizard({ isOpen: false, report: null, initialMode: 'wizard' });
+          restoreQuickRmaIfPending();
+        }}
+        report={simpleRtvWizard.report}
+        allReports={recentReportsList}
+        catalogProducts={savedProductsList}
+        activeUser={currentUser || gateSession}
+        isAdmin={Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin'))}
+        initialMode={simpleRtvWizard.initialMode}
+        onSuccess={() => {
+          refreshAllData();
+          showToast('Supplier RTV status saved!', 'success');
+          restoreQuickRmaIfPending();
+        }}
+        onOpenFullAdminModal={(rep) => {
+          setPendingQuickRmaNumber(null);
+          setSimpleRtvWizard({ isOpen: false, report: null, initialMode: 'wizard' });
+          setQuickRmaNumber(rep?.rma_number || rep?.rmaNumber);
+          setIsQuickRmaModalOpen(true);
+        }}
+      />
+
+      {/* Standalone Dual-Copy A4 Pickup Form Preview / Re-print Modal */}
+      <SupplierPickupFormModal
+        isOpen={Boolean(pickupFormReport)}
+        onClose={() => {
+          setPickupFormReport(null);
+          restoreQuickRmaIfPending();
+        }}
+        report={pickupFormReport}
+        allReports={recentReportsList}
+        catalogProducts={savedProductsList}
+      />
+
+      {/* Customer Hub / Supplier RTV Separated Excel Matrix (.xlsx) Exporter */}
+      <RMAMatrixExportModal
+        isOpen={matrixExportModal.isOpen}
+        onClose={() => setMatrixExportModal((prev) => ({ ...prev, isOpen: false }))}
+        reports={recentReportsList}
+        catalogProducts={savedProductsList}
+        stream={matrixExportModal.stream}
+        isTestMode={matrixExportModal.isTestMode}
       />
 
       {/* Toast Alert Notification */}
@@ -7470,7 +5455,7 @@ export default function App() {
                   sessionStorage.getItem('rma_active_invite_token') ||
                   localStorage.getItem('rma_active_invite_token');
               }
-            } catch {}
+            } catch { }
           }
 
           // If visiting an invite link with a token, the Gatekeeper MUST be locked until this specific token is authenticated!

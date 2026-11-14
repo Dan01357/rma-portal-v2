@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { creditMemoService } from '../services/creditMemoService';
 import { authService } from '../services/authService';
-import { hasAssignedSku } from '../utils/rmaHelpers';
+import { hasAssignedSku, isTestRecord } from '../utils/rmaHelpers';
 
 export default function CreditMemoModal({
   isOpen,
@@ -32,7 +32,8 @@ export default function CreditMemoModal({
   reportsList = [],
   savedProductsList = [],
   creditMemosCount = 0,
-  onAssignSku
+  onAssignSku,
+  isTestMode = false
 }) {
   const isEditing = Boolean(creditMemo && creditMemo.credit_memo_number);
 
@@ -286,7 +287,14 @@ export default function CreditMemoModal({
 
     try {
       const target = activeReport || creditMemo || report || {};
+      const effectiveIsTest = Boolean(
+        isTestMode ||
+        isTestRecord(target) ||
+        isTestRecord(creditMemo) ||
+        isTestRecord(report)
+      );
       const payload = {
+        is_test: effectiveIsTest,
         credit_memo_number: creditMemo?.credit_memo_number,
         rma_number: target?.rma_number,
         report_id: target?.id || target?.report_id,
@@ -351,13 +359,18 @@ export default function CreditMemoModal({
               <Receipt className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
                   {isEditing ? 'Edit Finance Credit Memo' : 'Issue Finance Credit Memo'}
                 </h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300">
                   {isEditing ? creditMemo.credit_memo_number : 'New Voucher'}
                 </span>
+                {Boolean(isTestMode || isTestRecord(creditMemo) || isTestRecord(activeReport) || isTestRecord(report)) && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                    🧪 Sandbox Test
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Generate official credit deduction linked to return ticket {targetReport.rma_number || ''}

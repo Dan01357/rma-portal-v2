@@ -1,79 +1,106 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  FlaskConical, 
-  Trash2, 
-  Terminal, 
-  Copy, 
-  Check, 
-  FileText, 
-  Building2, 
-  Receipt, 
-  RotateCcw,
-  Sparkles,
-  ClipboardCheck,
-  Package,
-  Layers,
-  ArrowRight,
-  Printer,
-  Archive,
-  Eye,
-  CheckCircle2
+import {
+  FlaskConical,
+  Trash2,
+  Copy,
+  Check,
+  FileText,
+  Building2,
+  Receipt,
+  FileSpreadsheet,
+  Terminal,
+  ChevronDown
 } from 'lucide-react';
-import { 
-  formatQuantityWithPackSize, 
-  normalizeWarehouseLocation,
-  formatLifecycleStage
+import {
+  isManifestSubItem,
+  isBatchManifest,
+  getReportManifestItems
 } from '../utils/rmaHelpers';
-import { catalogService } from '../services/catalogService';
-import TablePagination from './TablePagination';
+import CustomerHubTab from './CustomerHubTab';
+import SupplierClaimsTab from './SupplierClaimsTab';
+import CreditMemosTab from './CreditMemosTab';
+import { copyTextSafe } from '../utils/clipboard';
 
 export default function TestModeSandboxTab({
   testReportsList = [],
   testCreditMemosList = [],
+  savedProductsList = [],
   currentUser,
+  coworkerQueueFilter = 'all',
+  onClearCoworkerQueueFilter,
+  updatingQueueId = null,
+  activeSubTab: controlledSubTab,
+  onSubTabChange,
   onRefresh,
   onInspectTriage,
   onOpenQuickAction,
-  onResetToPending,
-  onClearAllSandbox,
-  onAssignSku,
-  onViewCreditMemo,
-  onPrintLabel,
+  onViewQR,
   onViewPhoto,
   onViewExplanation,
-  onRequestDeleteReport,
+  onPrintLabel,
+  onEditProductFromReport,
+  onResetToPending,
+  onConfirmCoworkerAction,
+  onOpenReportsModal,
+  onOpenMatrixExport,
   onArchiveReport,
-  savedProductsList = []
+  onBulkArchiveReports,
+  onRequestDeleteReport,
+  onRequestBulkDeleteReports,
+  onClearAllSandbox,
+  onAssignSku,
+  onOpenCreateCreditMemo,
+  onOpenCreditMemoForReport,
+  onEditCreditMemo,
+  onViewCreditMemoVoucher,
+  onRequestDeleteCreditMemo,
+  onRequestBulkDeleteCreditMemos,
+  onOpenSimpleWizard,
+  onOpenPickupForm
 }) {
-  const [activeSubTab, setActiveSubTab] = useState('customer'); // 'customer' | 'supplier' | 'memos'
+  const [internalSubTab, setInternalSubTab] = useState('customer');
+  const activeSubTab = controlledSubTab || internalSubTab;
+  const setActiveSubTab = (nextTab) => {
+    if (onSubTabChange) {
+      onSubTabChange(nextTab);
+    } else {
+      setInternalSubTab(nextTab);
+    }
+  };
+
   const [copiedKey, setCopiedKey] = useState(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [showApiGuide, setShowApiGuide] = useState(true);
 
   const canManage = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
 
-  // Sub-divide sandbox reports into customer inbound vs supplier outbound
-  const sandboxCustomerReports = useMemo(() => {
-    return testReportsList.filter(r => r.rma_type !== 'supplier_outbound');
+  // Top-level counts mirroring CustomerHubTab & SupplierClaimsTab predicates
+  const sandboxCustomerCount = useMemo(() => {
+    return testReportsList.filter(
+      (r) => r.rma_type !== 'supplier_outbound' && !isManifestSubItem(r, testReportsList)
+    ).length;
   }, [testReportsList]);
 
-  const sandboxSupplierReports = useMemo(() => {
-    return testReportsList.filter(r => r.rma_type === 'supplier_outbound');
+  const sandboxSupplierCount = useMemo(() => {
+    return testReportsList.filter((r) => {
+      if (isManifestSubItem(r, testReportsList)) return false;
+      const isExplicitSupplier = r.rma_type === 'supplier_outbound';
+      if (isExplicitSupplier) return true;
+      if (isBatchManifest(r, testReportsList)) {
+        const children = getReportManifestItems(r, testReportsList);
+        return children.some((c) => {
+          const cDisp = String(c?.disposition || '').toLowerCase();
+          return c?.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+        });
+      }
+      const disp = String(r.disposition || '').toLowerCase();
+      return disp.includes('rtv') || disp.includes('vendor') || disp.includes('supplier exchange') || disp.includes('supplier credit');
+    }).length;
   }, [testReportsList]);
 
-  const activeList = useMemo(() => {
-    if (activeSubTab === 'customer') return sandboxCustomerReports;
-    if (activeSubTab === 'supplier') return sandboxSupplierReports;
-    return testCreditMemosList;
-  }, [activeSubTab, sandboxCustomerReports, sandboxSupplierReports, testCreditMemosList]);
-
-  const paginatedList = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return activeList.slice(start, start + pageSize);
-  }, [activeList, currentPage, pageSize]);
+  const totalSandboxRecords = testReportsList.length + testCreditMemosList.length;
 
   const copyToClipboard = (text, key) => {
-    navigator.clipboard.writeText(text);
+    copyTextSafe(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
   };
@@ -108,7 +135,7 @@ export default function TestModeSandboxTab({
       <div className="bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/5 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-slate-900 border-2 border-amber-300 dark:border-amber-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="p-2 rounded-xl bg-amber-500 text-white shadow-xs">
                 <FlaskConical className="w-5 h-5" />
               </span>
@@ -117,113 +144,140 @@ export default function TestModeSandboxTab({
               </h3>
             </div>
             <p className="text-xs text-amber-900/80 dark:text-amber-300/80 max-w-2xl leading-relaxed">
-              Every return submitted here or created with <code className="font-mono font-bold bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded text-[11px]">?test_mode=true</code> is strictly isolated from live financial books and live production queues. Coworkers can simulate inventory restocks, supplier re-orders, and debit memos here safely!
+              Every return, RTV claim, or Credit Memo submitted here or via <code className="font-mono font-bold bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded text-[11px]">?test_mode=true</code> is strictly isolated from live financial books and live production queues — with full Live Mode feature parity.
             </p>
           </div>
 
-          {canManage && testReportsList.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap shrink-0 self-start sm:self-auto">
             <button
               type="button"
-              onClick={onClearAllSandbox}
-              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl shadow-xs flex items-center gap-2 cursor-pointer transition-all shrink-0 self-start sm:self-auto"
-              title="Delete all sandbox test records"
+              onClick={() => setShowApiGuide((prev) => !prev)}
+              className="px-3 py-2 bg-white/80 dark:bg-slate-900/80 hover:bg-white dark:hover:bg-slate-800 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-800 font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer transition-all"
+              title="Toggle REST API cURL Snippets"
             >
-              <Trash2 className="w-4 h-4" />
-              <span>Clear Sandbox ({testReportsList.length})</span>
+              <Terminal className="w-3.5 h-3.5" />
+              <span>{showApiGuide ? 'Hide cURL Guide' : 'Show cURL Guide'}</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showApiGuide ? 'rotate-180' : ''}`} />
             </button>
-          )}
+
+            {onOpenMatrixExport && activeSubTab !== 'memos' && (
+              <button
+                type="button"
+                onClick={() => onOpenMatrixExport(activeSubTab)}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                title={`Download Test Sandbox ${activeSubTab === 'supplier' ? 'Supplier RTV' : 'Customer Hub'} Matrix (.xlsx)`}
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>Sandbox {activeSubTab === 'supplier' ? 'Supplier RTV' : 'Customer'} Matrix (.xlsx)</span>
+              </button>
+            )}
+
+            {canManage && totalSandboxRecords > 0 && (
+              <button
+                type="button"
+                onClick={onClearAllSandbox}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl shadow-xs flex items-center gap-2 cursor-pointer transition-all"
+                title="Delete all sandbox test records"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Clear Sandbox ({totalSandboxRecords})</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* cURL Quick-Copy Cards */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 pt-2 border-t border-amber-200 dark:border-amber-900/60">
-          <div className="bg-white/90 dark:bg-slate-900/90 border border-amber-200 dark:border-amber-900/80 rounded-2xl p-3 space-y-1.5 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase text-amber-800 dark:text-amber-400 font-mono">1. Query Test Queue</span>
-              <button
-                type="button"
-                onClick={() => copyToClipboard(curlGetRestock, 'get')}
-                className="text-[10px] font-bold text-slate-500 hover:text-amber-600 flex items-center gap-1 cursor-pointer"
-              >
-                {copiedKey === 'get' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                <span>{copiedKey === 'get' ? 'Copied' : 'Copy cURL'}</span>
-              </button>
+        {showApiGuide && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 pt-2 border-t border-amber-200 dark:border-amber-900/60">
+            <div className="bg-white/90 dark:bg-slate-900/90 border border-amber-200 dark:border-amber-900/80 rounded-2xl p-3 space-y-1.5 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase text-amber-800 dark:text-amber-400 font-mono">1. Query Test Queue</span>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(curlGetRestock, 'get')}
+                  className="text-[10px] font-bold text-slate-500 hover:text-amber-600 flex items-center gap-1 cursor-pointer"
+                >
+                  {copiedKey === 'get' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedKey === 'get' ? 'Copied' : 'Copy cURL'}</span>
+                </button>
+              </div>
+              <pre className="text-[9px] font-mono text-slate-700 dark:text-slate-300 bg-amber-50/50 dark:bg-slate-950 p-2 rounded-xl overflow-x-auto whitespace-pre">
+                {curlGetRestock}
+              </pre>
             </div>
-            <pre className="text-[9px] font-mono text-slate-700 dark:text-slate-300 bg-amber-50/50 dark:bg-slate-950 p-2 rounded-xl overflow-x-auto whitespace-pre">
-              {curlGetRestock}
-            </pre>
-          </div>
 
-          <div className="bg-white/90 dark:bg-slate-900/90 border border-amber-200 dark:border-amber-900/80 rounded-2xl p-3 space-y-1.5 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase text-amber-800 dark:text-amber-400 font-mono">2. Ingest Test Return</span>
-              <button
-                type="button"
-                onClick={() => copyToClipboard(curlPostTest, 'post')}
-                className="text-[10px] font-bold text-slate-500 hover:text-amber-600 flex items-center gap-1 cursor-pointer"
-              >
-                {copiedKey === 'post' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                <span>{copiedKey === 'post' ? 'Copied' : 'Copy cURL'}</span>
-              </button>
+            <div className="bg-white/90 dark:bg-slate-900/90 border border-amber-200 dark:border-amber-900/80 rounded-2xl p-3 space-y-1.5 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase text-amber-800 dark:text-amber-400 font-mono">2. Ingest Test Return</span>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(curlPostTest, 'post')}
+                  className="text-[10px] font-bold text-slate-500 hover:text-amber-600 flex items-center gap-1 cursor-pointer"
+                >
+                  {copiedKey === 'post' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedKey === 'post' ? 'Copied' : 'Copy cURL'}</span>
+                </button>
+              </div>
+              <pre className="text-[9px] font-mono text-slate-700 dark:text-slate-300 bg-amber-50/50 dark:bg-slate-950 p-2 rounded-xl overflow-x-auto whitespace-pre">
+                {curlPostTest}
+              </pre>
             </div>
-            <pre className="text-[9px] font-mono text-slate-700 dark:text-slate-300 bg-amber-50/50 dark:bg-slate-950 p-2 rounded-xl overflow-x-auto whitespace-pre">
-              {curlPostTest}
-            </pre>
-          </div>
 
-          <div className="bg-white/90 dark:bg-slate-900/90 border border-amber-200 dark:border-amber-900/80 rounded-2xl p-3 space-y-1.5 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase text-amber-800 dark:text-amber-400 font-mono">3. Simulate Restock PATCH</span>
-              <button
-                type="button"
-                onClick={() => copyToClipboard(curlPatchRestock, 'patch')}
-                className="text-[10px] font-bold text-slate-500 hover:text-amber-600 flex items-center gap-1 cursor-pointer"
-              >
-                {copiedKey === 'patch' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                <span>{copiedKey === 'patch' ? 'Copied' : 'Copy cURL'}</span>
-              </button>
+            <div className="bg-white/90 dark:bg-slate-900/90 border border-amber-200 dark:border-amber-900/80 rounded-2xl p-3 space-y-1.5 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase text-amber-800 dark:text-amber-400 font-mono">3. Simulate Restock PATCH</span>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(curlPatchRestock, 'patch')}
+                  className="text-[10px] font-bold text-slate-500 hover:text-amber-600 flex items-center gap-1 cursor-pointer"
+                >
+                  {copiedKey === 'patch' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedKey === 'patch' ? 'Copied' : 'Copy cURL'}</span>
+                </button>
+              </div>
+              <pre className="text-[9px] font-mono text-slate-700 dark:text-slate-300 bg-amber-50/50 dark:bg-slate-950 p-2 rounded-xl overflow-x-auto whitespace-pre">
+                {curlPatchRestock}
+              </pre>
             </div>
-            <pre className="text-[9px] font-mono text-slate-700 dark:text-slate-300 bg-amber-50/50 dark:bg-slate-950 p-2 rounded-xl overflow-x-auto whitespace-pre">
-              {curlPatchRestock}
-            </pre>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* 2. Sub-Tabs Bar */}
+      {/* 2. Standardized Sandbox Sub-Tabs Bar */}
       <div className="flex items-center gap-2 bg-slate-200/80 dark:bg-slate-800/80 p-1 rounded-2xl overflow-x-auto">
         <button
           type="button"
-          onClick={() => { setActiveSubTab('customer'); setCurrentPage(1); }}
+          onClick={() => setActiveSubTab('customer')}
           className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
             activeSubTab === 'customer'
               ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
           <FileText className="w-4 h-4 text-blue-600" />
-          <span>📥 Sandbox Customer RMAs ({sandboxCustomerReports.length})</span>
+          <span>📥 Sandbox Customer RMAs ({sandboxCustomerCount})</span>
         </button>
 
         <button
           type="button"
-          onClick={() => { setActiveSubTab('supplier'); setCurrentPage(1); }}
+          onClick={() => setActiveSubTab('supplier')}
           className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
             activeSubTab === 'supplier'
-              ? 'bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
-          <Building2 className="w-4 h-4 text-purple-600" />
-          <span>📤 Sandbox Supplier RTVs ({sandboxSupplierReports.length})</span>
+          <Building2 className="w-4 h-4 text-amber-600" />
+          <span>🚚 Sandbox Supplier RTVs ({sandboxSupplierCount})</span>
         </button>
 
         <button
           type="button"
-          onClick={() => { setActiveSubTab('memos'); setCurrentPage(1); }}
+          onClick={() => setActiveSubTab('memos')}
           className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
             activeSubTab === 'memos'
               ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
           <Receipt className="w-4 h-4 text-emerald-600" />
@@ -231,227 +285,77 @@ export default function TestModeSandboxTab({
         </button>
       </div>
 
-      {/* 3. Sandbox Data Table */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm">
-        {activeList.length === 0 ? (
-          <div className="py-12 text-center space-y-2">
-            <FlaskConical className="w-10 h-10 text-amber-500 mx-auto" />
-            <h4 className="text-sm font-bold text-slate-700 dark:text-slate-200">
-              No Sandbox {activeSubTab === 'customer' ? 'Customer Returns' : activeSubTab === 'supplier' ? 'Supplier Claims' : 'Credit Memos'} Found
-            </h4>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              Enable Test Mode in the top header or call the REST API with <code className="font-mono">?test_mode=true</code> to generate test tickets here.
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-[10px] font-black uppercase text-slate-500 tracking-wider">
-                  <th className="py-3 px-3.5 text-center">SN</th>
-                  <th className="py-3 px-3.5">RMA Identifier</th>
-                  <th className="py-3 px-3.5">Store / Supplier</th>
-                  <th className="py-3 px-3.5">Product & SKU</th>
-                  <th className="py-3 px-3.5 text-right">Qty</th>
-                  <th className="py-3 px-3.5">Lifecycle Stage</th>
-                  <th className="py-3 px-3.5">Location</th>
-                  <th className="py-3 px-3.5 text-center">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {paginatedList.map((item, idx) => {
-                  const stageInfo = formatLifecycleStage(item.status, item);
-                  const loc = normalizeWarehouseLocation(item.warehouse_location, item);
-                  const isResolved = Boolean(item.ai_document_metadata?.workflow_resolution || item.status === 'resolved' || item.status === 'closed');
+      {/* 3. Full-Parity Standardized Sandbox Views */}
+      {activeSubTab === 'customer' && (
+        <CustomerHubTab
+          reportsList={testReportsList}
+          creditMemosList={testCreditMemosList}
+          savedProductsList={savedProductsList}
+          currentUser={currentUser}
+          coworkerQueueFilter={coworkerQueueFilter}
+          onClearCoworkerQueueFilter={onClearCoworkerQueueFilter}
+          updatingQueueId={updatingQueueId}
+          isTestMode={true}
+          onOpenReportsModal={() => onOpenReportsModal && onOpenReportsModal()}
+          onOpenMatrixExport={() => onOpenMatrixExport && onOpenMatrixExport('customer')}
+          onInspectTriage={onInspectTriage}
+          onViewQR={onViewQR}
+          onViewPhoto={onViewPhoto}
+          onViewExplanation={onViewExplanation}
+          onPrintLabel={onPrintLabel}
+          onEditProductFromReport={onEditProductFromReport}
+          onOpenCreditMemo={onOpenCreditMemoForReport}
+          onViewCreditMemoVoucher={onViewCreditMemoVoucher}
+          onConfirmCoworkerAction={onConfirmCoworkerAction}
+          onResetToPending={onResetToPending}
+          onArchiveReport={onArchiveReport}
+          onBulkArchiveReports={onBulkArchiveReports}
+          onRequestDeleteReport={onRequestDeleteReport}
+          onRequestBulkDeleteReports={onRequestBulkDeleteReports}
+        />
+      )}
 
-                  return (
-                    <tr key={item.id || item.rma_number} className="hover:bg-amber-50/20 dark:hover:bg-slate-800/40 transition-colors">
-                      <td className="py-3 px-3.5 text-center font-mono font-bold text-slate-400">
-                        #{(currentPage - 1) * pageSize + idx + 1}
-                      </td>
+      {activeSubTab === 'supplier' && (
+        <SupplierClaimsTab
+          reportsList={testReportsList}
+          currentUser={currentUser}
+          onRefresh={onRefresh}
+          onViewPhoto={onViewPhoto}
+          onRequestDeleteReport={onRequestDeleteReport}
+          onRequestBulkDeleteReports={onRequestBulkDeleteReports}
+          onRequestArchiveReport={onArchiveReport}
+          onRequestBulkArchiveReports={onBulkArchiveReports}
+          onArchiveReport={onArchiveReport}
+          onBulkArchiveReports={onBulkArchiveReports}
+          onAssignSku={onAssignSku}
+          onEditProductFromReport={onEditProductFromReport}
+          onOpenQuickAction={onOpenQuickAction}
+          onPrintLabel={onPrintLabel}
+          onViewQR={onViewQR}
+          onViewExplanation={onViewExplanation}
+          onOpenSimpleWizard={onOpenSimpleWizard}
+          onOpenPickupForm={onOpenPickupForm}
+          onOpenMatrixExport={() => onOpenMatrixExport && onOpenMatrixExport('supplier')}
+          savedProductsList={savedProductsList}
+          coworkerQueueFilter={coworkerQueueFilter}
+          isTestMode={true}
+        />
+      )}
 
-                      <td className="py-3 px-3.5 font-mono">
-                        <div className="font-bold text-amber-700 dark:text-amber-400">
-                          {item.rma_number || item.credit_memo_number}
-                        </div>
-                        <div className="text-[10px] text-slate-400">
-                          {new Date(item.created_at).toLocaleDateString()}
-                        </div>
-                        {item.ai_document_metadata?.delivery_handover && (
-                          <div className="mt-0.5">
-                            <span className="px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[9px] font-bold inline-flex items-center gap-0.5">
-                              🚚 Delivered ({item.ai_document_metadata.delivery_handover.driver_name || 'Driver'})
-                            </span>
-                          </div>
-                        )}
-                        {(item.si_number || item.dr_number || item.po_number || item.invoice_dr_number) && (
-                          <div className="flex items-center gap-1 flex-wrap mt-1 text-[9px] font-mono leading-tight">
-                            {item.si_number && (
-                              <span className="px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold">
-                                SI: {item.si_number}
-                              </span>
-                            )}
-                            {item.dr_number && (
-                              <span className="px-1.5 py-0.2 rounded bg-violet-50 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 font-bold">
-                                DR: {item.dr_number}
-                              </span>
-                            )}
-                            {item.po_number && (
-                              <span className="px-1.5 py-0.2 rounded bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold">
-                                PO: {item.po_number}
-                              </span>
-                            )}
-                            {!item.si_number && !item.dr_number && !item.po_number && item.invoice_dr_number && (
-                              <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-bold">
-                                Doc: {item.invoice_dr_number}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="py-3 px-3.5 font-semibold text-slate-800 dark:text-slate-200">
-                        {item.store_branch || item.supplier_name || 'N/A'}
-                      </td>
-
-                      <td className="py-3 px-3.5">
-                        <div className="font-bold text-slate-900 dark:text-white truncate max-w-xs" title={item.name || item.product_name}>
-                          {item.name || item.product_name}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                          BC: {item.barcode} {item.code || item.sku ? `• SKU: ${item.code || item.sku}` : ''}
-                        </div>
-                      </td>
-
-                      <td className="py-3 px-3.5 text-right font-mono font-bold text-slate-900 dark:text-white">
-                        {formatQuantityWithPackSize(item.quantity, item.unit_name, item.pieces_per_case)}
-                      </td>
-
-                      <td className="py-3 px-3.5">
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border inline-flex items-center gap-1 shadow-2xs ${stageInfo.color}`}>
-                          {stageInfo.label}
-                        </span>
-                      </td>
-
-                      <td className="py-3 px-3.5 font-mono text-[11px] text-slate-600 dark:text-slate-300">
-                        {loc}
-                      </td>
-
-                      <td className="py-3 px-3.5 text-center">
-                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                          {/* 1. Inspect / Triage */}
-                          {(onOpenQuickAction || onInspectTriage) && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (onOpenQuickAction) onOpenQuickAction(item.rma_number);
-                                else if (onInspectTriage) onInspectTriage(item);
-                              }}
-                              className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs whitespace-nowrap"
-                              title="Triage condition and operational disposition"
-                            >
-                              <ClipboardCheck className="w-3 h-3 text-amber-600" />
-                              <span>Triage</span>
-                            </button>
-                          )}
-
-                          {/* 2. Assign SKU */}
-                          {onAssignSku && !savedProductsList?.some(p => p.barcode && String(p.barcode) === String(item.barcode)) && (
-                            <button
-                              type="button"
-                              onClick={() => onAssignSku(item)}
-                              className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs whitespace-nowrap"
-                              title="Assign SKU & Save to Catalog"
-                            >
-                              <Package className="w-3 h-3 text-blue-600" />
-                              <span>Assign SKU</span>
-                            </button>
-                          )}
-
-                          {/* 3. Print 4x6 Label */}
-                          {onPrintLabel && (
-                            <button
-                              type="button"
-                              onClick={() => onPrintLabel(item)}
-                              className="p-1 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
-                              title="Print 4x6 Box Label"
-                            >
-                              <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
-                            </button>
-                          )}
-
-                          {/* 4. Reset to Pending */}
-                          {isResolved && (
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                if (onResetToPending) {
-                                  onResetToPending(item);
-                                } else {
-                                  try {
-                                    await catalogService.resetReportToPending(item.id, item.rma_number, currentUser?.name || 'Staff');
-                                    if (onRefresh) onRefresh();
-                                  } catch (e) {
-                                    console.error(e);
-                                  }
-                                }
-                              }}
-                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs whitespace-nowrap"
-                              title="Reset to pending to allow re-testing coworker queues"
-                            >
-                              <RotateCcw className="w-3 h-3 text-slate-500" />
-                              <span>↩️ Reset</span>
-                            </button>
-                          )}
-
-                          {/* 5. Archive to Vault */}
-                          {onArchiveReport && (
-                            <button
-                              type="button"
-                              onClick={() => onArchiveReport(item.id, item.rma_number, item)}
-                              className="p-1 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
-                              title="Archive to Vault"
-                            >
-                              <Archive className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
-                            </button>
-                          )}
-
-                          {/* 6. Move to Trash */}
-                          {onRequestDeleteReport && (
-                            <button
-                              type="button"
-                              onClick={() => onRequestDeleteReport(item.id, item.rma_number, item)}
-                              className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg cursor-pointer transition-colors"
-                              title="Move to 30-Day Trash Bin"
-                            >
-                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {activeList.length > 0 && (
-          <div className="p-3 border-t border-slate-100 dark:border-slate-800">
-            <TablePagination
-              currentPage={currentPage}
-              totalItems={activeList.length}
-              pageSize={pageSize}
-              onPageChange={setCurrentPage}
-              onPageSizeChange={setPageSize}
-              pageSizeOptions={[5, 10, 20]}
-              itemLabel="test records"
-            />
-          </div>
-        )}
-      </div>
+      {activeSubTab === 'memos' && (
+        <CreditMemosTab
+          creditMemosList={testCreditMemosList}
+          recentReportsList={testReportsList}
+          currentUser={currentUser}
+          onOpenCreateModal={onOpenCreateCreditMemo}
+          onEditCreditMemo={onEditCreditMemo}
+          onViewVoucher={onViewCreditMemoVoucher}
+          onPrintBulk={onViewCreditMemoVoucher}
+          onRequestDeleteCreditMemo={onRequestDeleteCreditMemo}
+          onRequestBulkDeleteCreditMemo={onRequestBulkDeleteCreditMemos}
+          isTestMode={true}
+        />
+      )}
     </div>
   );
 }
-

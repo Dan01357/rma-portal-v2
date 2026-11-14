@@ -1,0 +1,11 @@
+- generic [ref=e5]:
+  - generic [ref=e6]:
+    - heading "Company Staff Verification" [level=2] [ref=e11]
+    - paragraph [ref=e12]: One-Time Password (OTP) security gate for RMA admin access.
+  - generic [ref=e13]:
+    - generic [ref=e14]:
+      - generic [ref=e15]: Official Company Email Address
+      - textbox [active] [ref=e20]
+      - generic [ref=e21]: Must be an active employee in company directory. Personal emails (@gmail) are not accepted.
+    - button "Send OTP Verification Code" [disabled] [ref=e22]
+    - button "Cancel & Return to Public Portal" [ref=e27] [cursor=pointer]

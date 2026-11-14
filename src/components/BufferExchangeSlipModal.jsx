@@ -11,6 +11,15 @@ export default function BufferExchangeSlipModal({
   onDispatched,
   hasCreditMemo = false
 }) {
+  // Driver, vehicle, and dispatch state (declared unconditionally before any early returns)
+  const [driverName, setDriverName] = useState(report?.ai_document_metadata?.buffer_driver || '');
+  const [plateNumber, setPlateNumber] = useState(report?.ai_document_metadata?.buffer_plate || '');
+  const [dispatcherName, setDispatcherName] = useState('Logistics Lead');
+  const [sourceBin, setSourceBin] = useState(report?.warehouse_location || 'BUFFER-STOCK-RACK-01');
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchSuccess, setDispatchSuccess] = useState(false);
+  const [autoPrintOnDispatch, setAutoPrintOnDispatch] = useState(true);
+
   if (!isOpen) return null;
 
   // Resolve target reports array
@@ -19,15 +28,6 @@ export default function BufferExchangeSlipModal({
     : (report ? [report] : []);
 
   if (reportsToRender.length === 0) return null;
-
-  // Driver, vehicle, and dispatch state
-  const [driverName, setDriverName] = useState(report?.ai_document_metadata?.buffer_driver || '');
-  const [plateNumber, setPlateNumber] = useState(report?.ai_document_metadata?.buffer_plate || '');
-  const [dispatcherName, setDispatcherName] = useState('Logistics Lead');
-  const [sourceBin, setSourceBin] = useState(report?.warehouse_location || 'BUFFER-STOCK-RACK-01');
-  const [isDispatching, setIsDispatching] = useState(false);
-  const [dispatchSuccess, setDispatchSuccess] = useState(false);
-  const [autoPrintOnDispatch, setAutoPrintOnDispatch] = useState(true);
 
   const isAlreadyDispatched = reportsToRender.some(
     r => r.status === 'buffer_replacement_dispatched' || (r.disposition && r.disposition.includes('Buffer'))

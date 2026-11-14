@@ -15,7 +15,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import { supabase } from '../supabaseClient';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
-import { formatQuantityWithPackSize, formatManifestBreakdown, normalizeWarehouseLocation } from '../utils/rmaHelpers';
+import { formatQuantityWithPackSize, formatManifestBreakdown, normalizeWarehouseLocation, buildPortalQrPayload, isTestRecord } from '../utils/rmaHelpers';
 
 /**
  * Generates pseudo-Code128 SVG Barcode pattern based on string input
@@ -299,9 +299,16 @@ export default function ThermalBoxLabelModal({
               <Printer className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                Thermal 4x6" RMA Box Label
-              </h3>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                  Thermal 4x6" RMA Box Label
+                </h3>
+                {isTestRecord(report) && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                    🧪 Sandbox Test Label
+                  </span>
+                )}
+              </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 Optimized for Zebra / Dymo / Thermal sticker roll printers
               </p>
@@ -464,12 +471,13 @@ export default function ThermalBoxLabelModal({
                 </div>
               </div>
 
-              {/* 2D QR Code: Scannable by delivery drivers to immediately log delivery handover proof */}
+              {/* 2D QR Code: Private portal-only QR payload (blocked from external camera / Google Lens) */}
               <div className="p-0.5 border border-black bg-white shrink-0">
                 <QRCodeSVG
-                  value={typeof window !== 'undefined'
-                    ? `${window.location.origin}/?rma=${encodeURIComponent(rmaNumber)}&action=delivery`
-                    : rmaNumber}
+                  value={buildPortalQrPayload(
+                    rmaNumber,
+                    isTestRecord(report)
+                  )}
                   size={54}
                   level="M"
                 />

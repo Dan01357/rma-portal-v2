@@ -14,6 +14,7 @@
  */
 import { supabase } from '../supabaseClient';
 import { authService } from './authService';
+import { isTestRecord } from '../utils/rmaHelpers';
 
 const DEFAULT_RECIPIENTS = {
   toEmail: 'azgodev@gmail.com',
@@ -300,11 +301,24 @@ export const notificationService = {
 
     const currentUser = typeof window !== 'undefined' ? authService.getCurrentUser() : null;
     const isSuperAdmin = currentUser?.role === 'super_admin';
+    let hasActiveTestInvite = false;
+    try {
+      const rawGate = typeof window !== 'undefined' ? localStorage.getItem('rma_portal_gate_session') : null;
+      if (rawGate) {
+        const parsedGate = JSON.parse(rawGate);
+        if (parsedGate?.is_test === true && (!parsedGate.expires_at || new Date(parsedGate.expires_at) > new Date())) {
+          hasActiveTestInvite = true;
+        }
+      }
+    } catch {}
+
     const testActive = Boolean(
-      isSuperAdmin && (
-        isTestMode || 
+      isTestRecord(report) ||
+      hasActiveTestInvite ||
+      (isSuperAdmin && (
+        isTestMode ||
         (typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true')
-      )
+      ))
     );
 
     try {
@@ -484,11 +498,24 @@ export const notificationService = {
 
     const currentUser = typeof window !== 'undefined' ? authService.getCurrentUser() : null;
     const isSuperAdmin = currentUser?.role === 'super_admin';
+    let hasActiveTestInvite = false;
+    try {
+      const rawGate = typeof window !== 'undefined' ? localStorage.getItem('rma_portal_gate_session') : null;
+      if (rawGate) {
+        const parsedGate = JSON.parse(rawGate);
+        if (parsedGate?.is_test === true && (!parsedGate.expires_at || new Date(parsedGate.expires_at) > new Date())) {
+          hasActiveTestInvite = true;
+        }
+      }
+    } catch {}
+
     const testActive = Boolean(
-      isSuperAdmin && (
-        isTestMode || 
+      isTestRecord(report) ||
+      hasActiveTestInvite ||
+      (isSuperAdmin && (
+        isTestMode ||
         (typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true')
-      )
+      ))
     );
 
     try {

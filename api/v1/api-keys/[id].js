@@ -64,25 +64,9 @@ export default async function handler(req, res) {
   // PATCH: Rotate / Renew API Key (Revokes current, generates new replacement key)
   if (req.method === 'PATCH') {
     try {
-      // 1. Fetch current key
-      const { data: existing, error: fetchErr } = await supabase
-        .from('api_keys')
-        .select('*')
-        .eq('id', id)
-        .maybeSingle();
-
-      if (fetchErr || !existing) {
-        return sendJson(res, 404, {
-          success: false,
-          error: 'NOT_FOUND',
-          message: `API Key with ID ${id} was not found.`
-        });
-      }
-
-      // 2. Generate new key pair
+      // 1. Generate new key pair and rotate in a single round-trip
       const { rawKey, keyHash, maskedKey } = generateApiKeyPair();
 
-      // 3. Update record with new hash and mask
       const { data: updated, error: updateErr } = await supabase
         .from('api_keys')
         .update({
@@ -93,7 +77,7 @@ export default async function handler(req, res) {
         })
         .eq('id', id)
         .select('id, name, masked_key, is_active, rate_limit, updated_at')
-        .single();
+        .maybeSingle();
 
       if (updateErr) {
         console.error('[API Key ROTATE] Update error:', updateErr);
@@ -101,6 +85,14 @@ export default async function handler(req, res) {
           success: false,
           error: 'UPDATE_ERROR',
           message: updateErr.message
+        });
+      }
+
+      if (!updated) {
+        return sendJson(res, 404, {
+          success: false,
+          error: 'NOT_FOUND',
+          message: `API Key with ID ${id} was not found.`
         });
       }
 

@@ -55,8 +55,10 @@ import {
   getWarehouseLocations,
   normalizeWarehouseLocation,
   getRealPhotos,
-  isUnlabeledBarcode
+  isUnlabeledBarcode,
+  isTestRecord
 } from '../utils/rmaHelpers';
+import { copyTextSafe } from '../utils/clipboard';
 import ThermalBoxLabelModal from './ThermalBoxLabelModal';
 import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -161,7 +163,11 @@ export default function QuickRMAActionModal({
   onViewReportQR,
   onOpenLightbox,
   onOpenDriverHandover,
-  onRefresh
+  onReportUpdated,
+  onRefresh,
+  gateSession = null,
+  onOpenSimpleSupplierWizard,
+  onOpenSupplierPickupForm
 }) {
   const [report, setReport] = useState(null);
   const [isLoadingReport, setIsLoadingReport] = useState(false);
@@ -326,12 +332,6 @@ export default function QuickRMAActionModal({
     setIsUpdatingType(true);
     setTypeFeedback(null);
     try {
-      const currentDisp = String(report.disposition || '').trim();
-      const isPendingTriage = !currentDisp || 
-        currentDisp.toLowerCase().includes('pending triage') ||
-        currentDisp === '1- Pending Triage' ||
-        currentDisp === '1 - Pending Triage';
-
       // Automatically update disposition and status when switching streams
       let targetDisposition;
       let targetStatus;
@@ -343,7 +343,7 @@ export default function QuickRMAActionModal({
         targetStatus = 'vendor_claimed';
       }
 
-      // Optimistic update
+      // Optimistic update — applied BEFORE the network call so UI is immediately correct
       const updatedReport = { 
         ...report, 
         rma_type: newType,
@@ -354,6 +354,12 @@ export default function QuickRMAActionModal({
       setDisposition(targetDisposition);
       setRmaStatus(targetStatus);
 
+      // Push the optimistic state into recentReportsList immediately (in-memory only) so that
+      // sub-modal restoration picks up the correct stream without launching a premature network sync.
+      if (onReportUpdated) {
+        onReportUpdated(updatedReport);
+      }
+
       const cleanId = report.id || report.rma_number;
       const savedData = await catalogService.updateRMAType(cleanId, newType, targetDisposition, targetStatus);
       const finalReport = { ...updatedReport, ...(savedData || {}) };
@@ -362,6 +368,7 @@ export default function QuickRMAActionModal({
       setTypeFeedback(newType === 'customer_inbound' ? 'Moved to Customer RMA Hub (Inbound)' : 'Moved to Supplier RMA Hub (Outbound / RTV)');
       setTimeout(() => setTypeFeedback(null), 3000);
       
+      // Push confirmed state into recentReportsList and sync
       if (onRefresh) {
         onRefresh(finalReport);
       }
@@ -372,8 +379,12 @@ export default function QuickRMAActionModal({
       } catch {}
     } catch (err) {
       console.error('Failed to update RMA type:', err);
-      // Revert optimistic update
-      setReport(prev => ({ ...prev, rma_type: currentType }));
+      // Revert optimistic update in local state and in recentReportsList
+      const revertedReport = { ...report, rma_type: currentType };
+      setReport(revertedReport);
+      if (onReportUpdated) {
+        onReportUpdated(revertedReport);
+      }
       alert(`Could not switch return type: ${err.message}`);
     } finally {
       setIsUpdatingType(false);
@@ -1056,13 +1067,36 @@ export default function QuickRMAActionModal({
     };
   }, []);
 
-  // Check if current logged-in user is already admin or super admin
+  // Check if current logged-in user is already admin/super admin OR has an active verified Supplier RTV / portal session
   useEffect(() => {
     if (!isOpen) return;
 
     if (currentUser && (currentUser.role === 'super_admin' || currentUser.role === 'admin')) {
       setVerifiedAdmin(currentUser);
       return;
+    }
+
+    let resolvedGate = gateSession;
+    if (!resolvedGate) {
+      try {
+        const raw = localStorage.getItem('rma_portal_gate_session');
+        if (raw) resolvedGate = JSON.parse(raw);
+      } catch {}
+    }
+
+    if (resolvedGate && (resolvedGate.authorized_email || resolvedGate.stream_type === 'supplier_outbound')) {
+      const notExpired = !resolvedGate.expires_at || new Date(resolvedGate.expires_at) > new Date();
+      if (notExpired) {
+        setVerifiedAdmin({
+          name: resolvedGate.user_name || resolvedGate.profileName || resolvedGate.authorized_email || 'Authorized Staff',
+          email: resolvedGate.user_email || resolvedGate.authorized_email || '',
+          role: 'staff',
+          isGateAuthorized: true,
+          stream_type: resolvedGate.stream_type,
+          is_test: Boolean(resolvedGate.is_test)
+        });
+        return;
+      }
     }
 
     // Check session storage cache for verified admin in THIS tab only (never localStorage)
@@ -1102,6 +1136,16 @@ export default function QuickRMAActionModal({
 
     let isMounted = true;
     const cleanRma = String(rmaNumber).trim();
+
+    // If report is already loaded in memory and matches this RMA number or ID, don't re-trigger loading!
+    if (report && (
+      String(report.rma_number || '').toUpperCase() === cleanRma.toUpperCase() ||
+      String(report.id) === cleanRma
+    )) {
+      setIsLoadingReport(false);
+      setReportError(null);
+      return;
+    }
 
     const findInReports = (list) => {
       if (!Array.isArray(list) || !cleanRma) return null;
@@ -1195,6 +1239,8 @@ export default function QuickRMAActionModal({
         if (!prev) return match;
         // Do not downgrade an existing parent record to a child record
         if (!prev.parent_rma_id && match.parent_rma_id) return prev;
+        // Do not overwrite an optimistic rma_type change with a stale list entry
+        if (prev.rma_type && match.rma_type && prev.rma_type !== match.rma_type) return prev;
         if (
           prev.status !== match.status ||
           prev.disposition !== match.disposition ||
@@ -1417,7 +1463,6 @@ export default function QuickRMAActionModal({
         if (adminBarcode.trim()) updates.barcode = adminBarcode.trim();
         if (adminSku.trim()) {
           updates.code = adminSku.trim();
-          updates.sku = adminSku.trim();
         }
         if (adminQuantity) updates.quantity = Number(adminQuantity) || 1;
         if (adminUnitName.trim()) updates.unit_name = adminUnitName.trim();
@@ -1454,10 +1499,15 @@ export default function QuickRMAActionModal({
         updates.items = updatedItems;
       }
 
-      const { error } = await supabase
+      const updatePromise = supabase
         .from('rma_reports')
         .update(updates)
         .eq('id', report.id);
+
+      const { error } = await Promise.race([
+        updatePromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Supabase update timeout')), 8000))
+      ]);
 
       if (error) {
         console.warn('Initial update failed, falling back to core columns:', error.message);
@@ -1474,19 +1524,27 @@ export default function QuickRMAActionModal({
         if (error.message.includes('invoice_dr_number')) delete fallback.invoice_dr_number;
         if (error.message.includes('store_branch')) delete fallback.store_branch;
         if (error.message.includes('batch_lot_number')) delete fallback.batch_lot_number;
-        const { error: fbErr } = await supabase.from('rma_reports').update(fallback).eq('id', report.id);
+        const { error: fbErr } = await Promise.race([
+          supabase.from('rma_reports').update(fallback).eq('id', report.id),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Supabase fallback timeout')), 8000))
+        ]);
         if (fbErr) throw fbErr;
       }
 
-      // 2. Also update child records in rma_reports table for this parent
-      if (report.id) {
+      // 2. Also update child records in rma_reports table for this parent (batch manifest only)
+      if (report.id && (report.is_parent || isMultiItemManifest)) {
         const childCascade = {};
         if (cleanRmaNum && cleanRmaNum !== report.rma_number) childCascade.rma_number = cleanRmaNum;
         if (cleanSupplier) childCascade.supplier_name = cleanSupplier;
         if (Object.keys(childCascade).length > 0) {
           try {
-            await supabase.from('rma_reports').update(childCascade).eq('parent_rma_id', report.id);
-          } catch {}
+            await Promise.race([
+              supabase.from('rma_reports').update(childCascade).eq('parent_rma_id', report.id),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Child cascade timeout')), 3000))
+            ]);
+          } catch (cascadeErr) {
+            console.warn('Child cascade update notice:', cascadeErr?.message);
+          }
         }
       }
 
@@ -2152,7 +2210,7 @@ export default function QuickRMAActionModal({
                             type="button"
                             onClick={() => {
                               const docNum = adminDrNumber || report.dr_number || adminSiNumber || report.si_number || adminPoNumber || report.po_number;
-                              navigator.clipboard.writeText(docNum);
+                              copyTextSafe(docNum);
                               setCopyDrSuccess(true);
                               setTimeout(() => setCopyDrSuccess(false), 2000);
                             }}
@@ -2637,17 +2695,57 @@ export default function QuickRMAActionModal({
                 <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span className="font-bold">
-                    Authenticated: {verifiedAdmin.name} ({verifiedAdmin.role === 'super_admin' ? '👑 Super Admin' : '🛡️ Admin'})
+                    Authenticated: {verifiedAdmin.name} ({verifiedAdmin.role === 'super_admin' ? '👑 Super Admin' : verifiedAdmin.isGateAuthorized ? '📦 Authorized Staff' : '🛡️ Admin'})
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleSwitchAccount}
-                  className="text-[10px] text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 underline font-medium cursor-pointer"
-                >
-                  Switch
-                </button>
+                {!verifiedAdmin.isGateAuthorized && (
+                  <button
+                    type="button"
+                    onClick={handleSwitchAccount}
+                    className="text-[10px] text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 underline font-medium cursor-pointer"
+                  >
+                    Switch
+                  </button>
+                )}
               </div>
+
+              {isSupplierStream && (
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 rounded-2xl flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div>
+                    <div className="font-black text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                      <span>⚡ Simple Supplier RTV &amp; Driver Pickup Mode</span>
+                      {report?.status === 'picked_up' && (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-black uppercase">
+                          🚚 Picked Up
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80">
+                      Use the guided 4-choice menu or upload 5 driver pickup photos &amp; print the A4 2-copy form.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {report?.status === 'picked_up' && onOpenSupplierPickupForm && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenSupplierPickupForm(report)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-xs"
+                      >
+                        Print A4 Form
+                      </button>
+                    )}
+                    {onOpenSimpleSupplierWizard && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenSimpleSupplierWizard(report)}
+                        className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black shadow-xs"
+                      >
+                        Open 4-Choice Wizard →
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* ENTERPRISE ACTION 1: PHYSICAL DISPOSITION & WAREHOUSE TRIAGE MODULE */}
               <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-3">
@@ -4099,7 +4197,8 @@ export default function QuickRMAActionModal({
                       onClick={async () => {
                         try {
                           const claims = await supplierClaimService.getClaims();
-                          const claimNumber = supplierClaimService.generateRtvId(claims || []);
+                          const reportIsTest = isTestRecord(report);
+                          const claimNumber = supplierClaimService.generateRtvId(claims || [], reportIsTest);
                           const supplierName = (adminSupplierName || report?.supplier_name || report?.supplier || 'Master Supplier').trim();
                           const generatedBy = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
                           const newClaim = {
@@ -4113,7 +4212,9 @@ export default function QuickRMAActionModal({
                             generated_by: generatedBy,
                             items: [{ ...report, supplier_name: supplierName, quantity: itemQty, price: Number(report?.price_with_vat || report?.price || 0) }],
                             totalQuantity: itemQty,
-                            totalClaimAmount: totalClaimValue
+                            totalClaimAmount: totalClaimValue,
+                            notes: reportIsTest ? '[TEST_MODE] Sandbox RTV Claim' : '',
+                            isTest: reportIsTest
                           };
                           await supplierClaimService.saveClaim(newClaim);
                           if (onRefresh) onRefresh(report);

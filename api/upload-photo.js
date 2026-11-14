@@ -671,8 +671,8 @@ export default async function handler(req, res) {
     }
   }
 
-  // 1b. Handle Gemini Flash Driver License OCR
-  if (req.query?.action === 'inspect-license' || parsedBody?.action === 'inspect-license') {
+  // 1B. Handle Gemini Flash Driver License / ID OCR Inspection
+  if (req.query?.action === 'inspect-license' || parsedBody?.action === 'inspect-license' || req.url?.includes('inspect-license')) {
     try {
       const { fileData, imageUrl, mimeType } = parsedBody || {};
       const result = await inspectDriverLicenseWithGemini({
@@ -682,11 +682,12 @@ export default async function handler(req, res) {
       });
       return res.status(200).json(result);
     } catch (err) {
-      return res.status(200).json({
-        is_valid_license: false,
-        driver_name: null,
-        license_number: null,
-        rejection_reason: `License OCR notice: ${err.message}`
+      console.error('[Gemini Driver License OCR Error]:', err);
+      return res.status(500).json({
+        is_valid_id: false,
+        confidence: 0,
+        error: err.message,
+        rejection_reason: `AI ID reader error: ${err.message}`
       });
     }
   }

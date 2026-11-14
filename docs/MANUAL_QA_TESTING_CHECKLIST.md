@@ -1738,6 +1738,40 @@ Each test scenario defines:
 
 ---
 
+## Phase 22: Stream-Scoped Expiry Validation, QR Print Hook Safety, Full Test Mode Parity & Standardized Tables
+
+- [ ] **TC-P22-01 (Stream-Scoped Expiration Date Validation — Customer Optional vs Supplier RTV Mandatory)**
+  * **Action**:
+    1. Log in as Super Admin and switch to the Public Intake Portal (`/`).
+    2. Set Stream to **Inbound Customer RMA** (test in both **Live Mode** and **Test Mode**) -> confirm the Expiration Date badge displays **`Optional`**, and submitting a single item or adding items to a manifest without selecting an expiration date succeeds cleanly without blocking.
+    3. Switch Stream to **Outbound Supplier RTV** (test in both **Live Mode** and **Test Mode**) -> confirm the Expiration Date badge switches to **`Required *`** (`required={true}`), and clicking **Submit** or **Add to Manifest** without an expiration date displays a validation warning and blocks submission until a date is chosen.
+    4. Repeat via an invited External Customer Link vs an Outbound Supplier RTV Invite Link / Internal Warehouse Station.
+  * **Expected Behavior**: Expiration Date is strictly optional on inbound customer submissions (`customer_inbound`) and strictly mandatory across both single-item and multi-item manifest submissions for outbound supplier RTVs (`supplier_outbound` / `internal_warehouse`).
+
+- [ ] **TC-P22-02 (QR Sticker & Print Modals — Zero React Hook / Print Crashes)**
+  * **Action**:
+    1. Open any Customer RMA or Supplier RTV row's **Quick-View Box QR Sticker** (`ReturnQRModal`), click **Print Sticker** (`#rma-qr-box-sticker`), and confirm `printIsolatedElement` renders the clean print iframe without throwing `Minified React error #310` or console errors.
+    2. Open **Thermal Box Label** (`ThermalBoxLabelModal`) and **Buffer Exchange Slip** (`BufferExchangeSlipModal`) across closed -> opened -> closed transitions and trigger print preview.
+  * **Expected Behavior**: All hooks (`useState`, `useEffect`, `useRef`) execute unconditionally before any early returns across every printable modal, and clicking Print works seamlessly on both Live (`RMA-`) and Sandbox (`RMA-TEST-`) tickets.
+
+- [ ] **TC-P22-03 (Full Super Admin Test Mode Parity Across Customer RMAs, Supplier RTVs & Credit Memos)**
+  * **Action**:
+    1. Navigate to `/admin` -> **🧪 Test Mode Sandbox** and test each sub-tab:
+       - **📥 Sandbox Customer RMAs**: Verify **WMS / ERP Coworker Queues** bar updates counts dynamically, **Full Audit Log** shows Test-only records with Sandbox badge, **Sandbox Customer Matrix (.xlsx)** downloads test-only data, and row actions (QR Sticker, Thermal Print, Triage Quick Action, Assign SKU, Issue/View Credit Memo, Restocked/PO Placed, Reset to Pending, Archive, Trash) operate identically to Live Customer Hub.
+       - **🚚 Sandbox Supplier RTVs**: Verify **1-Click Simple RTV Wizard**, **Dual-Copy A4 Pickup Form**, **Generate Debit Claim (`RTV-TEST-` isolated ID)**, **Sandbox Supplier RTV Matrix (.xlsx)**, **Print Selected**, **Archive**, and **Delete** operate identically to Live Supplier RTV without creating Live `RTV-` claims.
+       - **💳 Sandbox Credit Memos**: Click **+ Issue Credit Memo** inside Sandbox (`CM-TEST-` auto-generated, Ticket Picker scoped strictly to Sandbox Customer RMAs, `[TEST_MODE]` preserved in `notes` on create/edit), print voucher, and confirm the Live top KPI card and Live `Credit Memos` tab badge counts remain strictly unaffected by test memos.
+    2. Click **Clear Sandbox** and confirm all Sandbox RMAs, `CM-TEST-` Credit Memos, and `RTV-TEST-` claims are purged while Live production data remains untouched.
+  * **Expected Behavior**: Super Admin Test Mode achieves 100% feature parity with Live Mode while maintaining strict financial/database isolation via `RMA-TEST-`, `CM-TEST-`, `RTV-TEST-`, and `[TEST_MODE]` notes.
+
+- [ ] **TC-P22-04 (Standardized Customer Hub & Supplier RTV Tables + Quick-View QR Column)**
+  * **Action**:
+    1. Compare **Customer RMA Hub** (Live) column headers, row/card layouts, filter controls, and action toolbars against **🧪 Test Mode Sandbox -> 📥 Sandbox Customer RMAs**.
+    2. Compare **Supplier RTV** (Live) column headers, row layouts, manifest drawer (`colSpan=12`), and action toolbars against **🧪 Test Mode Sandbox -> 🚚 Sandbox Supplier RTVs**, specifically verifying the new dedicated **QR** column header and clickable `<QrCode />` button in every row.
+    3. Click the `<QrCode />` button in both Live Supplier RTV and Sandbox Supplier RTV rows to verify `ReturnQRModal` opens immediately with the matching QR sticker and Print button.
+  * **Expected Behavior**: Both Customer Hubs render via shared `CustomerHubTab`, both Supplier RTV views render via shared `SupplierClaimsTab`, and both Live & Test Supplier RTV tables include a functional **QR** column/button.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -1763,4 +1797,5 @@ Each test scenario defines:
 | **Phase 19: Video QA Audit Resolution & Workflow Refinements** | Full Platform & REST API | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 20: Senior RMA Audit, SI/DR/PO Standardization & Silent Restitution** | Full Platform, REST API & Docs | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 21: Driver Delivery Handover, Test Sequence Isolation & Mandatory Expiration Date** | Full Platform, Mobile Driver Widget & REST API | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 22: Stream-Scoped Expiry Validation, QR Print Hook Safety, Full Test Mode Parity & Standardized Tables** | Customer Hub, Supplier RTV, Credit Memos & Test Sandbox | `READY FOR TESTING` | *Lead QA Director* |
 

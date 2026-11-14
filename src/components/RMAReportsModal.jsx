@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
-import { exportRMAReportsToCSV, exportRmaMatrixCsv } from '../utils/exportCsv';
+import { exportRMAReportsToCSV } from '../utils/exportCsv';
 import { formatLifecycleStage, getRealPhotos, normalizeWarehouseLocation } from '../utils/rmaHelpers';
 
 export default function RMAReportsModal({ 
@@ -42,7 +42,8 @@ export default function RMAReportsModal({
   onOpenCreditMemo,
   onViewCreditMemoVoucher,
   onEditProductFromReport,
-  onViewReportQR
+  onViewReportQR,
+  isTestMode = false
 }) {
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
   const [viewMode, setViewMode] = useState(() => {
@@ -286,13 +287,18 @@ export default function RMAReportsModal({
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
-                  Logged RMA Return Reports
+                  {isTestMode ? 'Logged Sandbox Test RMA Reports' : 'Logged RMA Return Reports'}
                 </h2>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300">
                   {processedReports.length} Reports
                 </span>
+                {isTestMode && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                    🧪 Test Mode Sandbox
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Incoming return reports with clickable proof photos, reporter contact info, and GPS coordinates.
@@ -352,49 +358,6 @@ export default function RMAReportsModal({
 
         {/* Filter & Sort Toolbar */}
         <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 space-y-2.5">
-          {/* Separated Matrix Report Export Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-700">
-            <div className="flex items-center gap-2 flex-wrap text-xs">
-              <span className="font-black text-slate-700 dark:text-slate-200">Matrix Report Range:</span>
-              <input
-                type="date"
-                id="matrix-start-date"
-                defaultValue={new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10)}
-                className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-bold"
-              />
-              <span className="text-slate-400">to</span>
-              <input
-                type="date"
-                id="matrix-end-date"
-                defaultValue={new Date().toISOString().slice(0, 10)}
-                className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-bold"
-              />
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => {
-                  const s = document.getElementById('matrix-start-date')?.value;
-                  const e = document.getElementById('matrix-end-date')?.value;
-                  exportRmaMatrixCsv({ reports, streamType: 'customer_inbound', startDate: s, endDate: e, isTestMode: false });
-                }}
-                className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[11px] font-extrabold flex items-center gap-1 cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" /> Customer Hub Matrix
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const s = document.getElementById('matrix-start-date')?.value;
-                  const e = document.getElementById('matrix-end-date')?.value;
-                  exportRmaMatrixCsv({ reports, streamType: 'supplier_outbound', startDate: s, endDate: e, isTestMode: false });
-                }}
-                className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[11px] font-extrabold flex items-center gap-1 cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" /> Supplier RTV Matrix
-              </button>
-            </div>
-          </div>
           <div className="flex flex-col md:flex-row md:items-center gap-2">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />

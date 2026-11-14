@@ -17,6 +17,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { downloadPortalPosterPng, downloadQrCodePng, printPortalPoster } from '../utils/qrDownload';
+import { copyTextSafe } from '../utils/clipboard';
 
 export default function PortalAccessQRModal({ isOpen, onClose }) {
   const [isCopied, setIsCopied] = useState(false);
@@ -31,13 +32,9 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
     : 'https://rma-portal-v2.vercel.app';
 
   const handleCopyLink = () => {
-    try {
-      navigator.clipboard.writeText(portalUrl);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2200);
-    } catch (e) {
-      console.warn('Clipboard write failed:', e);
-    }
+    copyTextSafe(portalUrl);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2200);
   };
 
   const handleDownloadPoster = async () => {

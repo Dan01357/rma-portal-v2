@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
+import { copyTextSafe } from '../utils/clipboard';
 
 export default function SavedProductsTab({ 
   products = [], 
@@ -70,7 +71,7 @@ export default function SavedProductsTab({
 
   const copyToClipboard = (barcode) => {
     if (!barcode) return;
-    navigator.clipboard.writeText(barcode);
+    copyTextSafe(barcode);
     setCopiedBarcode(barcode);
     setTimeout(() => setCopiedBarcode(null), 2000);
   };

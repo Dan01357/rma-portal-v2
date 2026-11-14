@@ -33,7 +33,8 @@ export default function CreditMemosTab({
   onRequestDeleteCreditMemo,
   onRequestBulkDeleteCreditMemo,
   recentReportsList = [],
-  currentUser
+  currentUser,
+  isTestMode = false
 }) {
   const canManageCreditMemos = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
   const [searchQuery, setSearchQuery] = useState('');
@@ -217,6 +218,15 @@ export default function CreditMemosTab({
     setSelectedMemoNumbers(new Set());
   };
 
+  const resetFilters = () => {
+    setSearchQuery('');
+    setSupplierFilter('All');
+    setDateFrom('');
+    setDateTo('');
+    setCurrentPage(1);
+    setSelectedMemoNumbers(new Set());
+  };
+
   const handleBulkPrint = () => {
     const selected = creditMemosList.filter(m => selectedMemoNumbers.has(m.credit_memo_number));
     if (selected.length === 0) return;
@@ -300,7 +310,7 @@ export default function CreditMemosTab({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `Finance_Credit_Memos ${formatFilenameDateTime()}.csv`);
+    link.setAttribute('download', `${isTestMode ? 'Sandbox_' : ''}Finance_Credit_Memos ${formatFilenameDateTime()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -382,6 +392,11 @@ export default function CreditMemosTab({
               <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-mono shrink-0">
                 {creditMemosList.length} Total
               </span>
+              {isTestMode && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500 text-slate-950 shrink-0">
+                  🧪 Sandbox Test Mode
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
               Manage approved customer deductions, pull-out receipts, credit amounts, and printable accounting vouchers.

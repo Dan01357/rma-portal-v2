@@ -3,6 +3,16 @@ import { supabase } from '../supabaseClient';
 const AUTH_STORAGE_KEY = 'rma_portal_admin_session';
 const HR_API_KEY_STORAGE = 'pingcon_hr_api_key';
 
+const EMPLOYEES_CACHE_TTL_MS = 60_000;
+let employeesCache = null;
+let employeesCacheAt = 0;
+let employeesInFlight = null;
+
+function invalidateEmployeesCache() {
+  employeesCache = null;
+  employeesCacheAt = 0;
+}
+
 // Default initial company employee directory (Strictly Company Emails)
 const DEFAULT_EMPLOYEES = [
   {
@@ -267,24 +277,42 @@ export const authService = {
   },
 
   /**
-   * Fetch employee directory from Supabase admin_users table
+   * Fetch employee directory from Supabase admin_users table (deduplicated with short TTL cache)
    */
-  async getEmployees() {
-    try {
-      const { data, error } = await supabase
-        .from('admin_users')
-        .select('*')
-        .order('role', { ascending: true })
-        .order('name', { ascending: true });
-
-      if (error || !data || data.length === 0) {
-        return DEFAULT_EMPLOYEES;
-      }
-      return data;
-    } catch (e) {
-      console.warn('Error fetching employees from Supabase:', e);
-      return DEFAULT_EMPLOYEES;
+  async getEmployees(forceRefresh = false) {
+    if (!forceRefresh && employeesCache && Date.now() - employeesCacheAt < EMPLOYEES_CACHE_TTL_MS) {
+      return employeesCache;
     }
+    if (!forceRefresh && employeesInFlight) {
+      return employeesInFlight;
+    }
+
+    const request = (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('admin_users')
+          .select('*')
+          .order('role', { ascending: true })
+          .order('name', { ascending: true });
+
+        if (error || !data || data.length === 0) {
+          return DEFAULT_EMPLOYEES;
+        }
+        employeesCache = data;
+        employeesCacheAt = Date.now();
+        return data;
+      } catch (e) {
+        console.warn('Error fetching employees from Supabase:', e);
+        return DEFAULT_EMPLOYEES;
+      } finally {
+        if (employeesInFlight === request) {
+          employeesInFlight = null;
+        }
+      }
+    })();
+
+    employeesInFlight = request;
+    return request;
   },
 
   /**
@@ -370,6 +398,7 @@ export const authService = {
       }
 
       this.setHrApiKey(key);
+      invalidateEmployeesCache();
       return { 
         count: rows.length, 
         message: `Successfully synchronized ${rows.length} company employee accounts with official company emails!` 
@@ -390,6 +419,7 @@ export const authService = {
         .eq('email', email);
 
       if (error) throw error;
+      invalidateEmployeesCache();
       return { success: true };
     } catch (e) {
       throw new Error(`Failed to update employee status: ${e.message}`);
@@ -407,6 +437,7 @@ export const authService = {
         .eq('email', email);
 
       if (error) throw error;
+      invalidateEmployeesCache();
       return { success: true };
     } catch (e) {
       throw new Error(`Failed to update employee role: ${e.message}`);
@@ -431,6 +462,7 @@ export const authService = {
       .upsert([row], { onConflict: 'email' });
 
     if (error) throw new Error(`Failed to add employee: ${error.message}`);
+    invalidateEmployeesCache();
     return { success: true };
   },
 

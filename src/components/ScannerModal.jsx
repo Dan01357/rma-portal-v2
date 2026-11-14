@@ -123,8 +123,8 @@ export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog =
               <Camera className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-slate-900 dark:text-white text-base">Camera Barcode Scanner</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Align retail box barcode or QR code</p>
+              <h3 className="font-bold text-slate-900 dark:text-white text-base">Product &amp; RMA QR Scanner</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Scan product barcode or internal Pingcon RMA sticker QR</p>
             </div>
           </div>
 

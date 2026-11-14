@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseClient';
 import { authService } from './authService';
+import { isTestRecord } from '../utils/rmaHelpers';
 
 const CREDIT_MEMOS_STORAGE_KEY = 'rma_portal_credit_memos_v2';
 
@@ -13,7 +14,7 @@ export const creditMemoService = {
    * Generate sequential Credit Memo Number
    * Format: CM-YYYY-XXXX-RAND (e.g. CM-2026-0001-H7D2)
    */
-  generateCreditMemoNumber(existingCount = 0) {
+  generateCreditMemoNumber(existingCount = 0, isTestMode = false) {
     const currentYear = new Date().getFullYear();
     let count = existingCount;
     if (!count) {
@@ -31,7 +32,7 @@ export const creditMemoService = {
     for (let i = 0; i < 4; i++) {
       rand += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    return `CM-${currentYear}-${seq}-${rand}`;
+    return `CM-${isTestMode ? 'TEST-' : ''}${currentYear}-${seq}-${rand}`;
   },
 
   /**
@@ -100,6 +101,7 @@ export const creditMemoService = {
         .from('rma_reports')
         .select('*')
         .not('status', 'eq', 'deleted')
+        .like('notes', '%credit_memo_number%')
         .order('created_at', { ascending: false });
 
       if (!error && Array.isArray(reports)) {
@@ -166,7 +168,19 @@ export const creditMemoService = {
    */
   async createCreditMemo(memoData) {
     const existing = await this.getCreditMemos();
-    const cmNumber = memoData.credit_memo_number || this.generateCreditMemoNumber(existing.length);
+    const isTest = Boolean(
+      memoData.is_test ||
+      memoData.test_mode ||
+      /^CM-TEST-/i.test(String(memoData.credit_memo_number || '')) ||
+      /^RMA-TEST-/i.test(String(memoData.rma_number || '')) ||
+      String(memoData.notes || '').includes('[TEST_MODE]')
+    );
+    const modeExisting = existing.filter((m) => isTestRecord(m) === isTest);
+    const cmNumber = memoData.credit_memo_number || this.generateCreditMemoNumber(modeExisting.length, isTest);
+    const rawNotes = memoData.notes ? String(memoData.notes).trim() : '';
+    const finalNotes = isTest && !rawNotes.includes('[TEST_MODE]')
+      ? (rawNotes ? `[TEST_MODE] ${rawNotes}` : '[TEST_MODE] Sandbox Credit Memo')
+      : rawNotes;
 
     const unitPrice = Number((Number(memoData.unit_price) || 0).toFixed(2));
     const qty = Number(memoData.quantity) || 1;
@@ -196,7 +210,7 @@ export const creditMemoService = {
       credit_issued_by: memoData.credit_issued_by || 'Analiza B. Benoza',
       credit_issued_by_email: memoData.credit_issued_by_email || 'analiza@savemore.com',
       credit_issued_at: new Date().toISOString(),
-      notes: memoData.notes ? memoData.notes.trim() : '',
+      notes: finalNotes,
       status: 'issued'
     };
 
@@ -266,6 +280,18 @@ export const creditMemoService = {
     const existing = await this.getCreditMemos();
     const index = existing.findIndex(m => m.credit_memo_number === cmNumber);
     if (index === -1) throw new Error(`Credit Memo ${cmNumber} not found.`);
+    const isTestMemo = isTestRecord(existing[index]) || /^CM-TEST-/i.test(String(cmNumber || '')) || isTestRecord(updates);
+    if (isTestMemo) {
+      const candidateNotes = updates?.notes !== undefined
+        ? String(updates.notes || '').trim()
+        : String(existing[index]?.notes || '').trim();
+      if (!candidateNotes.includes('[TEST_MODE]')) {
+        updates = {
+          ...(updates || {}),
+          notes: candidateNotes ? `[TEST_MODE] ${candidateNotes}` : '[TEST_MODE] Sandbox Credit Memo'
+        };
+      }
+    }
 
     const unitPrice = updates.unit_price !== undefined ? Number(Number(updates.unit_price).toFixed(2)) : existing[index].unit_price;
     const qty = updates.quantity !== undefined ? Number(updates.quantity) : existing[index].quantity;

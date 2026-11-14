@@ -215,11 +215,17 @@ export default function GatekeeperPinModal({
 
           const resolvedEntity = normalizeEntityName(invite.entity_name || invite.store_branch);
           const resolvedStream = invite.stream_type || 'customer_inbound';
+          const isTestInvite = Boolean(
+            invite.is_test ||
+            String(invite.token || '').startsWith('inv_test_') ||
+            (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mode') === 'test')
+          );
 
           const unlockedSession = {
             type: 'external_customer',
             token: invite.token,
             stream_type: resolvedStream,
+            is_test: isTestInvite,
             authorized_email: authorizedEmail,
             entity_name: resolvedEntity,
             store_branch: resolvedEntity,

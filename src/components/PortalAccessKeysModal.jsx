@@ -28,6 +28,7 @@ import {
 import { accessKeyService, DEFAULT_ACCESS_PROFILES } from '../services/accessKeyService';
 import { downloadPortalPosterPng, downloadQrCodePng, printPortalPoster } from '../utils/qrDownload';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
+import { copyTextSafe } from '../utils/clipboard';
 
 export function formatDurationLabel(hours) {
   const h = Number(hours || 0);
@@ -150,13 +151,9 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
 
   const handleCopyLink = (slug) => {
     const fullUrl = `${originUrl}/intake/${slug}`;
-    try {
-      navigator.clipboard.writeText(fullUrl);
-      setCopiedSlug(slug);
-      setTimeout(() => setCopiedSlug(null), 2000);
-    } catch (e) {
-      console.warn('Copy failed:', e);
-    }
+    copyTextSafe(fullUrl);
+    setCopiedSlug(slug);
+    setTimeout(() => setCopiedSlug(null), 2000);
   };
 
   const generateRandomPin = () => {

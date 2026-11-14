@@ -177,16 +177,6 @@ export default async function handler(req, res) {
         });
       }
 
-      const { data: existing, error: fetchErr } = await supabase
-        .from('api_keys')
-        .select('*')
-        .eq('id', targetId)
-        .maybeSingle();
-
-      if (fetchErr || !existing) {
-        return sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: `API Key with ID ${targetId} was not found.` });
-      }
-
       const { rawKey, keyHash, maskedKey } = generateApiKeyPair();
 
       const { data: updated, error: updateErr } = await supabase
@@ -199,10 +189,14 @@ export default async function handler(req, res) {
         })
         .eq('id', targetId)
         .select('id, name, masked_key, is_active, rate_limit, updated_at')
-        .single();
+        .maybeSingle();
 
       if (updateErr) {
         return sendJson(res, 500, { success: false, error: 'UPDATE_ERROR', message: updateErr.message });
+      }
+
+      if (!updated) {
+        return sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: `API Key with ID ${targetId} was not found.` });
       }
 
       return sendJson(res, 200, {

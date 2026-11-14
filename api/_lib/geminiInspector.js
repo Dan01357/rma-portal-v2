@@ -1,15 +1,7 @@
 /**
- * Validates and inspects paperwork photo using Google Gemini Flash
- * Extracts DR/SI number, store branch, vendor, and document type.
- * Rejects photos that are not official logistics paperwork with clear reasons.
+ * Shared image normalization helper for Google Gemini Flash inspection calls.
  */
-export async function inspectPaperworkWithGemini({ fileData, imageUrl, mimeType = 'image/jpeg' }) {
-  const apiKey = process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_AI_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.GOOGLE_GENAI_API_KEY;
-
-  // 1. Prepare Base64 Image & Mime
+async function prepareGeminiImagePayload({ fileData, imageUrl, mimeType = 'image/jpeg' }) {
   let cleanMimeType = mimeType || 'image/jpeg';
   let base64String = '';
 
@@ -35,7 +27,93 @@ export async function inspectPaperworkWithGemini({ fileData, imageUrl, mimeType 
     throw new Error('Either fileData (Base64) or imageUrl must be provided.');
   }
 
-  // 2. If API Key is missing, reject document validation with clear notice (NEVER create fake numbers!)
+  return { cleanMimeType, base64String };
+}
+
+/**
+ * Shared Gemini Flash Vision REST runner with model cascade fallback.
+ */
+async function invokeGeminiVisionJson({ apiKey, promptText, cleanMimeType, base64String }) {
+  const configuredModel = process.env.GEMINI_MODEL;
+  const modelsToTry = [
+    configuredModel || 'gemini-3.5-flash-lite',
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-flash-latest'
+  ].filter(Boolean);
+
+  let lastError = null;
+
+  for (const modelName of modelsToTry) {
+    try {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+
+      const apiRes = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: promptText },
+                {
+                  inlineData: {
+                    mimeType: cleanMimeType,
+                    data: base64String
+                  }
+                }
+              ]
+            }
+          ],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.1
+          }
+        })
+      });
+
+      if (!apiRes.ok) {
+        const errBody = await apiRes.text();
+        throw new Error(`Google API ${apiRes.status} on model ${modelName}: ${errBody}`);
+      }
+
+      const resData = await apiRes.json();
+      const partText = resData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+      if (!partText) {
+        throw new Error(`Empty response from model ${modelName}`);
+      }
+
+      const jsonStart = partText.indexOf('{');
+      const jsonEnd = partText.lastIndexOf('}');
+      if (jsonStart !== -1 && jsonEnd !== -1) {
+        return JSON.parse(partText.substring(jsonStart, jsonEnd + 1));
+      }
+
+      throw new Error(`Invalid JSON format from model ${modelName}`);
+    } catch (err) {
+      console.warn(`[Gemini Flash] Model ${modelName} attempt notice:`, err.message);
+      lastError = err;
+    }
+  }
+
+  throw new Error(`Gemini inspection failed: ${lastError?.message || 'Unknown error'}`);
+}
+
+/**
+ * Validates and inspects paperwork photo using Google Gemini Flash
+ * Extracts DR/SI number, store branch, vendor, and document type.
+ * Rejects photos that are not official logistics paperwork with clear reasons.
+ */
+export async function inspectPaperworkWithGemini({ fileData, imageUrl, mimeType = 'image/jpeg' }) {
+  const apiKey = process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_AI_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY;
+
+  const { cleanMimeType, base64String } = await prepareGeminiImagePayload({ fileData, imageUrl, mimeType });
+
+  // If API Key is missing, reject document validation with clear notice (NEVER create fake numbers!)
   if (!apiKey) {
     console.warn('[Gemini Flash Inspector] GEMINI_API_KEY environment variable is not configured.');
     return {
@@ -103,100 +181,32 @@ Return ONLY valid JSON matching this schema:
 }
 `;
 
-  // Direct fast REST model cascade: gemini-3.5-flash-lite first for instant <1.5s OCR
-  const configuredModel = process.env.GEMINI_MODEL;
-  const modelsToTry = [
-    configuredModel || 'gemini-3.5-flash-lite',
-    'gemini-2.5-flash-lite',
-    'gemini-2.5-flash',
-    'gemini-flash-latest'
-  ].filter(Boolean);
+  const parsed = await invokeGeminiVisionJson({ apiKey, promptText, cleanMimeType, base64String });
+  const isValid = Boolean(parsed.is_valid_document);
+  const siNum = parsed.si_number ? String(parsed.si_number).trim() : null;
+  const drNum = parsed.dr_number ? String(parsed.dr_number).trim() : null;
+  const poNum = parsed.po_number ? String(parsed.po_number).trim() : null;
+  const fallbackPrimary = parsed.invoice_dr_number ? String(parsed.invoice_dr_number).trim() : null;
+  const primaryDocNum = siNum || drNum || poNum || fallbackPrimary;
 
-  let lastError = null;
-
-  for (const modelName of modelsToTry) {
-    try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-
-      const apiRes = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { text: promptText },
-                {
-                  inlineData: {
-                    mimeType: cleanMimeType,
-                    data: base64String
-                  }
-                }
-              ]
-            }
-          ],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            temperature: 0.1
-          }
-        })
-      });
-
-      if (!apiRes.ok) {
-        const errBody = await apiRes.text();
-        throw new Error(`Google API ${apiRes.status} on model ${modelName}: ${errBody}`);
-      }
-
-      const resData = await apiRes.json();
-      const candidate = resData?.candidates?.[0];
-      const partText = candidate?.content?.parts?.[0]?.text?.trim() || '';
-
-      if (!partText) {
-        throw new Error(`Empty response from model ${modelName}`);
-      }
-
-      // Parse JSON from response
-      const jsonStart = partText.indexOf('{');
-      const jsonEnd = partText.lastIndexOf('}');
-      if (jsonStart !== -1 && jsonEnd !== -1) {
-        const cleanJsonStr = partText.substring(jsonStart, jsonEnd + 1);
-        const parsed = JSON.parse(cleanJsonStr);
-        const isValid = Boolean(parsed.is_valid_document);
-        const siNum = parsed.si_number ? String(parsed.si_number).trim() : null;
-        const drNum = parsed.dr_number ? String(parsed.dr_number).trim() : null;
-        const poNum = parsed.po_number ? String(parsed.po_number).trim() : null;
-        const fallbackPrimary = parsed.invoice_dr_number ? String(parsed.invoice_dr_number).trim() : null;
-        const primaryDocNum = siNum || drNum || poNum || fallbackPrimary;
-
-        return {
-          is_valid_document: isValid,
-          document_type: parsed.document_type || (isValid ? 'Commercial Logistics Paperwork' : 'Non-Document / Rejected'),
-          confidence: typeof parsed.confidence === 'number' ? parsed.confidence : (isValid ? 0.95 : 0.0),
-          si_number: siNum,
-          dr_number: drNum,
-          po_number: poNum,
-          invoice_dr_number: primaryDocNum,
-          store_branch: parsed.store_branch ? String(parsed.store_branch).trim() : null,
-          detected_date: parsed.detected_date || null,
-          vendor_name: parsed.vendor_name ? String(parsed.vendor_name).trim() : null,
-          rejection_reason: isValid ? null : (parsed.rejection_reason || 'Photo does not appear to be an authentic Sales Invoice, DR, or PO, or document numbers are unreadable.')
-        };
-      }
-
-      throw new Error(`Invalid JSON format from model ${modelName}`);
-    } catch (err) {
-      console.warn(`[Gemini Flash] Model ${modelName} attempt notice:`, err.message);
-      lastError = err;
-    }
-  }
-
-  // If all models failed
-  throw new Error(`Gemini inspection failed: ${lastError?.message || 'Unknown error'}`);
+  return {
+    is_valid_document: isValid,
+    document_type: parsed.document_type || (isValid ? 'Commercial Logistics Paperwork' : 'Non-Document / Rejected'),
+    confidence: typeof parsed.confidence === 'number' ? parsed.confidence : (isValid ? 0.95 : 0.0),
+    si_number: siNum,
+    dr_number: drNum,
+    po_number: poNum,
+    invoice_dr_number: primaryDocNum,
+    store_branch: parsed.store_branch ? String(parsed.store_branch).trim() : null,
+    detected_date: parsed.detected_date || null,
+    vendor_name: parsed.vendor_name ? String(parsed.vendor_name).trim() : null,
+    rejection_reason: isValid ? null : (parsed.rejection_reason || 'Photo does not appear to be an authentic Sales Invoice, DR, or PO, or document numbers are unreadable.')
+  };
 }
 
 /**
- * Extracts Driver's Name and License / ID Number from a Driver's License photo using Gemini Vision.
+ * Inspects a Driver's License or ID card using Gemini Flash to auto-populate pickup forms.
+ * Extracts driver full name, license/ID number, and expiration date without fabricating missing fields.
  */
 export async function inspectDriverLicenseWithGemini({ fileData, imageUrl, mimeType = 'image/jpeg' }) {
   const apiKey = process.env.GEMINI_API_KEY ||
@@ -204,102 +214,54 @@ export async function inspectDriverLicenseWithGemini({ fileData, imageUrl, mimeT
     process.env.GOOGLE_API_KEY ||
     process.env.GOOGLE_GENAI_API_KEY;
 
-  let cleanMimeType = mimeType || 'image/jpeg';
-  let base64String = '';
-
-  if (fileData) {
-    if (fileData.includes(';base64,')) {
-      const parts = fileData.split(';base64,');
-      cleanMimeType = parts[0].replace('data:', '') || cleanMimeType;
-      base64String = parts[1];
-    } else if (fileData.includes(',')) {
-      base64String = fileData.split(',')[1];
-    } else {
-      base64String = fileData;
-    }
-  } else if (imageUrl) {
-    const imgRes = await fetch(imageUrl);
-    if (!imgRes.ok) throw new Error(`Failed to fetch image: ${imgRes.statusText}`);
-    const arrayBuf = await imgRes.arrayBuffer();
-    cleanMimeType = imgRes.headers.get('content-type') || cleanMimeType;
-    base64String = Buffer.from(arrayBuf).toString('base64');
-  } else {
-    throw new Error('Either fileData (Base64) or imageUrl must be provided.');
-  }
+  const { cleanMimeType, base64String } = await prepareGeminiImagePayload({ fileData, imageUrl, mimeType });
 
   if (!apiKey) {
     return {
-      is_valid_license: false,
+      is_valid_id: false,
+      id_type: 'Unknown',
       driver_name: null,
       license_number: null,
+      expiry_date: null,
+      confidence: 0,
       error: 'MISSING_GEMINI_API_KEY',
-      rejection_reason: 'GEMINI_API_KEY is not configured. Please enter Driver Name and License # manually.'
+      rejection_reason: 'AI key is not configured. Please type Driver Name and License # manually.'
     };
   }
 
   const promptText = `
-You are an Identity & Logistics Verification OCR Specialist.
-Examine the provided photo and extract the Driver's Full Name and Driver's License / Government ID Number.
-- "is_valid_license": true if this is a readable Driver's License or Government ID card, false if blurry, blank, or not an ID.
-- "driver_name": Full name printed on the ID (e.g. "JUAN DELA CRUZ"), or null if unreadable.
-- "license_number": Exact License / ID number (e.g. "N01-23-456789"), or null if unreadable.
-- "rejection_reason": Brief reason if is_valid_license is false, otherwise null.
+You are a Logistics Gate Security ID Reader specializing in Philippine LTO Driver's Licenses and Government/Company IDs.
+Examine the uploaded ID photo and extract ONLY clearly legible fields:
+- "is_valid_id": true if the photo shows a physical or printed Driver's License, UMID, National ID, or Company ID card. False if it shows random objects, blurry text with no readable name/ID, or a product box.
+- "id_type": "Driver's License" | "Government ID" | "Company ID" | "Unknown"
+- "driver_name": The cardholder's full name formatted cleanly in normal First Middle Last order if recognizable (e.g. from "DELA CRUZ, JUAN SANTOS" return "Juan Santos Dela Cruz" or exact printed full name), or null if unreadable.
+- "license_number": The exact License No. / ID No. printed on the card (e.g. "N01-23-456789"), or null if unreadable.
+- "expiry_date": Expiration date on the ID in YYYY-MM-DD format if visible, else null.
+- "confidence": 0.0 to 1.0
+- "rejection_reason": Short explanation if is_valid_id is false, else null.
 
-NEVER invent or guess fake names or numbers. Return ONLY valid JSON:
+NEVER guess or make up a name or license number. Return ONLY valid JSON:
 {
-  "is_valid_license": boolean,
+  "is_valid_id": boolean,
+  "id_type": string,
   "driver_name": string | null,
   "license_number": string | null,
+  "expiry_date": string | null,
+  "confidence": number,
   "rejection_reason": string | null
 }
 `;
 
-  const configuredModel = process.env.GEMINI_MODEL;
-  const modelsToTry = [
-    configuredModel || 'gemini-3.5-flash-lite',
-    'gemini-2.5-flash-lite',
-    'gemini-2.5-flash',
-    'gemini-flash-latest'
-  ].filter(Boolean);
-
-  let lastError = null;
-  for (const modelName of modelsToTry) {
-    try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: promptText },
-              { inline_data: { mime_type: cleanMimeType, data: base64String } }
-            ]
-          }],
-          generationConfig: { temperature: 0.1, responseMimeType: 'application/json' }
-        })
-      });
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errText}`);
-      }
-      const data = await response.json();
-      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return {
-          is_valid_license: Boolean(parsed.is_valid_license),
-          driver_name: parsed.driver_name ? String(parsed.driver_name).trim() : null,
-          license_number: parsed.license_number ? String(parsed.license_number).trim() : null,
-          rejection_reason: parsed.is_valid_license ? null : (parsed.rejection_reason || 'Could not read Driver License clearly.')
-        };
-      }
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw new Error(`Gemini license OCR failed: ${lastError?.message || 'Unknown error'}`);
+  const parsed = await invokeGeminiVisionJson({ apiKey, promptText, cleanMimeType, base64String });
+  const isValid = Boolean(parsed.is_valid_id);
+  return {
+    is_valid_id: isValid,
+    id_type: parsed.id_type || (isValid ? "Driver's License" : 'Unknown'),
+    driver_name: parsed.driver_name ? String(parsed.driver_name).trim() : null,
+    license_number: parsed.license_number ? String(parsed.license_number).trim() : null,
+    expiry_date: parsed.expiry_date || null,
+    confidence: typeof parsed.confidence === 'number' ? parsed.confidence : (isValid ? 0.92 : 0),
+    rejection_reason: isValid ? null : (parsed.rejection_reason || 'Could not clearly read ID details. Please type Driver Name and License # manually.')
+  };
 }
-
 

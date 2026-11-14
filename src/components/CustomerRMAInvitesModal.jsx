@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { inviteService, formatRemainingCountdown } from '../services/inviteService';
 import TablePagination from './TablePagination';
+import { copyTextSafe } from '../utils/clipboard';
 
 const PRESET_EXPIRIES = [
   { label: '15 Mins', num: 15, unit: 'minutes' },
@@ -39,6 +40,13 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   
   // Stream Type Toggle: 'customer_inbound' (Customer Return) vs 'supplier_outbound' (Supplier RTV)
   const [streamType, setStreamType] = useState('customer_inbound');
+  const [inviteIsTestMode, setInviteIsTestMode] = useState(() => {
+    try {
+      return typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [authorizedEmail, setAuthorizedEmail] = useState('');
   const [entityName, setEntityName] = useState('');
   
@@ -118,15 +126,16 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
         storeBranch: entityName.trim(),
         durationValue: Math.max(1, parseInt(expiryNumber, 10) || 1),
         durationUnit: expiryUnit,
-        createdBy
+        createdBy,
+        isTest: inviteIsTestMode
       });
       setGeneratedInvite(newInv);
       setAuthorizedEmail('');
       setEntityName('');
       showToast(
-        streamType === 'supplier_outbound'
+        `${inviteIsTestMode ? '🧪 TEST MODE ' : ''}${streamType === 'supplier_outbound'
           ? 'Supplier RTV Invite generated successfully!'
-          : 'Customer RMA Return Invite generated successfully!'
+          : 'Customer RMA Return Invite generated successfully!'}`
       );
       loadInvites();
     } catch (err) {
@@ -138,8 +147,9 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
 
   const handleCopyLink = (token) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://rma-portal-pingconmarketing.vercel.app';
-    const link = `${origin}/intake?token=${encodeURIComponent(token)}`;
-    navigator.clipboard.writeText(link);
+    const isTestTok = String(token || '').startsWith('inv_test_');
+    const link = `${origin}/intake?token=${encodeURIComponent(token)}${isTestTok ? '&mode=test' : ''}`;
+    copyTextSafe(link);
     setCopiedToken(token);
     showToast('Secure link copied to clipboard!');
     setTimeout(() => setCopiedToken(null), 2500);
@@ -163,6 +173,9 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     }
     try {
       await inviteService.revokeInvite(token);
+      setInvites((prev) =>
+        prev.map((inv) => ((inv.token === token || inv.id === token) ? { ...inv, status: 'revoked' } : inv))
+      );
       showToast('Invite link revoked.');
       loadInvites();
       if (generatedInvite?.token === token) {
@@ -184,6 +197,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     setDeletingToken(tokenKey);
     try {
       await inviteService.deleteInvite(tokenKey);
+      setInvites((prev) => prev.filter((item) => (item.token || item.id) !== tokenKey));
       showToast('Invite record deleted successfully.');
       loadInvites();
       if (generatedInvite?.token === inv.token) {
@@ -339,6 +353,40 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
               <span className="text-[10px] text-slate-500 font-bold">
                 Anti-Hacker: Forwarding to unauthorized accounts is strictly blocked
               </span>
+            </div>
+
+            {/* Environment Mode Selector: Live Production vs Sandbox Test Mode */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-2xl bg-white/80 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700">
+              <div className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                Invite Environment:
+                <span className="ml-1.5 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                  Choose whether this staff link saves to Live Production or Isolated Test Sandbox
+                </span>
+              </div>
+              <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setInviteIsTestMode(false)}
+                  className={`px-3 py-1 rounded-lg text-[11px] font-black transition-all cursor-pointer ${
+                    !inviteIsTestMode
+                      ? 'bg-emerald-600 text-white shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  🟢 Live Mode
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInviteIsTestMode(true)}
+                  className={`px-3 py-1 rounded-lg text-[11px] font-black transition-all cursor-pointer ${
+                    inviteIsTestMode
+                      ? 'bg-amber-500 text-slate-950 shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  🧪 Test Mode Sandbox
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -537,7 +585,11 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
               </div>
 
               <div className="p-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 font-mono text-xs text-slate-800 dark:text-slate-200 break-all select-all flex items-center justify-between gap-2">
-                <span>{typeof window !== 'undefined' ? `${window.location.origin}/intake?token=${generatedInvite.token}` : generatedInvite.token}</span>
+                <span>
+                  {typeof window !== 'undefined'
+                    ? `${window.location.origin}/intake?token=${generatedInvite.token}${(generatedInvite.is_test || String(generatedInvite.token || '').startsWith('inv_test_')) ? '&mode=test' : ''}`
+                    : generatedInvite.token}
+                </span>
               </div>
 
               <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
@@ -672,17 +724,24 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                       return (
                         <tr key={inv.token || inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
                           <td className="p-3">
-                            {isSupplier ? (
-                              <span className="px-2 py-0.5 rounded text-[9.5px] font-black uppercase bg-purple-100 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1">
-                                <Truck className="w-3 h-3" />
-                                <span>Supplier RTV</span>
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 rounded text-[9.5px] font-black uppercase bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 inline-flex items-center gap-1">
-                                <Store className="w-3 h-3" />
-                                <span>Customer Return</span>
-                              </span>
-                            )}
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {isSupplier ? (
+                                <span className="px-2 py-0.5 rounded text-[9.5px] font-black uppercase bg-purple-100 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1">
+                                  <Truck className="w-3 h-3" />
+                                  <span>Supplier RTV</span>
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded text-[9.5px] font-black uppercase bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 inline-flex items-center gap-1">
+                                  <Store className="w-3 h-3" />
+                                  <span>Customer Return</span>
+                                </span>
+                              )}
+                              {(inv.is_test || String(inv.token || '').startsWith('inv_test_')) && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                  🧪 Test
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">
                             {inv.authorized_email}

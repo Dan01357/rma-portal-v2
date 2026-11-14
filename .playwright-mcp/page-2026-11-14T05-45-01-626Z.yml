@@ -1,0 +1,94 @@
+- generic [ref=e5]:
+  - generic [ref=e6]:
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - heading "🏢 Pingcon RMA Operations" [level=1] [ref=e9]
+        - generic [ref=e11]: Live Auto-Sync
+        - generic [ref=e13]: 👑 Super Admin
+      - paragraph [ref=e14]:
+        - text: Logged in as
+        - strong [ref=e15]: Danilo Alvaro Jr. (Super Admin)
+        - text: • finance2@keysysincorporated.com
+    - generic [ref=e16]:
+      - button "Open notifications" [ref=e18] [cursor=pointer]:
+        - generic [ref=e22]: "2"
+      - button "Toggle Theme" [ref=e23] [cursor=pointer]
+      - button "🎫 Generate RMA Invites" [ref=e26] [cursor=pointer]
+      - button "Public Reporter" [ref=e30] [cursor=pointer]
+      - button "Logout" [ref=e34] [cursor=pointer]
+  - generic [ref=e39]:
+    - generic [ref=e40] [cursor=pointer]:
+      - generic [ref=e41]: Catalog
+      - generic [ref=e47]: "0"
+      - generic [ref=e48]: Saved Products
+      - generic [ref=e49]: Catalog items
+    - generic [ref=e50] [cursor=pointer]:
+      - generic [ref=e51]: Inbound
+      - generic [ref=e56]: "0"
+      - generic [ref=e57]: Customer Inbound
+      - generic [ref=e58]: 0 pending credit
+    - generic [ref=e59] [cursor=pointer]:
+      - generic [ref=e60]: Outbound
+      - generic [ref=e66]: "0"
+      - generic [ref=e67]: Supplier RTVs
+      - generic [ref=e68]: Vendor claims queued
+    - generic [ref=e69] [cursor=pointer]:
+      - generic [ref=e70]: Finance
+      - generic [ref=e75]: "0"
+      - generic [ref=e76]: Credit Memos
+      - generic [ref=e77]: Customer deductions
+    - generic [ref=e78] [cursor=pointer]:
+      - generic [ref=e79]: Action
+      - generic [ref=e83]: "0"
+      - generic [ref=e84]: Awaiting SKU
+      - generic [ref=e85]: Needs SKU assignment
+    - generic [ref=e86] [cursor=pointer]:
+      - generic [ref=e87]: Team
+      - generic [ref=e94]: "25"
+      - generic [ref=e95]: Staff Directory
+      - generic [ref=e96]: Company staff
+  - generic [ref=e97]:
+    - button "Saved Products (0)" [ref=e98] [cursor=pointer]
+    - button "Customer RMA Hub (0)" [ref=e104] [cursor=pointer]
+    - button "Supplier Hub (RTV Claims) (0)" [ref=e109] [cursor=pointer]
+    - button "Credit Memos (0)" [ref=e115] [cursor=pointer]
+    - button "🧪 Test Mode Sandbox (0)" [ref=e120] [cursor=pointer]
+    - button "🗄️ Archive & Trash (0)" [ref=e124] [cursor=pointer]
+    - button "Settings & SMTP" [ref=e129] [cursor=pointer]
+    - button "Awaiting SKU (0)" [ref=e134] [cursor=pointer]
+    - button "Roles & Access" [ref=e138] [cursor=pointer]
+  - generic [ref=e145]:
+    - generic [ref=e146]:
+      - generic [ref=e153]:
+        - generic [ref=e154]:
+          - heading "Verified Products Catalog" [level=3] [ref=e155]
+          - generic [ref=e156]: 0 Items in DB
+        - paragraph [ref=e157]: Custom catalog items saved with verified barcodes & reference photos.
+      - generic [ref=e158]:
+        - generic [ref=e159]:
+          - button "Rows List" [ref=e160] [cursor=pointer]
+          - button "Grid Cards" [ref=e163] [cursor=pointer]
+        - button "Add Product" [ref=e170] [cursor=pointer]
+    - generic [ref=e173]:
+      - generic [ref=e174]:
+        - textbox "Search by SN (#), product name, barcode, SKU, or supplier..." [ref=e179]
+        - generic [ref=e180]:
+          - combobox [ref=e181] [cursor=pointer]:
+            - option "All Suppliers (0)" [selected]
+          - combobox [ref=e182] [cursor=pointer]:
+            - option "All Status" [selected]
+            - option "Verified Only"
+            - option "Pending Verification"
+      - generic [ref=e183]:
+        - generic [ref=e184]:
+          - text: Showing
+          - strong [ref=e185]: "0"
+          - text: of 0 products
+        - generic [ref=e186]:
+          - text: Click column headers to sort (
+          - strong [ref=e187]: id
+          - text: ▼)
+    - generic [ref=e188]:
+      - paragraph [ref=e193]: No saved products in custom database yet
+      - paragraph [ref=e194]: When you verify pending barcodes or add items, they will appear here with instant edit and delete controls.
+      - button "Add Your First Product" [ref=e195] [cursor=pointer]

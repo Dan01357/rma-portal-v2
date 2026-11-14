@@ -19,7 +19,10 @@ import {
   ClipboardCheck,
   ChevronDown,
   Lock,
-  Unlock
+  Unlock,
+  FileSpreadsheet,
+  FileCheck2,
+  QrCode
 } from 'lucide-react';
 import { exportRMAReportsToCSV, exportSupplierOutboundClaimsToCSV } from '../utils/exportCsv';
 import { catalogService } from '../services/catalogService';
@@ -36,7 +39,8 @@ import {
   hasAssignedSku,
   getRealPhotos,
   normalizeWarehouseLocation,
-  isUnlabeledBarcode
+  isUnlabeledBarcode,
+  isTestRecord
 } from '../utils/rmaHelpers';
 import {
   getItemNeedsReorder,
@@ -57,14 +61,23 @@ export default function SupplierClaimsTab({
   onRequestBulkDeleteReports,
   onRequestArchiveReport,
   onRequestBulkArchiveReports,
+  onArchiveReport,
+  onBulkArchiveReports,
   onAssignSku,
   onEditProductFromReport,
   onOpenQuickAction,
   onPrintLabel,
+  onViewQR,
   onViewExplanation,
+  onOpenSimpleWizard,
+  onOpenPickupForm,
+  onOpenMatrixExport,
   savedProductsList = [],
-  coworkerQueueFilter = 'all'
+  coworkerQueueFilter = 'all',
+  isTestMode = false
 }) {
+  const effectiveArchiveReport = onRequestArchiveReport || onArchiveReport;
+  const effectiveBulkArchiveReports = onRequestBulkArchiveReports || onBulkArchiveReports;
   const [selectedSupplier, setSelectedSupplier] = useState('All');
   const [dispositionFilter, setDispositionFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
@@ -202,11 +215,11 @@ export default function SupplierClaimsTab({
     let isMounted = true;
     supplierClaimService.getClaims().then(claims => {
       if (isMounted && Array.isArray(claims)) {
-        setSavedClaims(claims);
+        setSavedClaims(claims.filter(c => isTestRecord(c) === Boolean(isTestMode)));
       }
     });
     return () => { isMounted = false; };
-  }, [reportsList]);
+  }, [reportsList, isTestMode]);
 
   // Filter & dedup all reports suitable for Supplier Outbound / RTV
   const allRtvItems = useMemo(() => {
@@ -629,7 +642,7 @@ export default function SupplierClaimsTab({
 
     const supplierName = res.supplier.trim();
     const cleanGeneratedBy = getCleanUserName(currentUser);
-    const claimNumber = supplierClaimService.generateRtvId(savedClaims);
+    const claimNumber = supplierClaimService.generateRtvId(savedClaims, isTestMode);
     const qty = res.qty;
     const price = res.price;
 
@@ -654,7 +667,9 @@ export default function SupplierClaimsTab({
       generated_by: cleanGeneratedBy,
       items: [enrichedItem],
       totalQuantity: qty,
-      totalClaimAmount: qty * price
+      totalClaimAmount: qty * price,
+      notes: isTestMode ? '[TEST_MODE] Sandbox RTV Claim' : '',
+      isTest: Boolean(isTestMode)
     };
 
     setIsSavingClaim(true);
@@ -713,7 +728,7 @@ export default function SupplierClaimsTab({
 
     const supplierName = suppliersInBatch[0] || (selectedSupplier !== 'All' ? selectedSupplier : 'Savemore');
     const cleanGeneratedBy = getCleanUserName(currentUser);
-    const claimNumber = supplierClaimService.generateRtvId(savedClaims);
+    const claimNumber = supplierClaimService.generateRtvId(savedClaims, isTestMode);
 
     const enrichedItems = selectedItems.map(i => {
       const res = resolveReportProduct(i);
@@ -739,7 +754,9 @@ export default function SupplierClaimsTab({
       generated_by: cleanGeneratedBy,
       items: enrichedItems,
       totalQuantity,
-      totalClaimAmount
+      totalClaimAmount,
+      notes: isTestMode ? '[TEST_MODE] Sandbox RTV Claim' : '',
+      isTest: Boolean(isTestMode)
     };
 
     setIsSavingClaim(true);
@@ -791,7 +808,7 @@ export default function SupplierClaimsTab({
     );
 
     if (!existingClaim) {
-      const claimNumber = supplierClaimService.generateRtvId(savedClaims);
+      const claimNumber = supplierClaimService.generateRtvId(savedClaims, isTestMode);
       const enrichedItems = selectedItems.map(i => {
         const res = resolveReportProduct(i);
         return {
@@ -813,7 +830,9 @@ export default function SupplierClaimsTab({
         generatedBy: cleanGeneratedBy,
         items: enrichedItems,
         totalQuantity,
-        totalClaimAmount
+        totalClaimAmount,
+        notes: isTestMode ? '[TEST_MODE] Sandbox RTV Claim' : '',
+        isTest: Boolean(isTestMode)
       };
     }
 
@@ -915,6 +934,11 @@ export default function SupplierClaimsTab({
               <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 shrink-0">
                 Vendor Recovery
               </span>
+              {isTestMode && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500 text-slate-950 shrink-0">
+                  🧪 Sandbox Test Mode
+                </span>
+              )}
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
               Bundle damaged/defective merchandise by vendor to issue consolidated <strong>Return to Vendor (RTV) Debit Claims</strong>. All claims are automatically synced to database.
@@ -1081,10 +1105,10 @@ export default function SupplierClaimsTab({
                 </button>
 
                 {/* 2. Archive Selected */}
-                {onRequestBulkArchiveReports && (
+                {effectiveBulkArchiveReports && (
                   <button
                     type="button"
-                    onClick={() => onRequestBulkArchiveReports(selectedItems)}
+                    onClick={() => effectiveBulkArchiveReports(selectedItems)}
                     className="px-3 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
                     title="Archive selected records to Archive Vault"
                   >
@@ -1116,15 +1140,29 @@ export default function SupplierClaimsTab({
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={() => exportSupplierOutboundClaimsToCSV(selectedItems.length > 0 ? selectedItems : rtvCandidates, null, savedProductsList)}
-            className="text-xs text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 flex items-center gap-1.5 font-bold cursor-pointer ml-auto bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-3 py-1.5 rounded-xl shadow-2xs hover:shadow-xs transition-all"
-            title="Download vendor chargeback CSV with bin location and batch numbers"
-          >
-            <Download className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-            <span>Export Supplier Claims CSV</span>
-          </button>
+          <div className="flex items-center gap-2 ml-auto flex-wrap">
+            {onOpenMatrixExport && (
+              <button
+                type="button"
+                onClick={() => onOpenMatrixExport()}
+                className="text-xs text-emerald-700 dark:text-emerald-300 hover:text-emerald-900 dark:hover:text-emerald-100 flex items-center gap-1.5 font-black cursor-pointer bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 px-3 py-1.5 rounded-xl shadow-2xs hover:shadow-xs transition-all"
+                title="Download daily piece-based Excel Matrix (.xlsx) matching template for Supplier RTV"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Supplier RTV Matrix (.xlsx)</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => exportSupplierOutboundClaimsToCSV(selectedItems.length > 0 ? selectedItems : rtvCandidates, null, savedProductsList)}
+              className="text-xs text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 flex items-center gap-1.5 font-bold cursor-pointer bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-3 py-1.5 rounded-xl shadow-2xs hover:shadow-xs transition-all"
+              title="Download vendor chargeback CSV with bin location and batch numbers"
+            >
+              <Download className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              <span>Export Supplier Claims CSV</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1186,6 +1224,11 @@ export default function SupplierClaimsTab({
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
                     </div>
+                  </th>
+
+                  {/* Quick-View Box QR Code */}
+                  <th className="p-3 text-center w-14 font-bold" title="Quick-View Box QR Sticker">
+                    <span>QR</span>
                   </th>
 
                   {/* Vendor / Supplier */}
@@ -1426,6 +1469,28 @@ export default function SupplierClaimsTab({
                           )}
                         </td>
 
+                        {/* Quick-View RMA Box QR Code Button */}
+                        <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                          {onViewQR ? (
+                            <button
+                              type="button"
+                              onClick={() => onViewQR({
+                                ...r,
+                                name: res.name,
+                                supplier_name: res.supplier,
+                                code: res.code || r.code,
+                                price: res.price || r.price
+                              })}
+                              className="p-1.5 text-slate-500 hover:text-amber-600 dark:text-slate-400 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/60 rounded-lg border border-transparent hover:border-amber-200 dark:hover:border-amber-800 transition-colors cursor-pointer inline-flex items-center justify-center"
+                              title={`Quick-View & Print Box QR Sticker for ${r.rma_number}`}
+                            >
+                              <QrCode className="w-4 h-4" />
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-slate-300 dark:text-slate-600">—</span>
+                          )}
+                        </td>
+
                         {/* Vendor / Supplier & Warehouse Bin */}
                         <td className="p-3">
                           <div className={`font-bold ${res.supplier === 'Pending Assignment' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`}>
@@ -1562,6 +1627,31 @@ export default function SupplierClaimsTab({
                                 title="Print 4x6 inch Thermal Box Label"
                               >
                                 <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
+                              </button>
+                            )}
+
+                            {/* 1b. Simple 4-Choice Supplier RTV & Pickup Verification Wizard */}
+                            {onOpenSimpleWizard && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenSimpleWizard(r)}
+                                className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-700 rounded-lg text-[10px] font-black transition-colors cursor-pointer whitespace-nowrap"
+                                title="Open plain-English 4-Choice Supplier RTV & Driver Pickup Wizard"
+                              >
+                                ⚡ 4-Choice / Pickup
+                              </button>
+                            )}
+
+                            {/* 1c. View / Print Dual-Copy A4 Pickup Form when Picked Up */}
+                            {onOpenPickupForm && (r.status === 'picked_up' || r.ai_document_metadata?.supplier_pickup?.picked_up_at) && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenPickupForm(r)}
+                                className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap shadow-2xs"
+                                title="View / Re-print Dual-Copy A4 Pickup Validation Form"
+                              >
+                                <FileCheck2 className="w-3 h-3" />
+                                <span>A4 Form</span>
                               </button>
                             )}
 
@@ -1851,12 +1941,12 @@ export default function SupplierClaimsTab({
                             })()}
 
                             {/* 5. Archive Report */}
-                            {onRequestArchiveReport && (
+                            {effectiveArchiveReport && (
                               <button
                                 type="button"
                                 onClick={() => {
                                   const targetArchiveId = r.is_unpacked_manifest_item ? (r.parent_rma_id || r.id) : r.id;
-                                  onRequestArchiveReport(targetArchiveId, r.rma_number, r);
+                                  effectiveArchiveReport(targetArchiveId, r.rma_number, r);
                                 }}
                                 className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
                                 title={`Archive RMA #${r.rma_number} to Archive Vault`}
@@ -1886,7 +1976,7 @@ export default function SupplierClaimsTab({
                       {/* Expandable Multi-Item Manifest Sub-Table Drawer */}
                       {isManifest && isManifestExpanded && (
                         <tr className="bg-amber-50/40 dark:bg-slate-900/90 border-y-2 border-amber-200 dark:border-amber-900/60">
-                          <td colSpan={11} className="p-3 sm:p-4">
+                          <td colSpan={12} className="p-3 sm:p-4">
                             <div className="bg-white dark:bg-slate-800/90 rounded-xl border border-amber-200 dark:border-amber-800/60 shadow-sm overflow-hidden">
                               {/* Manifest Header */}
                               <div className="p-3 bg-amber-50/70 dark:bg-amber-950/40 border-b border-amber-200/80 dark:border-amber-900/50 flex flex-wrap items-center justify-between gap-2">

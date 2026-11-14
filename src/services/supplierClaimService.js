@@ -1,4 +1,5 @@
 import { supabase } from '../supabaseClient';
+import { isTestRecord } from '../utils/rmaHelpers';
 
 const CLAIMS_STORAGE_KEY = 'rma_portal_supplier_claims_v2';
 const SETTINGS_KEY = 'supplier_claims_store';
@@ -9,14 +10,14 @@ export const supplierClaimService = {
    * Format: RTV-YYYY-XXXX-RAND (e.g. RTV-2026-0001-HY67)
    * RTV + Current Year + 4-digit increasing sequence + 4-char alphanumeric
    */
-  generateRtvId(existingClaims = []) {
+  generateRtvId(existingClaims = [], isTestMode = false) {
     const currentYear = new Date().getFullYear();
     let maxSeq = 0;
 
     if (Array.isArray(existingClaims)) {
       existingClaims.forEach(c => {
         const num = c.claim_number || c.claimNumber || '';
-        const match = String(num).match(/RTV-\d{4}-(\d+)-/i);
+        const match = String(num).match(/RTV-(?:TEST-)?\d{4}-(\d+)-/i);
         if (match && match[1]) {
           const parsed = parseInt(match[1], 10);
           if (!isNaN(parsed) && parsed > maxSeq) {
@@ -33,7 +34,7 @@ export const supplierClaimService = {
       rand += chars.charAt(Math.floor(Math.random() * chars.length));
     }
 
-    return `RTV-${currentYear}-${nextSeq}-${rand}`;
+    return `RTV-${isTestMode ? 'TEST-' : ''}${currentYear}-${nextSeq}-${rand}`;
   },
 
   /**
@@ -122,8 +123,20 @@ export const supplierClaimService = {
     generatedBy,
     items = [],
     totalQuantity = 0,
-    totalClaimAmount = 0
+    totalClaimAmount = 0,
+    notes = '',
+    isTest = null
   }) {
+    const effectiveIsTest = Boolean(
+      isTest === true ||
+      /^RTV-TEST-/i.test(String(claimNumber || '')) ||
+      String(notes || '').includes('[TEST_MODE]') ||
+      (Array.isArray(items) && items.some(it => isTestRecord(it)))
+    );
+    const trimmedNotes = String(notes || '').trim();
+    const finalClaimNotes = effectiveIsTest && !trimmedNotes.includes('[TEST_MODE]')
+      ? (trimmedNotes ? `[TEST_MODE] ${trimmedNotes}` : '[TEST_MODE] Sandbox RTV Claim')
+      : trimmedNotes;
     if (!claimNumber) throw new Error('Claim number is required');
     if (!items.length) throw new Error('At least one item is required to save claim');
 
@@ -145,6 +158,7 @@ export const supplierClaimService = {
       totalClaimAmount: Number(totalClaimAmount) || 0,
       created_at: nowIso,
       createdAt: nowIso,
+      notes: finalClaimNotes,
       status: 'generated',
       items: items.map(item => ({
         rma_number: item.rma_number,
@@ -172,6 +186,7 @@ export const supplierClaimService = {
             total_quantity: claimRecord.total_quantity,
             total_claim_amount: claimRecord.total_claim_amount,
             items: claimRecord.items,
+            notes: claimRecord.notes || '',
             status: 'generated',
             created_at: nowIso
           }

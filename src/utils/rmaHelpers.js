@@ -420,6 +420,17 @@ export function formatManifestBreakdown(items = [], includeLineCount = true) {
  * - Child items are pending inspection -> '3- Under Inspection' (status: 'under_inspection')
  */
 export function resolveBatchManifestLifecycle(report, allReports = []) {
+  if (
+    String(report?.status || '').toLowerCase() === 'picked_up' ||
+    Boolean(report?.ai_document_metadata?.supplier_pickup?.picked_up_at)
+  ) {
+    return {
+      status: 'picked_up',
+      label: '🚚 Picked Up',
+      color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
+    };
+  }
+
   const items = getReportManifestItems(report, allReports);
   if (!Array.isArray(items) || items.length === 0) {
     return {
@@ -501,6 +512,12 @@ export function cleanExplanationText(text) {
  * Standardized Lifecycle Stage Formatter supporting 4-Pillar Resolutions
  */
 export function formatLifecycleStage(status, item = null) {
+  if (
+    item?.ai_document_metadata?.supplier_pickup?.picked_up_at &&
+    !['closed', 'resolved', 'restocked', 'scrapped', 'disposed', 'credit_memo_issued'].includes(String(status || '').toLowerCase())
+  ) {
+    return { label: '🚚 Picked Up', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' };
+  }
   if (!status) return { label: '2- Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
   const s = String(status).toLowerCase();
 
@@ -541,12 +558,13 @@ export function formatLifecycleStage(status, item = null) {
     case 'buffer_replacement_dispatched':
     case 'buffer_dispatched':
       return { label: '🚚 Buffer Dispatched', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
+    case 'picked_up':
+    case 'picked_up_by_supplier':
+      return { label: '🚚 Picked Up', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' };
     case 'rejected':
       return { label: '8- Rejected / Invalid Claim', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
     case 'vendor_claimed':
       return { label: 'RTV Claimed', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' };
-    case 'picked_up':
-      return { label: '🚚 Picked Up by Supplier', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' };
     case 'pending_admin_details':
       return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
     default:
@@ -815,15 +833,154 @@ export function saveWarehouseLocations(list) {
 }
 
 /**
- * Test Mode helper: Check if an RMA report is a sandbox test record.
+ * Test Mode helper: Check if an RMA report, Credit Memo, or Supplier Claim is a sandbox test record.
  */
 export function isTestRecord(item) {
   if (!item) return false;
+  const rmaNum = String(item.rma_number || item.rmaNumber || '');
+  const cmNum = String(item.credit_memo_number || item.creditMemoNumber || '');
+  const rtvNum = String(item.claim_number || item.claimNumber || '');
+  const itemArrayHasTestRef = Array.isArray(item.items) && item.items.some((sub) =>
+    /^RMA-TEST-/i.test(String(sub?.rma_number || sub?.rmaNumber || '')) ||
+    sub?.is_test === true ||
+    sub?.test_mode === true ||
+    sub?.ai_document_metadata?.is_test === true ||
+    sub?.ai_document_metadata?.test_mode === true
+  );
   return Boolean(
     item.is_test === true ||
+    item.test_mode === true ||
     item.ai_document_metadata?.is_test === true ||
-    String(item.notes || '').includes('[TEST_MODE]')
+    item.ai_document_metadata?.test_mode === true ||
+    String(item.notes || '').includes('[TEST_MODE]') ||
+    /^RMA-TEST-/i.test(rmaNum) ||
+    /^CM-TEST-/i.test(cmNum) ||
+    /^RTV-TEST-/i.test(rtvNum) ||
+    itemArrayHasTestRef
   );
+}
+
+export const DEFECT_REASONS = [
+  '1- Damaged Box / Crushed Packaging',
+  '2- Expired / Near Expiry Date',
+  '3- Spoiled / Broken Seal / Leaking',
+  '4- Wrong Item / Incorrect Shipment',
+  '5- Customer Pull-out / Unsold',
+  '6- Other Defect'
+];
+
+/**
+ * Resolve cleanly separated SI / DR / PO document numbers with legacy fallback.
+ */
+export function getDocumentNumbers(item) {
+  if (!item) return { si: 'N/A', dr: 'N/A', po: 'N/A' };
+
+  let si = item.si_number ? String(item.si_number).trim() : null;
+  let dr = item.dr_number ? String(item.dr_number).trim() : null;
+  let po = item.po_number ? String(item.po_number).trim() : null;
+
+  const legacy = item.invoice_dr_number ? String(item.invoice_dr_number).trim() : null;
+  if (legacy) {
+    if (!si && /^SI/i.test(legacy)) {
+      si = legacy;
+    } else if (!po && /^PO/i.test(legacy)) {
+      po = legacy;
+    } else if (!dr && !si && !po) {
+      dr = legacy;
+    }
+  }
+
+  return {
+    si: si || 'N/A',
+    dr: dr || 'N/A',
+    po: po || 'N/A'
+  };
+}
+
+/**
+ * Generates an internal, non-URL QR payload scoped cleanly by mode (TEST vs LIVE).
+ * Prevents external Google Lens / standard phone camera scanners from opening portal routes.
+ */
+export function buildPortalQrPayload(rmaNumber, isTestMode = false) {
+  const cleanRma = String(rmaNumber || '').trim();
+  if (!cleanRma) return '';
+  const inferredTest = Boolean(isTestMode || /^RMA-TEST-/i.test(cleanRma));
+  const scope = inferredTest ? 'TEST' : 'LIVE';
+  return `PINGCON-RMA:${scope}:${cleanRma}`;
+}
+
+/**
+ * Parses an internal portal QR code or legacy RMA scan into normalized RMA identity + mode.
+ * Returns null if the scanned code is a regular product barcode.
+ */
+export function parsePortalQrPayload(rawText) {
+  if (!rawText) return null;
+  const str = String(rawText).trim();
+
+  // Preferred internal format: PINGCON-RMA:TEST:<RMA> or PINGCON-RMA:LIVE:<RMA>
+  const privateMatch = str.match(/^PINGCON-RMA:(TEST|LIVE):(.+)$/i);
+  if (privateMatch) {
+    const scope = privateMatch[1].toUpperCase();
+    const rmaNumber = privateMatch[2].trim();
+    if (!rmaNumber) return null;
+    return {
+      rmaNumber,
+      qrMode: scope === 'TEST' ? 'test' : 'live',
+      isPrivatePayload: true
+    };
+  }
+
+  // Legacy URL or JSON or raw RMA string formats (fallback for older printed labels)
+  if (str.includes('rma=') || str.includes('rma_number=')) {
+    try {
+      const url = new URL(str.startsWith('http') ? str : `https://example.com/${str.replace(/^\/?/, '')}`);
+      const val = url.searchParams.get('rma') || url.searchParams.get('rma_number');
+      if (val) {
+        return {
+          rmaNumber: val.trim(),
+          qrMode: /^RMA-TEST-/i.test(val.trim()) ? 'test' : 'live',
+          isPrivatePayload: false
+        };
+      }
+    } catch { }
+  }
+
+  if (str.startsWith('{') && str.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(str);
+      if (parsed.rma) {
+        const clean = String(parsed.rma).trim();
+        return {
+          rmaNumber: clean,
+          qrMode: (parsed.mode === 'test' || /^RMA-TEST-/i.test(clean)) ? 'test' : 'live',
+          isPrivatePayload: true
+        };
+      }
+    } catch { }
+  }
+
+  if (/^RMA-TEST-/i.test(str) || /^RMA-\d{4}-\d+/i.test(str) || /^RMA-/i.test(str)) {
+    return {
+      rmaNumber: str,
+      qrMode: /^RMA-TEST-/i.test(str) ? 'test' : 'live',
+      isPrivatePayload: false
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Extracts a Google Drive folder ID from either a raw folder ID or folder URL.
+ */
+export function extractGoogleDriveFolderId(folderUrlOrId) {
+  if (!folderUrlOrId) return null;
+  const s = String(folderUrlOrId).trim();
+  if (!s) return null;
+  const match = s.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) return match[1];
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(s) && !s.includes('http')) return s;
+  return null;
 }
 
 /**
@@ -869,5 +1026,93 @@ export function getTrashDaysRemaining(item) {
   const diffMs = targetDate - Date.now();
   const days = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
   return days > 0 ? days : 0;
+}
+
+/**
+ * Resolve piece conversion & monetary totals for a single RMA item or manifest child.
+ * Converts case/box/carton quantities to pieces using pieces_per_case (or pack-size patterns like x24).
+ */
+export function computeItemPiecesAndValue(item, catalogProducts = []) {
+  if (!item) {
+    return {
+      rawQty: 0,
+      unitName: 'pc',
+      isCaseUnit: false,
+      piecesPerCase: 1,
+      totalPieces: 0,
+      recordedUnitPrice: 0,
+      pricePerPiece: 0,
+      lineTotal: 0
+    };
+  }
+
+  const rawQty = Math.max(0, Number(item.quantity) || 0);
+  const unitName = String(item.unit_name || item.unit || 'pc').trim() || 'pc';
+  const unitLower = unitName.toLowerCase();
+  const isCaseUnit =
+    /^(case|cs|box|bx|ctn|carton|pack|pk|tray|sack|bag|bndl|bundle)s?$/i.test(unitLower) ||
+    unitLower.includes('case') ||
+    unitLower.includes('carton') ||
+    unitLower.includes('box') ||
+    unitLower.includes('pack');
+
+  let matchedProduct = null;
+  if (Array.isArray(catalogProducts) && catalogProducts.length > 0) {
+    const itemBc = String(item.barcode || '').trim();
+    const itemSku = String(item.code || item.sku || '').trim();
+    matchedProduct = catalogProducts.find((p) => (
+      (itemBc && String(p.barcode || '').trim() === itemBc) ||
+      (itemSku && String(p.code || p.sku || '').trim() === itemSku)
+    )) || null;
+  }
+
+  let piecesPerCase = Number(
+    item.pieces_per_case ||
+    item.piecesPerCase ||
+    matchedProduct?.pieces_per_case ||
+    matchedProduct?.piecesPerCase ||
+    0
+  );
+
+  if (!piecesPerCase || piecesPerCase <= 0) {
+    const nameStr = String(item.name || item.product_name || matchedProduct?.name || '');
+    const packMatch =
+      nameStr.match(/\bx\s*(\d+)\b/i) ||
+      nameStr.match(/(\d+)\s*(?:pcs|pc|s)\b/i);
+    if (packMatch) {
+      const parsed = parseInt(packMatch[1], 10);
+      if (Number.isFinite(parsed) && parsed > 1) piecesPerCase = parsed;
+    }
+  }
+  if (!piecesPerCase || piecesPerCase <= 0) piecesPerCase = 1;
+
+  const totalPieces = isCaseUnit && piecesPerCase > 1
+    ? rawQty * piecesPerCase
+    : rawQty;
+
+  const recordedUnitPrice = Number(
+    item.price_with_vat ??
+    item.price ??
+    item.unit_price ??
+    matchedProduct?.price_with_vat ??
+    matchedProduct?.price ??
+    0
+  ) || 0;
+
+  const lineTotal = Number((rawQty * recordedUnitPrice).toFixed(2));
+  const pricePerPiece = totalPieces > 0
+    ? Number((lineTotal / totalPieces).toFixed(4))
+    : recordedUnitPrice;
+
+  return {
+    rawQty,
+    unitName,
+    isCaseUnit,
+    piecesPerCase,
+    totalPieces,
+    recordedUnitPrice,
+    pricePerPiece,
+    lineTotal
+  };
 }
 

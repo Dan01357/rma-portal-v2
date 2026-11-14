@@ -14,12 +14,21 @@ import {
 
 /**
  * Safe test mode resolution:
- * Accessible to authorized staff (Super Admin, Admin, Inventory Staff).
- * Anonymous public reporters are ALWAYS Live.
+ * Accessible to authorized staff (Super Admin, Admin, Inventory Staff)
+ * OR an invited reporter operating inside a verified Test Mode Sandbox link (`gateSession.is_test === true`).
+ * Regular live public reporters are ALWAYS Live.
  */
 function isSuperAdminTestModeActive() {
   if (typeof window === 'undefined') return false;
   try {
+    const rawGate = localStorage.getItem('rma_portal_gate_session');
+    if (rawGate) {
+      const parsedGate = JSON.parse(rawGate);
+      if (parsedGate?.is_test === true) {
+        const notExpired = !parsedGate.expires_at || new Date(parsedGate.expires_at) > new Date();
+        if (notExpired) return true;
+      }
+    }
     const user = authService.getCurrentUser();
     if (!user || !['super_admin', 'admin', 'inventory_staff'].includes(user.role)) {
       return false;
@@ -314,6 +323,49 @@ export const catalogService = {
         return JSON.parse(errText);
       } catch (e) {
         throw new Error(`Paperwork inspection error (${res.status}): ${errText}`);
+      }
+    }
+
+    return await res.json();
+  },
+
+  /**
+   * Inspect Driver's License / ID photo using Gemini Flash OCR via /api/upload-photo?action=inspect-license
+   */
+  async inspectDriverLicense(fileOrBase64, signal) {
+    let base64Data = '';
+    let mimeType = 'image/jpeg';
+
+    if (typeof fileOrBase64 === 'string') {
+      base64Data = fileOrBase64;
+      if (fileOrBase64.startsWith('data:image/')) {
+        mimeType = fileOrBase64.substring(5, fileOrBase64.indexOf(';'));
+      }
+    } else if (fileOrBase64 instanceof File || fileOrBase64 instanceof Blob) {
+      const compressed = await this.compressImage(fileOrBase64, 1280, 0.8);
+      mimeType = compressed.type || fileOrBase64.type || 'image/jpeg';
+      base64Data = await this.fileToBase64(compressed);
+    } else {
+      throw new Error('Invalid image provided for license OCR.');
+    }
+
+    const res = await fetch('/api/upload-photo?action=inspect-license', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'inspect-license',
+        fileData: base64Data,
+        mimeType
+      }),
+      signal
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      try {
+        return JSON.parse(errText);
+      } catch {
+        throw new Error(`License OCR error (${res.status}): ${errText}`);
       }
     }
 
@@ -1249,7 +1301,8 @@ export const catalogService = {
     total_quantity = null,
     is_parent = false,
     parent_rma_id = null,
-    condition_grade = null
+    condition_grade = null,
+    notes = null
   }) {
     const hasItems = Array.isArray(items) && items.length > 0;
     const isBatch = hasItems && items.length > 1;
@@ -1522,9 +1575,15 @@ export const catalogService = {
 
     // 2. Dispatch automated notification email RIGHT AWAY for every reported RMA!
     // Rule:
-    // - Test Mode is strictly accessible ONLY if user is logged in as Super Admin.
-    // - For all anonymous public reporters or non-super-admins, submissions are ALWAYS Live.
-    const isTestActive = isSuperAdminTestModeActive();
+    // - Test Mode is strictly accessible ONLY if user is logged in as Super Admin or ticket/invite is an explicit Sandbox record.
+    // - For all anonymous public reporters or non-super-admins on Live links, submissions are ALWAYS Live.
+    const isTestActive = Boolean(
+      isSuperAdminTestModeActive() ||
+      (rmaNumber && /^RMA-TEST-/i.test(String(rmaNumber))) ||
+      String(notes || '').includes('[TEST_MODE]') ||
+      reportRow?.ai_document_metadata?.is_test === true ||
+      reportRow?.ai_document_metadata?.test_mode === true
+    );
     notificationService.sendRMANotification(finalReport, isTestActive).catch(err => {
       console.warn('Background RMA report notification notice:', err.message);
     });
@@ -1588,39 +1647,45 @@ export const catalogService = {
       updates.status = status;
     }
 
-    // 1. Fetch current record to resolve id, rma_number, and child items
-    let target = null;
-    try {
-      const getQuery = isNum 
-        ? supabase.from('rma_reports').select('*').eq('id', parseInt(cleanId, 10)).maybeSingle()
-        : supabase.from('rma_reports').select('*').eq('rma_number', cleanId).maybeSingle();
-      const { data } = await getQuery;
-      target = data;
-    } catch {}
-
-    const recordId = target?.id || (isNum ? parseInt(cleanId, 10) : null);
-    const rmaNum = target?.rma_number || (!isNum ? cleanId : null);
-
-    // If report has items JSON array, cascade rma_type and disposition to child items
-    if (target && Array.isArray(target.items) && target.items.length > 0) {
-      updates.items = target.items.map(it => ({
-        ...it,
-        rma_type: cleanType,
-        disposition: disposition || it.disposition || (cleanType === 'supplier_outbound' ? '1 - Pending Vendor Pickup' : '1- Pending Triage')
-      }));
-    }
-
+    // 1. Direct UPDATE without a preflight SELECT — avoids hanging when many requests are in-flight.
+    //    We already know the id or rma_number from the caller; the items-array cascade is handled
+    //    post-hoc from the returned row to keep the critical path fast.
     let query = supabase.from('rma_reports').update(updates);
-    if (recordId) {
-      query = query.eq('id', recordId);
+    if (isNum) {
+      query = query.eq('id', parseInt(cleanId, 10));
     } else {
-      query = query.eq('rma_number', rmaNum);
+      query = query.eq('rma_number', cleanId);
     }
 
-    const { data, error } = await query.select().single();
+    const updatePromise = query.select().single();
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('updateRMAType timed out after 20 s')), 20000)
+    );
+
+    const { data, error } = await Promise.race([updatePromise, timeoutPromise]);
     if (error) {
       console.error('Failed to update rma_type:', error);
       throw error;
+    }
+
+    const recordId = data?.id || (isNum ? parseInt(cleanId, 10) : null);
+    const rmaNum = data?.rma_number || (!isNum ? cleanId : null);
+
+    // Post-hoc: cascade rma_type into the JSON `items` array if present
+    if (data && Array.isArray(data.items) && data.items.length > 0) {
+      try {
+        const itemsUpdate = {
+          items: data.items.map(it => ({
+            ...it,
+            rma_type: cleanType,
+            disposition: disposition || it.disposition || (cleanType === 'supplier_outbound' ? '1 - Pending Vendor Pickup' : '1- Pending Triage')
+          }))
+        };
+        const itemsCascade = supabase.from('rma_reports').update(itemsUpdate).eq('id', data.id).select().single();
+        const itemsTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('items cascade timeout')), 5000));
+        const { data: updatedRow } = await Promise.race([itemsCascade, itemsTimeout]).catch(() => ({ data: null }));
+        if (updatedRow) Object.assign(data, updatedRow);
+      } catch {}
     }
 
     // 2. Cascade update to all child records in rma_reports sharing parent_rma_id or rma_number
@@ -1628,24 +1693,25 @@ export const catalogService = {
       const childUpdates = { rma_type: cleanType };
       if (disposition) childUpdates.disposition = disposition;
 
+      const cascadeOps = [];
       if (recordId) {
-        await supabase.from('rma_reports').update(childUpdates).eq('parent_rma_id', recordId);
+        cascadeOps.push(supabase.from('rma_reports').update(childUpdates).eq('parent_rma_id', recordId));
       }
       if (rmaNum) {
-        await supabase.from('rma_reports').update(childUpdates).eq('rma_number', rmaNum).neq('id', data.id);
+        cascadeOps.push(supabase.from('rma_reports').update(childUpdates).eq('rma_number', rmaNum).neq('id', data.id));
+      }
+      if (cascadeOps.length) {
+        await Promise.race([
+          Promise.allSettled(cascadeOps),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('child cascade timeout')), 5000))
+        ]).catch(() => {});
       }
     } catch (e) {
       console.warn('Notice cascading rma_type to child rma_reports:', e?.message);
     }
 
-    // 3. Cascade to child records in rma_items if table exists
-    try {
-      if (recordId) {
-        await supabase.from('rma_items').update({ disposition: disposition || undefined }).eq('rma_report_id', recordId);
-      }
-    } catch (e) {
-      console.warn('Notice cascading disposition to rma_items:', e?.message);
-    }
+    // 3. rma_items table stores line-item product metadata only (no disposition column in schema);
+    // disposition updates are persisted on parent and child rma_reports rows above.
 
     this.notifyChange('report-updated', { report: data });
     return data;
@@ -2348,7 +2414,7 @@ export const catalogService = {
       try {
         let findQ = supabase
           .from('rma_reports')
-          .select('id, rma_number, barcode, name, photos, proof_photos, photo_url, paperwork_photos, google_drive_folder_id, google_drive_folder_url')
+          .select('id, rma_number, barcode, name, photos, paperwork_photos, google_drive_folder_id, google_drive_folder_url')
           .limit(1);
         if (isNumericId) findQ = findQ.eq('id', id);
         else findQ = findQ.eq('rma_number', rmaNumber);
@@ -2496,7 +2562,7 @@ export const catalogService = {
       if (numericIds.length > 0) {
         const { data: dbRecords } = await supabase
           .from('rma_reports')
-          .select('id, rma_number, barcode, name, photos, paperwork_photos, proof_photos, photo_url, google_drive_folder_id, google_drive_folder_url')
+          .select('id, rma_number, barcode, name, photos, paperwork_photos, google_drive_folder_id, google_drive_folder_url')
           .in('id', numericIds);
         if (dbRecords && Array.isArray(dbRecords)) {
           dbRecords.forEach(harvestReportAssets);
@@ -2830,6 +2896,123 @@ export const catalogService = {
         console.warn(`[Auto-Purge Notice]: Failed to purge ${r.rma_number}:`, err);
       }
     }
+  },
+
+  /**
+   * Saves Simple 4-Option Supplier RTV Choice & Pickup Verification Metadata
+   * Handles supplier name assignment, disposition/status/bin auto-sync,
+   * Drive folder sync, and automatic 'picked_up' tagging when A4 handover form is finalized.
+   */
+  async saveSimpleSupplierRtvDisposition(report, payload = {}) {
+    const cleanId = (report?.id && /^\d+$/.test(String(report.id))) ? Number(report.id) : null;
+    const rmaNumber = report?.rma_number || report?.rmaNumber || null;
+    if (!cleanId && !rmaNumber) {
+      throw new Error('Missing RMA identifier to update.');
+    }
+
+    // Fetch latest row from Supabase so we never overwrite existing photos or metadata
+    let existing = report;
+    try {
+      let query = supabase.from('rma_reports').select('*');
+      if (cleanId) query = query.eq('id', cleanId);
+      else query = query.eq('rma_number', rmaNumber);
+      const { data } = await query.maybeSingle();
+      if (data) existing = data;
+    } catch {}
+
+    const existingMeta = (existing?.ai_document_metadata && typeof existing.ai_document_metadata === 'object')
+      ? { ...existing.ai_document_metadata }
+      : {};
+
+    const updatedMeta = {
+      ...existingMeta,
+      ...(payload.metadataPatch || {})
+    };
+
+    const nowIso = new Date().toISOString();
+    const updates = {
+      disposition: payload.disposition ?? existing?.disposition,
+      status: payload.status ?? existing?.status,
+      warehouse_location: payload.warehouse_location ?? existing?.warehouse_location,
+      inspected_by: payload.actorName || existing?.inspected_by || 'Staff',
+      inspected_at: nowIso,
+      ai_document_metadata: updatedMeta
+    };
+
+    if (payload.supplier_name && String(payload.supplier_name).trim()) {
+      updates.supplier_name = String(payload.supplier_name).trim();
+    }
+    if (payload.google_drive_folder_url) {
+      updates.google_drive_folder_url = payload.google_drive_folder_url;
+    }
+    if (payload.google_drive_folder_id) {
+      updates.google_drive_folder_id = payload.google_drive_folder_id;
+    }
+
+    // Append any newly uploaded pickup photos cleanly onto the report's photos array too
+    if (Array.isArray(payload.appendPhotoUrls) && payload.appendPhotoUrls.length > 0) {
+      const prevPhotos = Array.isArray(existing?.photos) ? existing.photos : [];
+      updates.photos = [...new Set([...prevPhotos, ...payload.appendPhotoUrls.filter(Boolean)])];
+    }
+
+    // Update manifest item array if batch manifest
+    if (Array.isArray(existing?.items) && existing.items.length > 0) {
+      updates.items = existing.items.map(it => ({
+        ...it,
+        ...(updates.supplier_name ? { supplier_name: updates.supplier_name, supplier: updates.supplier_name } : {}),
+        ...(payload.disposition ? { disposition: payload.disposition } : {}),
+        ...(payload.status ? { status: payload.status } : {})
+      }));
+    }
+
+    const existingAudit = Array.isArray(existing?.audit_trail) ? existing.audit_trail : [];
+    updates.audit_trail = [
+      ...existingAudit,
+      {
+        timestamp: nowIso,
+        action: payload.auditAction || 'SUPPLIER_RTV_WORKFLOW_UPDATE',
+        stage: String(updates.status || 'UNDER_INSPECTION').toUpperCase(),
+        actor: payload.actorName || 'Staff',
+        note: payload.auditNote || `Updated disposition to ${updates.disposition}`
+      }
+    ];
+
+    let updateQuery = supabase.from('rma_reports').update(updates);
+    if (cleanId) updateQuery = updateQuery.eq('id', cleanId);
+    else updateQuery = updateQuery.eq('rma_number', rmaNumber);
+
+    let { data: savedRow, error: updateErr } = await updateQuery.select().maybeSingle();
+    if (updateErr) {
+      const fallback = { ...updates };
+      const colMatch = updateErr.message.match(/Could not find the '([^']+)' column/i) ||
+        updateErr.message.match(/column rma_reports\.([a-zA-Z0-9_]+) does not exist/i);
+      if (colMatch && colMatch[1]) {
+        delete fallback[colMatch[1]];
+      }
+      delete fallback.google_drive_folder_id;
+      let retryQuery = supabase.from('rma_reports').update(fallback);
+      if (cleanId) retryQuery = retryQuery.eq('id', cleanId);
+      else retryQuery = retryQuery.eq('rma_number', rmaNumber);
+      const { data: retryData, error: retryErr } = await retryQuery.select().maybeSingle();
+      if (retryErr) throw retryErr;
+      savedRow = retryData;
+    }
+
+    // Sync child rows if any exist in rma_reports or rma_items
+    const targetParentId = cleanId || existing?.id;
+    if (targetParentId) {
+      try {
+        await supabase.from('rma_reports').update({
+          ...(updates.supplier_name ? { supplier_name: updates.supplier_name } : {}),
+          disposition: updates.disposition,
+          status: updates.status,
+          warehouse_location: updates.warehouse_location
+        }).eq('parent_rma_id', targetParentId);
+      } catch {}
+    }
+
+    this.notifyChange('triage-updated', { id: targetParentId, rmaNumber, status: updates.status });
+    return savedRow || { ...existing, ...updates };
   }
 };
 

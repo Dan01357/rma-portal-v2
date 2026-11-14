@@ -1,0 +1,5 @@
+[     446ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ https://localhost:5173/node_modules/.vite/deps/chunk-NXESFFTV.js?v=f0e76edb:21609
+[   13409ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://lschluviltzsknptwgrz.supabase.co/auth/v1/otp?redirect_to=https%3A%2F%2Flocalhost%3A5173%2Fadmin:1
+[   13411ms] [WARNING] [Supabase Auth] signInWithOtp notice: For security purposes, you can only request this after 46 seconds. @ https://localhost:5173/src/services/authService.js:517
+[   13415ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://localhost:5173/api/send-email:1
+[   13415ms] [LOG] [Direct SMTP] Fallback OTP email successfully dispatched to finance2@keysysincorporated.com @ https://localhost:5173/src/services/authService.js:557

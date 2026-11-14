@@ -5,3 +5,9 @@ dist
 .vercel
 scratch/
 video/
+
+.vercel
+.env*
+tests/.auth/
+playwright-report/
+test-results/

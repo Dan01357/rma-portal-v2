@@ -15,6 +15,7 @@ import {
   Layers
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { copyTextSafe } from '../utils/clipboard';
 
 const TARGET_SYSTEMS = [
   { id: 'primary', name: 'Primary System (Mine)', role: 'Internal Central System', badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' },
@@ -203,7 +204,7 @@ export default function ApiKeysManagementSection() {
 
   const handleCopySecret = () => {
     if (!revealedKey?.rawKey) return;
-    navigator.clipboard.writeText(revealedKey.rawKey);
+    copyTextSafe(revealedKey.rawKey);
     setHasCopied(true);
     setTimeout(() => setHasCopied(false), 3000);
   };
