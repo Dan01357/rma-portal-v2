@@ -132,6 +132,7 @@ import {
   normalizeWarehouseLocation,
   buildPortalQrPayload,
   parsePortalQrPayload,
+  playBeep,
   DEFECT_REASONS,
   getDocumentNumbers
 } from './utils/rmaHelpers';
@@ -758,83 +759,168 @@ export default function App() {
   const [simpleRtvWizard, setSimpleRtvWizard] = useState({ isOpen: false, report: null, initialMode: 'wizard' });
   const [pickupFormReport, setPickupFormReport] = useState(null);
   const [matrixExportModal, setMatrixExportModal] = useState({ isOpen: false, stream: 'customer_inbound', isTestMode: false });
+  const [portalScanAlert, setPortalScanAlert] = useState(null); // { type: 'error' | 'warning' | 'info', title: string, message: string }
 
   // Unified QR Scan Handler for in-app ScannerModal (with strict Test vs Live isolation + zero double OTP login)
   const handlePortalQrScanResult = async (rawCode) => {
-    const parsedQr = parsePortalQrPayload(rawCode);
-    if (!parsedQr?.rmaNumber) {
-      setBarcodeInput(rawCode);
-      return;
-    }
+    try {
+      const parsedQr = parsePortalQrPayload(rawCode);
+      if (!parsedQr?.rmaNumber) {
+        setPortalScanAlert(null);
+        setBarcodeInput(rawCode);
+        return;
+      }
 
-    const scannedRma = parsedQr.rmaNumber;
-    const hasAdminAuth = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin'));
-    const hasValidGate = Boolean(
-      gateSession &&
-      (gateSession.authorized_email || gateSession.stream_type === 'supplier_outbound') &&
-      (!gateSession.expires_at || new Date(gateSession.expires_at) > new Date())
-    );
+      const scannedRma = parsedQr.rmaNumber;
+      const hasAdminAuth = Boolean(currentUser && currentUser.is_active !== false);
+      const hasValidGate = Boolean(
+        gateSession &&
+        (gateSession.authorized_email || gateSession.stream_type === 'supplier_outbound') &&
+        (!gateSession.expires_at || new Date(gateSession.expires_at) > new Date())
+      );
 
-    if (!hasAdminAuth && !hasValidGate) {
-      playBeep('error');
-      showToast('🔒 Please enter the portal using your verified invite link or admin login to scan RMA QR stickers.', 'error');
-      return;
-    }
+      if (!hasAdminAuth && !hasValidGate) {
+        playBeep('error');
+        const msg = '🔒 Please enter the portal using your verified invite link or admin login to scan RMA QR stickers.';
+        setPortalScanAlert({ type: 'error', title: 'Portal Authorization Required', message: msg });
+        showToast(msg, 'error');
+        return;
+      }
 
-    const activeContextIsTest = isAdminView
-      ? (adminActiveTab === 'sandbox' || isTestMode)
-      : effectiveIsTestMode;
+      const activeContextIsTest = isAdminView
+        ? (adminActiveTab === 'sandbox' || isTestMode)
+        : effectiveIsTestMode;
 
-    // Resolve the actual report record first so legacy/unprefixed scans also honor Test vs Live isolation
-    let matchedReport = recentReportsList.find(
-      (r) => String(r.rma_number || r.rmaNumber || '').toUpperCase() === scannedRma.toUpperCase()
-    ) || null;
+      // Fast cross-mode security check for explicitly scoped payloads (PINGCON-RMA:TEST:... / PINGCON-RMA:LIVE:... / RMA-TEST-...)
+      const explicitQrIsTest = parsedQr.qrMode === 'test' || scannedRma.toUpperCase().startsWith('RMA-TEST-');
+      if (explicitQrIsTest && !activeContextIsTest) {
+        playBeep('error');
+        const msg = '🔒 Security Block: This is a TEST MODE QR sticker and cannot be scanned inside Live Production!';
+        setPortalScanAlert({ type: 'error', title: 'Test Mode QR Blocked in Live Mode', message: msg });
+        showToast(msg, 'error');
+        return;
+      }
+      if (parsedQr.isPrivatePayload && !explicitQrIsTest && activeContextIsTest) {
+        playBeep('error');
+        const msg = '🔒 Security Block: This is a LIVE PRODUCTION QR sticker and cannot be scanned inside Test Mode Sandbox!';
+        setPortalScanAlert({ type: 'error', title: 'Live Mode QR Blocked in Test Mode', message: msg });
+        showToast(msg, 'error');
+        return;
+      }
 
-    if (!matchedReport) {
-      try {
-        const { data } = await supabase
+      // Helper: query Supabase without .maybeSingle() because batch manifests can have multiple rows per rma_number
+      const fetchParentRmaFromDb = async () => {
+        const { data, error } = await supabase
           .from('rma_reports')
           .select('*')
           .eq('rma_number', scannedRma)
-          .maybeSingle();
-        if (data) matchedReport = data;
-      } catch { }
-    }
+          .order('is_parent', { ascending: false })
+          .order('id', { ascending: true })
+          .limit(10);
+        if (error) throw error;
+        if (!Array.isArray(data) || data.length === 0) return null;
+        return (
+          data.find((r) => !isTrashedRecord(r) && r.parent_rma_id == null && r.is_parent) ||
+          data.find((r) => !isTrashedRecord(r) && r.parent_rma_id == null) ||
+          data.find((r) => !isTrashedRecord(r)) ||
+          data[0]
+        );
+      };
 
-    const qrIsTest =
-      parsedQr.qrMode === 'test' ||
-      Boolean(matchedReport && isTestRecord(matchedReport)) ||
-      scannedRma.toUpperCase().startsWith('RMA-TEST-');
+      // Check local state first, preferring a persisted DB row with numeric id (not an optimistic pre-insert row)
+      const localMatches = recentReportsList.filter(
+        (r) => String(r.rma_number || r.rmaNumber || '').toUpperCase() === scannedRma.toUpperCase()
+      );
+      let matchedReport =
+        localMatches.find((r) => /^\d+$/.test(String(r.id || '')) && !isTrashedRecord(r) && r.parent_rma_id == null && r.is_parent) ||
+        localMatches.find((r) => /^\d+$/.test(String(r.id || '')) && !isTrashedRecord(r) && r.parent_rma_id == null) ||
+        localMatches.find((r) => /^\d+$/.test(String(r.id || ''))) ||
+        null;
 
-    if (qrIsTest && !activeContextIsTest) {
+      const hasOptimisticPending = Boolean(
+        localMatches.length > 0 ||
+        (submitSuccessReport && String(submitSuccessReport.rma_number || submitSuccessReport.rmaNumber || '').toUpperCase() === scannedRma.toUpperCase())
+      );
+
+      if (!matchedReport) {
+        const maxAttempts = hasOptimisticPending ? 12 : 4;
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+          try {
+            const dbRow = await fetchParentRmaFromDb();
+            if (dbRow) {
+              matchedReport = dbRow;
+              break;
+            }
+          } catch (lookupErr) {
+            console.warn('QR RMA DB lookup attempt failed:', lookupErr?.message || lookupErr);
+          }
+          if (attempt < maxAttempts - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 450));
+          }
+        }
+      }
+
+      const qrIsTest =
+        explicitQrIsTest ||
+        Boolean(matchedReport && isTestRecord(matchedReport));
+
+      if (qrIsTest && !activeContextIsTest) {
+        playBeep('error');
+        const msg = '🔒 Security Block: This is a TEST MODE QR sticker and cannot be scanned inside Live Production!';
+        setPortalScanAlert({ type: 'error', title: 'Test Mode QR Blocked in Live Mode', message: msg });
+        showToast(msg, 'error');
+        return;
+      }
+      if (!qrIsTest && activeContextIsTest) {
+        playBeep('error');
+        const msg = '🔒 Security Block: This is a LIVE PRODUCTION QR sticker and cannot be scanned inside Test Mode Sandbox!';
+        setPortalScanAlert({ type: 'error', title: 'Live Mode QR Blocked in Test Mode', message: msg });
+        showToast(msg, 'error');
+        return;
+      }
+
+      if (!matchedReport) {
+        playBeep('error');
+        const msg = `RMA "${scannedRma}" was not found in the database yet. If you just submitted it, wait a moment and scan again.`;
+        setPortalScanAlert({ type: 'warning', title: 'RMA Record Not Found', message: msg });
+        showToast(msg, 'warning');
+        return;
+      }
+
+      if (isTrashedRecord(matchedReport)) {
+        playBeep('error');
+        const msg = `RMA "${scannedRma}" is currently in the 30-Day Trash Bin and must be restored before processing.`;
+        setPortalScanAlert({ type: 'warning', title: 'RMA Record In Trash', message: msg });
+        showToast(msg, 'warning');
+        return;
+      }
+
+      setPortalScanAlert(null);
+      playBeep('success');
+
+      // On the Public Portal ('/'), scanning any valid generated RMA QR immediately opens the 4-option wizard
+      if (!isAdminView) {
+        setSimpleRtvWizard({ isOpen: true, report: matchedReport, initialMode: 'wizard' });
+        return;
+      }
+
+      const isSupplierRtvItem = matchedReport.rma_type === 'supplier_outbound';
+      if (isSupplierRtvItem) {
+        setSimpleRtvWizard({ isOpen: true, report: matchedReport, initialMode: 'wizard' });
+      } else if (hasAdminAuth) {
+        setQuickRmaNumber(scannedRma);
+        setIsQuickRmaModalOpen(true);
+      } else {
+        const msg = 'Customer Hub RMA QR editing is restricted to Warehouse Admins.';
+        setPortalScanAlert({ type: 'warning', title: 'Admin Access Required', message: msg });
+        showToast(msg, 'warning');
+      }
+    } catch (err) {
+      console.error('QR scan processing error:', err);
       playBeep('error');
-      showToast('🔒 Security Block: This is a TEST MODE QR sticker and cannot be scanned inside Live Production!', 'error');
-      return;
-    }
-    if (!qrIsTest && activeContextIsTest) {
-      playBeep('error');
-      showToast('🔒 Security Block: This is a LIVE PRODUCTION QR sticker and cannot be scanned inside Test Mode Sandbox!', 'error');
-      return;
-    }
-
-    if (!matchedReport) {
-      playBeep('error');
-      showToast(`RMA "${scannedRma}" was not found in database yet.`, 'warning');
-      return;
-    }
-
-    playBeep('success');
-    const isSupplierRtvItem =
-      matchedReport.rma_type === 'supplier_outbound' ||
-      (!isAdminView && isSupplierRtvPortal);
-
-    if (isSupplierRtvItem) {
-      setSimpleRtvWizard({ isOpen: true, report: matchedReport, initialMode: 'wizard' });
-    } else if (hasAdminAuth) {
-      setQuickRmaNumber(scannedRma);
-      setIsQuickRmaModalOpen(true);
-    } else {
-      showToast('Customer Hub RMA QR editing is restricted to Warehouse Admins.', 'warning');
+      const msg = `Unable to open scanned RMA QR: ${err?.message || 'Unexpected error occurred.'}`;
+      setPortalScanAlert({ type: 'error', title: 'QR Scan Error', message: msg });
+      showToast(msg, 'error');
     }
   };
 
@@ -2880,6 +2966,33 @@ export default function App() {
               </div>
             </div>
 
+            {/* High-Visibility QR Scan Feedback / Cross-Mode Security Alert Banner */}
+            {portalScanAlert && (
+              <div
+                role="alert"
+                className={`p-4 rounded-2xl border-2 shadow-sm flex items-start justify-between gap-3 animate-in fade-in slide-in-from-top-2 ${
+                  portalScanAlert.type === 'error'
+                    ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-400 dark:border-rose-700 text-rose-900 dark:text-rose-100'
+                    : 'bg-amber-50 dark:bg-amber-950/60 border-amber-400 dark:border-amber-700 text-amber-900 dark:text-amber-100'
+                }`}
+              >
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <AlertTriangle className={`w-5 h-5 shrink-0 mt-0.5 ${portalScanAlert.type === 'error' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'}`} />
+                  <div className="space-y-0.5 text-xs">
+                    <div className="font-black uppercase tracking-wider">{portalScanAlert.title}</div>
+                    <p className="font-semibold leading-relaxed">{portalScanAlert.message}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPortalScanAlert(null)}
+                  aria-label="Dismiss scan alert"
+                  className="p-1 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 shrink-0 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
 
             {/* Super Admin Status, Test Mode & Destination Hub Control Banner on Public Portal:
                 Only displayed if the active user is an authenticated Super Admin.
@@ -4799,9 +4912,9 @@ export default function App() {
       <ScannerModal
         isOpen={isScannerOpen}
         onClose={() => setIsScannerOpen(false)}
-        onScanSuccess={(code) => {
+        onScanSuccess={async (code) => {
           setIsScannerOpen(false);
-          handlePortalQrScanResult(code);
+          await handlePortalQrScanResult(code);
         }}
       />
 
@@ -5407,12 +5520,18 @@ export default function App() {
 
       {/* Toast Alert Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-3">
+        <div role={toastMessage.type === 'error' || toastMessage.type === 'warning' ? 'alert' : 'status'} className="fixed bottom-6 right-6 z-[120] animate-in fade-in slide-in-from-bottom-3">
           <div className={`px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2 ${toastMessage.type === 'error'
             ? 'bg-rose-50 border-rose-300 text-rose-800'
-            : 'bg-slate-900 border-slate-700 text-white'
+            : toastMessage.type === 'warning'
+              ? 'bg-amber-50 border-amber-300 text-amber-900'
+              : 'bg-slate-900 border-slate-700 text-white'
             }`}>
-            <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+            {toastMessage.type === 'error' || toastMessage.type === 'warning' ? (
+              <AlertTriangle className={`w-4 h-4 shrink-0 ${toastMessage.type === 'error' ? 'text-rose-600' : 'text-amber-600'}`} />
+            ) : (
+              <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+            )}
             <span>{toastMessage.text}</span>
           </div>
         </div>

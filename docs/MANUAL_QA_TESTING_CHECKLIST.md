@@ -1772,6 +1772,42 @@ Each test scenario defines:
 
 ---
 
+## Phase 23: Public Portal QR Scanner -> 4-Option Wizard Routing & Strict Live/Test Isolation
+
+- [ ] **TC-P23-01 (Live Mode — Public Portal QR Scanner Opens 4-Option Wizard & Persists Choices)**
+  * **Location**: Public Portal (`/`) with **Test Mode: OFF** (`🟢 Live Delivery Mode Active`) or Live Invite Session
+  * **Action**:
+    1. Submit a return report in **Live Mode** (single item or multi-item batch manifest) to generate a Live RMA QR (`PINGCON-RMA:LIVE:RMA-2026-...`).
+    2. Click **"Scan RMA QR"** (`ScannerModal`) and scan the generated Live QR sticker (or enter `PINGCON-RMA:LIVE:<RMA>`, raw `RMA-...`, or `?rma=...` in the scanner's manual/USB input).
+    3. Confirm the scanner modal closes cleanly without errors and `SimpleSupplierRtvWizardModal` opens immediately displaying all 4 options:
+       - `Return to supplier for Debit Claim` (`supplier_credit`)
+       - `Return to supplier for Replacement / Exchange` (`supplier_exchange`)
+       - `Throw Away / Dispose (Scrap)` (`scrap`)
+       - `Put Back on Good Shelf (Restock)` (`restock_good`)
+    4. Execute each option (including **Save Choice Only** and **Driver Is Here — Upload Photos & Print A4** with 5 pickup photos + `SupplierPickupFormModal`) and verify Supabase saves cleanly with HTTP 200 and updates the Live Hubs.
+  * **Expected Behavior**: Scanner stops the camera cleanly, closes, and immediately opens the 4-option wizard without silent failures, HTTP 406 `.maybeSingle()` errors on batch manifests, or HTTP 400 status check-constraint errors.
+
+- [ ] **TC-P23-02 (Test Mode — Public Portal QR Scanner Opens 4-Option Wizard & Preserves Sandbox Isolation)**
+  * **Location**: Public Portal (`/`) with **Test Mode: ON** (`🧪 Super Admin Sandbox Active`) or Test Invite Session
+  * **Action**:
+    1. Submit a return report in **Test Mode** to generate a Test RMA QR (`PINGCON-RMA:TEST:RMA-TEST-...`).
+    2. Click **"Scan RMA QR"** (`ScannerModal`) and scan the generated Test QR payload (`PINGCON-RMA:TEST:<RMA-TEST-...>`).
+    3. Confirm the scanner closes and `SimpleSupplierRtvWizardModal` opens with the **`🧪 Test Mode`** badge and all 4 options visible.
+    4. Save a choice (e.g., `scrap`, `restock_good`, `supplier_credit`, or `supplier_exchange`) and verify the record remains tagged as test (`RMA-TEST-`, `[TEST_MODE]` in `notes`, `ai_document_metadata.is_test === true`) and appears strictly inside **🧪 Test Mode Sandbox** (never in Live Hubs).
+  * **Expected Behavior**: All 4 wizard options persist cleanly in Test Mode with zero console/network errors and complete Sandbox isolation.
+
+- [ ] **TC-P23-03 (Cross-Mode QR Security Block & High-Visibility Error Alerts)**
+  * **Location**: Public Portal (`/`) `ScannerModal`
+  * **Action**:
+    1. While in **Live Mode** (`Test Mode: OFF`), open **"Scan RMA QR"** and scan a **Test Mode** QR sticker (`PINGCON-RMA:TEST:RMA-TEST-...`).
+    2. Switch to **Test Mode** (`Test Mode: ON`), open **"Scan RMA QR"** and scan a **Live Mode** QR sticker (`PINGCON-RMA:LIVE:RMA-...`).
+    3. Scan an unknown/non-existent RMA code (`PINGCON-RMA:TEST:RMA-TEST-2026-9999-XXXX`).
+  * **Expected Behavior**:
+    1. Cross-mode scans are strictly blocked without opening the 4-option wizard, displaying a high-visibility red **`role="alert"`** banner and error toast explaining the Live vs Test security block.
+    2. Unknown RMA codes display a clear visible **"RMA Record Not Found"** warning alert rather than silently closing with no feedback.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |

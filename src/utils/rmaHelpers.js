@@ -565,6 +565,8 @@ export function formatLifecycleStage(status, item = null) {
       return { label: '8- Rejected / Invalid Claim', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
     case 'vendor_claimed':
       return { label: 'RTV Claimed', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' };
+    case 'triaged':
+      return { label: 'Triaged / Staged', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-300 dark:border-amber-700' };
     case 'pending_admin_details':
       return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
     default:
@@ -918,7 +920,7 @@ export function parsePortalQrPayload(rawText) {
   const str = String(rawText).trim();
 
   // Preferred internal format: PINGCON-RMA:TEST:<RMA> or PINGCON-RMA:LIVE:<RMA>
-  const privateMatch = str.match(/^PINGCON-RMA:(TEST|LIVE):(.+)$/i);
+  const privateMatch = str.match(/^PINGCON-RMA:\s*(TEST|LIVE)\s*:\s*(.+)$/i);
   if (privateMatch) {
     const scope = privateMatch[1].toUpperCase();
     const rmaNumber = privateMatch[2].trim();

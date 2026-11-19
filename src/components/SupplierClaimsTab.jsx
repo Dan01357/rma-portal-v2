@@ -239,7 +239,7 @@ export default function SupplierClaimsTab({
       const manifestChildren = isManifest ? getReportManifestItems(r, reportsList) : [];
       const hasRtvChild = manifestChildren.some(c => {
         const cDisp = String(c.disposition || '').toLowerCase();
-        return c.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+        return c.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor') || cDisp.includes('supplier_credit') || cDisp.includes('supplier_exchange');
       });
 
       if (!isExplicitSupplierOutbound && !hasRtvChild) {
@@ -249,7 +249,7 @@ export default function SupplierClaimsTab({
         }
 
         // Must strictly have an RTV disposition
-        const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor');
+        const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor') || disp.includes('supplier_credit') || disp.includes('supplier_exchange');
         if (!isRtvDisposition) {
           return;
         }
@@ -266,8 +266,8 @@ export default function SupplierClaimsTab({
             return;
           }
           // If the parent manifest wasn't explicitly supplier_outbound or RTV, require the child itself to be RTV
-          const isParentRtvOrSupplier = isExplicitSupplierOutbound || disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor');
-          const isChildRtvOrSupplier = child.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+          const isParentRtvOrSupplier = isExplicitSupplierOutbound || disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor') || disp.includes('supplier_credit') || disp.includes('supplier_exchange');
+          const isChildRtvOrSupplier = child.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor') || cDisp.includes('supplier_credit') || cDisp.includes('supplier_exchange');
           if (!isParentRtvOrSupplier && !isChildRtvOrSupplier) {
             return;
           }

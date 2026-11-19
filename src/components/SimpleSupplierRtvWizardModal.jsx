@@ -265,14 +265,16 @@ export default function SimpleSupplierRtvWizardModal({
 
   const handleSaveSimpleDecision = async (optionId, waitOnly = false) => {
     setErrorMsg('');
+    const opt = FOUR_OPTIONS.find((o) => o.id === optionId);
+    if (!opt) return;
+
     const cleanSupplier = supplierName.trim();
-    if (!cleanSupplier) {
+    if (opt.needsPickupForm && !cleanSupplier) {
       setErrorMsg('Please type or choose the Supplier Company Name first.');
       return;
     }
 
-    const opt = FOUR_OPTIONS.find((o) => o.id === optionId);
-    if (!opt) return;
+    const effectiveSupplier = cleanSupplier || activeReport.supplier_name || 'Pending Assignment';
 
     // If Debit Claim or Replacement and staff chose "Driver Is Here Now"
     if (opt.needsPickupForm && !waitOnly) {
@@ -298,7 +300,7 @@ export default function SimpleSupplierRtvWizardModal({
         disposition: optionId,
         status: nextStatus,
         warehouse_location: nextLocation,
-        supplier_name: cleanSupplier,
+        supplier_name: effectiveSupplier,
         actorName,
         auditAction: 'SIMPLE_SUPPLIER_RTV_DECISION',
         auditNote: `Staff selected "${opt.title}"${waitOnly ? ' (waiting for supplier driver)' : ''}`,

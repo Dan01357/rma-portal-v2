@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-14T09:00:55.190Z
+Generated At: 2026-11-19T04:27:56.574Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -171,7 +171,8 @@ rma-portal-v2/
 │   │   ├── 02-admin-catalog-invites.spec.js
 │   │   ├── 03-hubs-and-sandbox.spec.js
 │   │   ├── 04-quick-processing-widgets.spec.js
-│   │   └── 05-credit-memos-settings.spec.js
+│   │   ├── 05-credit-memos-settings.spec.js
+│   │   └── 06-portal-qr-scanner-wizard.spec.js
 ├── video/
 │   │   ├── watch this 1.mp4
 │   │   ├── watch this 2.mp4
@@ -4185,6 +4186,42 @@ Each test scenario defines:
     2. Compare **Supplier RTV** (Live) column headers, row layouts, manifest drawer (`colSpan=12`), and action toolbars against **🧪 Test Mode Sandbox -> 🚚 Sandbox Supplier RTVs**, specifically verifying the new dedicated **QR** column header and clickable `<QrCode />` button in every row.
     3. Click the `<QrCode />` button in both Live Supplier RTV and Sandbox Supplier RTV rows to verify `ReturnQRModal` opens immediately with the matching QR sticker and Print button.
   * **Expected Behavior**: Both Customer Hubs render via shared `CustomerHubTab`, both Supplier RTV views render via shared `SupplierClaimsTab`, and both Live & Test Supplier RTV tables include a functional **QR** column/button.
+
+---
+
+## Phase 23: Public Portal QR Scanner -> 4-Option Wizard Routing & Strict Live/Test Isolation
+
+- [ ] **TC-P23-01 (Live Mode — Public Portal QR Scanner Opens 4-Option Wizard & Persists Choices)**
+  * **Location**: Public Portal (`/`) with **Test Mode: OFF** (`🟢 Live Delivery Mode Active`) or Live Invite Session
+  * **Action**:
+    1. Submit a return report in **Live Mode** (single item or multi-item batch manifest) to generate a Live RMA QR (`PINGCON-RMA:LIVE:RMA-2026-...`).
+    2. Click **"Scan RMA QR"** (`ScannerModal`) and scan the generated Live QR sticker (or enter `PINGCON-RMA:LIVE:<RMA>`, raw `RMA-...`, or `?rma=...` in the scanner's manual/USB input).
+    3. Confirm the scanner modal closes cleanly without errors and `SimpleSupplierRtvWizardModal` opens immediately displaying all 4 options:
+       - `Return to supplier for Debit Claim` (`supplier_credit`)
+       - `Return to supplier for Replacement / Exchange` (`supplier_exchange`)
+       - `Throw Away / Dispose (Scrap)` (`scrap`)
+       - `Put Back on Good Shelf (Restock)` (`restock_good`)
+    4. Execute each option (including **Save Choice Only** and **Driver Is Here — Upload Photos & Print A4** with 5 pickup photos + `SupplierPickupFormModal`) and verify Supabase saves cleanly with HTTP 200 and updates the Live Hubs.
+  * **Expected Behavior**: Scanner stops the camera cleanly, closes, and immediately opens the 4-option wizard without silent failures, HTTP 406 `.maybeSingle()` errors on batch manifests, or HTTP 400 status check-constraint errors.
+
+- [ ] **TC-P23-02 (Test Mode — Public Portal QR Scanner Opens 4-Option Wizard & Preserves Sandbox Isolation)**
+  * **Location**: Public Portal (`/`) with **Test Mode: ON** (`🧪 Super Admin Sandbox Active`) or Test Invite Session
+  * **Action**:
+    1. Submit a return report in **Test Mode** to generate a Test RMA QR (`PINGCON-RMA:TEST:RMA-TEST-...`).
+    2. Click **"Scan RMA QR"** (`ScannerModal`) and scan the generated Test QR payload (`PINGCON-RMA:TEST:<RMA-TEST-...>`).
+    3. Confirm the scanner closes and `SimpleSupplierRtvWizardModal` opens with the **`🧪 Test Mode`** badge and all 4 options visible.
+    4. Save a choice (e.g., `scrap`, `restock_good`, `supplier_credit`, or `supplier_exchange`) and verify the record remains tagged as test (`RMA-TEST-`, `[TEST_MODE]` in `notes`, `ai_document_metadata.is_test === true`) and appears strictly inside **🧪 Test Mode Sandbox** (never in Live Hubs).
+  * **Expected Behavior**: All 4 wizard options persist cleanly in Test Mode with zero console/network errors and complete Sandbox isolation.
+
+- [ ] **TC-P23-03 (Cross-Mode QR Security Block & High-Visibility Error Alerts)**
+  * **Location**: Public Portal (`/`) `ScannerModal`
+  * **Action**:
+    1. While in **Live Mode** (`Test Mode: OFF`), open **"Scan RMA QR"** and scan a **Test Mode** QR sticker (`PINGCON-RMA:TEST:RMA-TEST-...`).
+    2. Switch to **Test Mode** (`Test Mode: ON`), open **"Scan RMA QR"** and scan a **Live Mode** QR sticker (`PINGCON-RMA:LIVE:RMA-...`).
+    3. Scan an unknown/non-existent RMA code (`PINGCON-RMA:TEST:RMA-TEST-2026-9999-XXXX`).
+  * **Expected Behavior**:
+    1. Cross-mode scans are strictly blocked without opening the 4-option wizard, displaying a high-visibility red **`role="alert"`** banner and error toast explaining the Live vs Test security block.
+    2. Unknown RMA codes display a clear visible **"RMA Record Not Found"** warning alert rather than silently closing with no feedback.
 
 ---
 
@@ -10906,6 +10943,7 @@ import {
   normalizeWarehouseLocation,
   buildPortalQrPayload,
   parsePortalQrPayload,
+  playBeep,
   DEFECT_REASONS,
   getDocumentNumbers
 } from './utils/rmaHelpers';
@@ -11532,83 +11570,168 @@ export default function App() {
   const [simpleRtvWizard, setSimpleRtvWizard] = useState({ isOpen: false, report: null, initialMode: 'wizard' });
   const [pickupFormReport, setPickupFormReport] = useState(null);
   const [matrixExportModal, setMatrixExportModal] = useState({ isOpen: false, stream: 'customer_inbound', isTestMode: false });
+  const [portalScanAlert, setPortalScanAlert] = useState(null); // { type: 'error' | 'warning' | 'info', title: string, message: string }
 
   // Unified QR Scan Handler for in-app ScannerModal (with strict Test vs Live isolation + zero double OTP login)
   const handlePortalQrScanResult = async (rawCode) => {
-    const parsedQr = parsePortalQrPayload(rawCode);
-    if (!parsedQr?.rmaNumber) {
-      setBarcodeInput(rawCode);
-      return;
-    }
+    try {
+      const parsedQr = parsePortalQrPayload(rawCode);
+      if (!parsedQr?.rmaNumber) {
+        setPortalScanAlert(null);
+        setBarcodeInput(rawCode);
+        return;
+      }
 
-    const scannedRma = parsedQr.rmaNumber;
-    const hasAdminAuth = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin'));
-    const hasValidGate = Boolean(
-      gateSession &&
-      (gateSession.authorized_email || gateSession.stream_type === 'supplier_outbound') &&
-      (!gateSession.expires_at || new Date(gateSession.expires_at) > new Date())
-    );
+      const scannedRma = parsedQr.rmaNumber;
+      const hasAdminAuth = Boolean(currentUser && currentUser.is_active !== false);
+      const hasValidGate = Boolean(
+        gateSession &&
+        (gateSession.authorized_email || gateSession.stream_type === 'supplier_outbound') &&
+        (!gateSession.expires_at || new Date(gateSession.expires_at) > new Date())
+      );
 
-    if (!hasAdminAuth && !hasValidGate) {
-      playBeep('error');
-      showToast('🔒 Please enter the portal using your verified invite link or admin login to scan RMA QR stickers.', 'error');
-      return;
-    }
+      if (!hasAdminAuth && !hasValidGate) {
+        playBeep('error');
+        const msg = '🔒 Please enter the portal using your verified invite link or admin login to scan RMA QR stickers.';
+        setPortalScanAlert({ type: 'error', title: 'Portal Authorization Required', message: msg });
+        showToast(msg, 'error');
+        return;
+      }
 
-    const activeContextIsTest = isAdminView
-      ? (adminActiveTab === 'sandbox' || isTestMode)
-      : effectiveIsTestMode;
+      const activeContextIsTest = isAdminView
+        ? (adminActiveTab === 'sandbox' || isTestMode)
+        : effectiveIsTestMode;
 
-    // Resolve the actual report record first so legacy/unprefixed scans also honor Test vs Live isolation
-    let matchedReport = recentReportsList.find(
-      (r) => String(r.rma_number || r.rmaNumber || '').toUpperCase() === scannedRma.toUpperCase()
-    ) || null;
+      // Fast cross-mode security check for explicitly scoped payloads (PINGCON-RMA:TEST:... / PINGCON-RMA:LIVE:... / RMA-TEST-...)
+      const explicitQrIsTest = parsedQr.qrMode === 'test' || scannedRma.toUpperCase().startsWith('RMA-TEST-');
+      if (explicitQrIsTest && !activeContextIsTest) {
+        playBeep('error');
+        const msg = '🔒 Security Block: This is a TEST MODE QR sticker and cannot be scanned inside Live Production!';
+        setPortalScanAlert({ type: 'error', title: 'Test Mode QR Blocked in Live Mode', message: msg });
+        showToast(msg, 'error');
+        return;
+      }
+      if (parsedQr.isPrivatePayload && !explicitQrIsTest && activeContextIsTest) {
+        playBeep('error');
+        const msg = '🔒 Security Block: This is a LIVE PRODUCTION QR sticker and cannot be scanned inside Test Mode Sandbox!';
+        setPortalScanAlert({ type: 'error', title: 'Live Mode QR Blocked in Test Mode', message: msg });
+        showToast(msg, 'error');
+        return;
+      }
 
-    if (!matchedReport) {
-      try {
-        const { data } = await supabase
+      // Helper: query Supabase without .maybeSingle() because batch manifests can have multiple rows per rma_number
+      const fetchParentRmaFromDb = async () => {
+        const { data, error } = await supabase
           .from('rma_reports')
           .select('*')
           .eq('rma_number', scannedRma)
-          .maybeSingle();
-        if (data) matchedReport = data;
-      } catch { }
-    }
+          .order('is_parent', { ascending: false })
+          .order('id', { ascending: true })
+          .limit(10);
+        if (error) throw error;
+        if (!Array.isArray(data) || data.length === 0) return null;
+        return (
+          data.find((r) => !isTrashedRecord(r) && r.parent_rma_id == null && r.is_parent) ||
+          data.find((r) => !isTrashedRecord(r) && r.parent_rma_id == null) ||
+          data.find((r) => !isTrashedRecord(r)) ||
+          data[0]
+        );
+      };
 
-    const qrIsTest =
-      parsedQr.qrMode === 'test' ||
-      Boolean(matchedReport && isTestRecord(matchedReport)) ||
-      scannedRma.toUpperCase().startsWith('RMA-TEST-');
+      // Check local state first, preferring a persisted DB row with numeric id (not an optimistic pre-insert row)
+      const localMatches = recentReportsList.filter(
+        (r) => String(r.rma_number || r.rmaNumber || '').toUpperCase() === scannedRma.toUpperCase()
+      );
+      let matchedReport =
+        localMatches.find((r) => /^\d+$/.test(String(r.id || '')) && !isTrashedRecord(r) && r.parent_rma_id == null && r.is_parent) ||
+        localMatches.find((r) => /^\d+$/.test(String(r.id || '')) && !isTrashedRecord(r) && r.parent_rma_id == null) ||
+        localMatches.find((r) => /^\d+$/.test(String(r.id || ''))) ||
+        null;
 
-    if (qrIsTest && !activeContextIsTest) {
+      const hasOptimisticPending = Boolean(
+        localMatches.length > 0 ||
+        (submitSuccessReport && String(submitSuccessReport.rma_number || submitSuccessReport.rmaNumber || '').toUpperCase() === scannedRma.toUpperCase())
+      );
+
+      if (!matchedReport) {
+        const maxAttempts = hasOptimisticPending ? 12 : 4;
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+          try {
+            const dbRow = await fetchParentRmaFromDb();
+            if (dbRow) {
+              matchedReport = dbRow;
+              break;
+            }
+          } catch (lookupErr) {
+            console.warn('QR RMA DB lookup attempt failed:', lookupErr?.message || lookupErr);
+          }
+          if (attempt < maxAttempts - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 450));
+          }
+        }
+      }
+
+      const qrIsTest =
+        explicitQrIsTest ||
+        Boolean(matchedReport && isTestRecord(matchedReport));
+
+      if (qrIsTest && !activeContextIsTest) {
+        playBeep('error');
+        const msg = '🔒 Security Block: This is a TEST MODE QR sticker and cannot be scanned inside Live Production!';
+        setPortalScanAlert({ type: 'error', title: 'Test Mode QR Blocked in Live Mode', message: msg });
+        showToast(msg, 'error');
+        return;
+      }
+      if (!qrIsTest && activeContextIsTest) {
+        playBeep('error');
+        const msg = '🔒 Security Block: This is a LIVE PRODUCTION QR sticker and cannot be scanned inside Test Mode Sandbox!';
+        setPortalScanAlert({ type: 'error', title: 'Live Mode QR Blocked in Test Mode', message: msg });
+        showToast(msg, 'error');
+        return;
+      }
+
+      if (!matchedReport) {
+        playBeep('error');
+        const msg = `RMA "${scannedRma}" was not found in the database yet. If you just submitted it, wait a moment and scan again.`;
+        setPortalScanAlert({ type: 'warning', title: 'RMA Record Not Found', message: msg });
+        showToast(msg, 'warning');
+        return;
+      }
+
+      if (isTrashedRecord(matchedReport)) {
+        playBeep('error');
+        const msg = `RMA "${scannedRma}" is currently in the 30-Day Trash Bin and must be restored before processing.`;
+        setPortalScanAlert({ type: 'warning', title: 'RMA Record In Trash', message: msg });
+        showToast(msg, 'warning');
+        return;
+      }
+
+      setPortalScanAlert(null);
+      playBeep('success');
+
+      // On the Public Portal ('/'), scanning any valid generated RMA QR immediately opens the 4-option wizard
+      if (!isAdminView) {
+        setSimpleRtvWizard({ isOpen: true, report: matchedReport, initialMode: 'wizard' });
+        return;
+      }
+
+      const isSupplierRtvItem = matchedReport.rma_type === 'supplier_outbound';
+      if (isSupplierRtvItem) {
+        setSimpleRtvWizard({ isOpen: true, report: matchedReport, initialMode: 'wizard' });
+      } else if (hasAdminAuth) {
+        setQuickRmaNumber(scannedRma);
+        setIsQuickRmaModalOpen(true);
+      } else {
+        const msg = 'Customer Hub RMA QR editing is restricted to Warehouse Admins.';
+        setPortalScanAlert({ type: 'warning', title: 'Admin Access Required', message: msg });
+        showToast(msg, 'warning');
+      }
+    } catch (err) {
+      console.error('QR scan processing error:', err);
       playBeep('error');
-      showToast('🔒 Security Block: This is a TEST MODE QR sticker and cannot be scanned inside Live Production!', 'error');
-      return;
-    }
-    if (!qrIsTest && activeContextIsTest) {
-      playBeep('error');
-      showToast('🔒 Security Block: This is a LIVE PRODUCTION QR sticker and cannot be scanned inside Test Mode Sandbox!', 'error');
-      return;
-    }
-
-    if (!matchedReport) {
-      playBeep('error');
-      showToast(`RMA "${scannedRma}" was not found in database yet.`, 'warning');
-      return;
-    }
-
-    playBeep('success');
-    const isSupplierRtvItem =
-      matchedReport.rma_type === 'supplier_outbound' ||
-      (!isAdminView && isSupplierRtvPortal);
-
-    if (isSupplierRtvItem) {
-      setSimpleRtvWizard({ isOpen: true, report: matchedReport, initialMode: 'wizard' });
-    } else if (hasAdminAuth) {
-      setQuickRmaNumber(scannedRma);
-      setIsQuickRmaModalOpen(true);
-    } else {
-      showToast('Customer Hub RMA QR editing is restricted to Warehouse Admins.', 'warning');
+      const msg = `Unable to open scanned RMA QR: ${err?.message || 'Unexpected error occurred.'}`;
+      setPortalScanAlert({ type: 'error', title: 'QR Scan Error', message: msg });
+      showToast(msg, 'error');
     }
   };
 
@@ -13654,6 +13777,33 @@ export default function App() {
               </div>
             </div>
 
+            {/* High-Visibility QR Scan Feedback / Cross-Mode Security Alert Banner */}
+            {portalScanAlert && (
+              <div
+                role="alert"
+                className={`p-4 rounded-2xl border-2 shadow-sm flex items-start justify-between gap-3 animate-in fade-in slide-in-from-top-2 ${
+                  portalScanAlert.type === 'error'
+                    ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-400 dark:border-rose-700 text-rose-900 dark:text-rose-100'
+                    : 'bg-amber-50 dark:bg-amber-950/60 border-amber-400 dark:border-amber-700 text-amber-900 dark:text-amber-100'
+                }`}
+              >
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <AlertTriangle className={`w-5 h-5 shrink-0 mt-0.5 ${portalScanAlert.type === 'error' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'}`} />
+                  <div className="space-y-0.5 text-xs">
+                    <div className="font-black uppercase tracking-wider">{portalScanAlert.title}</div>
+                    <p className="font-semibold leading-relaxed">{portalScanAlert.message}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPortalScanAlert(null)}
+                  aria-label="Dismiss scan alert"
+                  className="p-1 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 shrink-0 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
 
             {/* Super Admin Status, Test Mode & Destination Hub Control Banner on Public Portal:
                 Only displayed if the active user is an authenticated Super Admin.
@@ -15573,9 +15723,9 @@ export default function App() {
       <ScannerModal
         isOpen={isScannerOpen}
         onClose={() => setIsScannerOpen(false)}
-        onScanSuccess={(code) => {
+        onScanSuccess={async (code) => {
           setIsScannerOpen(false);
-          handlePortalQrScanResult(code);
+          await handlePortalQrScanResult(code);
         }}
       />
 
@@ -16181,12 +16331,18 @@ export default function App() {
 
       {/* Toast Alert Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-3">
+        <div role={toastMessage.type === 'error' || toastMessage.type === 'warning' ? 'alert' : 'status'} className="fixed bottom-6 right-6 z-[120] animate-in fade-in slide-in-from-bottom-3">
           <div className={`px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2 ${toastMessage.type === 'error'
             ? 'bg-rose-50 border-rose-300 text-rose-800'
-            : 'bg-slate-900 border-slate-700 text-white'
+            : toastMessage.type === 'warning'
+              ? 'bg-amber-50 border-amber-300 text-amber-900'
+              : 'bg-slate-900 border-slate-700 text-white'
             }`}>
-            <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+            {toastMessage.type === 'error' || toastMessage.type === 'warning' ? (
+              <AlertTriangle className={`w-4 h-4 shrink-0 ${toastMessage.type === 'error' ? 'text-rose-600' : 'text-amber-600'}`} />
+            ) : (
+              <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+            )}
             <span>{toastMessage.text}</span>
           </div>
         </div>
@@ -40363,7 +40519,7 @@ export default function SavedProductsTab({
 --- START FILE: src/components/ScannerModal.jsx ---
 import React, { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
-import { Camera, X, RefreshCw, Zap, AlertCircle, Sparkles } from 'lucide-react';
+import { Camera, X, RefreshCw, Zap, AlertCircle, QrCode, ArrowRight } from 'lucide-react';
 import { playBeep } from '../utils/rmaHelpers';
 
 export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog = [] }) {
@@ -40371,17 +40527,52 @@ export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog =
   const [isScanning, setIsScanning] = useState(false);
   const [cameras, setCameras] = useState([]);
   const [activeCameraId, setActiveCameraId] = useState(null);
+  const [manualCodeInput, setManualCodeInput] = useState('');
   const html5QrCodeRef = useRef(null);
+  const isOpenRef = useRef(isOpen);
+  const scanHandledRef = useRef(false);
+  const onScanSuccessRef = useRef(onScanSuccess);
+  const onCloseRef = useRef(onClose);
+
+  isOpenRef.current = isOpen;
+  onScanSuccessRef.current = onScanSuccess;
+  onCloseRef.current = onClose;
+
+  const triggerDecodedScan = async (rawText) => {
+    const clean = String(rawText || '').trim();
+    if (!clean || scanHandledRef.current) return;
+    scanHandledRef.current = true;
+    playBeep('success');
+    await stopScanner();
+    if (onCloseRef.current) onCloseRef.current();
+    if (onScanSuccessRef.current) {
+      try {
+        await onScanSuccessRef.current(clean);
+      } catch (err) {
+        console.error('QR scan handler error:', err);
+      }
+    }
+  };
 
   useEffect(() => {
+    let isCancelled = false;
+
     if (!isOpen) {
+      scanHandledRef.current = false;
       stopScanner();
-      return;
+      return () => {
+        isCancelled = true;
+      };
     }
+
+    scanHandledRef.current = false;
+    setManualCodeInput('');
+    setErrorMsg(null);
 
     // Discover cameras
     Html5Qrcode.getCameras()
       .then(devices => {
+        if (isCancelled || !isOpenRef.current) return;
         if (devices && devices.length > 0) {
           setCameras(devices);
           // Prefer back/environment camera
@@ -40392,27 +40583,30 @@ export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog =
           );
           const chosen = backCam ? backCam.id : devices[0].id;
           setActiveCameraId(chosen);
-          startScanner(chosen);
+          startScanner(chosen, () => isCancelled || !isOpenRef.current);
         } else {
-          setErrorMsg('No camera hardware detected on this device. You can search by SKU or enter barcode manually.');
+          setErrorMsg('No camera hardware detected on this device. You can paste a QR payload or enter a barcode/RMA below.');
         }
       })
       .catch(err => {
+        if (isCancelled || !isOpenRef.current) return;
         console.warn('Camera discovery error:', err);
-        setErrorMsg('Camera access was not granted or is blocked by browser permissions. You can use manual SKU search.');
+        setErrorMsg('Camera access was not granted or is blocked by browser permissions. You can paste a QR payload or enter a barcode/RMA below.');
       });
 
     return () => {
+      isCancelled = true;
       stopScanner();
     };
   }, [isOpen]);
 
-  const startScanner = async (cameraId) => {
+  const startScanner = async (cameraId, shouldAbort = () => false) => {
     try {
       setErrorMsg(null);
       if (html5QrCodeRef.current) {
         await stopScanner();
       }
+      if (shouldAbort() || !document.getElementById('camera-reader-viewport')) return;
 
       const html5QrCode = new Html5Qrcode('camera-reader-viewport');
       html5QrCodeRef.current = html5QrCode;
@@ -40427,36 +40621,46 @@ export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog =
         cameraId,
         config,
         (decodedText) => {
-          playBeep('success');
-          onScanSuccess(decodedText);
-          onClose();
+          triggerDecodedScan(decodedText);
         },
         () => {
           // Frame error, ignore
         }
       );
 
+      if (shouldAbort()) {
+        await stopScanner();
+        return;
+      }
+
       setIsScanning(true);
     } catch (err) {
       console.warn('Start scanner error:', err);
-      setErrorMsg('Unable to start camera stream. Ensure camera permissions are allowed in your browser.');
+      setErrorMsg('Unable to start camera stream. You can still scan or paste a QR payload or RMA code below.');
       setIsScanning(false);
     }
   };
 
   const stopScanner = async () => {
-    if (html5QrCodeRef.current) {
+    const instance = html5QrCodeRef.current;
+    html5QrCodeRef.current = null;
+    if (instance) {
       try {
-        if (html5QrCodeRef.current.isScanning) {
-          await html5QrCodeRef.current.stop();
+        if (instance.isScanning) {
+          await instance.stop();
         }
-        await html5QrCodeRef.current.clear();
+        await instance.clear();
       } catch (e) {
         console.debug('Scanner stop error:', e);
       }
-      html5QrCodeRef.current = null;
     }
     setIsScanning(false);
+  };
+
+  const handleManualScanSubmit = async (e) => {
+    e.preventDefault();
+    if (!manualCodeInput.trim()) return;
+    await triggerDecodedScan(manualCodeInput);
   };
 
   const switchCamera = () => {
@@ -40547,6 +40751,29 @@ export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog =
             <Zap className="w-3.5 h-3.5 text-brand-400" />
             <span>Align barcode within the target box</span>
           </div>
+
+          {/* USB / Handheld Scanner or Manual QR Payload Entry */}
+          <form onSubmit={handleManualScanSubmit} className="mt-3 w-full max-w-sm flex items-center gap-2">
+            <div className="relative flex-1">
+              <QrCode className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={manualCodeInput}
+                onChange={(e) => setManualCodeInput(e.target.value)}
+                placeholder="USB scanner / paste QR payload or RMA #..."
+                aria-label="Manual QR or barcode input"
+                className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono text-white placeholder-slate-400 focus:outline-none focus:border-brand-400"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={!manualCodeInput.trim()}
+              className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1 shrink-0 transition-colors cursor-pointer"
+            >
+              <span>Process</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </form>
         </div>
 
       </div>
@@ -41628,14 +41855,16 @@ export default function SimpleSupplierRtvWizardModal({
 
   const handleSaveSimpleDecision = async (optionId, waitOnly = false) => {
     setErrorMsg('');
+    const opt = FOUR_OPTIONS.find((o) => o.id === optionId);
+    if (!opt) return;
+
     const cleanSupplier = supplierName.trim();
-    if (!cleanSupplier) {
+    if (opt.needsPickupForm && !cleanSupplier) {
       setErrorMsg('Please type or choose the Supplier Company Name first.');
       return;
     }
 
-    const opt = FOUR_OPTIONS.find((o) => o.id === optionId);
-    if (!opt) return;
+    const effectiveSupplier = cleanSupplier || activeReport.supplier_name || 'Pending Assignment';
 
     // If Debit Claim or Replacement and staff chose "Driver Is Here Now"
     if (opt.needsPickupForm && !waitOnly) {
@@ -41661,7 +41890,7 @@ export default function SimpleSupplierRtvWizardModal({
         disposition: optionId,
         status: nextStatus,
         warehouse_location: nextLocation,
-        supplier_name: cleanSupplier,
+        supplier_name: effectiveSupplier,
         actorName,
         auditAction: 'SIMPLE_SUPPLIER_RTV_DECISION',
         auditNote: `Staff selected "${opt.title}"${waitOnly ? ' (waiting for supplier driver)' : ''}`,
@@ -43488,7 +43717,7 @@ export default function SupplierClaimsTab({
       const manifestChildren = isManifest ? getReportManifestItems(r, reportsList) : [];
       const hasRtvChild = manifestChildren.some(c => {
         const cDisp = String(c.disposition || '').toLowerCase();
-        return c.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+        return c.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor') || cDisp.includes('supplier_credit') || cDisp.includes('supplier_exchange');
       });
 
       if (!isExplicitSupplierOutbound && !hasRtvChild) {
@@ -43498,7 +43727,7 @@ export default function SupplierClaimsTab({
         }
 
         // Must strictly have an RTV disposition
-        const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor');
+        const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor') || disp.includes('supplier_credit') || disp.includes('supplier_exchange');
         if (!isRtvDisposition) {
           return;
         }
@@ -43515,8 +43744,8 @@ export default function SupplierClaimsTab({
             return;
           }
           // If the parent manifest wasn't explicitly supplier_outbound or RTV, require the child itself to be RTV
-          const isParentRtvOrSupplier = isExplicitSupplierOutbound || disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor');
-          const isChildRtvOrSupplier = child.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+          const isParentRtvOrSupplier = isExplicitSupplierOutbound || disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor') || disp.includes('supplier_credit') || disp.includes('supplier_exchange');
+          const isChildRtvOrSupplier = child.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor') || cDisp.includes('supplier_credit') || cDisp.includes('supplier_exchange');
           if (!isParentRtvOrSupplier && !isChildRtvOrSupplier) {
             return;
           }
@@ -52989,33 +53218,76 @@ export const catalogService = {
       throw new Error('Missing RMA identifier to update.');
     }
 
-    // Fetch latest row from Supabase so we never overwrite existing photos or metadata
-    let existing = report;
-    try {
-      let query = supabase.from('rma_reports').select('*');
-      if (cleanId) query = query.eq('id', cleanId);
-      else query = query.eq('rma_number', rmaNumber);
-      const { data } = await query.maybeSingle();
-      if (data) existing = data;
-    } catch {}
+    // Fetch latest parent/top-level row from Supabase (avoid .maybeSingle() on rma_number since batch manifests can have multiple rows)
+    const fetchLatestParentRow = async () => {
+      if (cleanId) {
+        const { data } = await supabase.from('rma_reports').select('*').eq('id', cleanId).limit(1);
+        if (Array.isArray(data) && data.length > 0) return data[0];
+      }
+      if (rmaNumber) {
+        const { data } = await supabase
+          .from('rma_reports')
+          .select('*')
+          .eq('rma_number', rmaNumber)
+          .order('is_parent', { ascending: false })
+          .order('id', { ascending: true })
+          .limit(10);
+        if (Array.isArray(data) && data.length > 0) {
+          return (
+            data.find((r) => !isTrashedRecord(r) && r.parent_rma_id == null && r.is_parent) ||
+            data.find((r) => !isTrashedRecord(r) && r.parent_rma_id == null) ||
+            data.find((r) => !isTrashedRecord(r)) ||
+            data[0]
+          );
+        }
+      }
+      return null;
+    };
+
+    let existing = await fetchLatestParentRow();
+    // If just submitted optimistically in background, briefly poll for DB row creation
+    if (!existing && rmaNumber) {
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        await new Promise((r) => setTimeout(r, 450));
+        existing = await fetchLatestParentRow();
+        if (existing) break;
+      }
+    }
+    if (!existing) {
+      existing = report;
+    }
+
+    const resolvedId = (existing?.id && /^\d+$/.test(String(existing.id))) ? Number(existing.id) : cleanId;
+    if (!resolvedId) {
+      throw new Error(`RMA "${rmaNumber || ''}" is still syncing to the database. Please try again in a moment.`);
+    }
 
     const existingMeta = (existing?.ai_document_metadata && typeof existing.ai_document_metadata === 'object')
       ? { ...existing.ai_document_metadata }
       : {};
+    const recordIsTest = Boolean(isTestRecord(existing) || isTestRecord(report));
 
     const updatedMeta = {
       ...existingMeta,
-      ...(payload.metadataPatch || {})
+      ...(payload.metadataPatch || {}),
+      ...(recordIsTest ? { is_test: true, test_mode: true } : {})
     };
 
     const nowIso = new Date().toISOString();
+    const preservedNotes = recordIsTest
+      ? (String(existing?.notes || '').includes('[TEST_MODE]')
+          ? existing.notes
+          : `${existing?.notes ? `${existing.notes} ` : ''}[TEST_MODE] Sandbox Return`)
+      : existing?.notes;
+
     const updates = {
       disposition: payload.disposition ?? existing?.disposition,
       status: payload.status ?? existing?.status,
       warehouse_location: payload.warehouse_location ?? existing?.warehouse_location,
       inspected_by: payload.actorName || existing?.inspected_by || 'Staff',
       inspected_at: nowIso,
-      ai_document_metadata: updatedMeta
+      ai_document_metadata: updatedMeta,
+      ...(preservedNotes !== undefined ? { notes: preservedNotes } : {})
     };
 
     if (payload.supplier_name && String(payload.supplier_name).trim()) {
@@ -53056,11 +53328,12 @@ export const catalogService = {
       }
     ];
 
-    let updateQuery = supabase.from('rma_reports').update(updates);
-    if (cleanId) updateQuery = updateQuery.eq('id', cleanId);
-    else updateQuery = updateQuery.eq('rma_number', rmaNumber);
+    let { data: savedRows, error: updateErr } = await supabase
+      .from('rma_reports')
+      .update(updates)
+      .eq('id', resolvedId)
+      .select();
 
-    let { data: savedRow, error: updateErr } = await updateQuery.select().maybeSingle();
     if (updateErr) {
       const fallback = { ...updates };
       const colMatch = updateErr.message.match(/Could not find the '([^']+)' column/i) ||
@@ -53068,30 +53341,35 @@ export const catalogService = {
       if (colMatch && colMatch[1]) {
         delete fallback[colMatch[1]];
       }
+      if (String(updateErr.message || '').includes('rma_reports_status_check')) {
+        fallback.status = 'under_inspection';
+      }
       delete fallback.google_drive_folder_id;
-      let retryQuery = supabase.from('rma_reports').update(fallback);
-      if (cleanId) retryQuery = retryQuery.eq('id', cleanId);
-      else retryQuery = retryQuery.eq('rma_number', rmaNumber);
-      const { data: retryData, error: retryErr } = await retryQuery.select().maybeSingle();
+      const { data: retryRows, error: retryErr } = await supabase
+        .from('rma_reports')
+        .update(fallback)
+        .eq('id', resolvedId)
+        .select();
       if (retryErr) throw retryErr;
-      savedRow = retryData;
+      savedRows = retryRows;
     }
 
-    // Sync child rows if any exist in rma_reports or rma_items
-    const targetParentId = cleanId || existing?.id;
-    if (targetParentId) {
+    const savedRow = Array.isArray(savedRows) && savedRows.length > 0 ? savedRows[0] : null;
+
+    // Sync child rows if any exist in rma_reports
+    if (resolvedId) {
       try {
         await supabase.from('rma_reports').update({
           ...(updates.supplier_name ? { supplier_name: updates.supplier_name } : {}),
           disposition: updates.disposition,
-          status: updates.status,
+          status: savedRow?.status || updates.status,
           warehouse_location: updates.warehouse_location
-        }).eq('parent_rma_id', targetParentId);
+        }).eq('parent_rma_id', resolvedId);
       } catch {}
     }
 
-    this.notifyChange('triage-updated', { id: targetParentId, rmaNumber, status: updates.status });
-    return savedRow || { ...existing, ...updates };
+    this.notifyChange('triage-updated', { id: resolvedId, rmaNumber, status: savedRow?.status || updates.status });
+    return savedRow || { ...existing, ...updates, id: resolvedId };
   }
 };
 
@@ -59837,6 +60115,8 @@ export function formatLifecycleStage(status, item = null) {
       return { label: '8- Rejected / Invalid Claim', color: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700' };
     case 'vendor_claimed':
       return { label: 'RTV Claimed', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' };
+    case 'triaged':
+      return { label: 'Triaged / Staged', color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-300 dark:border-amber-700' };
     case 'pending_admin_details':
       return { label: 'Awaiting SKU', color: 'bg-orange-100 text-orange-800 dark:bg-orange-950/70 dark:text-orange-300 border-orange-200 dark:border-orange-800' };
     default:
@@ -60190,7 +60470,7 @@ export function parsePortalQrPayload(rawText) {
   const str = String(rawText).trim();
 
   // Preferred internal format: PINGCON-RMA:TEST:<RMA> or PINGCON-RMA:LIVE:<RMA>
-  const privateMatch = str.match(/^PINGCON-RMA:(TEST|LIVE):(.+)$/i);
+  const privateMatch = str.match(/^PINGCON-RMA:\s*(TEST|LIVE)\s*:\s*(.+)$/i);
   if (privateMatch) {
     const scope = privateMatch[1].toUpperCase();
     const rmaNumber = privateMatch[2].trim();

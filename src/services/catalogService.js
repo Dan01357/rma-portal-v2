@@ -2910,33 +2910,76 @@ export const catalogService = {
       throw new Error('Missing RMA identifier to update.');
     }
 
-    // Fetch latest row from Supabase so we never overwrite existing photos or metadata
-    let existing = report;
-    try {
-      let query = supabase.from('rma_reports').select('*');
-      if (cleanId) query = query.eq('id', cleanId);
-      else query = query.eq('rma_number', rmaNumber);
-      const { data } = await query.maybeSingle();
-      if (data) existing = data;
-    } catch {}
+    // Fetch latest parent/top-level row from Supabase (avoid .maybeSingle() on rma_number since batch manifests can have multiple rows)
+    const fetchLatestParentRow = async () => {
+      if (cleanId) {
+        const { data } = await supabase.from('rma_reports').select('*').eq('id', cleanId).limit(1);
+        if (Array.isArray(data) && data.length > 0) return data[0];
+      }
+      if (rmaNumber) {
+        const { data } = await supabase
+          .from('rma_reports')
+          .select('*')
+          .eq('rma_number', rmaNumber)
+          .order('is_parent', { ascending: false })
+          .order('id', { ascending: true })
+          .limit(10);
+        if (Array.isArray(data) && data.length > 0) {
+          return (
+            data.find((r) => !isTrashedRecord(r) && r.parent_rma_id == null && r.is_parent) ||
+            data.find((r) => !isTrashedRecord(r) && r.parent_rma_id == null) ||
+            data.find((r) => !isTrashedRecord(r)) ||
+            data[0]
+          );
+        }
+      }
+      return null;
+    };
+
+    let existing = await fetchLatestParentRow();
+    // If just submitted optimistically in background, briefly poll for DB row creation
+    if (!existing && rmaNumber) {
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        await new Promise((r) => setTimeout(r, 450));
+        existing = await fetchLatestParentRow();
+        if (existing) break;
+      }
+    }
+    if (!existing) {
+      existing = report;
+    }
+
+    const resolvedId = (existing?.id && /^\d+$/.test(String(existing.id))) ? Number(existing.id) : cleanId;
+    if (!resolvedId) {
+      throw new Error(`RMA "${rmaNumber || ''}" is still syncing to the database. Please try again in a moment.`);
+    }
 
     const existingMeta = (existing?.ai_document_metadata && typeof existing.ai_document_metadata === 'object')
       ? { ...existing.ai_document_metadata }
       : {};
+    const recordIsTest = Boolean(isTestRecord(existing) || isTestRecord(report));
 
     const updatedMeta = {
       ...existingMeta,
-      ...(payload.metadataPatch || {})
+      ...(payload.metadataPatch || {}),
+      ...(recordIsTest ? { is_test: true, test_mode: true } : {})
     };
 
     const nowIso = new Date().toISOString();
+    const preservedNotes = recordIsTest
+      ? (String(existing?.notes || '').includes('[TEST_MODE]')
+          ? existing.notes
+          : `${existing?.notes ? `${existing.notes} ` : ''}[TEST_MODE] Sandbox Return`)
+      : existing?.notes;
+
     const updates = {
       disposition: payload.disposition ?? existing?.disposition,
       status: payload.status ?? existing?.status,
       warehouse_location: payload.warehouse_location ?? existing?.warehouse_location,
       inspected_by: payload.actorName || existing?.inspected_by || 'Staff',
       inspected_at: nowIso,
-      ai_document_metadata: updatedMeta
+      ai_document_metadata: updatedMeta,
+      ...(preservedNotes !== undefined ? { notes: preservedNotes } : {})
     };
 
     if (payload.supplier_name && String(payload.supplier_name).trim()) {
@@ -2977,11 +3020,12 @@ export const catalogService = {
       }
     ];
 
-    let updateQuery = supabase.from('rma_reports').update(updates);
-    if (cleanId) updateQuery = updateQuery.eq('id', cleanId);
-    else updateQuery = updateQuery.eq('rma_number', rmaNumber);
+    let { data: savedRows, error: updateErr } = await supabase
+      .from('rma_reports')
+      .update(updates)
+      .eq('id', resolvedId)
+      .select();
 
-    let { data: savedRow, error: updateErr } = await updateQuery.select().maybeSingle();
     if (updateErr) {
       const fallback = { ...updates };
       const colMatch = updateErr.message.match(/Could not find the '([^']+)' column/i) ||
@@ -2989,30 +3033,35 @@ export const catalogService = {
       if (colMatch && colMatch[1]) {
         delete fallback[colMatch[1]];
       }
+      if (String(updateErr.message || '').includes('rma_reports_status_check')) {
+        fallback.status = 'under_inspection';
+      }
       delete fallback.google_drive_folder_id;
-      let retryQuery = supabase.from('rma_reports').update(fallback);
-      if (cleanId) retryQuery = retryQuery.eq('id', cleanId);
-      else retryQuery = retryQuery.eq('rma_number', rmaNumber);
-      const { data: retryData, error: retryErr } = await retryQuery.select().maybeSingle();
+      const { data: retryRows, error: retryErr } = await supabase
+        .from('rma_reports')
+        .update(fallback)
+        .eq('id', resolvedId)
+        .select();
       if (retryErr) throw retryErr;
-      savedRow = retryData;
+      savedRows = retryRows;
     }
 
-    // Sync child rows if any exist in rma_reports or rma_items
-    const targetParentId = cleanId || existing?.id;
-    if (targetParentId) {
+    const savedRow = Array.isArray(savedRows) && savedRows.length > 0 ? savedRows[0] : null;
+
+    // Sync child rows if any exist in rma_reports
+    if (resolvedId) {
       try {
         await supabase.from('rma_reports').update({
           ...(updates.supplier_name ? { supplier_name: updates.supplier_name } : {}),
           disposition: updates.disposition,
-          status: updates.status,
+          status: savedRow?.status || updates.status,
           warehouse_location: updates.warehouse_location
-        }).eq('parent_rma_id', targetParentId);
+        }).eq('parent_rma_id', resolvedId);
       } catch {}
     }
 
-    this.notifyChange('triage-updated', { id: targetParentId, rmaNumber, status: updates.status });
-    return savedRow || { ...existing, ...updates };
+    this.notifyChange('triage-updated', { id: resolvedId, rmaNumber, status: savedRow?.status || updates.status });
+    return savedRow || { ...existing, ...updates, id: resolvedId };
   }
 };
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
-import { Camera, X, RefreshCw, Zap, AlertCircle, Sparkles } from 'lucide-react';
+import { Camera, X, RefreshCw, Zap, AlertCircle, QrCode, ArrowRight } from 'lucide-react';
 import { playBeep } from '../utils/rmaHelpers';
 
 export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog = [] }) {
@@ -8,17 +8,52 @@ export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog =
   const [isScanning, setIsScanning] = useState(false);
   const [cameras, setCameras] = useState([]);
   const [activeCameraId, setActiveCameraId] = useState(null);
+  const [manualCodeInput, setManualCodeInput] = useState('');
   const html5QrCodeRef = useRef(null);
+  const isOpenRef = useRef(isOpen);
+  const scanHandledRef = useRef(false);
+  const onScanSuccessRef = useRef(onScanSuccess);
+  const onCloseRef = useRef(onClose);
+
+  isOpenRef.current = isOpen;
+  onScanSuccessRef.current = onScanSuccess;
+  onCloseRef.current = onClose;
+
+  const triggerDecodedScan = async (rawText) => {
+    const clean = String(rawText || '').trim();
+    if (!clean || scanHandledRef.current) return;
+    scanHandledRef.current = true;
+    playBeep('success');
+    await stopScanner();
+    if (onCloseRef.current) onCloseRef.current();
+    if (onScanSuccessRef.current) {
+      try {
+        await onScanSuccessRef.current(clean);
+      } catch (err) {
+        console.error('QR scan handler error:', err);
+      }
+    }
+  };
 
   useEffect(() => {
+    let isCancelled = false;
+
     if (!isOpen) {
+      scanHandledRef.current = false;
       stopScanner();
-      return;
+      return () => {
+        isCancelled = true;
+      };
     }
+
+    scanHandledRef.current = false;
+    setManualCodeInput('');
+    setErrorMsg(null);
 
     // Discover cameras
     Html5Qrcode.getCameras()
       .then(devices => {
+        if (isCancelled || !isOpenRef.current) return;
         if (devices && devices.length > 0) {
           setCameras(devices);
           // Prefer back/environment camera
@@ -29,27 +64,30 @@ export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog =
           );
           const chosen = backCam ? backCam.id : devices[0].id;
           setActiveCameraId(chosen);
-          startScanner(chosen);
+          startScanner(chosen, () => isCancelled || !isOpenRef.current);
         } else {
-          setErrorMsg('No camera hardware detected on this device. You can search by SKU or enter barcode manually.');
+          setErrorMsg('No camera hardware detected on this device. You can paste a QR payload or enter a barcode/RMA below.');
         }
       })
       .catch(err => {
+        if (isCancelled || !isOpenRef.current) return;
         console.warn('Camera discovery error:', err);
-        setErrorMsg('Camera access was not granted or is blocked by browser permissions. You can use manual SKU search.');
+        setErrorMsg('Camera access was not granted or is blocked by browser permissions. You can paste a QR payload or enter a barcode/RMA below.');
       });
 
     return () => {
+      isCancelled = true;
       stopScanner();
     };
   }, [isOpen]);
 
-  const startScanner = async (cameraId) => {
+  const startScanner = async (cameraId, shouldAbort = () => false) => {
     try {
       setErrorMsg(null);
       if (html5QrCodeRef.current) {
         await stopScanner();
       }
+      if (shouldAbort() || !document.getElementById('camera-reader-viewport')) return;
 
       const html5QrCode = new Html5Qrcode('camera-reader-viewport');
       html5QrCodeRef.current = html5QrCode;
@@ -64,36 +102,46 @@ export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog =
         cameraId,
         config,
         (decodedText) => {
-          playBeep('success');
-          onScanSuccess(decodedText);
-          onClose();
+          triggerDecodedScan(decodedText);
         },
         () => {
           // Frame error, ignore
         }
       );
 
+      if (shouldAbort()) {
+        await stopScanner();
+        return;
+      }
+
       setIsScanning(true);
     } catch (err) {
       console.warn('Start scanner error:', err);
-      setErrorMsg('Unable to start camera stream. Ensure camera permissions are allowed in your browser.');
+      setErrorMsg('Unable to start camera stream. You can still scan or paste a QR payload or RMA code below.');
       setIsScanning(false);
     }
   };
 
   const stopScanner = async () => {
-    if (html5QrCodeRef.current) {
+    const instance = html5QrCodeRef.current;
+    html5QrCodeRef.current = null;
+    if (instance) {
       try {
-        if (html5QrCodeRef.current.isScanning) {
-          await html5QrCodeRef.current.stop();
+        if (instance.isScanning) {
+          await instance.stop();
         }
-        await html5QrCodeRef.current.clear();
+        await instance.clear();
       } catch (e) {
         console.debug('Scanner stop error:', e);
       }
-      html5QrCodeRef.current = null;
     }
     setIsScanning(false);
+  };
+
+  const handleManualScanSubmit = async (e) => {
+    e.preventDefault();
+    if (!manualCodeInput.trim()) return;
+    await triggerDecodedScan(manualCodeInput);
   };
 
   const switchCamera = () => {
@@ -184,6 +232,29 @@ export default function ScannerModal({ isOpen, onClose, onScanSuccess, catalog =
             <Zap className="w-3.5 h-3.5 text-brand-400" />
             <span>Align barcode within the target box</span>
           </div>
+
+          {/* USB / Handheld Scanner or Manual QR Payload Entry */}
+          <form onSubmit={handleManualScanSubmit} className="mt-3 w-full max-w-sm flex items-center gap-2">
+            <div className="relative flex-1">
+              <QrCode className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={manualCodeInput}
+                onChange={(e) => setManualCodeInput(e.target.value)}
+                placeholder="USB scanner / paste QR payload or RMA #..."
+                aria-label="Manual QR or barcode input"
+                className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono text-white placeholder-slate-400 focus:outline-none focus:border-brand-400"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={!manualCodeInput.trim()}
+              className="px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1 shrink-0 transition-colors cursor-pointer"
+            >
+              <span>Process</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </form>
         </div>
 
       </div>
