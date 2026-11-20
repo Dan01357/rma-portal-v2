@@ -197,16 +197,23 @@ test.describe('Suite 05: Credit Memos (Live & Sandbox, 12% VAT, ₱10k Governanc
       const cmRow = page.locator('tr', { hasText: seededRma }).first();
       await expect(cmRow).toBeVisible({ timeout: 20_000 });
 
-      // Verify 12% VAT breakdown in Export CSV (12000 / 1.12 = 10714.29 Net, 1285.71 VAT)
-      const [cmCsvDownload] = await Promise.all([
+      // Verify 12% VAT breakdown in Export Excel (.xlsx) (12000 / 1.12 = 10714.29 Net, 1285.71 VAT)
+      const [cmXlsxDownload] = await Promise.all([
         page.waitForEvent('download'),
-        page.locator('button[title="Export all credit memos to Excel CSV"]').click()
+        page.locator('button[title="Export all credit memos to Excel (.xlsx)"]').click()
       ]);
-      const csvPath = await cmCsvDownload.path();
-      if (csvPath) {
-        const csvContent = fs.readFileSync(csvPath, 'utf-8');
-        expect(csvContent).toContain('12% VAT Amount (PHP)');
-        expect(csvContent).toContain('1285.71');
+      expect(cmXlsxDownload.suggestedFilename()).toMatch(/\.xlsx$/i);
+      expect(cmXlsxDownload.suggestedFilename().toLowerCase()).not.toContain('.csv');
+      const xlsxPath = await cmXlsxDownload.path();
+      if (xlsxPath) {
+        const xlsxBuf = fs.readFileSync(xlsxPath);
+        expect(xlsxBuf[0]).toBe(0x50); // 'P'
+        expect(xlsxBuf[1]).toBe(0x4b); // 'K'
+        const xlsxXml = xlsxBuf.toString('utf-8');
+        expect(xlsxXml).toContain('xl/worksheets/sheet1.xml');
+        expect(xlsxXml).toContain('application/vnd.openxmlformats-package.relationships+xml');
+        expect(xlsxXml).toContain('12% VAT Amount (PHP)');
+        expect(xlsxXml).toContain('1285.71');
       }
 
       // Click row Print Official Credit Voucher icon

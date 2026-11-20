@@ -569,7 +569,7 @@ export const authService = {
             html: `
               <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background: #ffffff;">
                 <div style="background: #1e3a8a; padding: 20px; border-radius: 12px; color: #ffffff; text-align: center;">
-                  <h2 style="margin: 0; font-size: 18px; font-weight: 800;">Wholesale RMA Portal</h2>
+                  <h2 style="margin: 0; font-size: 18px; font-weight: 800;">Pingcon RMA Portal</h2>
                   <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Staff Verification Code</div>
                 </div>
                 <div style="padding: 24px 16px; text-align: center;">

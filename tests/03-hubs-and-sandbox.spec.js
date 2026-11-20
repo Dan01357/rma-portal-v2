@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import fs from 'fs';
 import {
   PNG_BUFFER,
   VERIFIED_BARCODE,
@@ -7,6 +8,20 @@ import {
   isoDateDaysOffset,
   gotoAdmin
 } from './helpers/testUtils.js';
+
+function assertValidXlsxFile(download, filePath) {
+  const name = download.suggestedFilename();
+  expect(name).toMatch(/\.xlsx$/i);
+  expect(name.toLowerCase()).not.toContain('.csv');
+  if (filePath) {
+    const buf = fs.readFileSync(filePath);
+    expect(buf[0]).toBe(0x50); // 'P'
+    expect(buf[1]).toBe(0x4b); // 'K'
+    const xmlStr = buf.toString('utf8');
+    expect(xmlStr).toContain('xl/worksheets/sheet1.xml');
+    expect(xmlStr).toContain('application/vnd.openxmlformats-package.relationships+xml');
+  }
+}
 
 /**
  * Seeds a Test Mode Sandbox RMA via the public intake page so Live DB stays untouched.
@@ -112,19 +127,19 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
       await page.getByRole('button', { name: 'Cards', exact: true }).click();
       await page.getByRole('button', { name: /Rows List/i }).click();
 
-      // 3. Full Audit Log modal (RMAReportsModal) -> Cards View / Rows List / Filters / Export CSV / Close
+      // 3. Full Audit Log modal (RMAReportsModal) -> Cards View / Rows List / Filters / Export Excel (.xlsx) / Close
       await page.getByRole('button', { name: /Full Audit Log/i }).click();
       await expect(page.getByText(/Logged RMA Return Reports/i)).toBeVisible();
       await page.getByRole('button', { name: /Cards View/i }).click();
       await page.getByRole('button', { name: /Rows List/i }).last().click();
-      const [liveAuditCsv] = await Promise.all([
+      const [liveAuditXlsx] = await Promise.all([
         page.waitForEvent('download'),
-        page.locator('button[title="Export filtered reports to CSV"]').click()
+        page.locator('button[title="Export filtered reports to Excel (.xlsx)"]').click()
       ]);
-      expect(liveAuditCsv.suggestedFilename()).toContain('.csv');
-      // Close RMAReportsModal (X button next to Export CSV)
+      assertValidXlsxFile(liveAuditXlsx, await liveAuditXlsx.path());
+      // Close RMAReportsModal (X button next to Export Excel (.xlsx))
       await page
-        .locator('div:has(> button[title="Export filtered reports to CSV"]) > button')
+        .locator('div:has(> button[title="Export filtered reports to Excel (.xlsx)"]) > button')
         .last()
         .click();
       await expect(page.getByText(/Logged RMA Return Reports/i)).toBeHidden();
@@ -136,24 +151,24 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
         page.waitForEvent('download'),
         page.getByRole('button', { name: /Download Excel Matrix \(\.xlsx\)/i }).click()
       ]);
-      expect(liveCustMatrix.suggestedFilename()).toContain('.xlsx');
+      assertValidXlsxFile(liveCustMatrix, await liveCustMatrix.path());
       await page.getByRole('button', { name: 'Close', exact: true }).click();
 
-      // 5. Export Inbound CSV (downloads CSV when populated, or shows empty-state alert when Live Customer Hub has 0 rows)
+      // 5. Export Inbound (.xlsx) (downloads .xlsx when populated, or shows empty-state alert when Live Customer Hub has 0 rows)
       const hasLiveCustomerRows = (await page.locator('tbody tr').count()) > 0;
       if (hasLiveCustomerRows) {
-        const [liveCustCsv] = await Promise.all([
+        const [liveCustXlsx] = await Promise.all([
           page.waitForEvent('download'),
-          page.getByRole('button', { name: /Export Inbound CSV/i }).click()
+          page.getByRole('button', { name: /Export Inbound \(\.xlsx\)/i }).click()
         ]);
-        expect(liveCustCsv.suggestedFilename()).toContain('.csv');
+        assertValidXlsxFile(liveCustXlsx, await liveCustXlsx.path());
       } else {
         let alertMsg = '';
         page.once('dialog', async (dialog) => {
           alertMsg = dialog.message();
           await dialog.accept();
         });
-        await page.getByRole('button', { name: /Export Inbound CSV/i }).click();
+        await page.getByRole('button', { name: /Export Inbound \(\.xlsx\)/i }).click();
         expect(alertMsg).toContain('No customer return reports available');
       }
 
@@ -178,7 +193,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
       // PART B: LIVE SUPPLIER HUB (RTV CLAIMS)
       // =========================================================================
       await page.getByRole('button', { name: /Supplier Hub \(RTV Claims\)/i }).click();
-      await expect(page.getByRole('button', { name: /Export Supplier Claims CSV/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Export Supplier Claims \(\.xlsx\)/i })).toBeVisible();
 
       // 1. Click all 3 Coworker Queue buttons + Clear
       await page.getByRole('button', { name: /Ready to Restock/i }).click();
@@ -210,12 +225,12 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
       expect(liveSuppMatrix.suggestedFilename()).toContain('.xlsx');
       await page.getByRole('button', { name: 'Close', exact: true }).click();
 
-      // 4. Export Supplier Claims CSV
-      const [liveSuppCsv] = await Promise.all([
+      // 4. Export Supplier Claims (.xlsx)
+      const [liveSuppXlsx] = await Promise.all([
         page.waitForEvent('download'),
-        page.getByRole('button', { name: /Export Supplier Claims CSV/i }).click()
+        page.getByRole('button', { name: /Export Supplier Claims \(\.xlsx\)/i }).click()
       ]);
-      expect(liveSuppCsv.suggestedFilename()).toContain('.csv');
+      assertValidXlsxFile(liveSuppXlsx, await liveSuppXlsx.path());
 
       // 5. Select All & Clear selection (without mutating Live DB)
       const selectAllCheckbox = page
@@ -308,30 +323,30 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
       await expect(page.getByText(/Logged Sandbox Test RMA Reports/i)).toBeVisible();
       await page.getByRole('button', { name: /Cards View/i }).click();
       await page.getByRole('button', { name: /Rows List/i }).last().click();
-      const [sbAuditCsv] = await Promise.all([
+      const [sbAuditXlsx] = await Promise.all([
         page.waitForEvent('download'),
-        page.locator('button[title="Export filtered reports to CSV"]').click()
+        page.locator('button[title="Export filtered reports to Excel (.xlsx)"]').click()
       ]);
-      expect(sbAuditCsv.suggestedFilename()).toContain('.csv');
+      assertValidXlsxFile(sbAuditXlsx, await sbAuditXlsx.path());
       await page
-        .locator('div:has(> button[title="Export filtered reports to CSV"]) > button')
+        .locator('div:has(> button[title="Export filtered reports to Excel (.xlsx)"]) > button')
         .last()
         .click();
 
-      // Sandbox Customer Matrix (.xlsx) & Export Inbound CSV
+      // Sandbox Customer Matrix (.xlsx) & Export Inbound (.xlsx)
       await page.getByRole('button', { name: /Sandbox Customer Matrix \(\.xlsx\)/i }).last().click();
       const [sbCustMatrix] = await Promise.all([
         page.waitForEvent('download'),
         page.getByRole('button', { name: /Download Excel Matrix \(\.xlsx\)/i }).click()
       ]);
-      expect(sbCustMatrix.suggestedFilename()).toContain('.xlsx');
+      assertValidXlsxFile(sbCustMatrix, await sbCustMatrix.path());
       await page.getByRole('button', { name: 'Close', exact: true }).click();
 
-      const [sbCustCsv] = await Promise.all([
+      const [sbCustXlsx] = await Promise.all([
         page.waitForEvent('download'),
-        page.getByRole('button', { name: /Export Inbound CSV/i }).click()
+        page.getByRole('button', { name: /Export Inbound \(\.xlsx\)/i }).click()
       ]);
-      expect(sbCustCsv.suggestedFilename()).toContain('.csv');
+      assertValidXlsxFile(sbCustXlsx, await sbCustXlsx.path());
 
       // Exercise filter dropdowns + Reset, then locate our 2-photo seededCustomerRma
       const sbCustSelects = page.locator('select');
@@ -400,11 +415,11 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
       expect(sbSuppMatrix.suggestedFilename()).toContain('.xlsx');
       await page.getByRole('button', { name: 'Close', exact: true }).click();
 
-      const [sbSuppCsv] = await Promise.all([
+      const [sbSuppXlsx] = await Promise.all([
         page.waitForEvent('download'),
-        page.getByRole('button', { name: /Export Supplier Claims CSV/i }).click()
+        page.getByRole('button', { name: /Export Supplier Claims \(\.xlsx\)/i }).click()
       ]);
-      expect(sbSuppCsv.suggestedFilename()).toContain('.csv');
+      assertValidXlsxFile(sbSuppXlsx, await sbSuppXlsx.path());
 
       // Filter dropdowns + Reset then locate seededSupplierRma
       const sbSuppSelects = page.locator('select');

@@ -13,6 +13,7 @@ import {
   Hash
 } from 'lucide-react';
 import { formatPeso, getEmailRoutingPayload } from '../utils/rmaHelpers';
+import { downloadTableXlsx } from '../utils/exportXlsx';
 
 export default function TicketsVaultTab({ 
   tickets = [], 
@@ -60,54 +61,52 @@ export default function TicketsVaultTab({
     });
   }, [tickets, searchTerm, statusFilter, selectedGroup]);
 
-  // Export to CSV
-  const handleExportCSV = () => {
-    const headers = [
-      'Ticket ID',
-      'Date',
-      'Customer',
-      'Branch',
-      'Product',
-      'SKU',
-      'Brand',
-      'Serial Numbers',
-      'Qty',
-      'Unit Price',
-      'Total Value (PHP)',
-      'Status',
-      'Defect Category',
-      'AE Name',
-      'Credit Memo #',
-      'Supplier'
+  // Export to genuine Excel (.xlsx)
+  const handleExportXlsx = () => {
+    const columns = [
+      { header: 'Ticket ID', width: 18, type: 'text' },
+      { header: 'Date', width: 14, type: 'text' },
+      { header: 'Customer', width: 24, type: 'text' },
+      { header: 'Branch', width: 22, type: 'text' },
+      { header: 'Product', width: 34, type: 'text' },
+      { header: 'SKU', width: 16, type: 'text' },
+      { header: 'Brand', width: 18, type: 'text' },
+      { header: 'Serial Numbers', width: 22, type: 'text' },
+      { header: 'Qty', width: 10, type: 'number' },
+      { header: 'Unit Price', width: 14, type: 'currency' },
+      { header: 'Total Value (PHP)', width: 18, type: 'currency' },
+      { header: 'Status', width: 16, type: 'text' },
+      { header: 'Defect Category', width: 22, type: 'text' },
+      { header: 'AE Name', width: 20, type: 'text' },
+      { header: 'Credit Memo #', width: 18, type: 'text' },
+      { header: 'Supplier', width: 22, type: 'text' }
     ];
 
     const rows = filteredTickets.map(t => [
-      t.id,
-      new Date(t.created_at).toLocaleDateString(),
-      `"${(t.customer_name || '').replace(/"/g, '""')}"`,
-      `"${(t.store_branch || '').replace(/"/g, '""')}"`,
-      `"${(t.product_name || '').replace(/"/g, '""')}"`,
-      t.sku,
+      t.id || '',
+      t.created_at ? new Date(t.created_at).toLocaleDateString() : '',
+      t.customer_name || '',
+      t.store_branch || '',
+      t.product_name || '',
+      t.sku || '',
       t.brand || '',
-      `"${(t.serial_numbers || '').replace(/"/g, '""')}"`,
-      t.quantity,
-      t.unit_price,
-      t.total_amount,
-      t.status,
-      `"${(t.defect_category || '').replace(/"/g, '""')}"`,
-      t.ae_name,
+      t.serial_numbers || '',
+      Number(t.quantity || 0),
+      Number(t.unit_price || 0),
+      Number(t.total_amount || 0),
+      t.status || '',
+      t.defect_category || '',
+      t.ae_name || '',
       t.credit_memo_no || '',
-      t.supplier
+      t.supplier || ''
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `RMA_Vault_Export_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadTableXlsx({
+      sheetName: 'RMA Vault',
+      filename: `RMA_Vault_Export_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      columns,
+      rows
+    });
   };
 
   return (
@@ -128,11 +127,11 @@ export default function TicketsVaultTab({
         </div>
 
         <button
-          onClick={handleExportCSV}
+          onClick={handleExportXlsx}
           className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 flex items-center space-x-2 transition-colors shadow-sm"
         >
           <Download className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-          <span>Export Vault to CSV</span>
+          <span>Export Vault (.xlsx)</span>
         </button>
       </div>
 

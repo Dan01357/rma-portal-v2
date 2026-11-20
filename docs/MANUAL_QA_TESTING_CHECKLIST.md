@@ -309,12 +309,12 @@ Each test scenario defines:
   * **Location**: Section 4: `Why are you returning this item?`
   * **Action**: Select reason `2- Expired / Near Expiry Date`.
   * **Expected Behavior**: Form dynamically reveals the `Product Expiry Date *` date-picker card. If user attempts submission without choosing an expiry date, form alerts: *"Product expiry date is required when returning expired items."*
-  * **Positive Path**: Selecting a date saves to `rma_reports.expiry_date`, visible on Admin table/card badges and CSV export.
+  * **Positive Path**: Selecting a date saves to `rma_reports.expiry_date`, visible on Admin table/card badges and Excel (`.xlsx`) export.
 
 - [ ] **TC-PUB-09D (Batch / Lot Number Quality Control Tracking)**
   * **Location**: Section 3: `Origin & Logistics Reference` -> Input `Batch / Lot Number`
   * **Action**: Enter batch code `LOT-B42`.
-  * **Expected Behavior**: Value persists into `rma_reports.batch_lot_number`, appears in admin table as `Lot: LOT-B42`, and exports in column 6 of the CSV.
+  * **Expected Behavior**: Value persists into `rma_reports.batch_lot_number`, appears in admin table as `Lot: LOT-B42`, and exports in the Excel (`.xlsx`) spreadsheet.
 
 ---
 
@@ -494,7 +494,7 @@ Each test scenario defines:
 - [ ] **Return Reports Header Actions Wrap Test (Portrait 360px-420px)**
   * **Location**: Tab 2 Incoming Return Reports Header on Mobile (< 640px viewport, e.g. iPhone / Galaxy portrait 390px).
   * **Action**: Resize browser to 390px width.
-  * **Expected Behavior**: Header title and count wrap cleanly. The action toolbar divides into two neat rows: `Rows List / Cards` view toggle on one side, and `Full Audit Log` + `Export CSV` grouped together with compact padding. Zero buttons bleed beyond the right edge of the screen.
+  * **Expected Behavior**: Header title and count wrap cleanly. The action toolbar divides into two neat rows: `Rows List / Cards` view toggle on one side, and `Full Audit Log` + `Export Excel (.xlsx)` grouped together with compact padding. Zero buttons bleed beyond the right edge of the screen.
 
 - [ ] **Filter Controls Grid Wrap Test (No right-edge clipping)**
   * **Location**: Tab 2 Filter Controls Toolbar on Mobile (< 640px).
@@ -516,10 +516,10 @@ Each test scenario defines:
   * **Action**: Select 3 reports; click floating bar button **"Delete Selected (3)"**.
   * **Expected Behavior**: Super Admin confirmation modal verifies deletion. All 3 rows are removed from Supabase and UI simultaneously.
 
-- [ ] **TC-REP-08 (CSV Export)**
-  * **Location**: Button **"Export CSV"**
+- [ ] **TC-REP-08 (Excel `.xlsx` Export)**
+  * **Location**: Full Audit Log Modal -> Button **"Export Excel (.xlsx)"**
   * **Action**: Click button.
-  * **Expected Behavior**: Downloads `rma_reports_export_[timestamp].csv` containing all filtered reports with RMA number, barcode, name, quantity, price, supplier, triage status, and GPS coordinates.
+  * **Expected Behavior**: Downloads `Pingcon_RMA_Reports [timestamp].xlsx` (or `TEST_Pingcon_RMA_Reports [timestamp].xlsx` in Test Mode) containing all filtered reports with RMA number, barcode, name, quantity, price, supplier, triage status, and expiry date.
 
 ---
 
@@ -1034,18 +1034,18 @@ Each test scenario defines:
     3. The item moves between Customer RMA Hub and Supplier RMA Hub without requiring a hard browser refresh.
     4. Audit trail records `RMA_TYPE_RECLASSIFIED`.
 
-### 11.3 Independent Inbound vs. Outbound CSV Exports
-- [ ] **TC-LOG-06 (Customer Inbound RMA CSV Export)**
-  * **Location**: Customer RMA Hub -> Click **"Export Inbound CSV"**
+### 11.3 Independent Inbound vs. Outbound Excel (`.xlsx`) Exports
+- [ ] **TC-LOG-06 (Customer Inbound RMA `.xlsx` Export)**
+  * **Location**: Customer RMA Hub -> Click **"Export Inbound (.xlsx)"**
   * **Expected Behavior**:
-    1. File downloads as `Customer_Inbound_RMAs_[Date].csv` with UTF-8 BOM.
+    1. File downloads as `Pingcon_Customer_Inbound_RMAs [Date].xlsx` (prefixed with `TEST_` in Test Mode).
     2. Columns include: `Store Branch`, `Reporter Name`, `Reporter Contact`, `Sales Invoice (SI) #`, `Delivery Receipt (DR) #`, `Purchase Order (PO) #`, `Customer AE`, and `Credit Memo #`.
 
-- [ ] **TC-LOG-07 (Supplier Outbound Claims CSV Export)**
-  * **Location**: Supplier RMA Hub -> Click **"Export Vendor Debit CSV"**
+- [ ] **TC-LOG-07 (Supplier Outbound Claims `.xlsx` Export)**
+  * **Location**: Supplier RMA Hub -> Click **"Export Supplier Claims (.xlsx)"**
   * **Expected Behavior**:
-    1. File downloads as `Supplier_Outbound_Claims_[Date].csv` with UTF-8 BOM.
-    2. Columns include: `Master Supplier`, `Warehouse Bin / Location`, `Batch / Lot #`, `Expiry Date`, `Net Purchase Price`, `Total Debit Value`, and `Supplier PO #`.
+    1. File downloads as `Pingcon_Supplier_Outbound_Claims [Date].xlsx` (prefixed with `TEST_` in Test Mode).
+    2. Columns include: `Master Supplier`, `Warehouse Bin / Location`, `Batch / Lot #`, `Expiry Date`, `Net Purchase Price`, `Total Debit Value`, and `Purchase Order (PO) #`.
 
 ---
 
@@ -1591,9 +1591,9 @@ Each test scenario defines:
     3. Clicking `[ ↩️ Restore ]` returns the record to its active hub and updates the UI instantaneously.
     4. Clicking `[ 🔥 Delete Forever ]` permanently deletes the item from database and storage.
 
-- [ ] **TC-V2-05 (CSV Export Master Supplier Name Resolution)**
-  * **Location**: Supplier Claims Hub -> `[ Export Supplier Claims CSV ]`
-  * **Action**: Download and open `Pingcon_Supplier_Outbound_Claims.csv` in Excel or Google Sheets.
+- [ ] **TC-V2-05 (Excel `.xlsx` Export Master Supplier Name Resolution)**
+  * **Location**: Supplier Claims Hub -> `[ Export Supplier Claims (.xlsx) ]`
+  * **Action**: Download and open `Pingcon_Supplier_Outbound_Claims [Date].xlsx` in Excel or Google Sheets.
   * **Expected Behavior**:
     1. The `Master Supplier / Vendor` column displays the resolved vendor (e.g. `Savemore`, `Guy Sing Commercial Corp`, `Marina Sales Inc`, `Landmark Corporation`).
     2. It never displays a blank cell or generic fallback `Pending Assignment` for items whose barcode matches the catalog.
@@ -1615,11 +1615,11 @@ Each test scenario defines:
 
 ## Section 20: Phase 20 — Senior RMA Engineering Audit, SI/DR/PO Document Standardization, and Silent Record Restitution
 
-- [ ] **TC-V3-01 (Standardized SI, DR, PO in Supplier Claims Hub & CSV Export)**
-  * **Location**: `🚚 Supplier RTV Hub` -> Table View & `[ Export Supplier Claims CSV ]`
+- [ ] **TC-V3-01 (Standardized SI, DR, PO in Supplier Claims Hub & `.xlsx` Export)**
+  * **Location**: `🚚 Supplier RTV Hub` -> Table View & `[ Export Supplier Claims (.xlsx) ]`
   * **Action**:
     1. Inspect table rows in Supplier Claims Hub for commercial document tags (`SI: ...`, `DR: ...`, `PO: ...`).
-    2. Click **"Export Supplier Claims CSV"** and open `Pingcon_Supplier_Outbound_Claims.csv` in Excel.
+    2. Click **"Export Supplier Claims (.xlsx)"** and open `Pingcon_Supplier_Outbound_Claims [Date].xlsx` in Excel.
   * **Expected Behavior**:
     1. The single ambiguous `Supplier PO #` column is replaced by three distinct, standardized columns:
        - `Sales Invoice (SI) #` (Supplier original sales invoice)
@@ -1627,11 +1627,11 @@ Each test scenario defines:
        - `Purchase Order (PO) #` (Pingcon purchase order placed with vendor)
     2. Document numbers map accurately to their respective fields with zero blanks caused by column conflation.
 
-- [ ] **TC-V3-02 (Standardized SI, DR, PO in Customer RMA Hub Table & Main CSV Export)**
-  * **Location**: `📥 Customer RMA Hub` -> Table Header & `[ Export CSV ]`
+- [ ] **TC-V3-02 (Standardized SI, DR, PO in Customer RMA Hub Table & Main `.xlsx` Export)**
+  * **Location**: `📥 Customer RMA Hub` -> Table Header & `[ Export Excel (.xlsx) ]`
   * **Action**:
     1. Inspect table column header: Displays `Commercial Docs (SI, DR, PO)` clearly.
-    2. Click **"Export RMA Reports CSV"** and open `Pingcon_RMA_Reports.csv` in Excel.
+    2. Click **"Export Excel (.xlsx)"** in Full Audit Log and open `Pingcon_RMA_Reports [Date].xlsx` in Excel.
   * **Expected Behavior**:
     1. Legacy `Invoice / DR #` header is cleanly separated into `Sales Invoice (SI) #`, `Delivery Receipt (DR) #`, and `Purchase Order (PO) #`.
     2. Document numbers format cleanly without scientific notation truncation.
@@ -1808,6 +1808,36 @@ Each test scenario defines:
 
 ---
 
+## Section 23: Phase 23 — Email Expiry Date, Pingcon Email Branding & Genuine `.xlsx` Spreadsheet Exports
+
+- [ ] **TC-P23-01 (RMA Email HTML & Plain-Text Include Expiry Date — Live Mode & Test Mode)**
+  * **Location**: Public Portal (`/`) or Super Admin Test Mode Sandbox -> Submit an RMA with a specific `Expiry Date` (e.g., `2026-12-31`).
+  * **Action**: Inspect the `/api/send-email` payload (or received email) for both Live Mode and Test Mode submissions (including multi-item batch manifests).
+  * **Expected Behavior**:
+    1. The `Item Details` card in `html` includes an **Expiry Date** row displaying `2026-12-31` (or per-item expiry dates for multi-item manifests, or `Not specified` if empty).
+    2. The plain-text `text` fallback includes `Expiry Date: 2026-12-31` (or per-item dates).
+
+- [ ] **TC-P23-02 (All Outbound Emails Use "Pingcon" Branding with Zero "Wholesale" Wording)**
+  * **Location**: Outbound email payloads from `notificationService.js`, `pinRequestService.js`, and `authService.js`.
+  * **Action**: Trigger RMA submission, PIN request/approval, and OTP fallback emails in Live Mode and Test Mode.
+  * **Expected Behavior**:
+    1. `subject`, `html`, `text`, and `fromName` contain `"Pingcon"` branding (e.g. `Pingcon RMA Returns`, `Pingcon RMA Finance Portal`, `Official Pingcon Logistics`).
+    2. Zero occurrences of `"wholesale"` (case-insensitive) appear anywhere in any outbound email payload, and no duplicate `"Pingcon Pingcon"` phrasing exists.
+
+- [ ] **TC-P23-03 (All Report, Hub & Credit Memo Exports Download Genuine `.xlsx` in Live Mode & Test Mode)**
+  * **Location**:
+    - **Customer RMA Hub** -> `Export Inbound (.xlsx)`
+    - **Supplier Hub (RTV)** -> `Export Supplier Claims (.xlsx)`
+    - **Finance Credit Memos** -> `Export Excel (.xlsx)`
+    - **Full Audit Log Modal** -> `Export Excel (.xlsx)`
+    - **Test Mode Sandbox** -> Sub-tab exports (`Customer`, `Supplier`, `Credit Memos`)
+  * **Action**: Click each export button in both Live Mode and Test Mode Sandbox.
+  * **Expected Behavior**:
+    1. Every downloaded filename ends strictly in `.xlsx` (zero `.csv` downloads anywhere), with `TEST_` or `Sandbox_` prefix in Test Mode.
+    2. Every downloaded file is a valid OOXML ZIP archive starting with `PK` (`0x50 0x4B`) containing `xl/worksheets/sheet1.xml`, bold frozen header row, numeric/currency cells for quantities/amounts, and plain-text cells for barcodes/SKUs/RMA# (no `8.02E+12` scientific notation and no raw `="..."` formula strings).
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -1834,4 +1864,5 @@ Each test scenario defines:
 | **Phase 20: Senior RMA Audit, SI/DR/PO Standardization & Silent Restitution** | Full Platform, REST API & Docs | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 21: Driver Delivery Handover, Test Sequence Isolation & Mandatory Expiration Date** | Full Platform, Mobile Driver Widget & REST API | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 22: Stream-Scoped Expiry Validation, QR Print Hook Safety, Full Test Mode Parity & Standardized Tables** | Customer Hub, Supplier RTV, Credit Memos & Test Sandbox | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 23: Email Expiry Date, Pingcon Email Branding & Genuine `.xlsx` Exports** | Notifications, Gatekeeper, Hubs, Credit Memos & Sandbox | `READY FOR TESTING` | *Lead QA Director* |
 

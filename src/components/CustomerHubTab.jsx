@@ -27,7 +27,7 @@ import {
   X
 } from 'lucide-react';
 import TablePagination from './TablePagination';
-import { exportCustomerInboundRMAsToCSV } from '../utils/exportCsv';
+import { exportCustomerInboundRMAsToXlsx } from '../utils/exportCsv';
 import {
   DEFECT_REASONS,
   cleanExplanationText,
@@ -540,12 +540,12 @@ export default function CustomerHubTab({
 
           <button
             type="button"
-            onClick={() => exportCustomerInboundRMAsToCSV(processedReports, null, savedProductsList)}
+            onClick={() => exportCustomerInboundRMAsToXlsx(processedReports, null, savedProductsList, isTestMode)}
             className="w-full sm:w-auto justify-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
-            title="Export Customer Inbound RMAs to CSV with Store Branch, Customer Name, DR#, AE Name, and Credit Memo #"
+            title="Export Customer Inbound RMAs to Excel (.xlsx) with Store Branch, Customer Name, DR#, AE Name, and Credit Memo #"
           >
             <Download className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Export Inbound CSV</span>
+            <span className="truncate">Export Inbound (.xlsx)</span>
           </button>
         </div>
       </div>

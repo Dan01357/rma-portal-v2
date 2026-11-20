@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import TablePagination from './TablePagination';
 import { formatFilenameDateTime } from '../utils/exportCsv';
+import { downloadTableXlsx } from '../utils/exportXlsx';
 
 export default function CreditMemosTab({
   creditMemosList = [],
@@ -255,27 +256,27 @@ export default function CreditMemosTab({
     }
   };
 
-  // Fixed CSV Export with Blob and UTF-8 BOM so Excel opens all data cleanly
-  const handleExportCsv = () => {
+  // Genuine Excel (.xlsx) Export with numeric/currency formatting and plain-text barcodes/IDs
+  const handleExportXlsx = () => {
     if (!processedMemos.length) return;
-    const headers = [
-      'SN',
-      'Credit Memo #',
-      'RMA #',
-      'Issue Date',
-      'Supplier / Vendor',
-      'Barcode',
-      'Product Description',
-      'Quantity',
-      'Unit',
-      'Net Unit Price (PHP)',
-      '12% VAT Amount (PHP)',
-      'Total Credited Amount (PHP)',
-      'Gross Amount (PHP)',
-      'Pull Out Ref',
-      'Pull Out Date',
-      'Issued By',
-      'Customer AE'
+    const columns = [
+      { header: 'SN', width: 7, type: 'number' },
+      { header: 'Credit Memo #', width: 20, type: 'text' },
+      { header: 'RMA #', width: 20, type: 'text' },
+      { header: 'Issue Date', width: 14, type: 'text' },
+      { header: 'Supplier / Vendor', width: 24, type: 'text' },
+      { header: 'Barcode', width: 18, type: 'text' },
+      { header: 'Product Description', width: 38, type: 'text' },
+      { header: 'Quantity', width: 11, type: 'number' },
+      { header: 'Unit', width: 12, type: 'text' },
+      { header: 'Net Unit Price (PHP)', width: 18, type: 'currency' },
+      { header: '12% VAT Amount (PHP)', width: 18, type: 'currency' },
+      { header: 'Total Credited Amount (PHP)', width: 22, type: 'currency' },
+      { header: 'Gross Amount (PHP)', width: 18, type: 'currency' },
+      { header: 'Pull Out Ref', width: 18, type: 'text' },
+      { header: 'Pull Out Date', width: 14, type: 'text' },
+      { header: 'Issued By', width: 20, type: 'text' },
+      { header: 'Customer AE', width: 22, type: 'text' }
     ];
 
     const rows = processedMemos.map((m, idx) => {
@@ -285,36 +286,34 @@ export default function CreditMemosTab({
       const dateStr = m.credit_issued_at ? new Date(m.credit_issued_at).toISOString().slice(0, 10) : '';
 
       return [
-        `"${idx + 1}"`,
-        `"${m.credit_memo_number || ''}"`,
-        `"${m.rma_number || ''}"`,
-        `"${dateStr}"`,
-        `"${(m.supplier_name || 'Savemore').replace(/"/g, '""')}"`,
-        `"${m.barcode || ''}"`,
-        `"${(m.product_name || '').replace(/"/g, '""')}"`,
-        m.quantity || 1,
-        `"${m.unit_name || 'pc'}"`,
-        (Number(m.unit_price) || (netPrice / (m.quantity || 1))).toFixed(2),
-        vatAmt.toFixed(2),
-        totalAmt.toFixed(2),
-        (Number(m.amount) || 0).toFixed(2),
-        `"${(m.pull_out_ref || '').replace(/"/g, '""')}"`,
-        `"${m.pull_out_date || ''}"`,
-        `"${(m.credit_issued_by || '').replace(/"/g, '""')}"`,
-        `"${(m.customer_ae_name || '').replace(/"/g, '""')}"`
+        idx + 1,
+        m.credit_memo_number || '',
+        m.rma_number || '',
+        dateStr,
+        m.supplier_name || 'Savemore',
+        m.barcode || '',
+        m.product_name || '',
+        Number(m.quantity || 1),
+        m.unit_name || 'pc',
+        Number((Number(m.unit_price) || (netPrice / (m.quantity || 1))).toFixed(2)),
+        Number(vatAmt.toFixed(2)),
+        Number(totalAmt.toFixed(2)),
+        Number((Number(m.amount) || 0).toFixed(2)),
+        m.pull_out_ref || '',
+        m.pull_out_date || '',
+        m.credit_issued_by || '',
+        m.customer_ae_name || ''
       ];
     });
 
-    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${isTestMode ? 'Sandbox_' : ''}Finance_Credit_Memos ${formatFilenameDateTime()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadTableXlsx({
+      sheetName: isTestMode ? 'Test Credit Memos' : 'Finance Credit Memos',
+      title: `${isTestMode ? 'TEST MODE SANDBOX — ' : ''}PINGCON FINANCE CREDIT MEMOS REPORT`,
+      subtitle: `Generated: ${formatFilenameDateTime()} (Asia/Manila) | Total Credit Memos: ${rows.length}`,
+      filename: `${isTestMode ? 'Sandbox_' : ''}Finance_Credit_Memos ${formatFilenameDateTime()}.xlsx`,
+      columns,
+      rows
+    });
   };
 
   return (
@@ -407,12 +406,12 @@ export default function CreditMemosTab({
             {creditMemosList.length > 0 && (
               <button
                 type="button"
-                onClick={handleExportCsv}
+                onClick={handleExportXlsx}
                 className="px-3 py-1.5 sm:px-3.5 sm:py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs shrink-0"
-                title="Export all credit memos to Excel CSV"
+                title="Export all credit memos to Excel (.xlsx)"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>Export CSV</span>
+                <span>Export Excel (.xlsx)</span>
               </button>
             )}
 

@@ -24,7 +24,7 @@ import {
   FileCheck2,
   QrCode
 } from 'lucide-react';
-import { exportRMAReportsToCSV, exportSupplierOutboundClaimsToCSV } from '../utils/exportCsv';
+import { exportSupplierOutboundClaimsToXlsx } from '../utils/exportCsv';
 import { catalogService } from '../services/catalogService';
 import TablePagination from './TablePagination';
 import ImageLightboxModal from './ImageLightboxModal';
@@ -1155,12 +1155,12 @@ export default function SupplierClaimsTab({
 
             <button
               type="button"
-              onClick={() => exportSupplierOutboundClaimsToCSV(selectedItems.length > 0 ? selectedItems : rtvCandidates, null, savedProductsList)}
+              onClick={() => exportSupplierOutboundClaimsToXlsx(selectedItems.length > 0 ? selectedItems : rtvCandidates, null, savedProductsList, isTestMode)}
               className="text-xs text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 flex items-center gap-1.5 font-bold cursor-pointer bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-3 py-1.5 rounded-xl shadow-2xs hover:shadow-xs transition-all"
-              title="Download vendor chargeback CSV with bin location and batch numbers"
+              title="Download vendor chargeback Excel (.xlsx) with bin location and batch numbers"
             >
               <Download className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-              <span>Export Supplier Claims CSV</span>
+              <span>Export Supplier Claims (.xlsx)</span>
             </button>
           </div>
         </div>

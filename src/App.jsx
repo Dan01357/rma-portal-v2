@@ -85,7 +85,7 @@ import TestModeSandboxTab from './components/TestModeSandboxTab';
 import CustomerHubTab from './components/CustomerHubTab';
 import ArchiveAndTrashTab from './components/ArchiveAndTrashTab';
 import ThermalBoxLabelModal from './components/ThermalBoxLabelModal';
-import { exportRMAReportsToCSV, exportCustomerInboundRMAsToCSV, exportSupplierOutboundClaimsToCSV } from './utils/exportCsv';
+import { exportRMAReportsToXlsx, exportCustomerInboundRMAsToXlsx, exportSupplierOutboundClaimsToXlsx } from './utils/exportCsv';
 import CreditMemoModal from './components/CreditMemoModal';
 import CreditMemoVoucherModal from './components/CreditMemoVoucherModal';
 import ProductEditModal from './components/ProductEditModal';

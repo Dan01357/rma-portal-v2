@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-19T04:27:56.574Z
+Generated At: 2026-11-19T09:08:02.571Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -153,6 +153,7 @@ rma-portal-v2/
 │   │   │   │   ├── deviceFingerprint.js
 │   │   │   │   ├── exportCsv.js
 │   │   │   │   ├── exportMatrixXlsx.js
+│   │   │   │   ├── exportXlsx.js
 │   │   │   │   ├── printIsolatedElement.js
 │   │   │   │   ├── qrDownload.js
 │   │   │   │   └── rmaHelpers.js
@@ -172,13 +173,15 @@ rma-portal-v2/
 │   │   ├── 03-hubs-and-sandbox.spec.js
 │   │   ├── 04-quick-processing-widgets.spec.js
 │   │   ├── 05-credit-memos-settings.spec.js
-│   │   └── 06-portal-qr-scanner-wizard.spec.js
+│   │   ├── 06-portal-qr-scanner-wizard.spec.js
+│   │   └── 07-email-and-xlsx-qa.spec.js
 ├── video/
 │   │   ├── watch this 1.mp4
 │   │   ├── watch this 2.mp4
 │   │   ├── watch this 3.mp4
 │   │   ├── watch this 4.mp4
-│   │   └── watch this 5.mp4
+│   │   ├── watch this 5.mp4
+│   │   └── watch this 6.mp4
 ├── .env
 ├── .env.example
 ├── .env.local
@@ -2726,12 +2729,12 @@ Each test scenario defines:
   * **Location**: Section 4: `Why are you returning this item?`
   * **Action**: Select reason `2- Expired / Near Expiry Date`.
   * **Expected Behavior**: Form dynamically reveals the `Product Expiry Date *` date-picker card. If user attempts submission without choosing an expiry date, form alerts: *"Product expiry date is required when returning expired items."*
-  * **Positive Path**: Selecting a date saves to `rma_reports.expiry_date`, visible on Admin table/card badges and CSV export.
+  * **Positive Path**: Selecting a date saves to `rma_reports.expiry_date`, visible on Admin table/card badges and Excel (`.xlsx`) export.
 
 - [ ] **TC-PUB-09D (Batch / Lot Number Quality Control Tracking)**
   * **Location**: Section 3: `Origin & Logistics Reference` -> Input `Batch / Lot Number`
   * **Action**: Enter batch code `LOT-B42`.
-  * **Expected Behavior**: Value persists into `rma_reports.batch_lot_number`, appears in admin table as `Lot: LOT-B42`, and exports in column 6 of the CSV.
+  * **Expected Behavior**: Value persists into `rma_reports.batch_lot_number`, appears in admin table as `Lot: LOT-B42`, and exports in the Excel (`.xlsx`) spreadsheet.
 
 ---
 
@@ -2911,7 +2914,7 @@ Each test scenario defines:
 - [ ] **Return Reports Header Actions Wrap Test (Portrait 360px-420px)**
   * **Location**: Tab 2 Incoming Return Reports Header on Mobile (< 640px viewport, e.g. iPhone / Galaxy portrait 390px).
   * **Action**: Resize browser to 390px width.
-  * **Expected Behavior**: Header title and count wrap cleanly. The action toolbar divides into two neat rows: `Rows List / Cards` view toggle on one side, and `Full Audit Log` + `Export CSV` grouped together with compact padding. Zero buttons bleed beyond the right edge of the screen.
+  * **Expected Behavior**: Header title and count wrap cleanly. The action toolbar divides into two neat rows: `Rows List / Cards` view toggle on one side, and `Full Audit Log` + `Export Excel (.xlsx)` grouped together with compact padding. Zero buttons bleed beyond the right edge of the screen.
 
 - [ ] **Filter Controls Grid Wrap Test (No right-edge clipping)**
   * **Location**: Tab 2 Filter Controls Toolbar on Mobile (< 640px).
@@ -2933,10 +2936,10 @@ Each test scenario defines:
   * **Action**: Select 3 reports; click floating bar button **"Delete Selected (3)"**.
   * **Expected Behavior**: Super Admin confirmation modal verifies deletion. All 3 rows are removed from Supabase and UI simultaneously.
 
-- [ ] **TC-REP-08 (CSV Export)**
-  * **Location**: Button **"Export CSV"**
+- [ ] **TC-REP-08 (Excel `.xlsx` Export)**
+  * **Location**: Full Audit Log Modal -> Button **"Export Excel (.xlsx)"**
   * **Action**: Click button.
-  * **Expected Behavior**: Downloads `rma_reports_export_[timestamp].csv` containing all filtered reports with RMA number, barcode, name, quantity, price, supplier, triage status, and GPS coordinates.
+  * **Expected Behavior**: Downloads `Pingcon_RMA_Reports [timestamp].xlsx` (or `TEST_Pingcon_RMA_Reports [timestamp].xlsx` in Test Mode) containing all filtered reports with RMA number, barcode, name, quantity, price, supplier, triage status, and expiry date.
 
 ---
 
@@ -3451,18 +3454,18 @@ Each test scenario defines:
     3. The item moves between Customer RMA Hub and Supplier RMA Hub without requiring a hard browser refresh.
     4. Audit trail records `RMA_TYPE_RECLASSIFIED`.
 
-### 11.3 Independent Inbound vs. Outbound CSV Exports
-- [ ] **TC-LOG-06 (Customer Inbound RMA CSV Export)**
-  * **Location**: Customer RMA Hub -> Click **"Export Inbound CSV"**
+### 11.3 Independent Inbound vs. Outbound Excel (`.xlsx`) Exports
+- [ ] **TC-LOG-06 (Customer Inbound RMA `.xlsx` Export)**
+  * **Location**: Customer RMA Hub -> Click **"Export Inbound (.xlsx)"**
   * **Expected Behavior**:
-    1. File downloads as `Customer_Inbound_RMAs_[Date].csv` with UTF-8 BOM.
+    1. File downloads as `Pingcon_Customer_Inbound_RMAs [Date].xlsx` (prefixed with `TEST_` in Test Mode).
     2. Columns include: `Store Branch`, `Reporter Name`, `Reporter Contact`, `Sales Invoice (SI) #`, `Delivery Receipt (DR) #`, `Purchase Order (PO) #`, `Customer AE`, and `Credit Memo #`.
 
-- [ ] **TC-LOG-07 (Supplier Outbound Claims CSV Export)**
-  * **Location**: Supplier RMA Hub -> Click **"Export Vendor Debit CSV"**
+- [ ] **TC-LOG-07 (Supplier Outbound Claims `.xlsx` Export)**
+  * **Location**: Supplier RMA Hub -> Click **"Export Supplier Claims (.xlsx)"**
   * **Expected Behavior**:
-    1. File downloads as `Supplier_Outbound_Claims_[Date].csv` with UTF-8 BOM.
-    2. Columns include: `Master Supplier`, `Warehouse Bin / Location`, `Batch / Lot #`, `Expiry Date`, `Net Purchase Price`, `Total Debit Value`, and `Supplier PO #`.
+    1. File downloads as `Pingcon_Supplier_Outbound_Claims [Date].xlsx` (prefixed with `TEST_` in Test Mode).
+    2. Columns include: `Master Supplier`, `Warehouse Bin / Location`, `Batch / Lot #`, `Expiry Date`, `Net Purchase Price`, `Total Debit Value`, and `Purchase Order (PO) #`.
 
 ---
 
@@ -4008,9 +4011,9 @@ Each test scenario defines:
     3. Clicking `[ ↩️ Restore ]` returns the record to its active hub and updates the UI instantaneously.
     4. Clicking `[ 🔥 Delete Forever ]` permanently deletes the item from database and storage.
 
-- [ ] **TC-V2-05 (CSV Export Master Supplier Name Resolution)**
-  * **Location**: Supplier Claims Hub -> `[ Export Supplier Claims CSV ]`
-  * **Action**: Download and open `Pingcon_Supplier_Outbound_Claims.csv` in Excel or Google Sheets.
+- [ ] **TC-V2-05 (Excel `.xlsx` Export Master Supplier Name Resolution)**
+  * **Location**: Supplier Claims Hub -> `[ Export Supplier Claims (.xlsx) ]`
+  * **Action**: Download and open `Pingcon_Supplier_Outbound_Claims [Date].xlsx` in Excel or Google Sheets.
   * **Expected Behavior**:
     1. The `Master Supplier / Vendor` column displays the resolved vendor (e.g. `Savemore`, `Guy Sing Commercial Corp`, `Marina Sales Inc`, `Landmark Corporation`).
     2. It never displays a blank cell or generic fallback `Pending Assignment` for items whose barcode matches the catalog.
@@ -4032,11 +4035,11 @@ Each test scenario defines:
 
 ## Section 20: Phase 20 — Senior RMA Engineering Audit, SI/DR/PO Document Standardization, and Silent Record Restitution
 
-- [ ] **TC-V3-01 (Standardized SI, DR, PO in Supplier Claims Hub & CSV Export)**
-  * **Location**: `🚚 Supplier RTV Hub` -> Table View & `[ Export Supplier Claims CSV ]`
+- [ ] **TC-V3-01 (Standardized SI, DR, PO in Supplier Claims Hub & `.xlsx` Export)**
+  * **Location**: `🚚 Supplier RTV Hub` -> Table View & `[ Export Supplier Claims (.xlsx) ]`
   * **Action**:
     1. Inspect table rows in Supplier Claims Hub for commercial document tags (`SI: ...`, `DR: ...`, `PO: ...`).
-    2. Click **"Export Supplier Claims CSV"** and open `Pingcon_Supplier_Outbound_Claims.csv` in Excel.
+    2. Click **"Export Supplier Claims (.xlsx)"** and open `Pingcon_Supplier_Outbound_Claims [Date].xlsx` in Excel.
   * **Expected Behavior**:
     1. The single ambiguous `Supplier PO #` column is replaced by three distinct, standardized columns:
        - `Sales Invoice (SI) #` (Supplier original sales invoice)
@@ -4044,11 +4047,11 @@ Each test scenario defines:
        - `Purchase Order (PO) #` (Pingcon purchase order placed with vendor)
     2. Document numbers map accurately to their respective fields with zero blanks caused by column conflation.
 
-- [ ] **TC-V3-02 (Standardized SI, DR, PO in Customer RMA Hub Table & Main CSV Export)**
-  * **Location**: `📥 Customer RMA Hub` -> Table Header & `[ Export CSV ]`
+- [ ] **TC-V3-02 (Standardized SI, DR, PO in Customer RMA Hub Table & Main `.xlsx` Export)**
+  * **Location**: `📥 Customer RMA Hub` -> Table Header & `[ Export Excel (.xlsx) ]`
   * **Action**:
     1. Inspect table column header: Displays `Commercial Docs (SI, DR, PO)` clearly.
-    2. Click **"Export RMA Reports CSV"** and open `Pingcon_RMA_Reports.csv` in Excel.
+    2. Click **"Export Excel (.xlsx)"** in Full Audit Log and open `Pingcon_RMA_Reports [Date].xlsx` in Excel.
   * **Expected Behavior**:
     1. Legacy `Invoice / DR #` header is cleanly separated into `Sales Invoice (SI) #`, `Delivery Receipt (DR) #`, and `Purchase Order (PO) #`.
     2. Document numbers format cleanly without scientific notation truncation.
@@ -4225,6 +4228,36 @@ Each test scenario defines:
 
 ---
 
+## Section 23: Phase 23 — Email Expiry Date, Pingcon Email Branding & Genuine `.xlsx` Spreadsheet Exports
+
+- [ ] **TC-P23-01 (RMA Email HTML & Plain-Text Include Expiry Date — Live Mode & Test Mode)**
+  * **Location**: Public Portal (`/`) or Super Admin Test Mode Sandbox -> Submit an RMA with a specific `Expiry Date` (e.g., `2026-12-31`).
+  * **Action**: Inspect the `/api/send-email` payload (or received email) for both Live Mode and Test Mode submissions (including multi-item batch manifests).
+  * **Expected Behavior**:
+    1. The `Item Details` card in `html` includes an **Expiry Date** row displaying `2026-12-31` (or per-item expiry dates for multi-item manifests, or `Not specified` if empty).
+    2. The plain-text `text` fallback includes `Expiry Date: 2026-12-31` (or per-item dates).
+
+- [ ] **TC-P23-02 (All Outbound Emails Use "Pingcon" Branding with Zero "Wholesale" Wording)**
+  * **Location**: Outbound email payloads from `notificationService.js`, `pinRequestService.js`, and `authService.js`.
+  * **Action**: Trigger RMA submission, PIN request/approval, and OTP fallback emails in Live Mode and Test Mode.
+  * **Expected Behavior**:
+    1. `subject`, `html`, `text`, and `fromName` contain `"Pingcon"` branding (e.g. `Pingcon RMA Returns`, `Pingcon RMA Finance Portal`, `Official Pingcon Logistics`).
+    2. Zero occurrences of `"wholesale"` (case-insensitive) appear anywhere in any outbound email payload, and no duplicate `"Pingcon Pingcon"` phrasing exists.
+
+- [ ] **TC-P23-03 (All Report, Hub & Credit Memo Exports Download Genuine `.xlsx` in Live Mode & Test Mode)**
+  * **Location**:
+    - **Customer RMA Hub** -> `Export Inbound (.xlsx)`
+    - **Supplier Hub (RTV)** -> `Export Supplier Claims (.xlsx)`
+    - **Finance Credit Memos** -> `Export Excel (.xlsx)`
+    - **Full Audit Log Modal** -> `Export Excel (.xlsx)`
+    - **Test Mode Sandbox** -> Sub-tab exports (`Customer`, `Supplier`, `Credit Memos`)
+  * **Action**: Click each export button in both Live Mode and Test Mode Sandbox.
+  * **Expected Behavior**:
+    1. Every downloaded filename ends strictly in `.xlsx` (zero `.csv` downloads anywhere), with `TEST_` or `Sandbox_` prefix in Test Mode.
+    2. Every downloaded file is a valid OOXML ZIP archive starting with `PK` (`0x50 0x4B`) containing `xl/worksheets/sheet1.xml`, bold frozen header row, numeric/currency cells for quantities/amounts, and plain-text cells for barcodes/SKUs/RMA# (no `8.02E+12` scientific notation and no raw `="..."` formula strings).
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -4251,6 +4284,7 @@ Each test scenario defines:
 | **Phase 20: Senior RMA Audit, SI/DR/PO Standardization & Silent Restitution** | Full Platform, REST API & Docs | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 21: Driver Delivery Handover, Test Sequence Isolation & Mandatory Expiration Date** | Full Platform, Mobile Driver Widget & REST API | `READY FOR TESTING` | *Lead QA Director* |
 | **Phase 22: Stream-Scoped Expiry Validation, QR Print Hook Safety, Full Test Mode Parity & Standardized Tables** | Customer Hub, Supplier RTV, Credit Memos & Test Sandbox | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 23: Email Expiry Date, Pingcon Email Branding & Genuine `.xlsx` Exports** | Notifications, Gatekeeper, Hubs, Credit Memos & Sandbox | `READY FOR TESTING` | *Lead QA Director* |
 
 
 --- END FILE: docs/MANUAL_QA_TESTING_CHECKLIST.md ---
@@ -4646,7 +4680,7 @@ In the **Supplier Claims (RTV)** tab:
    * Total Physical Units
    * Total Claim Debit Value (₱)
 4. Tapping **"+ Batch Debit Claim"** bundles selected returns into a formal supplier chargeback claim.
-5. Export formal CSV reports for supplier credit accounting or print supplier debit vouchers.
+5. Export formal Excel (`.xlsx`) reports for supplier credit accounting or print supplier debit vouchers.
 
 ### 5.3 Row-Level Operations & Triage Feature Parity
 Every line item in the Supplier Claims Hub offers complete operational parity with the Customer Hub:
@@ -4889,7 +4923,7 @@ To satisfy enterprise supply chain compliance (aligned with SAP ERP, Oracle SCM,
 | **Key Commercial Docs** | Customer Sales Invoice (SI), Delivery Receipt (DR), Customer PO | Supplier PO, Vendor Delivery Note, Batch/Lot Number |
 | **Financial Instrument** | **Customer Credit Memo Voucher** (Deduction from accounts receivable) | **Supplier Debit Claim Note** (Chargeback against vendor accounts payable) |
 | **Admin Hub Tab** | `Customer RMA Hub (Inbound)` (`adminActiveTab: 'customer_reports'`) | `Supplier RMA Hub (Outbound / RTV)` (`adminActiveTab: 'supplier_claims'`) |
-| **CSV Export Report** | `Customer_Inbound_RMAs_[Date].csv` (Branch, DR#, AE Name, Credit Memo #) | `Supplier_Outbound_Claims_[Date].csv` (Supplier, Bin, Batch/Lot#, Purchase Price) |
+| **Excel (.xlsx) Export Report** | `Pingcon_Customer_Inbound_RMAs [Date].xlsx` (Branch, DR#, AE Name, Credit Memo #) | `Pingcon_Supplier_Outbound_Claims [Date].xlsx` (Supplier, Bin, Batch/Lot#, Purchase Price) |
 
 ### 10.2 Zero-Typing Automatic Attribution Engine
 - **Gatekeeper Profile Detection**: When a user scans a station QR code or inputs an authorized 6-digit PIN, the portal creates a gatekeeper session (`gateSession.type`).
@@ -10896,7 +10930,7 @@ import TestModeSandboxTab from './components/TestModeSandboxTab';
 import CustomerHubTab from './components/CustomerHubTab';
 import ArchiveAndTrashTab from './components/ArchiveAndTrashTab';
 import ThermalBoxLabelModal from './components/ThermalBoxLabelModal';
-import { exportRMAReportsToCSV, exportCustomerInboundRMAsToCSV, exportSupplierOutboundClaimsToCSV } from './utils/exportCsv';
+import { exportRMAReportsToXlsx, exportCustomerInboundRMAsToXlsx, exportSupplierOutboundClaimsToXlsx } from './utils/exportCsv';
 import CreditMemoModal from './components/CreditMemoModal';
 import CreditMemoVoucherModal from './components/CreditMemoVoucherModal';
 import ProductEditModal from './components/ProductEditModal';
@@ -19219,6 +19253,7 @@ import {
 } from 'lucide-react';
 import TablePagination from './TablePagination';
 import { formatFilenameDateTime } from '../utils/exportCsv';
+import { downloadTableXlsx } from '../utils/exportXlsx';
 
 export default function CreditMemosTab({
   creditMemosList = [],
@@ -19451,27 +19486,27 @@ export default function CreditMemosTab({
     }
   };
 
-  // Fixed CSV Export with Blob and UTF-8 BOM so Excel opens all data cleanly
-  const handleExportCsv = () => {
+  // Genuine Excel (.xlsx) Export with numeric/currency formatting and plain-text barcodes/IDs
+  const handleExportXlsx = () => {
     if (!processedMemos.length) return;
-    const headers = [
-      'SN',
-      'Credit Memo #',
-      'RMA #',
-      'Issue Date',
-      'Supplier / Vendor',
-      'Barcode',
-      'Product Description',
-      'Quantity',
-      'Unit',
-      'Net Unit Price (PHP)',
-      '12% VAT Amount (PHP)',
-      'Total Credited Amount (PHP)',
-      'Gross Amount (PHP)',
-      'Pull Out Ref',
-      'Pull Out Date',
-      'Issued By',
-      'Customer AE'
+    const columns = [
+      { header: 'SN', width: 7, type: 'number' },
+      { header: 'Credit Memo #', width: 20, type: 'text' },
+      { header: 'RMA #', width: 20, type: 'text' },
+      { header: 'Issue Date', width: 14, type: 'text' },
+      { header: 'Supplier / Vendor', width: 24, type: 'text' },
+      { header: 'Barcode', width: 18, type: 'text' },
+      { header: 'Product Description', width: 38, type: 'text' },
+      { header: 'Quantity', width: 11, type: 'number' },
+      { header: 'Unit', width: 12, type: 'text' },
+      { header: 'Net Unit Price (PHP)', width: 18, type: 'currency' },
+      { header: '12% VAT Amount (PHP)', width: 18, type: 'currency' },
+      { header: 'Total Credited Amount (PHP)', width: 22, type: 'currency' },
+      { header: 'Gross Amount (PHP)', width: 18, type: 'currency' },
+      { header: 'Pull Out Ref', width: 18, type: 'text' },
+      { header: 'Pull Out Date', width: 14, type: 'text' },
+      { header: 'Issued By', width: 20, type: 'text' },
+      { header: 'Customer AE', width: 22, type: 'text' }
     ];
 
     const rows = processedMemos.map((m, idx) => {
@@ -19481,36 +19516,34 @@ export default function CreditMemosTab({
       const dateStr = m.credit_issued_at ? new Date(m.credit_issued_at).toISOString().slice(0, 10) : '';
 
       return [
-        `"${idx + 1}"`,
-        `"${m.credit_memo_number || ''}"`,
-        `"${m.rma_number || ''}"`,
-        `"${dateStr}"`,
-        `"${(m.supplier_name || 'Savemore').replace(/"/g, '""')}"`,
-        `"${m.barcode || ''}"`,
-        `"${(m.product_name || '').replace(/"/g, '""')}"`,
-        m.quantity || 1,
-        `"${m.unit_name || 'pc'}"`,
-        (Number(m.unit_price) || (netPrice / (m.quantity || 1))).toFixed(2),
-        vatAmt.toFixed(2),
-        totalAmt.toFixed(2),
-        (Number(m.amount) || 0).toFixed(2),
-        `"${(m.pull_out_ref || '').replace(/"/g, '""')}"`,
-        `"${m.pull_out_date || ''}"`,
-        `"${(m.credit_issued_by || '').replace(/"/g, '""')}"`,
-        `"${(m.customer_ae_name || '').replace(/"/g, '""')}"`
+        idx + 1,
+        m.credit_memo_number || '',
+        m.rma_number || '',
+        dateStr,
+        m.supplier_name || 'Savemore',
+        m.barcode || '',
+        m.product_name || '',
+        Number(m.quantity || 1),
+        m.unit_name || 'pc',
+        Number((Number(m.unit_price) || (netPrice / (m.quantity || 1))).toFixed(2)),
+        Number(vatAmt.toFixed(2)),
+        Number(totalAmt.toFixed(2)),
+        Number((Number(m.amount) || 0).toFixed(2)),
+        m.pull_out_ref || '',
+        m.pull_out_date || '',
+        m.credit_issued_by || '',
+        m.customer_ae_name || ''
       ];
     });
 
-    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${isTestMode ? 'Sandbox_' : ''}Finance_Credit_Memos ${formatFilenameDateTime()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadTableXlsx({
+      sheetName: isTestMode ? 'Test Credit Memos' : 'Finance Credit Memos',
+      title: `${isTestMode ? 'TEST MODE SANDBOX — ' : ''}PINGCON FINANCE CREDIT MEMOS REPORT`,
+      subtitle: `Generated: ${formatFilenameDateTime()} (Asia/Manila) | Total Credit Memos: ${rows.length}`,
+      filename: `${isTestMode ? 'Sandbox_' : ''}Finance_Credit_Memos ${formatFilenameDateTime()}.xlsx`,
+      columns,
+      rows
+    });
   };
 
   return (
@@ -19603,12 +19636,12 @@ export default function CreditMemosTab({
             {creditMemosList.length > 0 && (
               <button
                 type="button"
-                onClick={handleExportCsv}
+                onClick={handleExportXlsx}
                 className="px-3 py-1.5 sm:px-3.5 sm:py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs shrink-0"
-                title="Export all credit memos to Excel CSV"
+                title="Export all credit memos to Excel (.xlsx)"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>Export CSV</span>
+                <span>Export Excel (.xlsx)</span>
               </button>
             )}
 
@@ -20467,7 +20500,7 @@ import {
   X
 } from 'lucide-react';
 import TablePagination from './TablePagination';
-import { exportCustomerInboundRMAsToCSV } from '../utils/exportCsv';
+import { exportCustomerInboundRMAsToXlsx } from '../utils/exportCsv';
 import {
   DEFECT_REASONS,
   cleanExplanationText,
@@ -20980,12 +21013,12 @@ export default function CustomerHubTab({
 
           <button
             type="button"
-            onClick={() => exportCustomerInboundRMAsToCSV(processedReports, null, savedProductsList)}
+            onClick={() => exportCustomerInboundRMAsToXlsx(processedReports, null, savedProductsList, isTestMode)}
             className="w-full sm:w-auto justify-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
-            title="Export Customer Inbound RMAs to CSV with Store Branch, Customer Name, DR#, AE Name, and Credit Memo #"
+            title="Export Customer Inbound RMAs to Excel (.xlsx) with Store Branch, Customer Name, DR#, AE Name, and Credit Memo #"
           >
             <Download className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Export Inbound CSV</span>
+            <span className="truncate">Export Inbound (.xlsx)</span>
           </button>
         </div>
       </div>
@@ -38305,7 +38338,7 @@ import {
 } from 'lucide-react';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
-import { exportRMAReportsToCSV } from '../utils/exportCsv';
+import { exportRMAReportsToXlsx } from '../utils/exportCsv';
 import { formatLifecycleStage, getRealPhotos, normalizeWarehouseLocation } from '../utils/rmaHelpers';
 
 export default function RMAReportsModal({ 
@@ -38617,12 +38650,12 @@ export default function RMAReportsModal({
 
             <button
               type="button"
-              onClick={() => exportRMAReportsToCSV(processedReports)}
+              onClick={() => exportRMAReportsToXlsx(processedReports, null, [], isTestMode)}
               className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
-              title="Export filtered reports to CSV"
+              title="Export filtered reports to Excel (.xlsx)"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Export CSV</span>
+              <span>Export Excel (.xlsx)</span>
             </button>
 
             <button
@@ -43502,7 +43535,7 @@ import {
   FileCheck2,
   QrCode
 } from 'lucide-react';
-import { exportRMAReportsToCSV, exportSupplierOutboundClaimsToCSV } from '../utils/exportCsv';
+import { exportSupplierOutboundClaimsToXlsx } from '../utils/exportCsv';
 import { catalogService } from '../services/catalogService';
 import TablePagination from './TablePagination';
 import ImageLightboxModal from './ImageLightboxModal';
@@ -44633,12 +44666,12 @@ export default function SupplierClaimsTab({
 
             <button
               type="button"
-              onClick={() => exportSupplierOutboundClaimsToCSV(selectedItems.length > 0 ? selectedItems : rtvCandidates, null, savedProductsList)}
+              onClick={() => exportSupplierOutboundClaimsToXlsx(selectedItems.length > 0 ? selectedItems : rtvCandidates, null, savedProductsList, isTestMode)}
               className="text-xs text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 flex items-center gap-1.5 font-bold cursor-pointer bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-3 py-1.5 rounded-xl shadow-2xs hover:shadow-xs transition-all"
-              title="Download vendor chargeback CSV with bin location and batch numbers"
+              title="Download vendor chargeback Excel (.xlsx) with bin location and batch numbers"
             >
               <Download className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-              <span>Export Supplier Claims CSV</span>
+              <span>Export Supplier Claims (.xlsx)</span>
             </button>
           </div>
         </div>
@@ -47383,6 +47416,7 @@ import {
   Hash
 } from 'lucide-react';
 import { formatPeso, getEmailRoutingPayload } from '../utils/rmaHelpers';
+import { downloadTableXlsx } from '../utils/exportXlsx';
 
 export default function TicketsVaultTab({ 
   tickets = [], 
@@ -47430,54 +47464,52 @@ export default function TicketsVaultTab({
     });
   }, [tickets, searchTerm, statusFilter, selectedGroup]);
 
-  // Export to CSV
-  const handleExportCSV = () => {
-    const headers = [
-      'Ticket ID',
-      'Date',
-      'Customer',
-      'Branch',
-      'Product',
-      'SKU',
-      'Brand',
-      'Serial Numbers',
-      'Qty',
-      'Unit Price',
-      'Total Value (PHP)',
-      'Status',
-      'Defect Category',
-      'AE Name',
-      'Credit Memo #',
-      'Supplier'
+  // Export to genuine Excel (.xlsx)
+  const handleExportXlsx = () => {
+    const columns = [
+      { header: 'Ticket ID', width: 18, type: 'text' },
+      { header: 'Date', width: 14, type: 'text' },
+      { header: 'Customer', width: 24, type: 'text' },
+      { header: 'Branch', width: 22, type: 'text' },
+      { header: 'Product', width: 34, type: 'text' },
+      { header: 'SKU', width: 16, type: 'text' },
+      { header: 'Brand', width: 18, type: 'text' },
+      { header: 'Serial Numbers', width: 22, type: 'text' },
+      { header: 'Qty', width: 10, type: 'number' },
+      { header: 'Unit Price', width: 14, type: 'currency' },
+      { header: 'Total Value (PHP)', width: 18, type: 'currency' },
+      { header: 'Status', width: 16, type: 'text' },
+      { header: 'Defect Category', width: 22, type: 'text' },
+      { header: 'AE Name', width: 20, type: 'text' },
+      { header: 'Credit Memo #', width: 18, type: 'text' },
+      { header: 'Supplier', width: 22, type: 'text' }
     ];
 
     const rows = filteredTickets.map(t => [
-      t.id,
-      new Date(t.created_at).toLocaleDateString(),
-      `"${(t.customer_name || '').replace(/"/g, '""')}"`,
-      `"${(t.store_branch || '').replace(/"/g, '""')}"`,
-      `"${(t.product_name || '').replace(/"/g, '""')}"`,
-      t.sku,
+      t.id || '',
+      t.created_at ? new Date(t.created_at).toLocaleDateString() : '',
+      t.customer_name || '',
+      t.store_branch || '',
+      t.product_name || '',
+      t.sku || '',
       t.brand || '',
-      `"${(t.serial_numbers || '').replace(/"/g, '""')}"`,
-      t.quantity,
-      t.unit_price,
-      t.total_amount,
-      t.status,
-      `"${(t.defect_category || '').replace(/"/g, '""')}"`,
-      t.ae_name,
+      t.serial_numbers || '',
+      Number(t.quantity || 0),
+      Number(t.unit_price || 0),
+      Number(t.total_amount || 0),
+      t.status || '',
+      t.defect_category || '',
+      t.ae_name || '',
       t.credit_memo_no || '',
-      t.supplier
+      t.supplier || ''
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `RMA_Vault_Export_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadTableXlsx({
+      sheetName: 'RMA Vault',
+      filename: `RMA_Vault_Export_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      columns,
+      rows
+    });
   };
 
   return (
@@ -47498,11 +47530,11 @@ export default function TicketsVaultTab({
         </div>
 
         <button
-          onClick={handleExportCSV}
+          onClick={handleExportXlsx}
           className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 flex items-center space-x-2 transition-colors shadow-sm"
         >
           <Download className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-          <span>Export Vault to CSV</span>
+          <span>Export Vault (.xlsx)</span>
         </button>
       </div>
 
@@ -50132,7 +50164,7 @@ export const authService = {
             html: `
               <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background: #ffffff;">
                 <div style="background: #1e3a8a; padding: 20px; border-radius: 12px; color: #ffffff; text-align: center;">
-                  <h2 style="margin: 0; font-size: 18px; font-weight: 800;">Wholesale RMA Portal</h2>
+                  <h2 style="margin: 0; font-size: 18px; font-weight: 800;">Pingcon RMA Portal</h2>
                   <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Staff Verification Code</div>
                 </div>
                 <div style="padding: 24px 16px; text-align: center;">
@@ -54597,13 +54629,51 @@ export const notificationService = {
   resolveCompanyConfig(report) {
     const settings = this.getEmailSettings();
     return {
-      companyName: 'Wholesale RMA Returns',
+      companyName: 'Pingcon RMA Returns',
       senderEmail: 'finance2@keysysincorporated.com',
-      senderName: 'Wholesale RMA Finance Portal',
+      senderName: 'Pingcon RMA Finance Portal',
       toEmail: settings.toEmail || DEFAULT_RECIPIENTS.toEmail,
       baseCcList: Array.isArray(settings.baseCcList) && settings.baseCcList.length > 0 
         ? settings.baseCcList 
         : DEFAULT_RECIPIENTS.baseCcList
+    };
+  },
+
+  /**
+   * Format single or multi-item expiry dates cleanly (YYYY-MM-DD) for email HTML and plain-text fallbacks
+   */
+  formatExpiryForEmail(report) {
+    const formatDateOnly = (val) => {
+      if (!val) return '';
+      const str = String(val).trim();
+      if (!str) return '';
+      if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10);
+      const d = new Date(str);
+      if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+      return str;
+    };
+
+    if (Array.isArray(report?.items) && report.items.length > 1) {
+      const entries = report.items.map((it, idx) => {
+        const label = it.name || it.productName || it.barcode || `Item ${idx + 1}`;
+        const exp = formatDateOnly(it.expiry_date || it.ai_document_metadata?.expiry_date) || 'Not specified';
+        return { label, exp };
+      });
+      return {
+        html: entries.map(e => `${e.label}: <strong>${e.exp}</strong>`).join('<br/>'),
+        text: entries.map(e => `${e.label}: ${e.exp}`).join('; ')
+      };
+    }
+
+    const rawExpiry =
+      report?.expiry_date ||
+      report?.ai_document_metadata?.expiry_date ||
+      (Array.isArray(report?.items) ? report.items[0]?.expiry_date : '') ||
+      '';
+    const formatted = formatDateOnly(rawExpiry) || 'Not specified';
+    return {
+      html: formatted,
+      text: formatted
     };
   },
 
@@ -54617,6 +54687,7 @@ export const notificationService = {
     const contact = report.reporter_contact || 'N/A';
     const aeName = report.ae_name || 'Unassigned';
     const aeEmail = report.ae_email || '';
+    const expiryInfo = this.formatExpiryForEmail(report);
     const photos = Array.isArray(report.photos) 
       ? report.photos 
       : (typeof report.photos === 'string' ? JSON.parse(report.photos || '[]') : []);
@@ -54691,6 +54762,10 @@ export const notificationService = {
                   <div class="col-val" style="font-size: 14px; font-weight: 800; color: #0f172a;">${report.quantity || 1} ${report.unit_name || report.unit || 'pc'}</div>
                 </div>
                 <div class="row">
+                  <div class="col-label">Expiry Date:</div>
+                  <div class="col-val">${expiryInfo.html}</div>
+                </div>
+                <div class="row">
                   <div class="col-label">Supplier / Brand:</div>
                   <div class="col-val">${report.supplier_name || report.supplierName || 'Savemore'}</div>
                 </div>
@@ -54754,7 +54829,7 @@ export const notificationService = {
           </div>
 
           <div class="footer">
-            This automated alert was dispatched by the Wholesale RMA Return Portal.<br>
+            This automated alert was dispatched by the Pingcon RMA Return Portal.<br>
             Sender: ${config.senderEmail} • Intended Recipient: ${config.toEmail}
           </div>
         </div>
@@ -54823,6 +54898,8 @@ export const notificationService = {
 
       console.log(`[RMA Email Dispatch] (TestMode: ${testActive}) Sending from "${config.senderEmail}" to "${toEmail}", CC: [${finalCcList.join(', ')}] with ${attachments.length} attachments`);
 
+      const expiryInfo = this.formatExpiryForEmail(report);
+
       const res = await fetch('/api/send-email', {
         method: 'POST',
         headers: {
@@ -54837,7 +54914,7 @@ export const notificationService = {
           html: htmlBody,
           isTestMode: testActive,
           attachments,
-          text: `${testActive ? 'Test - ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}`
+          text: `${testActive ? 'Test - ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Expiry Date: ${expiryInfo.text}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}`
         })
       });
 
@@ -54952,7 +55029,7 @@ export const notificationService = {
           </div>
 
           <div class="footer">
-            Sender: ${config.senderEmail} • Dispatched by Wholesale RMA Portal
+            Sender: ${config.senderEmail} • Dispatched by Pingcon RMA Portal
           </div>
         </div>
       </body>
@@ -55277,7 +55354,7 @@ export const pinRequestService = {
             <div class="header">
               <span class="badge">Return Authorization Request</span>
               <h1 class="title">${isTestMode ? 'Test - ' : ''}New PIN Code Request Pending Review</h1>
-              <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Wholesale RMA Return Gatekeeper</div>
+              <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Pingcon RMA Return Gatekeeper</div>
             </div>
             <div class="content">
               <p style="font-size: 14px; line-height: 1.5; margin-top: 0; color: #334155;">
@@ -55319,7 +55396,7 @@ export const pinRequestService = {
               </p>
             </div>
             <div class="footer">
-              Wholesale RMA Operations Portal • Automated Security & Intake System
+              Pingcon RMA Operations Portal • Automated Security & Intake System
             </div>
           </div>
         </body>
@@ -55335,7 +55412,7 @@ export const pinRequestService = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           from: 'finance2@keysysincorporated.com',
-          fromName: isTestMode ? '[TEST] Wholesale RMA Portal' : 'Wholesale RMA Portal',
+          fromName: isTestMode ? '[TEST] Pingcon RMA Portal' : 'Pingcon RMA Portal',
           to: toEmail,
           cc: cleanCcList,
           subject,
@@ -55429,7 +55506,7 @@ export const pinRequestService = {
                   <tr>
                     <td style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 28px; text-align: center;">
                       <div style="display: inline-block; background-color: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 12px; padding: 6px 14px; margin-bottom: 12px;">
-                        <span style="color: #ffffff; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px;">Official Wholesale Logistics</span>
+                        <span style="color: #ffffff; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px;">Official Pingcon Logistics</span>
                       </div>
                       <h1 style="color: #ffffff; font-size: 24px; font-weight: 900; margin: 0; letter-spacing: -0.5px;">
                         Keysys &amp; Pingcon Operations
@@ -55507,7 +55584,7 @@ export const pinRequestService = {
                   <tr>
                     <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px; text-align: center;">
                       <p style="margin: 0; font-size: 11px; color: #94a3b8; font-weight: 500;">
-                        &copy; ${new Date().getFullYear()} Keysys &amp; Pingcon Wholesale Operations. All rights reserved.<br/>
+                        &copy; ${new Date().getFullYear()} Keysys &amp; Pingcon Operations. All rights reserved.<br/>
                         Automated Gatekeeper Security Engine &bull; System Verified
                       </p>
                     </td>
@@ -55521,7 +55598,7 @@ export const pinRequestService = {
         </html>
       `;
 
-      const textFallback = `Keysys & Pingcon Wholesale RMA Gatekeeper\n\nHello ${target.requester_name} (${target.organization_name || 'Valued Partner'}),\n\nYour request for Return Merchandise Authorization (RMA) access has been approved by ${approvedBy}.\n\nYour 6-digit PIN: ${pinCode}\nDirect Link: ${portalUrl}\n\nEnter this PIN after scanning the QR code on your product box. Keep this PIN safe—you can reuse it for future damaged item reports under this QR profile.`;
+      const textFallback = `Keysys & Pingcon RMA Gatekeeper\n\nHello ${target.requester_name} (${target.organization_name || 'Valued Partner'}),\n\nYour request for Return Merchandise Authorization (RMA) access has been approved by ${approvedBy}.\n\nYour 6-digit PIN: ${pinCode}\nDirect Link: ${portalUrl}\n\nEnter this PIN after scanning the QR code on your product box. Keep this PIN safe—you can reuse it for future damaged item reports under this QR profile.`;
 
       const resp = await fetch('/api/send-email', {
         method: 'POST',
@@ -57271,10 +57348,12 @@ export async function getDeviceFingerprint() {
 
 --- START FILE: src/utils/exportCsv.js ---
 /**
- * Enterprise Accounting & Logistics CSV Exporter
- * Formats financial records with clean headers and UTF-8 BOM for Microsoft Excel & Google Sheets.
+ * Enterprise Accounting & Logistics Excel (.xlsx) Exporter
+ * Formats financial and warehouse records into genuine OOXML (.xlsx) spreadsheets
+ * with bold frozen headers, clean column widths, numeric/currency cells, and plain-text IDs/barcodes.
  */
-import { normalizeWarehouseLocation } from './rmaHelpers';
+import { normalizeWarehouseLocation, isTestRecord } from './rmaHelpers';
+import { downloadTableXlsx } from './exportXlsx';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -57294,11 +57373,13 @@ export function formatFilenameDateTime(date = new Date()) {
   return `${yyyy}-${mm}${mon}-${dd} ${hh}${min}`;
 }
 
-export function resolveFilenameWithTimestamp(defaultPrefix, customFilename) {
+export function resolveFilenameWithTimestamp(defaultPrefix, customFilename, isTestMode = false) {
   const ts = formatFilenameDateTime();
-  if (!customFilename) return `${defaultPrefix} ${ts}.csv`;
-  const cleanName = customFilename.replace(/\.csv$/i, '');
-  return `${cleanName} ${ts}.csv`;
+  const modePrefix = isTestMode ? 'TEST_' : '';
+  if (!customFilename) return `${modePrefix}${defaultPrefix} ${ts}.xlsx`;
+  const cleanName = customFilename.replace(/\.(csv|xlsx)$/i, '');
+  const hasTestPrefix = /^(TEST_|Sandbox_)/i.test(cleanName);
+  return `${hasTestPrefix ? '' : modePrefix}${cleanName} ${ts}.xlsx`;
 }
 
 /**
@@ -57317,25 +57398,8 @@ export function formatMilitaryDateTime(val) {
   return `${yyyy}-${mm}-${dd} ${hh}${min}`;
 }
 
-function escapeCsvCell(val) {
-  if (val === null || val === undefined) return '""';
-  const str = String(val).replace(/"/g, '""');
-  return `"${str}"`;
-}
-
 /**
- * Escape numeric codes, barcodes, dates, and references as Excel text formulas (="...")
- * to prevent scientific notation (8.02E+12) and auto-formatting corruption in Excel/Sheets.
- */
-export function escapeCsvTextFormula(val) {
-  if (val === null || val === undefined || val === '') return '""';
-  const str = String(val).trim().replace(/"/g, '""');
-  if (!str || str === 'N/A') return `"${str}"`;
-  return `="${str}"`;
-}
-
-/**
- * Format date cleanly as YYYY-MM-DD stripping time parts to prevent "#######" cell overflow in Excel.
+ * Format date cleanly as YYYY-MM-DD stripping time parts to prevent overflow in Excel.
  */
 export function formatCleanDateOnly(val) {
   if (!val) return '';
@@ -57389,66 +57453,58 @@ export function resolveExportSupplier(r, savedProducts = []) {
   return rawSup || 'Pending Assignment';
 }
 
-function downloadCsvBlob(csvContent, filename) {
-  // \uFEFF is UTF-8 Byte Order Mark (BOM) so Excel reads formatting and currencies properly
-  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, 200);
+function inferTestMode(records, explicitIsTestMode) {
+  if (typeof explicitIsTestMode === 'boolean') return explicitIsTestMode;
+  return Array.isArray(records) && records.length > 0 && records.every(r => isTestRecord(r));
 }
 
 /**
- * Export RMA Reports to CSV
+ * Export RMA Reports to genuine .xlsx
  */
-export function exportRMAReportsToCSV(reports, filename = null, savedProducts = []) {
+export function exportRMAReportsToXlsx(reports, filename = null, savedProducts = [], isTestMode = undefined) {
   if (!reports || reports.length === 0) {
     alert('No reports available to export.');
     return;
   }
 
-  const headers = [
-    'SN',
-    'RMA Number',
-    'Date Logged (YYYY-MM-DD HHMM)',
-    'Store / Branch',
-    'Sales Invoice (SI) #',
-    'Delivery Receipt (DR) #',
-    'Purchase Order (PO) #',
-    'Batch / Lot #',
-    'Expiry Date',
-    'Status',
-    'Disposition',
-    'Condition Grade',
-    'Warehouse Location',
-    'Supplier / Vendor',
-    'Barcode',
-    'Assigned SKU',
-    'Product Description',
-    'Quantity',
-    'Packaging Unit',
-    'Net Unit Price (PHP)',
-    'Price w/ VAT (PHP)',
-    'Total Claim Value (PHP)',
-    'Reporter Name',
-    'Reported By',
-    'Inspected By',
-    'Defect Reason',
-    'Google Drive Photo Link',
-    'Google Drive Folder',
-    'Notes'
+  const testActive = inferTestMode(reports, isTestMode);
+
+  const columns = [
+    { header: 'SN', width: 7, type: 'number' },
+    { header: 'RMA Number', width: 20, type: 'text' },
+    { header: 'Date Logged (YYYY-MM-DD HHMM)', width: 24, type: 'text' },
+    { header: 'Store / Branch', width: 24, type: 'text' },
+    { header: 'Sales Invoice (SI) #', width: 18, type: 'text' },
+    { header: 'Delivery Receipt (DR) #', width: 18, type: 'text' },
+    { header: 'Purchase Order (PO) #', width: 18, type: 'text' },
+    { header: 'Batch / Lot #', width: 16, type: 'text' },
+    { header: 'Expiry Date', width: 14, type: 'text' },
+    { header: 'Status', width: 18, type: 'text' },
+    { header: 'Disposition', width: 24, type: 'text' },
+    { header: 'Condition Grade', width: 18, type: 'text' },
+    { header: 'Warehouse Location', width: 20, type: 'text' },
+    { header: 'Supplier / Vendor', width: 24, type: 'text' },
+    { header: 'Barcode', width: 18, type: 'text' },
+    { header: 'Assigned SKU', width: 16, type: 'text' },
+    { header: 'Product Description', width: 38, type: 'text' },
+    { header: 'Quantity', width: 11, type: 'number' },
+    { header: 'Packaging Unit', width: 14, type: 'text' },
+    { header: 'Net Unit Price (PHP)', width: 18, type: 'currency' },
+    { header: 'Price w/ VAT (PHP)', width: 18, type: 'currency' },
+    { header: 'Total Claim Value (PHP)', width: 20, type: 'currency' },
+    { header: 'Reporter Name', width: 20, type: 'text' },
+    { header: 'Reported By', width: 20, type: 'text' },
+    { header: 'Inspected By', width: 20, type: 'text' },
+    { header: 'Defect Reason', width: 28, type: 'text' },
+    { header: 'Google Drive Photo Link', width: 36, type: 'text' },
+    { header: 'Google Drive Folder', width: 36, type: 'text' },
+    { header: 'Notes', width: 32, type: 'text' }
   ];
 
   const rows = reports.map((r, index) => {
     const qty = Number(r.quantity || 1);
     const unitPrice = Number(r.price_with_vat || r.price || 0);
-    const totalVal = (qty * unitPrice).toFixed(2);
+    const totalVal = Number((qty * unitPrice).toFixed(2));
     const dateStr = formatMilitaryDateTime(r.created_at);
     const photoLink = extractPhotoLink(r);
     const cleanExpiry = formatCleanDateOnly(r.expiry_date);
@@ -57456,164 +57512,180 @@ export function exportRMAReportsToCSV(reports, filename = null, savedProducts = 
     const supplier = resolveExportSupplier(r, savedProducts);
 
     return [
-      escapeCsvCell(index + 1),
-      escapeCsvTextFormula(r.rma_number),
-      escapeCsvTextFormula(dateStr),
-      escapeCsvCell(r.store_branch || ''),
-      escapeCsvTextFormula(r.si_number || ''),
-      escapeCsvTextFormula(r.dr_number || r.invoice_dr_number || ''),
-      escapeCsvTextFormula(r.po_number || ''),
-      escapeCsvTextFormula(r.batch_lot_number || ''),
-      escapeCsvTextFormula(cleanExpiry),
-      escapeCsvCell(r.status || 'pending'),
-      escapeCsvCell(r.disposition || 'Pending Triage'),
-      escapeCsvCell(r.condition_grade || 'Unassessed'),
-      escapeCsvCell(loc),
-      escapeCsvCell(supplier),
-      escapeCsvTextFormula(r.barcode),
-      escapeCsvTextFormula(r.code || r.sku || ''),
-      escapeCsvCell(r.name),
-      escapeCsvCell(qty),
-      escapeCsvCell(r.unit_name || 'pc'),
-      escapeCsvCell(Number(r.price || 0).toFixed(2)),
-      escapeCsvCell(Number(r.price_with_vat || 0).toFixed(2)),
-      escapeCsvCell(totalVal),
-      escapeCsvCell(r.reporter_name || ''),
-      escapeCsvCell(r.reported_by || ''),
-      escapeCsvCell(r.inspected_by || ''),
-      escapeCsvCell(r.reason || ''),
-      escapeCsvCell(photoLink),
-      escapeCsvCell(r.google_drive_folder_url || ''),
-      escapeCsvCell(r.notes || '')
-    ].join(',');
+      index + 1,
+      r.rma_number || '',
+      dateStr,
+      r.store_branch || '',
+      r.si_number || '',
+      r.dr_number || r.invoice_dr_number || '',
+      r.po_number || '',
+      r.batch_lot_number || '',
+      cleanExpiry,
+      r.status || 'pending',
+      r.disposition || 'Pending Triage',
+      r.condition_grade || 'Unassessed',
+      loc,
+      supplier,
+      r.barcode || '',
+      r.code || r.sku || '',
+      r.name || '',
+      qty,
+      r.unit_name || 'pc',
+      Number(Number(r.price || 0).toFixed(2)),
+      Number(Number(r.price_with_vat || 0).toFixed(2)),
+      totalVal,
+      r.reporter_name || '',
+      r.reported_by || '',
+      r.inspected_by || '',
+      r.reason || '',
+      photoLink,
+      r.google_drive_folder_url || '',
+      r.notes || ''
+    ];
   });
 
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = resolveFilenameWithTimestamp('Pingcon_RMA_Reports', filename);
-  downloadCsvBlob(csv, actualFilename);
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_RMA_Reports', filename, testActive);
+  downloadTableXlsx({
+    sheetName: testActive ? 'Test RMA Audit Log' : 'RMA Audit Log',
+    title: `${testActive ? 'TEST MODE SANDBOX — ' : ''}PINGCON RMA FULL AUDIT LOG REPORT`,
+    subtitle: `Generated: ${formatFilenameDateTime()} (Asia/Manila) | Total Records: ${rows.length}`,
+    filename: actualFilename,
+    columns,
+    rows
+  });
 }
 
 /**
- * Export Customer Inbound RMAs to CSV
+ * Export Customer Inbound RMAs to genuine .xlsx
  */
-export function exportCustomerInboundRMAsToCSV(reports, filename = null, savedProducts = []) {
+export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedProducts = [], isTestMode = undefined) {
   if (!reports || reports.length === 0) {
     alert('No customer return reports available to export.');
     return;
   }
 
-  const headers = [
-    'SN',
-    'RMA Number',
-    'Date Logged (YYYY-MM-DD HHMM)',
-    'Customer Store / Branch',
-    'Reporter Name',
-    'Reporter Contact',
-    'Sales Invoice (SI) #',
-    'Delivery Receipt (DR) #',
-    'Purchase Order (PO) #',
-    'Account Executive (AE)',
-    'AE Email',
-    'Barcode',
-    'Assigned SKU',
-    'Product Description',
-    'Quantity',
-    'Packaging Unit',
-    'Unit Price (PHP)',
-    'Total Credit Claim (PHP)',
-    'Lifecycle Stage / Status',
-    'Disposition',
-    'Condition Grade',
-    'Defect Reason',
-    'Credit Memo #',
-    'Google Drive Photo Link',
-    'Google Drive Folder',
-    'Customer Notes'
+  const testActive = inferTestMode(reports, isTestMode);
+
+  const columns = [
+    { header: 'SN', width: 7, type: 'number' },
+    { header: 'RMA Number', width: 20, type: 'text' },
+    { header: 'Date Logged (YYYY-MM-DD HHMM)', width: 24, type: 'text' },
+    { header: 'Customer Store / Branch', width: 26, type: 'text' },
+    { header: 'Reporter Name', width: 20, type: 'text' },
+    { header: 'Reporter Contact', width: 22, type: 'text' },
+    { header: 'Sales Invoice (SI) #', width: 18, type: 'text' },
+    { header: 'Delivery Receipt (DR) #', width: 18, type: 'text' },
+    { header: 'Purchase Order (PO) #', width: 18, type: 'text' },
+    { header: 'Account Executive (AE)', width: 22, type: 'text' },
+    { header: 'AE Email', width: 26, type: 'text' },
+    { header: 'Barcode', width: 18, type: 'text' },
+    { header: 'Assigned SKU', width: 16, type: 'text' },
+    { header: 'Product Description', width: 38, type: 'text' },
+    { header: 'Quantity', width: 11, type: 'number' },
+    { header: 'Packaging Unit', width: 14, type: 'text' },
+    { header: 'Unit Price (PHP)', width: 16, type: 'currency' },
+    { header: 'Total Credit Claim (PHP)', width: 20, type: 'currency' },
+    { header: 'Lifecycle Stage / Status', width: 20, type: 'text' },
+    { header: 'Disposition', width: 24, type: 'text' },
+    { header: 'Condition Grade', width: 18, type: 'text' },
+    { header: 'Defect Reason', width: 28, type: 'text' },
+    { header: 'Credit Memo #', width: 18, type: 'text' },
+    { header: 'Google Drive Photo Link', width: 36, type: 'text' },
+    { header: 'Google Drive Folder', width: 36, type: 'text' },
+    { header: 'Customer Notes', width: 32, type: 'text' }
   ];
 
   const rows = reports.map((r, index) => {
     const qty = Number(r.quantity || 1);
     const unitPrice = Number(r.price_with_vat || r.price || 0);
-    const totalVal = (qty * unitPrice).toFixed(2);
+    const totalVal = Number((qty * unitPrice).toFixed(2));
     const dateStr = formatMilitaryDateTime(r.created_at);
     const photoLink = extractPhotoLink(r);
 
     return [
-      escapeCsvCell(index + 1),
-      escapeCsvTextFormula(r.rma_number),
-      escapeCsvTextFormula(dateStr),
-      escapeCsvCell(r.store_branch || ''),
-      escapeCsvCell(r.reporter_name || ''),
-      escapeCsvTextFormula(r.reporter_contact || ''),
-      escapeCsvTextFormula(r.si_number || ''),
-      escapeCsvTextFormula(r.dr_number || r.invoice_dr_number || ''),
-      escapeCsvTextFormula(r.po_number || ''),
-      escapeCsvCell(r.ae_name || ''),
-      escapeCsvCell(r.ae_email || ''),
-      escapeCsvTextFormula(r.barcode),
-      escapeCsvTextFormula(r.code || r.sku || ''),
-      escapeCsvCell(r.name),
-      escapeCsvCell(qty),
-      escapeCsvCell(r.unit_name || 'pc'),
-      escapeCsvCell(unitPrice.toFixed(2)),
-      escapeCsvCell(totalVal),
-      escapeCsvCell(r.status || 'received_at_dock'),
-      escapeCsvCell(r.disposition || 'Pending Triage'),
-      escapeCsvCell(r.condition_grade || 'Unassessed'),
-      escapeCsvCell(r.reason || ''),
-      escapeCsvTextFormula(r.credit_memo_no || r.credit_memo_number || ''),
-      escapeCsvCell(photoLink),
-      escapeCsvCell(r.google_drive_folder_url || ''),
-      escapeCsvCell(r.notes || '')
-    ].join(',');
+      index + 1,
+      r.rma_number || '',
+      dateStr,
+      r.store_branch || '',
+      r.reporter_name || '',
+      r.reporter_contact || '',
+      r.si_number || '',
+      r.dr_number || r.invoice_dr_number || '',
+      r.po_number || '',
+      r.ae_name || '',
+      r.ae_email || '',
+      r.barcode || '',
+      r.code || r.sku || '',
+      r.name || '',
+      qty,
+      r.unit_name || 'pc',
+      Number(unitPrice.toFixed(2)),
+      totalVal,
+      r.status || 'received_at_dock',
+      r.disposition || 'Pending Triage',
+      r.condition_grade || 'Unassessed',
+      r.reason || '',
+      r.credit_memo_no || r.credit_memo_number || '',
+      photoLink,
+      r.google_drive_folder_url || '',
+      r.notes || ''
+    ];
   });
 
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Customer_Inbound_RMAs', filename);
-  downloadCsvBlob(csv, actualFilename);
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Customer_Inbound_RMAs', filename, testActive);
+  downloadTableXlsx({
+    sheetName: testActive ? 'Test Customer RMAs' : 'Customer Inbound RMAs',
+    title: `${testActive ? 'TEST MODE SANDBOX — ' : ''}CUSTOMER RMA HUB — INBOUND RETURNS REPORT`,
+    subtitle: `Generated: ${formatFilenameDateTime()} (Asia/Manila) | Total Inbound RMAs: ${rows.length}`,
+    filename: actualFilename,
+    columns,
+    rows
+  });
 }
 
 /**
- * Export Supplier Outbound / RTV Debit Claims to CSV
+ * Export Supplier Outbound / RTV Debit Claims to genuine .xlsx
  */
-export function exportSupplierOutboundClaimsToCSV(reports, filename = null, savedProducts = []) {
+export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, savedProducts = [], isTestMode = undefined) {
   if (!reports || reports.length === 0) {
     alert('No supplier outbound claims available to export.');
     return;
   }
 
-  const headers = [
-    'SN',
-    'RMA Number',
-    'Date Logged (YYYY-MM-DD HHMM)',
-    'Master Supplier / Vendor',
-    'Warehouse Bin / Location',
-    'Batch / Lot #',
-    'Expiry Date',
-    'Barcode',
-    'Assigned SKU',
-    'Product Description',
-    'Quantity',
-    'Packaging Unit',
-    'Net Purchase Price (PHP)',
-    'Total Debit Value (PHP)',
-    'Condition Grade',
-    'Disposition',
-    'Debit Claim Status',
-    'Inspected By',
-    'Defect Reason / Diagnosis',
-    'Sales Invoice (SI) #',
-    'Delivery Receipt (DR) #',
-    'Purchase Order (PO) #',
-    'Google Drive Photo Link',
-    'Google Drive Folder',
-    'Warehouse Notes'
+  const testActive = inferTestMode(reports, isTestMode);
+
+  const columns = [
+    { header: 'SN', width: 7, type: 'number' },
+    { header: 'RMA Number', width: 20, type: 'text' },
+    { header: 'Date Logged (YYYY-MM-DD HHMM)', width: 24, type: 'text' },
+    { header: 'Master Supplier / Vendor', width: 26, type: 'text' },
+    { header: 'Warehouse Bin / Location', width: 22, type: 'text' },
+    { header: 'Batch / Lot #', width: 16, type: 'text' },
+    { header: 'Expiry Date', width: 14, type: 'text' },
+    { header: 'Barcode', width: 18, type: 'text' },
+    { header: 'Assigned SKU', width: 16, type: 'text' },
+    { header: 'Product Description', width: 38, type: 'text' },
+    { header: 'Quantity', width: 11, type: 'number' },
+    { header: 'Packaging Unit', width: 14, type: 'text' },
+    { header: 'Net Purchase Price (PHP)', width: 20, type: 'currency' },
+    { header: 'Total Debit Value (PHP)', width: 20, type: 'currency' },
+    { header: 'Condition Grade', width: 18, type: 'text' },
+    { header: 'Disposition', width: 24, type: 'text' },
+    { header: 'Debit Claim Status', width: 18, type: 'text' },
+    { header: 'Inspected By', width: 20, type: 'text' },
+    { header: 'Defect Reason / Diagnosis', width: 28, type: 'text' },
+    { header: 'Sales Invoice (SI) #', width: 18, type: 'text' },
+    { header: 'Delivery Receipt (DR) #', width: 18, type: 'text' },
+    { header: 'Purchase Order (PO) #', width: 18, type: 'text' },
+    { header: 'Google Drive Photo Link', width: 36, type: 'text' },
+    { header: 'Google Drive Folder', width: 36, type: 'text' },
+    { header: 'Warehouse Notes', width: 32, type: 'text' }
   ];
 
   const rows = reports.map((r, index) => {
     const qty = Number(r.quantity || 1);
     const unitPrice = Number(r.price || r.price_with_vat || 0);
-    const totalVal = (qty * unitPrice).toFixed(2);
+    const totalVal = Number((qty * unitPrice).toFixed(2));
     const dateStr = formatMilitaryDateTime(r.created_at);
     const photoLink = extractPhotoLink(r);
     const cleanExpiry = formatCleanDateOnly(r.expiry_date);
@@ -57621,69 +57693,77 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null, save
     const supplier = resolveExportSupplier(r, savedProducts);
 
     return [
-      escapeCsvCell(index + 1),
-      escapeCsvTextFormula(r.rma_number),
-      escapeCsvTextFormula(dateStr),
-      escapeCsvCell(supplier),
-      escapeCsvCell(loc),
-      escapeCsvTextFormula(r.batch_lot_number || ''),
-      escapeCsvTextFormula(cleanExpiry),
-      escapeCsvTextFormula(r.barcode),
-      escapeCsvTextFormula(r.code || r.sku || ''),
-      escapeCsvCell(r.name),
-      escapeCsvCell(qty),
-      escapeCsvCell(r.unit_name || 'pc'),
-      escapeCsvCell(unitPrice.toFixed(2)),
-      escapeCsvCell(totalVal),
-      escapeCsvCell(r.condition_grade || 'Unassessed'),
-      escapeCsvCell(r.disposition || 'Return to Vendor (RTV)'),
-      escapeCsvCell(r.status || 'Pending Debit'),
-      escapeCsvCell(r.inspected_by || ''),
-      escapeCsvCell(r.reason || r.explanation || ''),
-      escapeCsvTextFormula(r.si_number || ''),
-      escapeCsvTextFormula(r.dr_number || r.invoice_dr_number || ''),
-      escapeCsvTextFormula(r.po_number || r.supplier_po_no || ''),
-      escapeCsvCell(photoLink),
-      escapeCsvCell(r.google_drive_folder_url || ''),
-      escapeCsvCell(r.notes || '')
-    ].join(',');
+      index + 1,
+      r.rma_number || '',
+      dateStr,
+      supplier,
+      loc,
+      r.batch_lot_number || '',
+      cleanExpiry,
+      r.barcode || '',
+      r.code || r.sku || '',
+      r.name || '',
+      qty,
+      r.unit_name || 'pc',
+      Number(unitPrice.toFixed(2)),
+      totalVal,
+      r.condition_grade || 'Unassessed',
+      r.disposition || 'Return to Vendor (RTV)',
+      r.status || 'Pending Debit',
+      r.inspected_by || '',
+      r.reason || r.explanation || '',
+      r.si_number || '',
+      r.dr_number || r.invoice_dr_number || '',
+      r.po_number || r.supplier_po_no || '',
+      photoLink,
+      r.google_drive_folder_url || '',
+      r.notes || ''
+    ];
   });
 
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Supplier_Outbound_Claims', filename);
-  downloadCsvBlob(csv, actualFilename);
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Supplier_Outbound_Claims', filename, testActive);
+  downloadTableXlsx({
+    sheetName: testActive ? 'Test Supplier RTV' : 'Supplier Outbound Claims',
+    title: `${testActive ? 'TEST MODE SANDBOX — ' : ''}SUPPLIER RTV HUB — OUTBOUND VENDOR CLAIMS REPORT`,
+    subtitle: `Generated: ${formatFilenameDateTime()} (Asia/Manila) | Total Supplier RTV Claims: ${rows.length}`,
+    filename: actualFilename,
+    columns,
+    rows
+  });
 }
 
 /**
- * Export Credit Memos to CSV
+ * Export Credit Memos to genuine .xlsx
  */
-export function exportCreditMemosToCSV(memos, filename = null) {
+export function exportCreditMemosToXlsx(memos, filename = null, isTestMode = undefined) {
   if (!memos || memos.length === 0) {
     alert('No credit memos available to export.');
     return;
   }
 
-  const headers = [
-    'SN',
-    'Credit Memo Number',
-    'RMA Number',
-    'Pull-Out Slip Ref',
-    'Pull-Out Date',
-    'Date Issued (YYYY-MM-DD HHMM)',
-    'Supplier / Vendor',
-    'Product Description',
-    'SKU',
-    'Barcode',
-    'Quantity',
-    'Packaging Unit',
-    'Unit Price (PHP)',
-    'Amount (PHP)',
-    'Final Credit Amount (PHP)',
-    'Status',
-    'Issued By',
-    'Account Executive',
-    'AE Email',
-    'Notes'
+  const testActive = inferTestMode(memos, isTestMode);
+
+  const columns = [
+    { header: 'SN', width: 7, type: 'number' },
+    { header: 'Credit Memo Number', width: 20, type: 'text' },
+    { header: 'RMA Number', width: 20, type: 'text' },
+    { header: 'Pull-Out Slip Ref', width: 18, type: 'text' },
+    { header: 'Pull-Out Date', width: 14, type: 'text' },
+    { header: 'Date Issued (YYYY-MM-DD HHMM)', width: 24, type: 'text' },
+    { header: 'Supplier / Vendor', width: 24, type: 'text' },
+    { header: 'Product Description', width: 38, type: 'text' },
+    { header: 'SKU', width: 16, type: 'text' },
+    { header: 'Barcode', width: 18, type: 'text' },
+    { header: 'Quantity', width: 11, type: 'number' },
+    { header: 'Packaging Unit', width: 14, type: 'text' },
+    { header: 'Unit Price (PHP)', width: 16, type: 'currency' },
+    { header: 'Amount (PHP)', width: 16, type: 'currency' },
+    { header: 'Final Credit Amount (PHP)', width: 22, type: 'currency' },
+    { header: 'Status', width: 14, type: 'text' },
+    { header: 'Issued By', width: 20, type: 'text' },
+    { header: 'Account Executive', width: 22, type: 'text' },
+    { header: 'AE Email', width: 26, type: 'text' },
+    { header: 'Notes', width: 32, type: 'text' }
   ];
 
   const rows = memos.map((cm, index) => {
@@ -57691,33 +57771,45 @@ export function exportCreditMemosToCSV(memos, filename = null) {
     const dateIssued = formatMilitaryDateTime(cm.created_at);
 
     return [
-      escapeCsvCell(index + 1),
-      escapeCsvTextFormula(cm.credit_memo_number),
-      escapeCsvTextFormula(cm.rma_number),
-      escapeCsvTextFormula(cm.pull_out_ref),
-      escapeCsvTextFormula(pullOutDate),
-      escapeCsvTextFormula(dateIssued),
-      escapeCsvCell(cm.supplier_name || 'Savemore'),
-      escapeCsvCell(cm.product_name),
-      escapeCsvTextFormula(cm.sku || ''),
-      escapeCsvTextFormula(cm.barcode),
-      escapeCsvCell(cm.quantity || 1),
-      escapeCsvCell(cm.unit_name || 'pc'),
-      escapeCsvCell(Number(cm.unit_price || 0).toFixed(2)),
-      escapeCsvCell(Number(cm.amount || 0).toFixed(2)),
-      escapeCsvCell(Number(cm.credit_amount || 0).toFixed(2)),
-      escapeCsvCell(cm.status || 'issued'),
-      escapeCsvCell(cm.credit_issued_by || ''),
-      escapeCsvCell(cm.customer_ae_name || ''),
-      escapeCsvCell(cm.customer_ae_email || ''),
-      escapeCsvCell(cm.notes || '')
-    ].join(',');
+      index + 1,
+      cm.credit_memo_number || '',
+      cm.rma_number || '',
+      cm.pull_out_ref || '',
+      pullOutDate,
+      dateIssued,
+      cm.supplier_name || 'Savemore',
+      cm.product_name || '',
+      cm.sku || '',
+      cm.barcode || '',
+      Number(cm.quantity || 1),
+      cm.unit_name || 'pc',
+      Number(Number(cm.unit_price || 0).toFixed(2)),
+      Number(Number(cm.amount || 0).toFixed(2)),
+      Number(Number(cm.credit_amount || 0).toFixed(2)),
+      cm.status || 'issued',
+      cm.credit_issued_by || '',
+      cm.customer_ae_name || '',
+      cm.customer_ae_email || '',
+      cm.notes || ''
+    ];
   });
 
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Credit_Memos_Export', filename);
-  downloadCsvBlob(csv, actualFilename);
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Credit_Memos_Export', filename, testActive);
+  downloadTableXlsx({
+    sheetName: testActive ? 'Test Credit Memos' : 'Credit Memos',
+    title: `${testActive ? 'TEST MODE SANDBOX — ' : ''}PINGCON FINANCE CREDIT MEMOS REPORT`,
+    subtitle: `Generated: ${formatFilenameDateTime()} (Asia/Manila) | Total Credit Memos: ${rows.length}`,
+    filename: actualFilename,
+    columns,
+    rows
+  });
 }
+
+// Backwards-compatible aliases (all output genuine .xlsx)
+export const exportRMAReportsToCSV = exportRMAReportsToXlsx;
+export const exportCustomerInboundRMAsToCSV = exportCustomerInboundRMAsToXlsx;
+export const exportSupplierOutboundClaimsToCSV = exportSupplierOutboundClaimsToXlsx;
+export const exportCreditMemosToCSV = exportCreditMemosToXlsx;
 
 --- END FILE: src/utils/exportCsv.js ---
 
@@ -57741,29 +57833,7 @@ import {
   isTestRecord,
   isTrashedRecord
 } from './rmaHelpers.js';
-
-const textEncoder = new TextEncoder();
-
-function escapeXml(str) {
-  return String(str ?? '')
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-function colToLetter(colIdxZeroBased) {
-  let n = colIdxZeroBased + 1;
-  let result = '';
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    result = String.fromCharCode(65 + rem) + result;
-    n = Math.floor((n - 1) / 26);
-  }
-  return result;
-}
+import { buildStoredZip, colToLetter, escapeXml } from './exportXlsx.js';
 
 /** Format an ISO timestamp or YYYY-MM-DD string into Asia/Manila YYYY-MM-DD */
 export function toManilaDateKey(dateInput) {
@@ -57978,106 +58048,6 @@ export function buildRmaMatrixDataset({
     monitoredSkuCount: rows.length,
     grandTotalPcs
   };
-}
-
-// ==========================================
-// Minimal CRC-32 + Stored ZIP Builder
-// ==========================================
-const CRC_TABLE = (() => {
-  const tbl = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let c = i;
-    for (let j = 0; j < 8; j++) {
-      c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
-    }
-    tbl[i] = c >>> 0;
-  }
-  return tbl;
-})();
-
-function crc32(bytes) {
-  let c = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++) {
-    c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
-  }
-  return (c ^ 0xffffffff) >>> 0;
-}
-
-function buildStoredZip(files) {
-  // files: [{ name: string, content: string }]
-  const localParts = [];
-  const centralParts = [];
-  let offset = 0;
-
-  files.forEach((file) => {
-    const nameBytes = textEncoder.encode(file.name);
-    const dataBytes = textEncoder.encode(file.content);
-    const crc = crc32(dataBytes);
-
-    // Local file header (30 bytes + name)
-    const lh = new ArrayBuffer(30 + nameBytes.length);
-    const lv = new DataView(lh);
-    lv.setUint32(0, 0x04034b50, true);
-    lv.setUint16(4, 20, true); // version needed 2.0
-    lv.setUint16(6, 0x0800, true); // UTF-8 filename flag
-    lv.setUint16(8, 0, true); // compression 0 = stored
-    lv.setUint16(10, 0, true); // mod time
-    lv.setUint16(12, 0x5421, true); // mod date
-    lv.setUint32(14, crc, true);
-    lv.setUint32(18, dataBytes.length, true);
-    lv.setUint32(22, dataBytes.length, true);
-    lv.setUint16(26, nameBytes.length, true);
-    lv.setUint16(28, 0, true);
-    new Uint8Array(lh, 30).set(nameBytes);
-
-    localParts.push(new Uint8Array(lh), dataBytes);
-
-    // Central directory header (46 bytes + name)
-    const ch = new ArrayBuffer(46 + nameBytes.length);
-    const cv = new DataView(ch);
-    cv.setUint32(0, 0x02014b50, true);
-    cv.setUint16(4, 20, true);
-    cv.setUint16(6, 20, true);
-    cv.setUint16(8, 0x0800, true);
-    cv.setUint16(10, 0, true);
-    cv.setUint16(12, 0, true);
-    cv.setUint16(14, 0x5421, true);
-    cv.setUint32(16, crc, true);
-    cv.setUint32(20, dataBytes.length, true);
-    cv.setUint32(24, dataBytes.length, true);
-    cv.setUint16(28, nameBytes.length, true);
-    cv.setUint16(30, 0, true);
-    cv.setUint16(32, 0, true);
-    cv.setUint16(34, 0, true);
-    cv.setUint16(36, 0, true);
-    cv.setUint32(38, 0, true);
-    cv.setUint32(42, offset, true);
-    new Uint8Array(ch, 46).set(nameBytes);
-
-    centralParts.push(new Uint8Array(ch));
-    offset += 30 + nameBytes.length + dataBytes.length;
-  });
-
-  const centralSize = centralParts.reduce((s, p) => s + p.length, 0);
-  const eocd = new ArrayBuffer(22);
-  const ev = new DataView(eocd);
-  ev.setUint32(0, 0x06054b50, true);
-  ev.setUint16(4, 0, true);
-  ev.setUint16(6, 0, true);
-  ev.setUint16(8, files.length, true);
-  ev.setUint16(10, files.length, true);
-  ev.setUint32(12, centralSize, true);
-  ev.setUint32(16, offset, true);
-  ev.setUint16(20, 0, true);
-
-  const totalLen = offset + centralSize + 22;
-  const out = new Uint8Array(totalLen);
-  let pos = 0;
-  [...localParts, ...centralParts, new Uint8Array(eocd)].forEach((chunk) => {
-    out.set(chunk, pos);
-    pos += chunk.length;
-  });
-  return out;
 }
 
 // ==========================================
@@ -58422,6 +58392,352 @@ export function downloadRmaMatrixXlsx(options) {
 }
 
 --- END FILE: src/utils/exportMatrixXlsx.js ---
+
+--- START FILE: src/utils/exportXlsx.js ---
+/**
+ * Zero-dependency OOXML (.xlsx) Table & ZIP Builder
+ * Generates genuine .xlsx files (Stored ZIP + OOXML workbook) compatible with Microsoft Excel, Google Sheets, and Vercel/browser.
+ * - Optional Title Row 1 + Metadata Subtitle Row 2 (matching Pingcon Matrix .xlsx styling)
+ * - Bold navy header row with frozen panes
+ * - Auto-fitted column widths
+ * - Numeric & currency cells for quantities/prices/totals
+ * - Plain inlineStr text cells for barcodes/SKUs/RMA#/phone numbers (no scientific notation, no ="..." raw formulas)
+ */
+
+const textEncoder = new TextEncoder();
+
+export function escapeXml(str) {
+  return String(str ?? '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+export function colToLetter(colIdxZeroBased) {
+  let n = colIdxZeroBased + 1;
+  let result = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    result = String.fromCharCode(65 + rem) + result;
+    n = Math.floor((n - 1) / 26);
+  }
+  return result;
+}
+
+// ==========================================
+// Minimal CRC-32 + Stored ZIP Builder
+// ==========================================
+const CRC_TABLE = (() => {
+  const tbl = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let j = 0; j < 8; j++) {
+      c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    tbl[i] = c >>> 0;
+  }
+  return tbl;
+})();
+
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) {
+    c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+export function buildStoredZip(files) {
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  files.forEach((file) => {
+    const nameBytes = textEncoder.encode(file.name);
+    const dataBytes = textEncoder.encode(file.content);
+    const crc = crc32(dataBytes);
+
+    const lh = new ArrayBuffer(30 + nameBytes.length);
+    const lv = new DataView(lh);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 0, true);
+    lv.setUint16(10, 0, true);
+    lv.setUint16(12, 0x5421, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, dataBytes.length, true);
+    lv.setUint32(22, dataBytes.length, true);
+    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(28, 0, true);
+    new Uint8Array(lh, 30).set(nameBytes);
+
+    localParts.push(new Uint8Array(lh), dataBytes);
+
+    const ch = new ArrayBuffer(46 + nameBytes.length);
+    const cv = new DataView(ch);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, 0, true);
+    cv.setUint16(14, 0x5421, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, dataBytes.length, true);
+    cv.setUint32(24, dataBytes.length, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, offset, true);
+    new Uint8Array(ch, 46).set(nameBytes);
+
+    centralParts.push(new Uint8Array(ch));
+    offset += 30 + nameBytes.length + dataBytes.length;
+  });
+
+  const centralSize = centralParts.reduce((s, p) => s + p.length, 0);
+  const eocd = new ArrayBuffer(22);
+  const ev = new DataView(eocd);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, offset, true);
+  ev.setUint16(20, 0, true);
+
+  const totalLen = offset + centralSize + 22;
+  const out = new Uint8Array(totalLen);
+  let pos = 0;
+  [...localParts, ...centralParts, new Uint8Array(eocd)].forEach((chunk) => {
+    out.set(chunk, pos);
+    pos += chunk.length;
+  });
+  return out;
+}
+
+function buildTableStylesXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="2">
+    <numFmt numFmtId="164" formatCode="#,##0"/>
+    <numFmt numFmtId="165" formatCode="#,##0.00"/>
+  </numFmts>
+  <fonts count="4">
+    <font><sz val="10"/><color rgb="FF0F172A"/><name val="Arial"/></font>
+    <font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font>
+    <font><b/><sz val="13"/><color rgb="FF0F172A"/><name val="Arial"/></font>
+    <font><i/><sz val="10"/><color rgb="FF334155"/><name val="Arial"/></font>
+  </fonts>
+  <fills count="5">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF1E3A5F"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFF8FAFC"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFFEF9C3"/></patternFill></fill>
+  </fills>
+  <borders count="2">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+    <border>
+      <left style="thin"><color rgb="FFE2E8F0"/></left>
+      <right style="thin"><color rgb="FFE2E8F0"/></right>
+      <top style="thin"><color rgb="FFE2E8F0"/></top>
+      <bottom style="thin"><color rgb="FFE2E8F0"/></bottom>
+      <diagonal/>
+    </border>
+  </borders>
+  <cellStyleXfs count="1">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
+  </cellStyleXfs>
+  <cellXfs count="10">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+    <xf numFmtId="164" fontId="0" fillId="3" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+    <xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+    <xf numFmtId="165" fontId="0" fillId="3" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="4" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+  </cellXfs>
+</styleSheet>`;
+}
+
+/**
+ * Build genuine .xlsx bytes from tabular columns & rows.
+ * @param {{ sheetName?: string, title?: string, subtitle?: string, columns: Array<{header: string, width?: number, type?: 'text'|'number'|'currency'}>, rows: Array<Array<any>> }} params
+ */
+export function buildTableXlsxBytes({ sheetName = 'Export', title = '', subtitle = '', columns = [], rows = [] }) {
+  const safeSheetName = String(sheetName || 'Export').replace(/[\\/?*\[\]:]/g, ' ').trim().slice(0, 31) || 'Export';
+
+  const colWidths = columns.map((col, cIdx) => {
+    if (col.width) return col.width;
+    let maxLen = String(col.header || '').length;
+    const sampleLimit = Math.min(rows.length, 200);
+    for (let r = 0; r < sampleLimit; r++) {
+      const valLen = String(rows[r]?.[cIdx] ?? '').length;
+      if (valLen > maxLen) maxLen = valLen;
+    }
+    return Math.min(48, Math.max(12, maxLen + 4));
+  });
+
+  const colsXml = `<cols>${colWidths.map((w, idx) => {
+    const n = idx + 1;
+    return `<col min="${n}" max="${n}" width="${w}" customWidth="1"/>`;
+  }).join('')}</cols>`;
+
+  const sheetRows = [];
+  const merges = [];
+  const lastColIdx = Math.max(0, columns.length - 1);
+  const lastColLetter = colToLetter(lastColIdx);
+  let currentRow = 1;
+
+  if (title) {
+    sheetRows.push(
+      `<row r="${currentRow}" ht="24" customHeight="1"><c r="A${currentRow}" s="8" t="inlineStr"><is><t xml:space="preserve">${escapeXml(title)}</t></is></c></row>`
+    );
+    currentRow += 1;
+  }
+
+  if (subtitle) {
+    const subCells = [
+      `<c r="A${currentRow}" s="9" t="inlineStr"><is><t xml:space="preserve">${escapeXml(subtitle)}</t></is></c>`
+    ];
+    for (let c = 1; c <= lastColIdx; c++) {
+      subCells.push(`<c r="${colToLetter(c)}${currentRow}" s="9"/>`);
+    }
+    sheetRows.push(`<row r="${currentRow}" ht="18" customHeight="1">${subCells.join('')}</row>`);
+    if (lastColIdx > 0) {
+      merges.push(`A${currentRow}:${lastColLetter}${currentRow}`);
+    }
+    currentRow += 1;
+  }
+
+  // Bold Navy Header Row
+  const headerRowNum = currentRow;
+  const headerCells = columns.map((col, cIdx) => {
+    const ref = `${colToLetter(cIdx)}${headerRowNum}`;
+    return `<c r="${ref}" s="1" t="inlineStr"><is><t xml:space="preserve">${escapeXml(col.header)}</t></is></c>`;
+  });
+  sheetRows.push(`<row r="${headerRowNum}" ht="24" customHeight="1">${headerCells.join('')}</row>`);
+  currentRow += 1;
+
+  const firstDataRowNum = currentRow;
+
+  // Data Rows
+  rows.forEach((row, rIdx) => {
+    const rowNum = firstDataRowNum + rIdx;
+    const isAlt = rIdx % 2 === 1;
+    const cells = columns.map((col, cIdx) => {
+      const ref = `${colToLetter(cIdx)}${rowNum}`;
+      const rawVal = row[cIdx];
+      const colType = col.type || 'text';
+
+      if (colType === 'number' || colType === 'currency') {
+        const num = Number(rawVal);
+        if (rawVal !== '' && rawVal !== null && rawVal !== undefined && Number.isFinite(num)) {
+          const styleIdx = colType === 'currency' ? (isAlt ? 7 : 6) : (isAlt ? 5 : 4);
+          return `<c r="${ref}" s="${styleIdx}"><v>${num}</v></c>`;
+        }
+      }
+
+      const textStyle = isAlt ? 3 : 2;
+      const strVal = rawVal === null || rawVal === undefined ? '' : String(rawVal);
+      return `<c r="${ref}" s="${textStyle}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(strVal)}</t></is></c>`;
+    });
+    sheetRows.push(`<row r="${rowNum}" ht="19" customHeight="1">${cells.join('')}</row>`);
+  });
+
+  const mergeXml = merges.length > 0
+    ? `<mergeCells count="${merges.length}">${merges.map((m) => `<mergeCell ref="${m}"/>`).join('')}</mergeCells>`
+    : '';
+
+  const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetViews>
+    <sheetView tabSelected="1" workbookViewId="0">
+      <pane ySplit="${headerRowNum}" topLeftCell="A${firstDataRowNum}" activePane="bottomLeft" state="frozen"/>
+    </sheetView>
+  </sheetViews>
+  <sheetFormatPr defaultRowHeight="19"/>
+  ${colsXml}
+  <sheetData>
+    ${sheetRows.join('\n    ')}
+  </sheetData>
+  ${mergeXml}
+</worksheet>`;
+
+  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="${escapeXml(safeSheetName)}" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`;
+
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>`;
+
+  const rootRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+
+  const wbRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+
+  return buildStoredZip([
+    { name: '[Content_Types].xml', content: contentTypesXml },
+    { name: '_rels/.rels', content: rootRelsXml },
+    { name: 'xl/workbook.xml', content: workbookXml },
+    { name: 'xl/_rels/workbook.xml.rels', content: wbRelsXml },
+    { name: 'xl/styles.xml', content: buildTableStylesXml() },
+    { name: 'xl/worksheets/sheet1.xml', content: sheetXml }
+  ]);
+}
+
+/**
+ * Download a genuine .xlsx file in the browser.
+ */
+export function downloadTableXlsx({ sheetName = 'Export', title = '', subtitle = '', filename, columns = [], rows = [] }) {
+  const bytes = buildTableXlsxBytes({ sheetName, title, subtitle, columns, rows });
+  const safeFilename = String(filename || 'Export.xlsx').replace(/\.(csv|xlsx)$/i, '') + '.xlsx';
+  const blob = new Blob([bytes], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = safeFilename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 1000);
+
+  return safeFilename;
+}
+
+--- END FILE: src/utils/exportXlsx.js ---
 
 --- START FILE: src/utils/printIsolatedElement.js ---
 /**

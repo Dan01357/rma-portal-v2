@@ -212,7 +212,7 @@ export const pinRequestService = {
             <div class="header">
               <span class="badge">Return Authorization Request</span>
               <h1 class="title">${isTestMode ? 'Test - ' : ''}New PIN Code Request Pending Review</h1>
-              <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Wholesale RMA Return Gatekeeper</div>
+              <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Pingcon RMA Return Gatekeeper</div>
             </div>
             <div class="content">
               <p style="font-size: 14px; line-height: 1.5; margin-top: 0; color: #334155;">
@@ -254,7 +254,7 @@ export const pinRequestService = {
               </p>
             </div>
             <div class="footer">
-              Wholesale RMA Operations Portal • Automated Security & Intake System
+              Pingcon RMA Operations Portal • Automated Security & Intake System
             </div>
           </div>
         </body>
@@ -270,7 +270,7 @@ export const pinRequestService = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           from: 'finance2@keysysincorporated.com',
-          fromName: isTestMode ? '[TEST] Wholesale RMA Portal' : 'Wholesale RMA Portal',
+          fromName: isTestMode ? '[TEST] Pingcon RMA Portal' : 'Pingcon RMA Portal',
           to: toEmail,
           cc: cleanCcList,
           subject,
@@ -364,7 +364,7 @@ export const pinRequestService = {
                   <tr>
                     <td style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 28px; text-align: center;">
                       <div style="display: inline-block; background-color: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 12px; padding: 6px 14px; margin-bottom: 12px;">
-                        <span style="color: #ffffff; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px;">Official Wholesale Logistics</span>
+                        <span style="color: #ffffff; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px;">Official Pingcon Logistics</span>
                       </div>
                       <h1 style="color: #ffffff; font-size: 24px; font-weight: 900; margin: 0; letter-spacing: -0.5px;">
                         Keysys &amp; Pingcon Operations
@@ -442,7 +442,7 @@ export const pinRequestService = {
                   <tr>
                     <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px; text-align: center;">
                       <p style="margin: 0; font-size: 11px; color: #94a3b8; font-weight: 500;">
-                        &copy; ${new Date().getFullYear()} Keysys &amp; Pingcon Wholesale Operations. All rights reserved.<br/>
+                        &copy; ${new Date().getFullYear()} Keysys &amp; Pingcon Operations. All rights reserved.<br/>
                         Automated Gatekeeper Security Engine &bull; System Verified
                       </p>
                     </td>
@@ -456,7 +456,7 @@ export const pinRequestService = {
         </html>
       `;
 
-      const textFallback = `Keysys & Pingcon Wholesale RMA Gatekeeper\n\nHello ${target.requester_name} (${target.organization_name || 'Valued Partner'}),\n\nYour request for Return Merchandise Authorization (RMA) access has been approved by ${approvedBy}.\n\nYour 6-digit PIN: ${pinCode}\nDirect Link: ${portalUrl}\n\nEnter this PIN after scanning the QR code on your product box. Keep this PIN safe—you can reuse it for future damaged item reports under this QR profile.`;
+      const textFallback = `Keysys & Pingcon RMA Gatekeeper\n\nHello ${target.requester_name} (${target.organization_name || 'Valued Partner'}),\n\nYour request for Return Merchandise Authorization (RMA) access has been approved by ${approvedBy}.\n\nYour 6-digit PIN: ${pinCode}\nDirect Link: ${portalUrl}\n\nEnter this PIN after scanning the QR code on your product box. Keep this PIN safe—you can reuse it for future damaged item reports under this QR profile.`;
 
       const resp = await fetch('/api/send-email', {
         method: 'POST',

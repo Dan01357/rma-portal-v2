@@ -127,13 +127,51 @@ export const notificationService = {
   resolveCompanyConfig(report) {
     const settings = this.getEmailSettings();
     return {
-      companyName: 'Wholesale RMA Returns',
+      companyName: 'Pingcon RMA Returns',
       senderEmail: 'finance2@keysysincorporated.com',
-      senderName: 'Wholesale RMA Finance Portal',
+      senderName: 'Pingcon RMA Finance Portal',
       toEmail: settings.toEmail || DEFAULT_RECIPIENTS.toEmail,
       baseCcList: Array.isArray(settings.baseCcList) && settings.baseCcList.length > 0 
         ? settings.baseCcList 
         : DEFAULT_RECIPIENTS.baseCcList
+    };
+  },
+
+  /**
+   * Format single or multi-item expiry dates cleanly (YYYY-MM-DD) for email HTML and plain-text fallbacks
+   */
+  formatExpiryForEmail(report) {
+    const formatDateOnly = (val) => {
+      if (!val) return '';
+      const str = String(val).trim();
+      if (!str) return '';
+      if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10);
+      const d = new Date(str);
+      if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+      return str;
+    };
+
+    if (Array.isArray(report?.items) && report.items.length > 1) {
+      const entries = report.items.map((it, idx) => {
+        const label = it.name || it.productName || it.barcode || `Item ${idx + 1}`;
+        const exp = formatDateOnly(it.expiry_date || it.ai_document_metadata?.expiry_date) || 'Not specified';
+        return { label, exp };
+      });
+      return {
+        html: entries.map(e => `${e.label}: <strong>${e.exp}</strong>`).join('<br/>'),
+        text: entries.map(e => `${e.label}: ${e.exp}`).join('; ')
+      };
+    }
+
+    const rawExpiry =
+      report?.expiry_date ||
+      report?.ai_document_metadata?.expiry_date ||
+      (Array.isArray(report?.items) ? report.items[0]?.expiry_date : '') ||
+      '';
+    const formatted = formatDateOnly(rawExpiry) || 'Not specified';
+    return {
+      html: formatted,
+      text: formatted
     };
   },
 
@@ -147,6 +185,7 @@ export const notificationService = {
     const contact = report.reporter_contact || 'N/A';
     const aeName = report.ae_name || 'Unassigned';
     const aeEmail = report.ae_email || '';
+    const expiryInfo = this.formatExpiryForEmail(report);
     const photos = Array.isArray(report.photos) 
       ? report.photos 
       : (typeof report.photos === 'string' ? JSON.parse(report.photos || '[]') : []);
@@ -221,6 +260,10 @@ export const notificationService = {
                   <div class="col-val" style="font-size: 14px; font-weight: 800; color: #0f172a;">${report.quantity || 1} ${report.unit_name || report.unit || 'pc'}</div>
                 </div>
                 <div class="row">
+                  <div class="col-label">Expiry Date:</div>
+                  <div class="col-val">${expiryInfo.html}</div>
+                </div>
+                <div class="row">
                   <div class="col-label">Supplier / Brand:</div>
                   <div class="col-val">${report.supplier_name || report.supplierName || 'Savemore'}</div>
                 </div>
@@ -284,7 +327,7 @@ export const notificationService = {
           </div>
 
           <div class="footer">
-            This automated alert was dispatched by the Wholesale RMA Return Portal.<br>
+            This automated alert was dispatched by the Pingcon RMA Return Portal.<br>
             Sender: ${config.senderEmail} • Intended Recipient: ${config.toEmail}
           </div>
         </div>
@@ -353,6 +396,8 @@ export const notificationService = {
 
       console.log(`[RMA Email Dispatch] (TestMode: ${testActive}) Sending from "${config.senderEmail}" to "${toEmail}", CC: [${finalCcList.join(', ')}] with ${attachments.length} attachments`);
 
+      const expiryInfo = this.formatExpiryForEmail(report);
+
       const res = await fetch('/api/send-email', {
         method: 'POST',
         headers: {
@@ -367,7 +412,7 @@ export const notificationService = {
           html: htmlBody,
           isTestMode: testActive,
           attachments,
-          text: `${testActive ? 'Test - ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}`
+          text: `${testActive ? 'Test - ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Expiry Date: ${expiryInfo.text}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}`
         })
       });
 
@@ -482,7 +527,7 @@ export const notificationService = {
           </div>
 
           <div class="footer">
-            Sender: ${config.senderEmail} • Dispatched by Wholesale RMA Portal
+            Sender: ${config.senderEmail} • Dispatched by Pingcon RMA Portal
           </div>
         </div>
       </body>

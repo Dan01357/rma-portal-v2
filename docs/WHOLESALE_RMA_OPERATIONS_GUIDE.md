@@ -388,7 +388,7 @@ In the **Supplier Claims (RTV)** tab:
    * Total Physical Units
    * Total Claim Debit Value (₱)
 4. Tapping **"+ Batch Debit Claim"** bundles selected returns into a formal supplier chargeback claim.
-5. Export formal CSV reports for supplier credit accounting or print supplier debit vouchers.
+5. Export formal Excel (`.xlsx`) reports for supplier credit accounting or print supplier debit vouchers.
 
 ### 5.3 Row-Level Operations & Triage Feature Parity
 Every line item in the Supplier Claims Hub offers complete operational parity with the Customer Hub:
@@ -631,7 +631,7 @@ To satisfy enterprise supply chain compliance (aligned with SAP ERP, Oracle SCM,
 | **Key Commercial Docs** | Customer Sales Invoice (SI), Delivery Receipt (DR), Customer PO | Supplier PO, Vendor Delivery Note, Batch/Lot Number |
 | **Financial Instrument** | **Customer Credit Memo Voucher** (Deduction from accounts receivable) | **Supplier Debit Claim Note** (Chargeback against vendor accounts payable) |
 | **Admin Hub Tab** | `Customer RMA Hub (Inbound)` (`adminActiveTab: 'customer_reports'`) | `Supplier RMA Hub (Outbound / RTV)` (`adminActiveTab: 'supplier_claims'`) |
-| **CSV Export Report** | `Customer_Inbound_RMAs_[Date].csv` (Branch, DR#, AE Name, Credit Memo #) | `Supplier_Outbound_Claims_[Date].csv` (Supplier, Bin, Batch/Lot#, Purchase Price) |
+| **Excel (.xlsx) Export Report** | `Pingcon_Customer_Inbound_RMAs [Date].xlsx` (Branch, DR#, AE Name, Credit Memo #) | `Pingcon_Supplier_Outbound_Claims [Date].xlsx` (Supplier, Bin, Batch/Lot#, Purchase Price) |
 
 ### 10.2 Zero-Typing Automatic Attribution Engine
 - **Gatekeeper Profile Detection**: When a user scans a station QR code or inputs an authorized 6-digit PIN, the portal creates a gatekeeper session (`gateSession.type`).

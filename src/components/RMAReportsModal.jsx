@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
-import { exportRMAReportsToCSV } from '../utils/exportCsv';
+import { exportRMAReportsToXlsx } from '../utils/exportCsv';
 import { formatLifecycleStage, getRealPhotos, normalizeWarehouseLocation } from '../utils/rmaHelpers';
 
 export default function RMAReportsModal({ 
@@ -339,12 +339,12 @@ export default function RMAReportsModal({
 
             <button
               type="button"
-              onClick={() => exportRMAReportsToCSV(processedReports)}
+              onClick={() => exportRMAReportsToXlsx(processedReports, null, [], isTestMode)}
               className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
-              title="Export filtered reports to CSV"
+              title="Export filtered reports to Excel (.xlsx)"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Export CSV</span>
+              <span>Export Excel (.xlsx)</span>
             </button>
 
             <button

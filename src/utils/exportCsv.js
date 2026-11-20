@@ -1,8 +1,10 @@
 /**
- * Enterprise Accounting & Logistics CSV Exporter
- * Formats financial records with clean headers and UTF-8 BOM for Microsoft Excel & Google Sheets.
+ * Enterprise Accounting & Logistics Excel (.xlsx) Exporter
+ * Formats financial and warehouse records into genuine OOXML (.xlsx) spreadsheets
+ * with bold frozen headers, clean column widths, numeric/currency cells, and plain-text IDs/barcodes.
  */
-import { normalizeWarehouseLocation } from './rmaHelpers';
+import { normalizeWarehouseLocation, isTestRecord } from './rmaHelpers';
+import { downloadTableXlsx } from './exportXlsx';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -22,11 +24,13 @@ export function formatFilenameDateTime(date = new Date()) {
   return `${yyyy}-${mm}${mon}-${dd} ${hh}${min}`;
 }
 
-export function resolveFilenameWithTimestamp(defaultPrefix, customFilename) {
+export function resolveFilenameWithTimestamp(defaultPrefix, customFilename, isTestMode = false) {
   const ts = formatFilenameDateTime();
-  if (!customFilename) return `${defaultPrefix} ${ts}.csv`;
-  const cleanName = customFilename.replace(/\.csv$/i, '');
-  return `${cleanName} ${ts}.csv`;
+  const modePrefix = isTestMode ? 'TEST_' : '';
+  if (!customFilename) return `${modePrefix}${defaultPrefix} ${ts}.xlsx`;
+  const cleanName = customFilename.replace(/\.(csv|xlsx)$/i, '');
+  const hasTestPrefix = /^(TEST_|Sandbox_)/i.test(cleanName);
+  return `${hasTestPrefix ? '' : modePrefix}${cleanName} ${ts}.xlsx`;
 }
 
 /**
@@ -45,25 +49,8 @@ export function formatMilitaryDateTime(val) {
   return `${yyyy}-${mm}-${dd} ${hh}${min}`;
 }
 
-function escapeCsvCell(val) {
-  if (val === null || val === undefined) return '""';
-  const str = String(val).replace(/"/g, '""');
-  return `"${str}"`;
-}
-
 /**
- * Escape numeric codes, barcodes, dates, and references as Excel text formulas (="...")
- * to prevent scientific notation (8.02E+12) and auto-formatting corruption in Excel/Sheets.
- */
-export function escapeCsvTextFormula(val) {
-  if (val === null || val === undefined || val === '') return '""';
-  const str = String(val).trim().replace(/"/g, '""');
-  if (!str || str === 'N/A') return `"${str}"`;
-  return `="${str}"`;
-}
-
-/**
- * Format date cleanly as YYYY-MM-DD stripping time parts to prevent "#######" cell overflow in Excel.
+ * Format date cleanly as YYYY-MM-DD stripping time parts to prevent overflow in Excel.
  */
 export function formatCleanDateOnly(val) {
   if (!val) return '';
@@ -117,66 +104,58 @@ export function resolveExportSupplier(r, savedProducts = []) {
   return rawSup || 'Pending Assignment';
 }
 
-function downloadCsvBlob(csvContent, filename) {
-  // \uFEFF is UTF-8 Byte Order Mark (BOM) so Excel reads formatting and currencies properly
-  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, 200);
+function inferTestMode(records, explicitIsTestMode) {
+  if (typeof explicitIsTestMode === 'boolean') return explicitIsTestMode;
+  return Array.isArray(records) && records.length > 0 && records.every(r => isTestRecord(r));
 }
 
 /**
- * Export RMA Reports to CSV
+ * Export RMA Reports to genuine .xlsx
  */
-export function exportRMAReportsToCSV(reports, filename = null, savedProducts = []) {
+export function exportRMAReportsToXlsx(reports, filename = null, savedProducts = [], isTestMode = undefined) {
   if (!reports || reports.length === 0) {
     alert('No reports available to export.');
     return;
   }
 
-  const headers = [
-    'SN',
-    'RMA Number',
-    'Date Logged (YYYY-MM-DD HHMM)',
-    'Store / Branch',
-    'Sales Invoice (SI) #',
-    'Delivery Receipt (DR) #',
-    'Purchase Order (PO) #',
-    'Batch / Lot #',
-    'Expiry Date',
-    'Status',
-    'Disposition',
-    'Condition Grade',
-    'Warehouse Location',
-    'Supplier / Vendor',
-    'Barcode',
-    'Assigned SKU',
-    'Product Description',
-    'Quantity',
-    'Packaging Unit',
-    'Net Unit Price (PHP)',
-    'Price w/ VAT (PHP)',
-    'Total Claim Value (PHP)',
-    'Reporter Name',
-    'Reported By',
-    'Inspected By',
-    'Defect Reason',
-    'Google Drive Photo Link',
-    'Google Drive Folder',
-    'Notes'
+  const testActive = inferTestMode(reports, isTestMode);
+
+  const columns = [
+    { header: 'SN', width: 7, type: 'number' },
+    { header: 'RMA Number', width: 20, type: 'text' },
+    { header: 'Date Logged (YYYY-MM-DD HHMM)', width: 24, type: 'text' },
+    { header: 'Store / Branch', width: 24, type: 'text' },
+    { header: 'Sales Invoice (SI) #', width: 18, type: 'text' },
+    { header: 'Delivery Receipt (DR) #', width: 18, type: 'text' },
+    { header: 'Purchase Order (PO) #', width: 18, type: 'text' },
+    { header: 'Batch / Lot #', width: 16, type: 'text' },
+    { header: 'Expiry Date', width: 14, type: 'text' },
+    { header: 'Status', width: 18, type: 'text' },
+    { header: 'Disposition', width: 24, type: 'text' },
+    { header: 'Condition Grade', width: 18, type: 'text' },
+    { header: 'Warehouse Location', width: 20, type: 'text' },
+    { header: 'Supplier / Vendor', width: 24, type: 'text' },
+    { header: 'Barcode', width: 18, type: 'text' },
+    { header: 'Assigned SKU', width: 16, type: 'text' },
+    { header: 'Product Description', width: 38, type: 'text' },
+    { header: 'Quantity', width: 11, type: 'number' },
+    { header: 'Packaging Unit', width: 14, type: 'text' },
+    { header: 'Net Unit Price (PHP)', width: 18, type: 'currency' },
+    { header: 'Price w/ VAT (PHP)', width: 18, type: 'currency' },
+    { header: 'Total Claim Value (PHP)', width: 20, type: 'currency' },
+    { header: 'Reporter Name', width: 20, type: 'text' },
+    { header: 'Reported By', width: 20, type: 'text' },
+    { header: 'Inspected By', width: 20, type: 'text' },
+    { header: 'Defect Reason', width: 28, type: 'text' },
+    { header: 'Google Drive Photo Link', width: 36, type: 'text' },
+    { header: 'Google Drive Folder', width: 36, type: 'text' },
+    { header: 'Notes', width: 32, type: 'text' }
   ];
 
   const rows = reports.map((r, index) => {
     const qty = Number(r.quantity || 1);
     const unitPrice = Number(r.price_with_vat || r.price || 0);
-    const totalVal = (qty * unitPrice).toFixed(2);
+    const totalVal = Number((qty * unitPrice).toFixed(2));
     const dateStr = formatMilitaryDateTime(r.created_at);
     const photoLink = extractPhotoLink(r);
     const cleanExpiry = formatCleanDateOnly(r.expiry_date);
@@ -184,164 +163,180 @@ export function exportRMAReportsToCSV(reports, filename = null, savedProducts = 
     const supplier = resolveExportSupplier(r, savedProducts);
 
     return [
-      escapeCsvCell(index + 1),
-      escapeCsvTextFormula(r.rma_number),
-      escapeCsvTextFormula(dateStr),
-      escapeCsvCell(r.store_branch || ''),
-      escapeCsvTextFormula(r.si_number || ''),
-      escapeCsvTextFormula(r.dr_number || r.invoice_dr_number || ''),
-      escapeCsvTextFormula(r.po_number || ''),
-      escapeCsvTextFormula(r.batch_lot_number || ''),
-      escapeCsvTextFormula(cleanExpiry),
-      escapeCsvCell(r.status || 'pending'),
-      escapeCsvCell(r.disposition || 'Pending Triage'),
-      escapeCsvCell(r.condition_grade || 'Unassessed'),
-      escapeCsvCell(loc),
-      escapeCsvCell(supplier),
-      escapeCsvTextFormula(r.barcode),
-      escapeCsvTextFormula(r.code || r.sku || ''),
-      escapeCsvCell(r.name),
-      escapeCsvCell(qty),
-      escapeCsvCell(r.unit_name || 'pc'),
-      escapeCsvCell(Number(r.price || 0).toFixed(2)),
-      escapeCsvCell(Number(r.price_with_vat || 0).toFixed(2)),
-      escapeCsvCell(totalVal),
-      escapeCsvCell(r.reporter_name || ''),
-      escapeCsvCell(r.reported_by || ''),
-      escapeCsvCell(r.inspected_by || ''),
-      escapeCsvCell(r.reason || ''),
-      escapeCsvCell(photoLink),
-      escapeCsvCell(r.google_drive_folder_url || ''),
-      escapeCsvCell(r.notes || '')
-    ].join(',');
+      index + 1,
+      r.rma_number || '',
+      dateStr,
+      r.store_branch || '',
+      r.si_number || '',
+      r.dr_number || r.invoice_dr_number || '',
+      r.po_number || '',
+      r.batch_lot_number || '',
+      cleanExpiry,
+      r.status || 'pending',
+      r.disposition || 'Pending Triage',
+      r.condition_grade || 'Unassessed',
+      loc,
+      supplier,
+      r.barcode || '',
+      r.code || r.sku || '',
+      r.name || '',
+      qty,
+      r.unit_name || 'pc',
+      Number(Number(r.price || 0).toFixed(2)),
+      Number(Number(r.price_with_vat || 0).toFixed(2)),
+      totalVal,
+      r.reporter_name || '',
+      r.reported_by || '',
+      r.inspected_by || '',
+      r.reason || '',
+      photoLink,
+      r.google_drive_folder_url || '',
+      r.notes || ''
+    ];
   });
 
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = resolveFilenameWithTimestamp('Pingcon_RMA_Reports', filename);
-  downloadCsvBlob(csv, actualFilename);
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_RMA_Reports', filename, testActive);
+  downloadTableXlsx({
+    sheetName: testActive ? 'Test RMA Audit Log' : 'RMA Audit Log',
+    title: `${testActive ? 'TEST MODE SANDBOX — ' : ''}PINGCON RMA FULL AUDIT LOG REPORT`,
+    subtitle: `Generated: ${formatFilenameDateTime()} (Asia/Manila) | Total Records: ${rows.length}`,
+    filename: actualFilename,
+    columns,
+    rows
+  });
 }
 
 /**
- * Export Customer Inbound RMAs to CSV
+ * Export Customer Inbound RMAs to genuine .xlsx
  */
-export function exportCustomerInboundRMAsToCSV(reports, filename = null, savedProducts = []) {
+export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedProducts = [], isTestMode = undefined) {
   if (!reports || reports.length === 0) {
     alert('No customer return reports available to export.');
     return;
   }
 
-  const headers = [
-    'SN',
-    'RMA Number',
-    'Date Logged (YYYY-MM-DD HHMM)',
-    'Customer Store / Branch',
-    'Reporter Name',
-    'Reporter Contact',
-    'Sales Invoice (SI) #',
-    'Delivery Receipt (DR) #',
-    'Purchase Order (PO) #',
-    'Account Executive (AE)',
-    'AE Email',
-    'Barcode',
-    'Assigned SKU',
-    'Product Description',
-    'Quantity',
-    'Packaging Unit',
-    'Unit Price (PHP)',
-    'Total Credit Claim (PHP)',
-    'Lifecycle Stage / Status',
-    'Disposition',
-    'Condition Grade',
-    'Defect Reason',
-    'Credit Memo #',
-    'Google Drive Photo Link',
-    'Google Drive Folder',
-    'Customer Notes'
+  const testActive = inferTestMode(reports, isTestMode);
+
+  const columns = [
+    { header: 'SN', width: 7, type: 'number' },
+    { header: 'RMA Number', width: 20, type: 'text' },
+    { header: 'Date Logged (YYYY-MM-DD HHMM)', width: 24, type: 'text' },
+    { header: 'Customer Store / Branch', width: 26, type: 'text' },
+    { header: 'Reporter Name', width: 20, type: 'text' },
+    { header: 'Reporter Contact', width: 22, type: 'text' },
+    { header: 'Sales Invoice (SI) #', width: 18, type: 'text' },
+    { header: 'Delivery Receipt (DR) #', width: 18, type: 'text' },
+    { header: 'Purchase Order (PO) #', width: 18, type: 'text' },
+    { header: 'Account Executive (AE)', width: 22, type: 'text' },
+    { header: 'AE Email', width: 26, type: 'text' },
+    { header: 'Barcode', width: 18, type: 'text' },
+    { header: 'Assigned SKU', width: 16, type: 'text' },
+    { header: 'Product Description', width: 38, type: 'text' },
+    { header: 'Quantity', width: 11, type: 'number' },
+    { header: 'Packaging Unit', width: 14, type: 'text' },
+    { header: 'Unit Price (PHP)', width: 16, type: 'currency' },
+    { header: 'Total Credit Claim (PHP)', width: 20, type: 'currency' },
+    { header: 'Lifecycle Stage / Status', width: 20, type: 'text' },
+    { header: 'Disposition', width: 24, type: 'text' },
+    { header: 'Condition Grade', width: 18, type: 'text' },
+    { header: 'Defect Reason', width: 28, type: 'text' },
+    { header: 'Credit Memo #', width: 18, type: 'text' },
+    { header: 'Google Drive Photo Link', width: 36, type: 'text' },
+    { header: 'Google Drive Folder', width: 36, type: 'text' },
+    { header: 'Customer Notes', width: 32, type: 'text' }
   ];
 
   const rows = reports.map((r, index) => {
     const qty = Number(r.quantity || 1);
     const unitPrice = Number(r.price_with_vat || r.price || 0);
-    const totalVal = (qty * unitPrice).toFixed(2);
+    const totalVal = Number((qty * unitPrice).toFixed(2));
     const dateStr = formatMilitaryDateTime(r.created_at);
     const photoLink = extractPhotoLink(r);
 
     return [
-      escapeCsvCell(index + 1),
-      escapeCsvTextFormula(r.rma_number),
-      escapeCsvTextFormula(dateStr),
-      escapeCsvCell(r.store_branch || ''),
-      escapeCsvCell(r.reporter_name || ''),
-      escapeCsvTextFormula(r.reporter_contact || ''),
-      escapeCsvTextFormula(r.si_number || ''),
-      escapeCsvTextFormula(r.dr_number || r.invoice_dr_number || ''),
-      escapeCsvTextFormula(r.po_number || ''),
-      escapeCsvCell(r.ae_name || ''),
-      escapeCsvCell(r.ae_email || ''),
-      escapeCsvTextFormula(r.barcode),
-      escapeCsvTextFormula(r.code || r.sku || ''),
-      escapeCsvCell(r.name),
-      escapeCsvCell(qty),
-      escapeCsvCell(r.unit_name || 'pc'),
-      escapeCsvCell(unitPrice.toFixed(2)),
-      escapeCsvCell(totalVal),
-      escapeCsvCell(r.status || 'received_at_dock'),
-      escapeCsvCell(r.disposition || 'Pending Triage'),
-      escapeCsvCell(r.condition_grade || 'Unassessed'),
-      escapeCsvCell(r.reason || ''),
-      escapeCsvTextFormula(r.credit_memo_no || r.credit_memo_number || ''),
-      escapeCsvCell(photoLink),
-      escapeCsvCell(r.google_drive_folder_url || ''),
-      escapeCsvCell(r.notes || '')
-    ].join(',');
+      index + 1,
+      r.rma_number || '',
+      dateStr,
+      r.store_branch || '',
+      r.reporter_name || '',
+      r.reporter_contact || '',
+      r.si_number || '',
+      r.dr_number || r.invoice_dr_number || '',
+      r.po_number || '',
+      r.ae_name || '',
+      r.ae_email || '',
+      r.barcode || '',
+      r.code || r.sku || '',
+      r.name || '',
+      qty,
+      r.unit_name || 'pc',
+      Number(unitPrice.toFixed(2)),
+      totalVal,
+      r.status || 'received_at_dock',
+      r.disposition || 'Pending Triage',
+      r.condition_grade || 'Unassessed',
+      r.reason || '',
+      r.credit_memo_no || r.credit_memo_number || '',
+      photoLink,
+      r.google_drive_folder_url || '',
+      r.notes || ''
+    ];
   });
 
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Customer_Inbound_RMAs', filename);
-  downloadCsvBlob(csv, actualFilename);
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Customer_Inbound_RMAs', filename, testActive);
+  downloadTableXlsx({
+    sheetName: testActive ? 'Test Customer RMAs' : 'Customer Inbound RMAs',
+    title: `${testActive ? 'TEST MODE SANDBOX — ' : ''}CUSTOMER RMA HUB — INBOUND RETURNS REPORT`,
+    subtitle: `Generated: ${formatFilenameDateTime()} (Asia/Manila) | Total Inbound RMAs: ${rows.length}`,
+    filename: actualFilename,
+    columns,
+    rows
+  });
 }
 
 /**
- * Export Supplier Outbound / RTV Debit Claims to CSV
+ * Export Supplier Outbound / RTV Debit Claims to genuine .xlsx
  */
-export function exportSupplierOutboundClaimsToCSV(reports, filename = null, savedProducts = []) {
+export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, savedProducts = [], isTestMode = undefined) {
   if (!reports || reports.length === 0) {
     alert('No supplier outbound claims available to export.');
     return;
   }
 
-  const headers = [
-    'SN',
-    'RMA Number',
-    'Date Logged (YYYY-MM-DD HHMM)',
-    'Master Supplier / Vendor',
-    'Warehouse Bin / Location',
-    'Batch / Lot #',
-    'Expiry Date',
-    'Barcode',
-    'Assigned SKU',
-    'Product Description',
-    'Quantity',
-    'Packaging Unit',
-    'Net Purchase Price (PHP)',
-    'Total Debit Value (PHP)',
-    'Condition Grade',
-    'Disposition',
-    'Debit Claim Status',
-    'Inspected By',
-    'Defect Reason / Diagnosis',
-    'Sales Invoice (SI) #',
-    'Delivery Receipt (DR) #',
-    'Purchase Order (PO) #',
-    'Google Drive Photo Link',
-    'Google Drive Folder',
-    'Warehouse Notes'
+  const testActive = inferTestMode(reports, isTestMode);
+
+  const columns = [
+    { header: 'SN', width: 7, type: 'number' },
+    { header: 'RMA Number', width: 20, type: 'text' },
+    { header: 'Date Logged (YYYY-MM-DD HHMM)', width: 24, type: 'text' },
+    { header: 'Master Supplier / Vendor', width: 26, type: 'text' },
+    { header: 'Warehouse Bin / Location', width: 22, type: 'text' },
+    { header: 'Batch / Lot #', width: 16, type: 'text' },
+    { header: 'Expiry Date', width: 14, type: 'text' },
+    { header: 'Barcode', width: 18, type: 'text' },
+    { header: 'Assigned SKU', width: 16, type: 'text' },
+    { header: 'Product Description', width: 38, type: 'text' },
+    { header: 'Quantity', width: 11, type: 'number' },
+    { header: 'Packaging Unit', width: 14, type: 'text' },
+    { header: 'Net Purchase Price (PHP)', width: 20, type: 'currency' },
+    { header: 'Total Debit Value (PHP)', width: 20, type: 'currency' },
+    { header: 'Condition Grade', width: 18, type: 'text' },
+    { header: 'Disposition', width: 24, type: 'text' },
+    { header: 'Debit Claim Status', width: 18, type: 'text' },
+    { header: 'Inspected By', width: 20, type: 'text' },
+    { header: 'Defect Reason / Diagnosis', width: 28, type: 'text' },
+    { header: 'Sales Invoice (SI) #', width: 18, type: 'text' },
+    { header: 'Delivery Receipt (DR) #', width: 18, type: 'text' },
+    { header: 'Purchase Order (PO) #', width: 18, type: 'text' },
+    { header: 'Google Drive Photo Link', width: 36, type: 'text' },
+    { header: 'Google Drive Folder', width: 36, type: 'text' },
+    { header: 'Warehouse Notes', width: 32, type: 'text' }
   ];
 
   const rows = reports.map((r, index) => {
     const qty = Number(r.quantity || 1);
     const unitPrice = Number(r.price || r.price_with_vat || 0);
-    const totalVal = (qty * unitPrice).toFixed(2);
+    const totalVal = Number((qty * unitPrice).toFixed(2));
     const dateStr = formatMilitaryDateTime(r.created_at);
     const photoLink = extractPhotoLink(r);
     const cleanExpiry = formatCleanDateOnly(r.expiry_date);
@@ -349,69 +344,77 @@ export function exportSupplierOutboundClaimsToCSV(reports, filename = null, save
     const supplier = resolveExportSupplier(r, savedProducts);
 
     return [
-      escapeCsvCell(index + 1),
-      escapeCsvTextFormula(r.rma_number),
-      escapeCsvTextFormula(dateStr),
-      escapeCsvCell(supplier),
-      escapeCsvCell(loc),
-      escapeCsvTextFormula(r.batch_lot_number || ''),
-      escapeCsvTextFormula(cleanExpiry),
-      escapeCsvTextFormula(r.barcode),
-      escapeCsvTextFormula(r.code || r.sku || ''),
-      escapeCsvCell(r.name),
-      escapeCsvCell(qty),
-      escapeCsvCell(r.unit_name || 'pc'),
-      escapeCsvCell(unitPrice.toFixed(2)),
-      escapeCsvCell(totalVal),
-      escapeCsvCell(r.condition_grade || 'Unassessed'),
-      escapeCsvCell(r.disposition || 'Return to Vendor (RTV)'),
-      escapeCsvCell(r.status || 'Pending Debit'),
-      escapeCsvCell(r.inspected_by || ''),
-      escapeCsvCell(r.reason || r.explanation || ''),
-      escapeCsvTextFormula(r.si_number || ''),
-      escapeCsvTextFormula(r.dr_number || r.invoice_dr_number || ''),
-      escapeCsvTextFormula(r.po_number || r.supplier_po_no || ''),
-      escapeCsvCell(photoLink),
-      escapeCsvCell(r.google_drive_folder_url || ''),
-      escapeCsvCell(r.notes || '')
-    ].join(',');
+      index + 1,
+      r.rma_number || '',
+      dateStr,
+      supplier,
+      loc,
+      r.batch_lot_number || '',
+      cleanExpiry,
+      r.barcode || '',
+      r.code || r.sku || '',
+      r.name || '',
+      qty,
+      r.unit_name || 'pc',
+      Number(unitPrice.toFixed(2)),
+      totalVal,
+      r.condition_grade || 'Unassessed',
+      r.disposition || 'Return to Vendor (RTV)',
+      r.status || 'Pending Debit',
+      r.inspected_by || '',
+      r.reason || r.explanation || '',
+      r.si_number || '',
+      r.dr_number || r.invoice_dr_number || '',
+      r.po_number || r.supplier_po_no || '',
+      photoLink,
+      r.google_drive_folder_url || '',
+      r.notes || ''
+    ];
   });
 
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Supplier_Outbound_Claims', filename);
-  downloadCsvBlob(csv, actualFilename);
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Supplier_Outbound_Claims', filename, testActive);
+  downloadTableXlsx({
+    sheetName: testActive ? 'Test Supplier RTV' : 'Supplier Outbound Claims',
+    title: `${testActive ? 'TEST MODE SANDBOX — ' : ''}SUPPLIER RTV HUB — OUTBOUND VENDOR CLAIMS REPORT`,
+    subtitle: `Generated: ${formatFilenameDateTime()} (Asia/Manila) | Total Supplier RTV Claims: ${rows.length}`,
+    filename: actualFilename,
+    columns,
+    rows
+  });
 }
 
 /**
- * Export Credit Memos to CSV
+ * Export Credit Memos to genuine .xlsx
  */
-export function exportCreditMemosToCSV(memos, filename = null) {
+export function exportCreditMemosToXlsx(memos, filename = null, isTestMode = undefined) {
   if (!memos || memos.length === 0) {
     alert('No credit memos available to export.');
     return;
   }
 
-  const headers = [
-    'SN',
-    'Credit Memo Number',
-    'RMA Number',
-    'Pull-Out Slip Ref',
-    'Pull-Out Date',
-    'Date Issued (YYYY-MM-DD HHMM)',
-    'Supplier / Vendor',
-    'Product Description',
-    'SKU',
-    'Barcode',
-    'Quantity',
-    'Packaging Unit',
-    'Unit Price (PHP)',
-    'Amount (PHP)',
-    'Final Credit Amount (PHP)',
-    'Status',
-    'Issued By',
-    'Account Executive',
-    'AE Email',
-    'Notes'
+  const testActive = inferTestMode(memos, isTestMode);
+
+  const columns = [
+    { header: 'SN', width: 7, type: 'number' },
+    { header: 'Credit Memo Number', width: 20, type: 'text' },
+    { header: 'RMA Number', width: 20, type: 'text' },
+    { header: 'Pull-Out Slip Ref', width: 18, type: 'text' },
+    { header: 'Pull-Out Date', width: 14, type: 'text' },
+    { header: 'Date Issued (YYYY-MM-DD HHMM)', width: 24, type: 'text' },
+    { header: 'Supplier / Vendor', width: 24, type: 'text' },
+    { header: 'Product Description', width: 38, type: 'text' },
+    { header: 'SKU', width: 16, type: 'text' },
+    { header: 'Barcode', width: 18, type: 'text' },
+    { header: 'Quantity', width: 11, type: 'number' },
+    { header: 'Packaging Unit', width: 14, type: 'text' },
+    { header: 'Unit Price (PHP)', width: 16, type: 'currency' },
+    { header: 'Amount (PHP)', width: 16, type: 'currency' },
+    { header: 'Final Credit Amount (PHP)', width: 22, type: 'currency' },
+    { header: 'Status', width: 14, type: 'text' },
+    { header: 'Issued By', width: 20, type: 'text' },
+    { header: 'Account Executive', width: 22, type: 'text' },
+    { header: 'AE Email', width: 26, type: 'text' },
+    { header: 'Notes', width: 32, type: 'text' }
   ];
 
   const rows = memos.map((cm, index) => {
@@ -419,30 +422,42 @@ export function exportCreditMemosToCSV(memos, filename = null) {
     const dateIssued = formatMilitaryDateTime(cm.created_at);
 
     return [
-      escapeCsvCell(index + 1),
-      escapeCsvTextFormula(cm.credit_memo_number),
-      escapeCsvTextFormula(cm.rma_number),
-      escapeCsvTextFormula(cm.pull_out_ref),
-      escapeCsvTextFormula(pullOutDate),
-      escapeCsvTextFormula(dateIssued),
-      escapeCsvCell(cm.supplier_name || 'Savemore'),
-      escapeCsvCell(cm.product_name),
-      escapeCsvTextFormula(cm.sku || ''),
-      escapeCsvTextFormula(cm.barcode),
-      escapeCsvCell(cm.quantity || 1),
-      escapeCsvCell(cm.unit_name || 'pc'),
-      escapeCsvCell(Number(cm.unit_price || 0).toFixed(2)),
-      escapeCsvCell(Number(cm.amount || 0).toFixed(2)),
-      escapeCsvCell(Number(cm.credit_amount || 0).toFixed(2)),
-      escapeCsvCell(cm.status || 'issued'),
-      escapeCsvCell(cm.credit_issued_by || ''),
-      escapeCsvCell(cm.customer_ae_name || ''),
-      escapeCsvCell(cm.customer_ae_email || ''),
-      escapeCsvCell(cm.notes || '')
-    ].join(',');
+      index + 1,
+      cm.credit_memo_number || '',
+      cm.rma_number || '',
+      cm.pull_out_ref || '',
+      pullOutDate,
+      dateIssued,
+      cm.supplier_name || 'Savemore',
+      cm.product_name || '',
+      cm.sku || '',
+      cm.barcode || '',
+      Number(cm.quantity || 1),
+      cm.unit_name || 'pc',
+      Number(Number(cm.unit_price || 0).toFixed(2)),
+      Number(Number(cm.amount || 0).toFixed(2)),
+      Number(Number(cm.credit_amount || 0).toFixed(2)),
+      cm.status || 'issued',
+      cm.credit_issued_by || '',
+      cm.customer_ae_name || '',
+      cm.customer_ae_email || '',
+      cm.notes || ''
+    ];
   });
 
-  const csv = [headers.join(','), ...rows].join('\r\n');
-  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Credit_Memos_Export', filename);
-  downloadCsvBlob(csv, actualFilename);
+  const actualFilename = resolveFilenameWithTimestamp('Pingcon_Credit_Memos_Export', filename, testActive);
+  downloadTableXlsx({
+    sheetName: testActive ? 'Test Credit Memos' : 'Credit Memos',
+    title: `${testActive ? 'TEST MODE SANDBOX — ' : ''}PINGCON FINANCE CREDIT MEMOS REPORT`,
+    subtitle: `Generated: ${formatFilenameDateTime()} (Asia/Manila) | Total Credit Memos: ${rows.length}`,
+    filename: actualFilename,
+    columns,
+    rows
+  });
 }
+
+// Backwards-compatible aliases (all output genuine .xlsx)
+export const exportRMAReportsToCSV = exportRMAReportsToXlsx;
+export const exportCustomerInboundRMAsToCSV = exportCustomerInboundRMAsToXlsx;
+export const exportSupplierOutboundClaimsToCSV = exportSupplierOutboundClaimsToXlsx;
+export const exportCreditMemosToCSV = exportCreditMemosToXlsx;
