@@ -24,7 +24,11 @@ import {
 import TablePagination from './TablePagination';
 import { formatFilenameDateTime } from '../utils/exportCsv';
 import { downloadTableXlsx } from '../utils/exportXlsx';
-import { formatDateYmd } from '../utils/rmaHelpers';
+import {
+  formatDateYmd,
+  getCreditMemoConsolidatedItems,
+  getCreditMemoRmaNumbers
+} from '../utils/rmaHelpers';
 
 export default function CreditMemosTab({
   creditMemosList = [],
@@ -99,9 +103,11 @@ export default function CreditMemosTab({
       }
 
       if (q) {
+        const linkedRmasStr = getCreditMemoRmaNumbers(item).join(' ').toLowerCase();
         const matches = (
           (item.credit_memo_number || '').toLowerCase().includes(q) ||
           (item.rma_number || '').toLowerCase().includes(q) ||
+          linkedRmasStr.includes(q) ||
           (item.barcode || '').toLowerCase().includes(q) ||
           (item.product_name || '').toLowerCase().includes(q) ||
           (item.pull_out_ref || '').toLowerCase().includes(q) ||
@@ -783,11 +789,31 @@ export default function CreditMemosTab({
                         </td>
 
                         {/* RMA # */}
-                        <td className="py-3 px-3.5 font-mono font-bold text-blue-700 dark:text-blue-400 text-xs">
-                          {memo.rma_number || 'N/A'}
-                          <div className="text-[10px] text-slate-400 font-sans">
-                            Supplier: {memo.supplier_name || 'Savemore'}
-                          </div>
+                        <td className="py-3 px-3.5 font-mono font-bold text-blue-700 dark:text-blue-400 text-xs max-w-[210px]">
+                          {(() => {
+                            const cmRmas = getCreditMemoRmaNumbers(memo);
+                            const cmItems = getCreditMemoConsolidatedItems(memo);
+                            const count = Math.max(cmRmas.length, cmItems.length);
+                            const isMulti = count > 1;
+                            return (
+                              <>
+                                <div className="truncate" title={cmRmas.join(', ') || memo.rma_number || 'N/A'}>
+                                  {isMulti ? `${cmRmas[0] || memo.rma_number} (+${count - 1})` : (memo.rma_number || 'N/A')}
+                                </div>
+                                {isMulti && (
+                                  <span
+                                    className="mt-1 px-1.5 py-0.5 rounded text-[9.5px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 inline-flex items-center gap-0.5"
+                                    title={`Consolidated RMA Tickets: ${cmRmas.join(', ')}`}
+                                  >
+                                    🔗 Consolidated ({count} RMAs)
+                                  </span>
+                                )}
+                                <div className="text-[10px] text-slate-400 font-sans mt-0.5">
+                                  Supplier: {memo.supplier_name || 'Savemore'}
+                                </div>
+                              </>
+                            );
+                          })()}
                         </td>
 
                         {/* Product Name & Barcode */}

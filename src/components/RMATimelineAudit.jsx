@@ -8,7 +8,7 @@ import {
   Box,
   Layers
 } from 'lucide-react';
-import { formatFourChoiceOutcome, formatDateTimeYmdHm } from '../utils/rmaHelpers';
+import { formatFourChoiceOutcome, formatDateTimeYmdHm, doesCreditMemoLinkReport } from '../utils/rmaHelpers';
 
 export default function RMATimelineAudit({ 
   report, 
@@ -20,9 +20,7 @@ export default function RMATimelineAudit({
   const pickup = report.ai_document_metadata?.supplier_pickup || {};
 
   // Find linked credit memo if any
-  const linkedCM = creditMemosList.find(cm => 
-    cm.rma_number === report.rma_number || String(cm.report_id) === String(report.id)
-  );
+  const linkedCM = creditMemosList.find(cm => doesCreditMemoLinkReport(cm, report));
 
   // Synthesize chronological milestones
   const events = [];

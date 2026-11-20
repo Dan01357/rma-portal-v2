@@ -1,10 +1,8 @@
 import {
   formatPeso,
-  getReportManifestItems,
-  computeItemPiecesAndValue,
   formatFourChoiceOutcome,
   isTestRecord,
-  formatDateYmd
+  getConsolidatedPickupItems
 } from './rmaHelpers.js';
 
 const PAGE_W = 1700; // 8.5 in * 200 dpi
@@ -218,6 +216,10 @@ function drawCopyHeaderAndMeta(ctx, startX, startY, width, copyTitle, info, comp
   let badgeX = innerX;
   const bw1 = drawBadge(ctx, badgeX, y, copyTitle.toUpperCase(), compact ? 15 : 16, compact);
   badgeX += bw1 + 10;
+  if (info.batchCount > 1) {
+    const bwBatch = drawBadge(ctx, badgeX, y, `BATCH (${info.batchCount} RMAs)`, compact ? 15 : 16, compact);
+    badgeX += bwBatch + 10;
+  }
   if (info.isTest) {
     drawBadge(ctx, badgeX, y, '[TEST MODE RECORD]', compact ? 15 : 16, compact);
   }
@@ -228,11 +230,15 @@ function drawCopyHeaderAndMeta(ctx, startX, startY, width, copyTitle, info, comp
   ctx.font = `900 ${compact ? 17 : 19}px "Courier New", Courier, monospace`;
   ctx.textBaseline = 'top';
   ctx.fillText(info.refLineLabel, innerX + innerW, y);
-  ctx.font = `900 ${compact ? 22 : 26}px "Courier New", Courier, monospace`;
-  ctx.fillText(`RMA #: ${info.rmaNumber}`, innerX + innerW, y + (compact ? 22 : 26));
-  ctx.font = `600 ${compact ? 15 : 16}px Arial, Helvetica, sans-serif`;
+  ctx.font = `900 ${compact ? 20 : 24}px "Courier New", Courier, monospace`;
+  ctx.fillText(
+    info.batchCount > 1 ? `BATCH: ${info.batchCount} RMAs` : `RMA #: ${info.rmaNumber}`,
+    innerX + innerW,
+    y + (compact ? 22 : 26)
+  );
+  ctx.font = `600 ${compact ? 14 : 15}px Arial, Helvetica, sans-serif`;
   const statusLine = `${info.formattedTime ? `${info.formattedTime} • ` : ''}${info.photoCount}/5 Drive Photos Verified`;
-  ctx.fillText(statusLine, innerX + innerW, y + (compact ? 48 : 56));
+  ctx.fillText(statusLine, innerX + innerW, y + (compact ? 47 : 54), innerW * 0.42);
 
   // Title on left
   ctx.textAlign = 'left';
@@ -368,14 +374,20 @@ function drawTableHeader(ctx, tableX, y, tableW, cols, compact = false) {
   return y + h;
 }
 
-function measureItemRowHeight(ctx, it, cols, compact = false) {
+function measureItemRowHeight(ctx, it, cols, compact = false, showRmaLine = false) {
   ctx.font = `700 ${compact ? 16 : 18}px Arial, Helvetica, sans-serif`;
   const nameLines = wrapTextLines(ctx, it.name, cols[1].w - 16);
   const lineH = compact ? 20 : 23;
-  return Math.max(compact ? 42 : 48, 12 + nameLines.length * lineH + (compact ? 16 : 19));
+  let extraRmaH = 0;
+  if (showRmaLine && Array.isArray(it.rmaNumbers) && it.rmaNumbers.length > 0) {
+    ctx.font = `700 ${compact ? 12 : 13}px "Courier New", Courier, monospace`;
+    const rmaLines = wrapTextLines(ctx, `RMAs: ${it.rmaNumbers.join(', ')}`, cols[1].w - 16);
+    extraRmaH = rmaLines.length * (compact ? 15 : 17);
+  }
+  return Math.max(compact ? 42 : 48, 12 + nameLines.length * lineH + (compact ? 16 : 19) + extraRmaH);
 }
 
-function drawItemRow(ctx, tableX, y, tableW, cols, it, rowH, compact = false) {
+function drawItemRow(ctx, tableX, y, tableW, cols, it, rowH, compact = false, showRmaLine = false) {
   ctx.lineWidth = 1.4;
   ctx.strokeRect(tableX, y, tableW, rowH);
   ctx.fillStyle = '#000000';
@@ -395,7 +407,7 @@ function drawItemRow(ctx, tableX, y, tableW, cols, it, rowH, compact = false) {
   ctx.textAlign = 'center';
   ctx.fillText(String(it.idx), tableX + cols[0].x + cols[0].w / 2, y + 8);
 
-  // Col 1: Description + SKU
+  // Col 1: Description + SKU + Consolidated RMAs
   ctx.font = `700 ${compact ? 16 : 18}px Arial, Helvetica, sans-serif`;
   ctx.textAlign = 'left';
   const nameLines = wrapTextLines(ctx, it.name, cols[1].w - 16);
@@ -403,8 +415,17 @@ function drawItemRow(ctx, tableX, y, tableW, cols, it, rowH, compact = false) {
   nameLines.forEach((ln, i) => {
     ctx.fillText(ln, tableX + cols[1].x + 8, y + 7 + i * lineH, cols[1].w - 14);
   });
+  let subY = y + 7 + nameLines.length * lineH;
   ctx.font = `600 ${compact ? 13 : 14}px "Courier New", Courier, monospace`;
-  ctx.fillText(`SKU: ${it.sku}`, tableX + cols[1].x + 8, y + 7 + nameLines.length * lineH, cols[1].w - 14);
+  ctx.fillText(`SKU: ${it.sku}`, tableX + cols[1].x + 8, subY, cols[1].w - 14);
+  if (showRmaLine && Array.isArray(it.rmaNumbers) && it.rmaNumbers.length > 0) {
+    subY += compact ? 16 : 18;
+    ctx.font = `700 ${compact ? 12 : 13}px "Courier New", Courier, monospace`;
+    const rmaLines = wrapTextLines(ctx, `RMAs: ${it.rmaNumbers.join(', ')}`, cols[1].w - 16);
+    rmaLines.forEach((ln, idx) => {
+      ctx.fillText(ln, tableX + cols[1].x + 8, subY + idx * (compact ? 15 : 17), cols[1].w - 14);
+    });
+  }
 
   // Col 2: Expiry Date
   ctx.font = `600 ${compact ? 15 : 17}px "Courier New", Courier, monospace`;
@@ -531,9 +552,10 @@ function renderCompactDualCopyPage(info) {
 
     const cols = getTableColumns(innerW);
     curY = drawTableHeader(ctx, innerX, curY, innerW, cols, true);
+    const showRmaSub = info.batchCount > 1;
     for (const it of info.normalizedItems) {
-      const rh = measureItemRowHeight(ctx, it, cols, true);
-      curY = drawItemRow(ctx, innerX, curY, innerW, cols, it, rh, true);
+      const rh = measureItemRowHeight(ctx, it, cols, true, showRmaSub || (it.rmaNumbers?.length > 1));
+      curY = drawItemRow(ctx, innerX, curY, innerW, cols, it, rh, true, showRmaSub || (it.rmaNumbers?.length > 1));
     }
     drawTotalRow(ctx, innerX, curY, innerW, cols, info, true);
 
@@ -588,10 +610,12 @@ function renderFullPageCopy(info, copyTitle) {
 
   let curY = drawCopyHeaderAndMeta(ctx, MARGIN_X, boxY + pad, CONTENT_W, copyTitle, info, false);
   curY = drawTableHeader(ctx, innerX, curY, innerW, cols, false);
+  const showRmaSub = info.batchCount > 1;
 
   for (let i = 0; i < info.normalizedItems.length; i++) {
     const it = info.normalizedItems[i];
-    const rowH = measureItemRowHeight(ctx, it, cols, false);
+    const showRowRma = showRmaSub || (it.rmaNumbers?.length > 1);
+    const rowH = measureItemRowHeight(ctx, it, cols, false, showRowRma);
     const isLast = i === info.normalizedItems.length - 1;
     const reserveAfter = isLast ? (42 + 16 + 124) : 0;
 
@@ -606,12 +630,16 @@ function renderFullPageCopy(info, copyTitle) {
       ctx.fillStyle = '#000000';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.fillText(`${copyTitle} (Continued) — ${info.formHeaderTitle} • RMA #: ${info.rmaNumber}`, innerX, boxY + pad);
+      ctx.fillText(
+        `${copyTitle} (Continued) — ${info.formHeaderTitle} • ${info.batchCount > 1 ? `Claim: ${info.claimNumber || info.rmaNumber}` : `RMA #: ${info.rmaNumber}`}`,
+        innerX,
+        boxY + pad
+      );
       curY = boxY + pad + 32;
       curY = drawTableHeader(ctx, innerX, curY, innerW, cols, false);
     }
 
-    curY = drawItemRow(ctx, innerX, curY, innerW, cols, it, rowH, false);
+    curY = drawItemRow(ctx, innerX, curY, innerW, cols, it, rowH, false, showRowRma);
   }
 
   curY = drawTotalRow(ctx, innerX, curY, innerW, cols, info, false);
@@ -625,22 +653,31 @@ function renderFullPageCopy(info, copyTitle) {
  * Returns null gracefully if running outside a Canvas-capable browser.
  */
 export function generatePickupFormPdfAttachment({
-  report,
+  report = null,
+  reports = [],
   allReports = [],
   catalogProducts = [],
-  preparedByOverride = null
+  preparedByOverride = null,
+  combineIdentical = true
 }) {
-  if (!report || typeof document === 'undefined') return null;
+  const effectiveReports = Array.isArray(reports) && reports.length > 0
+    ? reports
+    : (report ? [report] : []);
+  const primaryReport = effectiveReports[0];
+  if (!primaryReport || typeof document === 'undefined') return null;
 
   try {
-    const meta = report.ai_document_metadata || {};
+    const meta = primaryReport.ai_document_metadata || {};
     const pickup = meta.supplier_pickup || {};
-    const outcome = formatFourChoiceOutcome(report);
+    const outcome = formatFourChoiceOutcome(primaryReport);
 
-    const rmaNumber = report.rma_number || report.rmaNumber || report.id || 'N/A';
-    const isTest = isTestRecord(report);
-    const bc = String(report.barcode || '').trim();
-    const skuCode = String(report.code || report.sku || '').trim();
+    const rmaNumber = primaryReport.rma_number || primaryReport.rmaNumber || primaryReport.id || 'N/A';
+    const rmaNumbersList = Array.from(new Set(
+      effectiveReports.map((r) => r.rma_number || r.rmaNumber || String(r.id || '')).filter(Boolean)
+    ));
+    const isTest = effectiveReports.some((r) => isTestRecord(r));
+    const bc = String(primaryReport.barcode || '').trim();
+    const skuCode = String(primaryReport.code || primaryReport.sku || '').trim();
     const matchedCatalogProd = (catalogProducts || []).find((p) =>
       (bc && p.barcode && String(p.barcode).trim() === bc) ||
       (skuCode && (String(p.code || '').trim() === skuCode || String(p.sku || '').trim() === skuCode))
@@ -648,14 +685,14 @@ export function generatePickupFormPdfAttachment({
 
     const supplierName = [
       pickup.supplier_name,
-      report.supplier_name,
-      report.supplierName,
-      report.supplier,
+      primaryReport.supplier_name,
+      primaryReport.supplierName,
+      primaryReport.supplier,
       matchedCatalogProd?.supplier_name,
       matchedCatalogProd?.supplierName
     ].find((cand) => !isPlaceholderSupplier(cand)) || 'Pending Assignment';
 
-    const dispositionCode = String(pickup.disposition || meta.simple_rtv_disposition || report.disposition || '').toLowerCase();
+    const dispositionCode = String(pickup.disposition || meta.simple_rtv_disposition || primaryReport.disposition || '').toLowerCase();
     const isReplacementForm =
       dispositionCode === 'supplier_exchange' ||
       dispositionCode === 'customer_exchange' ||
@@ -672,31 +709,27 @@ export function generatePickupFormPdfAttachment({
       ? `Replacement Ref #: ${claimNumber || rmaNumber}`
       : `Claim #: ${claimNumber || rmaNumber}`;
 
-    const manifestChildren = getReportManifestItems(report, allReports);
-    const rawItems = manifestChildren.length > 0 ? manifestChildren : [report];
-    const normalizedItems = rawItems.map((it, idx) => {
-      const calc = computeItemPiecesAndValue(it, catalogProducts);
-      const rawExp = String(it.expiry_date || it.ai_document_metadata?.expiry_date || report.expiry_date || '').trim();
-      const cleanExpiry = formatDateYmd(rawExp) || rawExp || '—';
-      return {
-        idx: idx + 1,
-        name: it.name || it.product_name || it.productName || `Item ${it.barcode || idx + 1}`,
-        sku: (it.code && it.code !== it.barcode ? it.code : (it.sku && it.sku !== it.barcode ? it.sku : '')) || it.barcode || '—',
-        expiry: cleanExpiry,
-        ...calc
-      };
+    const { items: normalizedItems } = getConsolidatedPickupItems({
+      report: primaryReport,
+      reports: effectiveReports,
+      allReports,
+      catalogProducts,
+      combineIdentical
     });
 
     const preparedBy = String(
       preparedByOverride ||
       pickup.processed_by ||
-      report.inspected_by ||
+      primaryReport.inspected_by ||
       meta.simple_rtv_updated_by ||
       'Warehouse Staff'
     ).replace(/\s*\([^)]*\)/g, '').trim() || 'Warehouse Staff';
 
     const info = {
       rmaNumber,
+      batchCount: effectiveReports.length,
+      rmaNumbersList,
+      claimNumber,
       isTest,
       isReplacementForm,
       formHeaderTitle,
@@ -708,7 +741,7 @@ export function generatePickupFormPdfAttachment({
       supplierEmailTo: pickup.supplier_email_to || '',
       supplierEmailCc: pickup.supplier_email_cc || '',
       truckPlate: pickup.truck_plate || '',
-      driverName: pickup.driver_name || report.driver_name || '',
+      driverName: pickup.driver_name || primaryReport.driver_name || '',
       driverLicense: pickup.driver_license_no || '',
       preparedBy,
       normalizedItems,
@@ -738,10 +771,10 @@ export function generatePickupFormPdfAttachment({
       base64Pdf = encodeAtQuality(0.65);
     }
 
-    const safeRma = sanitizeFilenamePart(rmaNumber);
+    const safeRef = sanitizeFilenamePart(claimNumber || rmaNumber);
     const filename = isReplacementForm
-      ? `Replacement-Form-${safeRma}.pdf`
-      : `Debit-Claim-Form-${safeRma}.pdf`;
+      ? `Replacement-Form-${safeRef}.pdf`
+      : `Debit-Claim-Form-${safeRef}.pdf`;
 
     return {
       filename,

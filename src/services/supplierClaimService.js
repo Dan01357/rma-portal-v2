@@ -68,7 +68,7 @@ export const supplierClaimService = {
           .from('rma_settings')
           .select('value')
           .eq('key', SETTINGS_KEY)
-          .single();
+          .maybeSingle();
 
         if (!error && data?.value && Array.isArray(data.value)) {
           remoteClaims = data.value;

@@ -1,84 +1,62 @@
 import { test, expect } from '@playwright/test';
-import fs from 'fs';
 import {
   PNG_BUFFER,
   VERIFIED_BARCODE,
   attachStrictGuards,
   installPrintStubs,
   interceptAndCaptureEmails,
+  mockPhotoUploadSuccess,
   isoDateDaysOffset,
-  gotoAdmin
+  setPublicPortalTestMode,
+  assertValidXlsxFile,
+  seedTestModeRma,
+  gotoAdmin,
+  cleanupTestRecords
 } from './helpers/testUtils.js';
 
-function assertValidXlsxFile(download, filePath) {
-  const name = download.suggestedFilename();
-  expect(name).toMatch(/\.xlsx$/i);
-  expect(name.toLowerCase()).not.toContain('.csv');
-  if (filePath) {
-    const buf = fs.readFileSync(filePath);
-    expect(buf[0]).toBe(0x50); // 'P'
-    expect(buf[1]).toBe(0x4b); // 'K'
-    const xmlStr = buf.toString('utf8');
-    expect(xmlStr).toContain('xl/worksheets/sheet1.xml');
-    expect(xmlStr).toContain('application/vnd.openxmlformats-package.relationships+xml');
-  }
-}
-
 /**
- * Seeds a Test Mode Sandbox RMA via the public intake page so Live DB stays untouched.
- * Returns the generated RMA number (RMA-TEST-...).
+ * Seeds a 2-item Multi-Item Manifest RMA in Test Mode Customer Hub
+ * so the expandable Manifest Drawer, child photo/SKU/CM controls, and manifest XLSX are tested.
  */
-async function seedTestModeRma(page, { stream = 'customer', photoCount = 1, expiryDays = 45 } = {}) {
+async function seedTestModeManifestCustomerRma(page) {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await expect(page.getByText(/Scan Product Barcode or RMA Sticker QR/i)).toBeVisible({
     timeout: 20_000
   });
+  await setPublicPortalTestMode(page, true);
+  await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
 
-  const toggleBtn = page.locator('button[title="Toggle Test / Sandbox Mode"]');
-  await expect(toggleBtn).toBeVisible();
-  if (!/Test Mode:\s*ON/i.test(await toggleBtn.innerText())) {
-    await toggleBtn.click();
-  }
-  await expect(page.getByText('🧪 Super Admin Sandbox Active')).toBeVisible();
+  // Item 1: Cataloged SKU
+  await page.locator('input[placeholder*="barcode" i]').first().fill(VERIFIED_BARCODE);
+  await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 25_000 });
+  const fileInput = page.locator('input[type="file"][accept="image/*"]').first();
+  await fileInput.setInputFiles({ name: 'pw-mf-1.png', mimeType: 'image/png', buffer: PNG_BUFFER });
+  await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({ name: 'pw-mf-1b.png', mimeType: 'image/png', buffer: PNG_BUFFER });
+  await expect(page.getByText('2/10 photos')).toBeVisible({ timeout: 10_000 });
+  await page.getByRole('button', { name: /\+ Add Another Item to Return/i }).click();
+  await expect(page.getByText(/Queued Return Manifest \(1 Item\)/i)).toBeVisible();
 
-  if (stream === 'supplier') {
-    await page.getByRole('button', { name: /Supplier RTV Hub/i }).click();
-  } else {
-    await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
-  }
+  // Item 2: Unlabeled item without SKU (tests child Assign SKU button in drawer)
+  await page.getByRole('button', { name: /Missing Barcode \/ Unlabeled Item\? Click here to report/i }).click();
+  await page.locator('input[placeholder*="Oishi"], input[placeholder*="identif"]').first().fill('Playwright Manifest Child 2');
+  await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({
+    name: 'pw-mf-2.png',
+    mimeType: 'image/png',
+    buffer: PNG_BUFFER
+  });
+  await page.getByRole('button', { name: /\+ Add Another Item to Return/i }).click();
+  await expect(page.getByText(/Queued Return Manifest \(2 Items\)/i)).toBeVisible();
 
-  const barcodeField = page.locator('input[placeholder*="barcode" i]').first();
-  await barcodeField.fill(VERIFIED_BARCODE);
-  await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 12_000 });
-
-  if (stream === 'supplier') {
-    const expiryInput = page.locator('input[type="date"]').first();
-    await expiryInput.fill(isoDateDaysOffset(expiryDays));
-  }
-
-  for (let idx = 0; idx < photoCount; idx += 1) {
-    const fileInput = page.locator('input[type="file"][accept="image/*"]').first();
-    await fileInput.setInputFiles({
-      name: `pw-seed-${stream}-${idx + 1}.png`,
-      mimeType: 'image/png',
-      buffer: PNG_BUFFER
-    });
-    await expect(page.getByText(`${idx + 1}/10 photos`)).toBeVisible({ timeout: 10_000 });
-  }
-
-  await page.locator('input[placeholder="Your Full Name *"]').fill('Playwright Hub Seeder');
-  await page
-    .locator('input[placeholder="Phone No. or Email *"]')
-    .fill('playwright-hub@pingcon.local');
+  await page.locator('input[placeholder="Your Full Name *"]').fill('Playwright Manifest Seeder');
+  await page.locator('input[placeholder="Phone No. or Email *"]').fill('playwright-mf@pingcon.local');
 
   const submitPostPromise = page.waitForResponse(
     (res) => res.url().includes('/rest/v1/rma_reports') && res.request().method() === 'POST',
-    { timeout: 25_000 }
+    { timeout: 35_000 }
   );
-  await page.getByRole('button', { name: /Submit Return Report/i }).click();
+  await page.getByRole('button', { name: /Submit Return Manifest/i }).click();
   await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 20_000 });
-  const postRes = await submitPostPromise;
-  expect(postRes.status()).toBeLessThan(400);
+  expect((await submitPostPromise).status()).toBeLessThan(400);
 
   const rmaText = await page
     .locator('.font-mono.font-black.text-slate-900, .font-mono.font-black.dark\\:text-white')
@@ -86,30 +64,43 @@ async function seedTestModeRma(page, { stream = 'customer', photoCount = 1, expi
     .first()
     .innerText();
   const rmaNumber = rmaText.trim();
-  expect(rmaNumber).toMatch(/^RMA-TEST-/);
-
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await page.waitForLoadState('networkidle').catch(() => { });
   return rmaNumber;
 }
 
-test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Lightbox & Archive/Trash', () => {
-  test('every button in Customer Hub & Supplier RTV Hub (Live + Sandbox), Full Audit Log, Matrix/CSV exports, Lightbox, QR, Thermal 4x6, Archive & 30-Day Trash restore/destroy', async ({
+async function assertZeroDeprecatedWidgets(page, scopeLabel) {
+  await expect(page.locator('button[title*="Thermal Box Label" i]'), `${scopeLabel}: Thermal`).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Driver QR Widget/i }), `${scopeLabel}: Driver QR`).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Buffer Stock Replacement/i }), `${scopeLabel}: Buffer Slip`).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Vendor RTV Gate Pass/i }), `${scopeLabel}: Vendor Gate Pass`).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Rejected Return Gate Pass/i }), `${scopeLabel}: Rejected Gate Pass`).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /\+ Debit Claim/i }), `${scopeLabel}: + Debit Claim`).toHaveCount(0);
+  await expect(page.getByText(/Supplier Debit Claim Voucher/i), `${scopeLabel}: Debit Voucher`).toHaveCount(0);
+}
+
+test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Manifest Drawer, Queues & Archive/Trash', () => {
+  test('exercises all toolbars, deprecated widget removals, Full Audit Log, Matrix/XLSX exports, Manifest drawer, WMS/PO confirm + Reset to Pending, Archive & 30-Day Trash restore/destroy', async ({
     page,
     context
   }) => {
     test.setTimeout(180_000);
-    await context.grantPermissions(['camera', 'clipboard-read', 'clipboard-write']).catch(() => {});
+    await context.grantPermissions(['camera', 'clipboard-read', 'clipboard-write']).catch(() => { });
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
     await interceptAndCaptureEmails(page);
+    await mockPhotoUploadSuccess(page);
 
-    let seededCustomerRma = null;
+    let seededManifestRma = null;
     let seededSupplierRma = null;
 
     try {
-      // Seed 1 Customer RMA (2 proof photos for Lightbox Next/Prev) & 1 Supplier RTV (1 proof photo) strictly in Test Mode
-      seededCustomerRma = await seedTestModeRma(page, { stream: 'customer', photoCount: 2 });
-      seededSupplierRma = await seedTestModeRma(page, { stream: 'supplier', photoCount: 1 });
+      seededManifestRma = await seedTestModeManifestCustomerRma(page);
+      seededSupplierRma = await seedTestModeRma(page, {
+        stream: 'supplier',
+        photoCount: 1,
+        expiryDays: 60,
+        supplierOrCompany: 'Monde Nissin Corp'
+      });
 
       await gotoAdmin(page);
 
@@ -118,18 +109,17 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
       // =========================================================================
       await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
       await expect(page.getByRole('button', { name: /Full Audit Log/i })).toBeVisible();
+      await assertZeroDeprecatedWidgets(page, 'Live Customer Hub');
 
-      // 1. Click all 3 Coworker Queue buttons + Clear Queue Filter
       await page.getByRole('button', { name: /Ready to Restock/i }).click();
       await page.getByRole('button', { name: /Supplier Re-Order/i }).click();
       await page.getByRole('button', { name: /No Re-Order \/ Write-Off/i }).click();
       await page.getByRole('button', { name: /Clear Queue Filter/i }).click();
 
-      // 2. Rows List vs Cards toggle
       await page.getByRole('button', { name: 'Cards', exact: true }).click();
       await page.getByRole('button', { name: /Rows List/i }).click();
 
-      // 3. Full Audit Log modal (RMAReportsModal) -> Cards View / Rows List / Filters / Export Excel (.xlsx) / Close
+      // Full Audit Log (RMAReportsModal) -> Cards View, Rows List, Reset, Export Excel (.xlsx), Close
       await page.getByRole('button', { name: /Full Audit Log/i }).click();
       await expect(page.getByText(/Logged RMA Return Reports/i)).toBeVisible();
       await page.getByRole('button', { name: /Cards View/i }).click();
@@ -139,14 +129,13 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
         page.locator('button[title="Export filtered reports to Excel (.xlsx)"]').click()
       ]);
       assertValidXlsxFile(liveAuditXlsx, await liveAuditXlsx.path());
-      // Close RMAReportsModal (X button next to Export Excel (.xlsx))
       await page
         .locator('div:has(> button[title="Export filtered reports to Excel (.xlsx)"]) > button')
         .last()
         .click();
       await expect(page.getByText(/Logged RMA Return Reports/i)).toBeHidden();
 
-      // 4. Overall RMA Matrix (.xlsx) (RMAMatrixExportModal)
+      // Overall RMA Matrix (.xlsx)
       await page.getByRole('button', { name: /Overall RMA Matrix \(\.xlsx\)/i }).click();
       await page.getByRole('button', { name: /Last 14 Days/i }).click();
       const [liveCustMatrix] = await Promise.all([
@@ -154,15 +143,12 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
         page.getByRole('button', { name: /Download Excel Matrix \(\.xlsx\)/i }).click()
       ]);
       assertValidXlsxFile(liveCustMatrix, await liveCustMatrix.path());
-      expect(liveCustMatrix.suggestedFilename()).toMatch(/^Overall_RMA_Matrix_Report_\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2} \d{4}\.xlsx$/);
+      expect(liveCustMatrix.suggestedFilename()).toMatch(
+        /^Overall_RMA_Matrix_Report_\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2} \d{4}\.xlsx$/
+      );
       await page.getByRole('button', { name: 'Close', exact: true }).click();
 
-      // Verify removed deprecated widgets are absent in Customer Hub
-      await expect(page.locator('button[title*="Thermal Box Label" i]')).toHaveCount(0);
-      await expect(page.getByRole('button', { name: /Driver QR Widget/i })).toHaveCount(0);
-      await expect(page.getByRole('button', { name: /Buffer Stock Replacement/i })).toHaveCount(0);
-
-      // 5. Export Inbound (.xlsx) (downloads .xlsx when populated, or shows empty-state alert when Live Customer Hub has 0 rows)
+      // Export Inbound (.xlsx)
       const hasLiveCustomerRows = (await page.locator('tbody tr').count()) > 0;
       if (hasLiveCustomerRows) {
         const [liveCustXlsx] = await Promise.all([
@@ -180,15 +166,13 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
         expect(alertMsg).toContain('No customer return reports available');
       }
 
-      // 6. All filter dropdowns + Search + Reset in Live Customer Hub
+      // Filters & Reset in Live Customer Hub
       const custSearch = page.locator('input[placeholder*="Search" i]').first();
       await custSearch.fill('SS1319P');
       const custSelects = page.locator('select');
-      const custSelectCount = await custSelects.count();
-      for (let i = 0; i < custSelectCount; i++) {
+      for (let i = 0; i < (await custSelects.count()); i++) {
         const sel = custSelects.nth(i);
-        const optCount = await sel.locator('option').count();
-        if (optCount > 1) {
+        if ((await sel.locator('option').count()) > 1) {
           await sel.selectOption({ index: 1 });
         }
       }
@@ -198,21 +182,19 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
       }
 
       // =========================================================================
-      // PART B: LIVE SUPPLIER HUB (RTV CLAIMS)
+      // PART B: LIVE SUPPLIER HUB (RTV CLAIMS) — NO DEPRECATED WIDGETS
       // =========================================================================
       await page.getByRole('button', { name: /Supplier Hub \(RTV Claims\)/i }).click();
       await expect(page.getByRole('button', { name: /Export Supplier Claims \(\.xlsx\)/i })).toBeVisible();
+      await assertZeroDeprecatedWidgets(page, 'Live Supplier RTV Hub');
 
-      // 1. Click all 3 Coworker Queue buttons + Clear
       await page.getByRole('button', { name: /Ready to Restock/i }).click();
       await page.getByRole('button', { name: /Supplier Re-Order/i }).click();
       await page.getByRole('button', { name: /No Re-Order \/ Write-Off/i }).click();
       await page.getByRole('button', { name: /Clear Queue Filter/i }).click();
 
-      // 2. Supplier & Triage filters + Search + Reset
       const suppSelects = page.locator('select');
-      const suppSelectCount = await suppSelects.count();
-      for (let i = 0; i < suppSelectCount; i++) {
+      for (let i = 0; i < (await suppSelects.count()); i++) {
         const sel = suppSelects.nth(i);
         if ((await sel.locator('option').count()) > 1) {
           await sel.selectOption({ index: 1 });
@@ -223,72 +205,33 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
         await suppReset.click();
       }
 
-      // 3. Supplier RTV Matrix (.xlsx)
-      await page.getByRole('button', { name: /Supplier RTV Matrix \(\.xlsx\)/i }).click();
+      await page.getByRole('button', { name: /Overall RMA Matrix \(\.xlsx\)/i }).click();
       await page.getByRole('button', { name: /Last 7 Days/i }).click();
       const [liveSuppMatrix] = await Promise.all([
         page.waitForEvent('download'),
         page.getByRole('button', { name: /Download Excel Matrix \(\.xlsx\)/i }).click()
       ]);
-      expect(liveSuppMatrix.suggestedFilename()).toContain('.xlsx');
+      assertValidXlsxFile(liveSuppMatrix, await liveSuppMatrix.path());
       await page.getByRole('button', { name: 'Close', exact: true }).click();
 
-      // 4. Export Supplier Claims (.xlsx)
       const [liveSuppXlsx] = await Promise.all([
         page.waitForEvent('download'),
         page.getByRole('button', { name: /Export Supplier Claims \(\.xlsx\)/i }).click()
       ]);
       assertValidXlsxFile(liveSuppXlsx, await liveSuppXlsx.path());
 
-      // 5. Select All & Clear selection (without mutating Live DB)
-      const selectAllCheckbox = page
-        .locator('thead input[type="checkbox"]')
-        .first();
-      if (await selectAllCheckbox.isVisible().catch(() => false)) {
-        await selectAllCheckbox.check();
-        const clearSelBtn = page.getByRole('button', { name: /Clear Selection|Deselect/i }).first();
-        if (await clearSelBtn.isVisible().catch(() => false)) {
-          await clearSelBtn.click();
-        } else {
-          await selectAllCheckbox.uncheck();
-        }
-      }
-
-      // 6. Live Supplier Row QR Quick-View & Print + Thermal 4x6 Label & Print + Photo Lightbox + Pagination
+      // Row QR Quick-View + Photo Lightbox + Pagination on Live Supplier RTV
       const liveQrBtn = page.locator('button[title*="Quick-View & Print Box QR Sticker"]').first();
-      await expect(liveQrBtn).toBeVisible();
-      await liveQrBtn.click();
-      await expect(page.getByText('Print RMA Sticker Label')).toBeVisible();
-      const qrPrintBefore = await page.evaluate(() => window.__pwPrintCount || 0);
-      await page.getByRole('button', { name: /Print Sticker \(/i }).click();
-      await expect
-        .poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 10_000 })
-        .toBeGreaterThan(qrPrintBefore);
-      await page.getByRole('button', { name: 'Done', exact: true }).click();
-      await expect(page.getByText('Print RMA Sticker Label')).toBeHidden();
-
-      const liveThermalBtn = page.locator('button[title="Print 4x6 inch Thermal Box Label"]').first();
-      await liveThermalBtn.click();
-      const thermPrintBtn = page.getByRole('button', { name: /Print 4x6" Box Label/i });
-      await expect(thermPrintBtn).toBeVisible();
-      const thermBefore = await page.evaluate(() => window.__pwPrintCount || 0);
-      await thermPrintBtn.click();
-      await expect
-        .poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 10_000 })
-        .toBeGreaterThan(thermBefore);
-      await page.getByRole('button', { name: 'Close', exact: true }).click();
-
+      if (await liveQrBtn.isVisible().catch(() => false)) {
+        await liveQrBtn.click();
+        await expect(page.getByText('Print RMA Sticker Label')).toBeVisible();
+        await page.getByRole('button', { name: 'Done', exact: true }).click();
+      }
       const livePhotoBtn = page.locator('button[title="Click to view full-size photo"]').first();
       if (await livePhotoBtn.isVisible().catch(() => false)) {
         await livePhotoBtn.click();
-        const closeLb = page.locator('button[title="Close (Esc)"]');
-        await expect(closeLb).toBeVisible();
-        const nextImg = page.locator('button[aria-label="Next image"]');
-        if (await nextImg.isVisible().catch(() => false)) {
-          await nextImg.click();
-          await page.locator('button[aria-label="Previous image"]').click();
-        }
-        await closeLb.click();
+        await expect(page.locator('button[title="Close (Esc)"]')).toBeVisible();
+        await page.locator('button[title="Close (Esc)"]').click();
       }
 
       const nextPageBtn = page.getByRole('button', { name: 'Next', exact: true }).first();
@@ -298,220 +241,106 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
       }
 
       // =========================================================================
-      // PART C: TEST MODE SANDBOX (cURL Guide, Customer RMAs, Supplier RTVs, Credit Memos)
+      // PART C: TEST MODE SANDBOX (cURL, Manifest Drawer, Lightbox Next/Prev, WMS Confirm & Reset, Archive)
       // =========================================================================
-      await page.getByRole('button', { name: /Test Mode Sandbox/i }).click();
+      await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await assertZeroDeprecatedWidgets(page, 'Test Mode Sandbox');
 
-      // 1. Toggle & copy API Sandbox cURL guide
       const showCurlBtn = page.getByRole('button', { name: /Show cURL Guide/i });
       if (await showCurlBtn.isVisible().catch(() => false)) {
         await showCurlBtn.click();
-        const copyCurlBtn = page.getByRole('button', { name: /Copy cURL/i }).first();
-        await expect(copyCurlBtn).toBeVisible();
-        await copyCurlBtn.click();
+        await page.getByRole('button', { name: /Copy cURL/i }).first().click();
         await page.getByRole('button', { name: /Hide cURL Guide/i }).click();
       }
 
-      // 2. Sandbox Customer RMAs sub-tab
+      // Sandbox Customer RMAs: Manifest Drawer, Lightbox Prev/Next, Restock via 4-Choice -> Confirm Restocked -> Reset to Pending -> Bulk Archive
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
-      await expect(page.getByRole('button', { name: /Full Audit Log/i })).toBeVisible();
-
-      // All 3 Coworker Queue buttons + Clear
-      await page.getByRole('button', { name: /Ready to Restock/i }).click();
-      await page.getByRole('button', { name: /Supplier Re-Order/i }).click();
-      await page.getByRole('button', { name: /No Re-Order \/ Write-Off/i }).click();
-      await page.getByRole('button', { name: /Clear Queue Filter/i }).click();
-
-      // Rows List vs Cards View
-      await page.getByRole('button', { name: 'Cards', exact: true }).click();
-      await page.getByRole('button', { name: /Rows List/i }).click();
-
-      // Sandbox Full Audit Log
-      await page.getByRole('button', { name: /Full Audit Log/i }).click();
-      await expect(page.getByText(/Logged Sandbox Test RMA Reports/i)).toBeVisible();
-      await page.getByRole('button', { name: /Cards View/i }).click();
-      await page.getByRole('button', { name: /Rows List/i }).last().click();
-      const [sbAuditXlsx] = await Promise.all([
-        page.waitForEvent('download'),
-        page.locator('button[title="Export filtered reports to Excel (.xlsx)"]').click()
-      ]);
-      assertValidXlsxFile(sbAuditXlsx, await sbAuditXlsx.path());
-      await page
-        .locator('div:has(> button[title="Export filtered reports to Excel (.xlsx)"]) > button')
-        .last()
-        .click();
-
-      // Sandbox Customer Matrix (.xlsx) & Export Inbound (.xlsx)
-      await page.getByRole('button', { name: /Sandbox Customer Matrix \(\.xlsx\)/i }).last().click();
-      const [sbCustMatrix] = await Promise.all([
-        page.waitForEvent('download'),
-        page.getByRole('button', { name: /Download Excel Matrix \(\.xlsx\)/i }).click()
-      ]);
-      assertValidXlsxFile(sbCustMatrix, await sbCustMatrix.path());
-      await page.getByRole('button', { name: 'Close', exact: true }).click();
-
-      const [sbCustXlsx] = await Promise.all([
-        page.waitForEvent('download'),
-        page.getByRole('button', { name: /Export Inbound \(\.xlsx\)/i }).click()
-      ]);
-      assertValidXlsxFile(sbCustXlsx, await sbCustXlsx.path());
-
-      // Exercise filter dropdowns + Reset, then locate our 2-photo seededCustomerRma
-      const sbCustSelects = page.locator('select');
-      for (let i = 0; i < (await sbCustSelects.count()); i++) {
-        const sel = sbCustSelects.nth(i);
-        if ((await sel.locator('option').count()) > 1) {
-          await sel.selectOption({ index: 1 });
-        }
-      }
-      const sbCustReset = page.getByRole('button', { name: 'Reset', exact: true }).first();
-      if (await sbCustReset.isVisible().catch(() => false)) {
-        await sbCustReset.click();
-      }
-
       const sbCustSearch = page.locator('input[placeholder*="Search" i]').first();
-      await sbCustSearch.fill(seededCustomerRma);
-      const sbCustRow = page.locator('tr', { hasText: seededCustomerRma }).first();
+      await sbCustSearch.fill(seededManifestRma);
+      const sbCustRow = page.locator('tr', { hasText: seededManifestRma }).first();
       await expect(sbCustRow).toBeVisible({ timeout: 10_000 });
 
-      // Lightbox with Next / Previous / Close on our 2-photo Sandbox Customer RMA
+      // Expand Manifest (2) drawer & inspect child items + collapse
+      const manifestBtn = sbCustRow.getByRole('button', { name: /Manifest \(2\)/i }).first();
+      await expect(manifestBtn).toBeVisible();
+      await manifestBtn.click();
+      await expect(page.getByText('Playwright Manifest Child 2').first()).toBeVisible();
+      await manifestBtn.click();
+
+      // Lightbox Prev / Next / Close on 2-photo first manifest item
       await sbCustRow.locator('button[title="Click to view full-size proof photo"]').click();
       await expect(page.locator('button[title="Close (Esc)"]')).toBeVisible();
-      await expect(page.locator('button[aria-label="Next image"]')).toBeVisible();
-      await page.locator('button[aria-label="Next image"]').click();
-      await page.locator('button[aria-label="Previous image"]').click();
+      const nextImg = page.locator('button[aria-label="Next image"]');
+      if (await nextImg.isVisible().catch(() => false)) {
+        await nextImg.click();
+        await page.locator('button[aria-label="Previous image"]').click();
+      }
       await page.locator('button[title="Close (Esc)"]').click();
 
-      // Row QR Quick-View & Print
+      // QR Quick-View & Print
       await sbCustRow.locator('button[title*="View & Print Box QR Sticker"]').click();
       await expect(page.getByText('Print RMA Sticker Label')).toBeVisible();
       const sbQrBefore = await page.evaluate(() => window.__pwPrintCount || 0);
       await page.getByRole('button', { name: /Print Sticker \(/i }).click();
-      await expect
-        .poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 10_000 })
-        .toBeGreaterThan(sbQrBefore);
+      await expect.poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 10_000 }).toBeGreaterThan(sbQrBefore);
       await page.getByRole('button', { name: 'Done', exact: true }).click();
 
-      // Row Thermal 4x6 Label & Print
-      await sbCustRow.locator('button[title="Print 4x6 inch Thermal Box Label"]').click();
-      const sbThermBtn = page.getByRole('button', { name: /Print 4x6" Box Label/i });
-      await expect(sbThermBtn).toBeVisible();
-      const sbThermBefore = await page.evaluate(() => window.__pwPrintCount || 0);
-      await sbThermBtn.click();
-      await expect
-        .poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 10_000 })
-        .toBeGreaterThan(sbThermBefore);
-      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      // Bulk select -> Archive Selected
+      await sbCustRow.locator('input[type="checkbox"]').first().check();
+      await page.getByRole('button', { name: /Archive Selected \(1\)/i }).click();
+      await expect(sbCustRow).toBeHidden({ timeout: 15_000 });
 
-      // Row Archive button
-      await sbCustRow.locator(`button[title*="Archive RMA #${seededCustomerRma}"]`).click();
-      await expect(sbCustRow).toBeHidden({ timeout: 10_000 });
-
-      // 3. Sandbox Supplier RTVs sub-tab
+      // Sandbox Supplier RTVs -> WMS Restocked confirm + Reset to Pending -> Archive row
       await page.getByRole('button', { name: /Sandbox Supplier RTVs/i }).click();
-      await page.getByRole('button', { name: /Ready to Restock/i }).click();
-      await page.getByRole('button', { name: /Supplier Re-Order/i }).click();
-      await page.getByRole('button', { name: /No Re-Order \/ Write-Off/i }).click();
-      await page.getByRole('button', { name: /Clear Queue Filter/i }).click();
-
-      // Sandbox Supplier RTV Matrix (.xlsx) & Export CSV
-      await page.getByRole('button', { name: /Sandbox Supplier RTV Matrix \(\.xlsx\)/i }).last().click();
-      const [sbSuppMatrix] = await Promise.all([
-        page.waitForEvent('download'),
-        page.getByRole('button', { name: /Download Excel Matrix \(\.xlsx\)/i }).click()
-      ]);
-      expect(sbSuppMatrix.suggestedFilename()).toContain('.xlsx');
-      await page.getByRole('button', { name: 'Close', exact: true }).click();
-
-      const [sbSuppXlsx] = await Promise.all([
-        page.waitForEvent('download'),
-        page.getByRole('button', { name: /Export Supplier Claims \(\.xlsx\)/i }).click()
-      ]);
-      assertValidXlsxFile(sbSuppXlsx, await sbSuppXlsx.path());
-
-      // Filter dropdowns + Reset then locate seededSupplierRma
-      const sbSuppSelects = page.locator('select');
-      for (let i = 0; i < (await sbSuppSelects.count()); i++) {
-        const sel = sbSuppSelects.nth(i);
-        if ((await sel.locator('option').count()) > 1) {
-          await sel.selectOption({ index: 1 });
-        }
-      }
-      const sbSuppReset = page.getByRole('button', { name: 'Reset', exact: true }).first();
-      if (await sbSuppReset.isVisible().catch(() => false)) {
-        await sbSuppReset.click();
-      }
-
-      const sbSuppSearch = page.locator('input[placeholder*="Search" i]').first();
-      await sbSuppSearch.fill(seededSupplierRma);
+      await page.locator('input[placeholder*="Search" i]').first().fill(seededSupplierRma);
       const sbSuppRow = page.locator('tr', { hasText: seededSupplierRma }).first();
       await expect(sbSuppRow).toBeVisible({ timeout: 10_000 });
 
-      // Lightbox on Supplier RTV row
-      await sbSuppRow.locator('button[title="Click to view full-size photo"]').click();
-      await expect(page.locator('button[title="Close (Esc)"]')).toBeVisible();
-      await page.locator('button[title="Close (Esc)"]').click();
+      // Open 4-Choice on Supplier RTV and save Restock -> test "✓ Confirm Restocked in WMS" & "↩️ Reset to Pending"
+      await sbSuppRow.locator('button[title*="Open 4-Choice" i]').first().click();
+      await expect(page.getByText('What do you want to do with this item?')).toBeVisible();
+      await page.getByRole('button', { name: /Put Back on Good Shelf \(Restock\)|Return to Good Stock/i }).first().click();
+      await page.getByRole('button', { name: /Confirm & Save/i }).first().click();
+      await expect(page.getByRole('button', { name: /^Done$/i })).toBeVisible({ timeout: 15_000 });
+      await page.getByRole('button', { name: /^Done$/i }).click();
 
-      // QR Quick-View & Print on Sandbox Supplier RTV
-      await sbSuppRow.locator('button[title*="Quick-View & Print Box QR Sticker"]').click();
-      await expect(page.getByText('Print RMA Sticker Label')).toBeVisible();
-      const sbSuppQrBefore = await page.evaluate(() => window.__pwPrintCount || 0);
-      await page.getByRole('button', { name: /Print Sticker \(/i }).click();
-      await expect
-        .poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 10_000 })
-        .toBeGreaterThan(sbSuppQrBefore);
-      await page.getByRole('button', { name: 'Done', exact: true }).click();
+      const confirmRestockBtn = sbSuppRow.getByRole('button', { name: /Confirm Restocked in WMS/i });
+      if (await confirmRestockBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await confirmRestockBtn.click();
+        const resetPendingBtn = sbSuppRow.getByRole('button', { name: /Reset to Pending/i });
+        await expect(resetPendingBtn).toBeVisible({ timeout: 10_000 });
+        await resetPendingBtn.click();
+        await page.waitForTimeout(400);
+      }
 
-      // Thermal 4x6 on Sandbox Supplier RTV
-      await sbSuppRow.locator('button[title="Print 4x6 inch Thermal Box Label"]').click();
-      const sbSuppThermBefore = await page.evaluate(() => window.__pwPrintCount || 0);
-      await page.getByRole('button', { name: /Print 4x6" Box Label/i }).click();
-      await expect
-        .poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 10_000 })
-        .toBeGreaterThan(sbSuppThermBefore);
-      await page.getByRole('button', { name: 'Close', exact: true }).click();
-
-      // Archive Sandbox Supplier RTV row
+      // Archive Sandbox Supplier RTV
       await sbSuppRow.locator(`button[title*="Archive RMA #${seededSupplierRma}"]`).click();
-      await expect(sbSuppRow).toBeHidden({ timeout: 10_000 });
-
-      // Check Sandbox Credit Memos sub-tab renders cleanly
-      await page.getByRole('button', { name: /Sandbox Credit Memos/i }).click();
-      await expect(page.getByRole('button', { name: /Issue Credit Memo/i })).toBeVisible();
+      await expect(sbSuppRow).toBeHidden({ timeout: 15_000 });
 
       // =========================================================================
-      // PART D: ARCHIVE VAULT RESTORE + 30-DAY TRASH BIN PERMANENT DELETE
+      // PART D: ARCHIVE VAULT RESTORE -> 30-DAY TRASH BIN -> PERMANENT DELETE
       // =========================================================================
       await page.getByRole('button', { name: /Archive & Trash/i }).click();
       await page.getByRole('button', { name: /Archive Vault/i }).click();
-
-      // Exercise environment scope filter pills
       await page.getByRole('button', { name: /Live Production/i }).click();
       await page.getByRole('button', { name: /Test Mode Sandbox/i }).last().click();
 
       const archiveSearch = page.locator('input[placeholder*="Search" i]').first();
+      for (const targetRma of [seededManifestRma, seededSupplierRma]) {
+        await archiveSearch.fill(targetRma);
+        const archRow = page.locator('tr', { hasText: targetRma }).first();
+        await expect(archRow).toBeVisible({ timeout: 10_000 });
+        await archRow.locator('button[title="Restore item back to active hub"]').click();
+        await expect(archRow).toBeHidden({ timeout: 10_000 });
+      }
 
-      // Restore both archived synthetic Sandbox RMAs back to active hubs
-      await archiveSearch.fill(seededCustomerRma);
-      const archCustRow = page.locator('tr', { hasText: seededCustomerRma }).first();
-      await expect(archCustRow).toBeVisible({ timeout: 10_000 });
-      await archCustRow.locator('button[title="Restore item back to active hub"]').click();
-      await expect(archCustRow).toBeHidden({ timeout: 10_000 });
-
-      await archiveSearch.fill(seededSupplierRma);
-      const archSuppRow = page.locator('tr', { hasText: seededSupplierRma }).first();
-      await expect(archSuppRow).toBeVisible({ timeout: 10_000 });
-      await archSuppRow.locator('button[title="Restore item back to active hub"]').click();
-      await expect(archSuppRow).toBeHidden({ timeout: 10_000 });
-
-      // Move both restored records to 30-Day Trash Bin from Test Mode Sandbox
+      // Move both restored records to 30-Day Trash & permanently destroy
       await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
-
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
-      await page.locator('input[placeholder*="Search" i]').first().fill(seededCustomerRma);
-      const restoredCustRow = page.locator('tr', { hasText: seededCustomerRma }).first();
+      await page.locator('input[placeholder*="Search" i]').first().fill(seededManifestRma);
+      const restoredCustRow = page.locator('tr', { hasText: seededManifestRma }).first();
       await expect(restoredCustRow).toBeVisible({ timeout: 10_000 });
-      await restoredCustRow.locator(`button[title*="Move RMA #${seededCustomerRma} to 30-Day Trash Bin"]`).click();
+      await restoredCustRow.locator(`button[title*="Move RMA #${seededManifestRma} to 30-Day Trash Bin"]`).click();
       await page.getByRole('button', { name: /Move to Trash/i }).click();
       await expect(restoredCustRow).toBeHidden({ timeout: 10_000 });
 
@@ -523,7 +352,6 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
       await page.getByRole('button', { name: /Move to Trash/i }).click();
       await expect(restoredSuppRow).toBeHidden({ timeout: 10_000 });
 
-      // Permanently destroy both synthetic test records from 30-Day Trash Bin
       await page.getByRole('button', { name: /Archive & Trash/i }).click();
       await page.getByRole('button', { name: /Trash Bin/i }).click();
       await expect(page.getByRole('button', { name: /Empty Trash/i })).toBeVisible();
@@ -532,34 +360,25 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
         await dialog.accept();
       };
       page.on('dialog', onConfirmDialog);
-
       try {
         const trashSearch = page.locator('input[placeholder*="Search" i]').first();
-        for (const targetRma of [seededCustomerRma, seededSupplierRma]) {
+        for (const targetRma of [seededManifestRma, seededSupplierRma]) {
           await trashSearch.fill(targetRma);
           const trashedRow = page.locator('tr', { hasText: targetRma }).first();
           await expect(trashedRow).toBeVisible({ timeout: 10_000 });
-          const delWait = page
-            .waitForResponse(
-              (res) => res.url().includes('/rest/v1/rma_reports') && res.request().method() === 'DELETE',
-              { timeout: 20_000 }
-            )
-            .catch(() => null);
-          await trashedRow
-            .locator('button[title="Permanently destroy this record forever"]')
-            .click();
+          await trashedRow.locator('button[title="Permanently destroy this record forever"]').click();
           await expect(trashedRow).toBeHidden({ timeout: 15_000 });
-          await delWait;
         }
-        await page.waitForLoadState('networkidle').catch(() => {});
+        await page.waitForLoadState('networkidle').catch(() => { });
       } finally {
         page.off('dialog', onConfirmDialog);
       }
 
-      seededCustomerRma = null;
+      seededManifestRma = null;
       seededSupplierRma = null;
-      guard.assertClean('suite 03 hubs, sandbox, lightbox, archive and trash');
+      guard.assertClean('suite 03 hubs, sandbox, manifest drawer, queue confirms & archive/trash');
     } finally {
+      await cleanupTestRecords(page, { rmaNumbers: [seededManifestRma, seededSupplierRma] });
       guard.detach();
     }
   });

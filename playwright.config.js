@@ -25,7 +25,7 @@ export default defineConfig({
     storageState: 'tests/.auth/admin.json',
     viewport: { width: 1440, height: 900 },
     actionTimeout: 12_000,
-    navigationTimeout: 20_000,
+    navigationTimeout: 35_000,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

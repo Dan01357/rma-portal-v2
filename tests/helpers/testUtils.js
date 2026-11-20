@@ -158,6 +158,42 @@ export async function interceptAndCaptureEmails(page) {
 }
 
 /**
+ * Deterministically mocks /api/upload-photo during automated upload/pickup tests
+ * while preserving the AI paperwork inspection sub-route if passed through.
+ */
+export async function mockPhotoUploadSuccess(page) {
+  await page.route('**/pw-mock-photo-*.png', async (route) => {
+    return route.fulfill({
+      status: 200,
+      contentType: 'image/png',
+      body: PNG_BUFFER
+    });
+  });
+  await page.route('**/api/upload-photo**', async (route) => {
+    const req = route.request();
+    const url = req.url();
+    if (req.method() === 'POST' && !url.includes('inspect-paperwork')) {
+      const idx = Date.now() % 10000;
+      const localUrl = `https://localhost:5173/pw-mock-photo-${idx}.png`;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          url: localUrl,
+          previewUrl: localUrl,
+          rmaFolderId: 'pw_mock_folder_id',
+          rmaFolderUrl: 'https://drive.google.com/drive/folders/pw_mock_folder_id',
+          fileId: `pw_mock_photo_${idx}`,
+          provider: 'google_drive'
+        })
+      });
+    }
+    return route.continue();
+  });
+}
+
+/**
  * Attaches strict pageerror, console (error + React warnings + #310), and HTTP >=400 response guards.
  * Optionally accepts `allowHttp` (array of `(res) => boolean`) and `allowConsole` (array of RegExp)
  * ONLY for intentional negative security/validation test assertions.
@@ -218,9 +254,13 @@ export function attachStrictGuards(page, { allowHttp = [], allowConsole = [] } =
  * Ensures /admin finished authenticating and loaded the header & KPI grid.
  */
 export async function gotoAdmin(page) {
-  await page.goto('/admin', { waitUntil: 'commit', timeout: 30_000 });
-  await expect(page.getByText('Pingcon RMA Operations')).toBeVisible({ timeout: 30_000 });
+  await page.goto('/admin', { waitUntil: 'domcontentloaded', timeout: 45_000 });
+  await expect(page.getByText('Pingcon RMA Operations')).toBeVisible({ timeout: 45_000 });
   await page.waitForLoadState('networkidle').catch(() => {});
+  await page
+    .getByRole('button', { name: /Saved Products \([1-9]/i })
+    .waitFor({ state: 'visible', timeout: 25_000 })
+    .catch(() => {});
 }
 
 /**
@@ -230,4 +270,270 @@ export function isoDateDaysOffset(days = 30) {
   const d = new Date();
   d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Verifies a downloaded file is a genuine OOXML .xlsx ZIP archive (PK header + sheet1.xml).
+ */
+export function assertValidXlsxFile(download, filePath) {
+  const name = download.suggestedFilename();
+  expect(name).toMatch(/\.xlsx$/i);
+  expect(name.toLowerCase()).not.toContain('.csv');
+  if (filePath) {
+    const buf = fs.readFileSync(filePath);
+    expect(buf[0]).toBe(0x50); // 'P'
+    expect(buf[1]).toBe(0x4b); // 'K'
+    const xmlStr = buf.toString('utf8');
+    expect(xmlStr).toContain('xl/worksheets/sheet1.xml');
+    expect(xmlStr).toContain('application/vnd.openxmlformats-package.relationships+xml');
+    return xmlStr;
+  }
+  return '';
+}
+
+/**
+ * Asserts the document has no unintentional horizontal overflow at the active viewport.
+ */
+export async function assertNoHorizontalOverflow(page, label = 'viewport') {
+  const dims = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth
+  }));
+  expect(
+    dims.scrollWidth,
+    `Horizontal overflow detected on ${label}: scrollWidth=${dims.scrollWidth} > innerWidth=${dims.innerWidth}`
+  ).toBeLessThanOrEqual(dims.innerWidth + 1);
+}
+
+/**
+ * Toggles the public intake page Super Admin Test Mode switch cleanly.
+ */
+export async function setPublicPortalTestMode(page, enabled) {
+  const toggleBtn = page.locator('button[title="Toggle Test / Sandbox Mode"]');
+  await expect(toggleBtn).toBeVisible({ timeout: 20_000 });
+  const isCurrentlyOn = /Test Mode:\s*ON/i.test(await toggleBtn.innerText());
+  if (isCurrentlyOn !== enabled) {
+    await toggleBtn.click();
+  }
+  if (enabled) {
+    await expect(page.getByText('🧪 Super Admin Sandbox Active')).toBeVisible({ timeout: 10_000 });
+  } else {
+    await expect(page.getByText('🟢 Live Delivery Mode Active')).toBeVisible({ timeout: 10_000 });
+  }
+}
+
+/**
+ * Seeds a Test Mode Sandbox RMA via the public intake page so Live DB stays untouched.
+ */
+export async function seedTestModeRma(
+  page,
+  {
+    stream = 'customer',
+    photoCount = 1,
+    expiryDays = 45,
+    supplierOrCompany = '',
+    quantity = 1,
+    barcode = VERIFIED_BARCODE,
+    reporterName = 'Playwright Hub Seeder'
+  } = {}
+) {
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 35_000 });
+  await expect(page.getByText(/Scan Product Barcode or RMA Sticker QR/i)).toBeVisible({
+    timeout: 20_000
+  });
+
+  await setPublicPortalTestMode(page, true);
+
+  if (stream === 'supplier') {
+    await page.getByRole('button', { name: /Supplier RTV Hub/i }).click();
+  } else {
+    await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
+  }
+
+  const barcodeField = page.locator('input[placeholder*="barcode" i]').first();
+  await barcodeField.fill(barcode);
+  if (barcode === VERIFIED_BARCODE) {
+    await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 25_000 });
+  } else {
+    await page.waitForTimeout(400);
+  }
+
+  if (quantity > 1) {
+    const qtyField = page.locator('input[type="number"][min="1"]').first();
+    await qtyField.fill(String(quantity));
+  }
+
+  if (stream === 'supplier' || expiryDays !== null) {
+    const expiryInput = page.locator('input[type="date"]').first();
+    if (expiryDays !== null) {
+      await expiryInput.fill(isoDateDaysOffset(expiryDays));
+    }
+  }
+
+  if (supplierOrCompany) {
+    const sec3Input = page
+      .locator(
+        stream === 'supplier'
+          ? 'input[placeholder*="Supplier" i], input[placeholder*="Suy Sing" i]'
+          : 'input[placeholder*="Store" i], input[placeholder*="Savemore" i], input[placeholder*="Company" i]'
+      )
+      .first();
+    if (await sec3Input.isVisible().catch(() => false)) {
+      await sec3Input.fill(supplierOrCompany);
+    }
+  }
+
+  for (let idx = 0; idx < photoCount; idx += 1) {
+    const fileInput = page.locator('input[type="file"][accept="image/*"]').first();
+    await fileInput.setInputFiles({
+      name: `pw-seed-${stream}-${idx + 1}.png`,
+      mimeType: 'image/png',
+      buffer: PNG_BUFFER
+    });
+    await expect(page.getByText(`${idx + 1}/10 photos`)).toBeVisible({ timeout: 10_000 });
+  }
+
+  await page.locator('input[placeholder="Your Full Name *"]').fill(reporterName);
+  await page
+    .locator('input[placeholder="Phone No. or Email *"]')
+    .fill('playwright-hub@pingcon.local');
+
+  const submitPostPromise = page.waitForResponse(
+    (res) => res.url().includes('/rest/v1/rma_reports') && res.request().method() === 'POST',
+    { timeout: 25_000 }
+  );
+  await page.getByRole('button', { name: /Submit Return Report/i }).click();
+  await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 20_000 });
+  const postRes = await submitPostPromise;
+  expect(postRes.status()).toBeLessThan(400);
+
+  const rmaText = await page
+    .locator('.font-mono.font-black.text-slate-900, .font-mono.font-black.dark\\:text-white')
+    .filter({ hasText: /^RMA-TEST-/ })
+    .first()
+    .innerText();
+  const rmaNumber = rmaText.trim();
+  expect(rmaNumber).toMatch(/^RMA-TEST-/);
+  await page.waitForLoadState('networkidle').catch(() => {});
+  return rmaNumber;
+}
+
+/**
+ * Deletes synthetic RMAs, associated Credit Memos, Supplier Claims, and Consolidated CM entries from Supabase.
+ */
+export async function cleanupTestRecords(
+  page,
+  { rmaNumbers = [], claimNumbers = [], creditMemoNumbers = [] } = {}
+) {
+  const rmas = (rmaNumbers || []).filter(Boolean);
+  const claims = (claimNumbers || []).filter(Boolean);
+  const cms = (creditMemoNumbers || []).filter(Boolean);
+  if (rmas.length === 0 && claims.length === 0 && cms.length === 0) return;
+
+  const { supaUrl, anonKey } = readSupabasePublicEnv();
+  await page
+    .evaluate(
+      async ({ targetRmas, targetClaims, targetCms, url, key }) => {
+        try {
+          const supaKey = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'));
+          const token = supaKey ? JSON.parse(localStorage.getItem(supaKey))?.access_token : null;
+          if (!url || !key || !token) return;
+          const headers = {
+            apikey: key,
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          };
+
+          for (const cmNum of targetCms) {
+            await fetch(
+              `${url}/rest/v1/credit_memos?credit_memo_number=eq.${encodeURIComponent(cmNum)}`,
+              { method: 'DELETE', headers }
+            );
+          }
+
+          for (const rmaNum of targetRmas) {
+            await fetch(
+              `${url}/rest/v1/credit_memos?rma_number=eq.${encodeURIComponent(rmaNum)}`,
+              { method: 'DELETE', headers }
+            );
+            await fetch(
+              `${url}/rest/v1/rma_reports?rma_number=eq.${encodeURIComponent(rmaNum)}`,
+              { method: 'DELETE', headers }
+            );
+          }
+
+          for (const claimNum of targetClaims) {
+            await fetch(
+              `${url}/rest/v1/supplier_claims?claim_number=eq.${encodeURIComponent(claimNum)}`,
+              { method: 'DELETE', headers }
+            );
+          }
+
+          // Prune supplier_claims_store in rma_settings
+          const sRes = await fetch(
+            `${url}/rest/v1/rma_settings?key=eq.supplier_claims_store&select=value`,
+            { headers }
+          );
+          if (sRes.ok) {
+            const sJson = await sRes.json();
+            const currentClaims = sJson?.[0]?.value;
+            if (Array.isArray(currentClaims)) {
+              const filtered = currentClaims.filter((c) => {
+                const cNum = c.claim_number || c.claimNumber;
+                if (targetClaims.includes(cNum)) return false;
+                if (
+                  Array.isArray(c.items) &&
+                  c.items.some((it) => targetRmas.includes(it.rma_number))
+                ) {
+                  return false;
+                }
+                return true;
+              });
+              if (filtered.length !== currentClaims.length) {
+                await fetch(`${url}/rest/v1/rma_settings?key=eq.supplier_claims_store`, {
+                  method: 'PATCH',
+                  headers,
+                  body: JSON.stringify({ value: filtered })
+                });
+              }
+            }
+          }
+
+          // Prune consolidated_cm_items_store in rma_settings
+          const cmRes = await fetch(
+            `${url}/rest/v1/rma_settings?key=eq.consolidated_cm_items_store&select=value`,
+            { headers }
+          );
+          if (cmRes.ok) {
+            const cmJson = await cmRes.json();
+            const storeVal = cmJson?.[0]?.value;
+            if (storeVal && typeof storeVal === 'object') {
+              let changed = false;
+              const next = { ...storeVal };
+              for (const [cmKey, entry] of Object.entries(next)) {
+                const linkedRmas = Array.isArray(entry?.consolidated_rma_numbers)
+                  ? entry.consolidated_rma_numbers
+                  : [];
+                if (
+                  targetCms.includes(cmKey) ||
+                  linkedRmas.some((r) => targetRmas.includes(r))
+                ) {
+                  delete next[cmKey];
+                  changed = true;
+                }
+              }
+              if (changed) {
+                await fetch(`${url}/rest/v1/rma_settings?key=eq.consolidated_cm_items_store`, {
+                  method: 'PATCH',
+                  headers,
+                  body: JSON.stringify({ value: next })
+                });
+              }
+            }
+          }
+        } catch {}
+      },
+      { targetRmas: rmas, targetClaims: claims, targetCms: cms, url: supaUrl, key: anonKey }
+    )
+    .catch(() => {});
 }

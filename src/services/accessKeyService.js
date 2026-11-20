@@ -88,7 +88,7 @@ export const accessKeyService = {
           .from('rma_settings')
           .select('value')
           .eq('key', SETTINGS_KEY)
-          .single();
+          .maybeSingle();
 
         if (!error && data?.value && Array.isArray(data.value) && data.value.length > 0) {
           remoteProfiles = data.value;

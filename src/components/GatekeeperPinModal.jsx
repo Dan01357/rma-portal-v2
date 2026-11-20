@@ -401,7 +401,7 @@ export default function GatekeeperPinModal({
 
   // 5. Live ticking countdown timer for valid invite (updates every 1s)
   useEffect(() => {
-    if (!validationResult?.invite?.expires_at) return;
+    if (!validationResult?.valid || !validationResult?.invite?.expires_at) return;
 
     const updateTimer = () => {
       const countdown = formatRemainingCountdown(validationResult.invite.expires_at, validationResult.invite.status);
@@ -414,7 +414,7 @@ export default function GatekeeperPinModal({
     updateTimer();
     const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
-  }, [validationResult?.invite?.expires_at, validationResult?.invite?.status]);
+  }, [validationResult?.valid, validationResult?.invite?.expires_at, validationResult?.invite?.status]);
 
   // 6. Handle "Continue with Google" OAuth trigger
   const handleContinueWithGoogle = async () => {

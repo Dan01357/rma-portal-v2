@@ -1432,3 +1432,268 @@ export function computeItemPiecesAndValue(item, catalogProducts = []) {
   };
 }
 
+const CM_META_REGEX = /\s*\[CM_META:([\s\S]*?)\]$/;
+
+/**
+ * Remove hidden [CM_META:...] JSON suffix so human-visible Credit Memo notes stay clean.
+ */
+export function stripCreditMemoMetaTag(rawNotes) {
+  if (!rawNotes) return '';
+  return String(rawNotes).replace(CM_META_REGEX, '').trim();
+}
+
+/**
+ * Parse embedded [CM_META:{...}] payload from a Credit Memo's notes field.
+ */
+export function parseCreditMemoMeta(rawNotes) {
+  if (!rawNotes || typeof rawNotes !== 'string') return null;
+  const match = rawNotes.match(CM_META_REGEX);
+  if (!match || !match[1]) return null;
+  try {
+    const parsed = JSON.parse(match[1]);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve consolidated line items attached to a Credit Memo record.
+ */
+export function getCreditMemoConsolidatedItems(memo) {
+  if (!memo) return [];
+  if (Array.isArray(memo.consolidated_items) && memo.consolidated_items.length > 0) {
+    return memo.consolidated_items;
+  }
+  if (Array.isArray(memo.items) && memo.items.length > 0) {
+    return memo.items;
+  }
+  const meta = parseCreditMemoMeta(memo.notes);
+  if (meta && Array.isArray(meta.consolidated_items) && meta.consolidated_items.length > 0) {
+    return meta.consolidated_items;
+  }
+  return [];
+}
+
+/**
+ * Extract all RMA numbers associated with a single or consolidated Credit Memo.
+ */
+export function getCreditMemoRmaNumbers(memo) {
+  if (!memo) return [];
+  const set = new Set();
+  if (Array.isArray(memo.consolidated_rma_numbers)) {
+    memo.consolidated_rma_numbers.forEach((n) => {
+      const clean = String(n || '').trim();
+      if (clean) set.add(clean);
+    });
+  }
+  const meta = parseCreditMemoMeta(memo.notes);
+  if (meta && Array.isArray(meta.rma_numbers)) {
+    meta.rma_numbers.forEach((n) => {
+      const clean = String(n || '').trim();
+      if (clean) set.add(clean);
+    });
+  }
+  getCreditMemoConsolidatedItems(memo).forEach((it) => {
+    const clean = String(it?.rma_number || '').trim();
+    if (clean) set.add(clean);
+  });
+  String(memo.rma_number || '')
+    .split(',')
+    .map((part) => part.replace(/\s*\(\+\d+[^)]*\)$/i, '').trim())
+    .filter(Boolean)
+    .forEach((n) => set.add(n));
+  return Array.from(set);
+}
+
+/**
+ * Checks if a (single or consolidated) Credit Memo is linked to a given RMA report.
+ */
+export function doesCreditMemoLinkReport(memo, report) {
+  if (!memo || !report) return false;
+  if (report.id != null) {
+    if (memo.report_id != null && String(memo.report_id) === String(report.id)) return true;
+    const meta = parseCreditMemoMeta(memo.notes);
+    if (Array.isArray(meta?.report_ids) && meta.report_ids.some((rid) => String(rid) === String(report.id))) {
+      return true;
+    }
+    if (Array.isArray(memo.consolidated_report_ids) && memo.consolidated_report_ids.some((rid) => String(rid) === String(report.id))) {
+      return true;
+    }
+  }
+  const rma = String(report.rma_number || '').trim();
+  if (!rma) return false;
+  return getCreditMemoRmaNumbers(memo).includes(rma);
+}
+
+/**
+ * Find all RMA reports sharing the same consolidated Debit Claim / Replacement batch.
+ */
+export function findConsolidatedRtvBatchReports(targetReport, allReports = []) {
+  if (!targetReport) return [];
+  const list = Array.isArray(allReports) ? allReports : [];
+  const targetIsTest = isTestRecord(targetReport);
+  const pickup = targetReport.ai_document_metadata?.supplier_pickup || {};
+
+  const targetClaim = String(
+    pickup.claim_number ||
+    String(targetReport.notes || '').match(/\[RTV:\s*([^\]]+)\]/i)?.[1] ||
+    ''
+  ).trim();
+
+  const listedRmas = new Set(
+    (Array.isArray(pickup.consolidated_rma_numbers) ? pickup.consolidated_rma_numbers : [])
+      .map((n) => String(n || '').trim())
+      .filter(Boolean)
+  );
+  if (targetReport.rma_number) {
+    listedRmas.add(String(targetReport.rma_number).trim());
+  }
+
+  const matched = list.filter((cand) => {
+    if (!cand || isTrashedRecord(cand) || isTestRecord(cand) !== targetIsTest) return false;
+    if (isManifestSubItem(cand, list)) return false;
+    if (cand.id && targetReport.id && String(cand.id) === String(targetReport.id)) return true;
+    const candRma = String(cand.rma_number || '').trim();
+    if (candRma && listedRmas.has(candRma)) return true;
+
+    if (targetClaim) {
+      const candPickup = cand.ai_document_metadata?.supplier_pickup || {};
+      const candClaim = String(
+        candPickup.claim_number ||
+        String(cand.notes || '').match(/\[RTV:\s*([^\]]+)\]/i)?.[1] ||
+        ''
+      ).trim();
+      if (candClaim && candClaim === targetClaim) return true;
+    }
+    return false;
+  });
+
+  if (matched.length === 0) return [targetReport];
+  // Deduplicate by rma_number/id while keeping targetReport's freshest snapshot
+  const byKey = new Map();
+  matched.forEach((r) => {
+    const key = String(r.rma_number || r.id || '');
+    if (key) byKey.set(key, r);
+  });
+  const targetKey = String(targetReport.rma_number || targetReport.id || '');
+  if (targetKey && !byKey.has(targetKey)) {
+    byKey.set(targetKey, targetReport);
+  }
+  return Array.from(byKey.values());
+}
+
+/**
+ * Build normalized item rows for 1 or many consolidated RMA reports,
+ * supporting automatic combination of identical items (SKU + Price + Expiry Date).
+ */
+export function getConsolidatedPickupItems({
+  report = null,
+  reports = [],
+  allReports = [],
+  catalogProducts = [],
+  combineIdentical = false
+}) {
+  const sourceReports = Array.isArray(reports) && reports.length > 0
+    ? reports
+    : (report ? [report] : []);
+
+  const flatRows = [];
+  sourceReports.forEach((rep) => {
+    if (!rep) return;
+    const repRma = rep.rma_number || rep.rmaNumber || String(rep.id || 'N/A');
+    const manifestChildren = getReportManifestItems(rep, allReports);
+    const lines = manifestChildren.length > 0 ? manifestChildren : [rep];
+
+    lines.forEach((it, idx) => {
+      const calc = computeItemPiecesAndValue(it, catalogProducts);
+      const rawExp = String(it.expiry_date || it.ai_document_metadata?.expiry_date || rep.expiry_date || '').trim();
+      const expiry = formatDateYmd(rawExp) || rawExp || '—';
+      const sku = getCleanSku(it.code || it.sku || rep.code || rep.sku, it.barcode || rep.barcode);
+      const barcode = String(it.barcode || rep.barcode || '').trim();
+      const displaySku = sku || barcode || '—';
+      const name = it.name || it.product_name || it.productName || rep.name || `Item ${barcode || idx + 1}`;
+      const unitPricePerPiece = calc.totalPieces > 0
+        ? Number((calc.lineTotal / calc.totalPieces).toFixed(4))
+        : Number(calc.recordedUnitPrice || 0);
+
+      // Grouping identity: SKU (or barcode/name fallback) + Price + Expiry Date
+      const identityCode = (sku || barcode || name).trim().toUpperCase();
+      const groupKey = `${identityCode}|${unitPricePerPiece.toFixed(2)}|${expiry}`;
+
+      flatRows.push({
+        idx: flatRows.length + 1,
+        rmaNumber: repRma,
+        rmaNumbers: [repRma],
+        name,
+        sku: displaySku,
+        cleanSku: sku,
+        barcode,
+        expiry,
+        rawQty: calc.rawQty,
+        unitName: calc.unitName,
+        piecesPerCase: calc.piecesPerCase,
+        isCaseUnit: calc.isCaseUnit,
+        totalPieces: calc.totalPieces,
+        recordedUnitPrice: calc.recordedUnitPrice,
+        pricePerPiece: unitPricePerPiece,
+        lineTotal: calc.lineTotal,
+        groupKey
+      });
+    });
+  });
+
+  const groupCounts = new Map();
+  flatRows.forEach((row) => {
+    groupCounts.set(row.groupKey, (groupCounts.get(row.groupKey) || 0) + 1);
+  });
+  const hasCombinableDuplicates = Array.from(groupCounts.values()).some((cnt) => cnt > 1);
+
+  if (!combineIdentical) {
+    return {
+      items: flatRows,
+      rawCount: flatRows.length,
+      hasCombinableDuplicates
+    };
+  }
+
+  const combinedMap = new Map();
+  flatRows.forEach((row) => {
+    if (!combinedMap.has(row.groupKey)) {
+      combinedMap.set(row.groupKey, {
+        ...row,
+        rmaNumbers: [...row.rmaNumbers]
+      });
+      return;
+    }
+    const existing = combinedMap.get(row.groupKey);
+    existing.totalPieces += row.totalPieces;
+    existing.lineTotal = Number((existing.lineTotal + row.lineTotal).toFixed(2));
+    if (existing.isCaseUnit && row.isCaseUnit && existing.piecesPerCase === row.piecesPerCase) {
+      existing.rawQty += row.rawQty;
+    } else {
+      existing.isCaseUnit = false;
+      existing.piecesPerCase = 1;
+      existing.rawQty = existing.totalPieces;
+      existing.unitName = 'pc';
+      existing.recordedUnitPrice = existing.pricePerPiece;
+    }
+    if (!existing.rmaNumbers.includes(row.rmaNumber)) {
+      existing.rmaNumbers.push(row.rmaNumber);
+    }
+    existing.rmaNumber = existing.rmaNumbers.join(', ');
+  });
+
+  const combinedItems = Array.from(combinedMap.values()).map((it, idx) => ({
+    ...it,
+    idx: idx + 1
+  }));
+
+  return {
+    items: combinedItems,
+    rawCount: flatRows.length,
+    hasCombinableDuplicates
+  };
+}
+
+

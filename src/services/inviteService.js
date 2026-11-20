@@ -129,7 +129,23 @@ export const inviteService = {
    * Fetch all invites from Supabase (table or fallback settings)
    */
   async getInvites() {
-    // 1. Try public.rma_invites table
+    const mergedMap = new Map();
+    const absorbList = (list) => {
+      if (!Array.isArray(list)) return;
+      list.forEach((i) => {
+        if (!i || !i.token || mergedMap.has(i.token)) return;
+        const ent = normalizeEntityName(i.store_branch) || normalizeEntityName(i.entity_name);
+        mergedMap.set(i.token, {
+          ...i,
+          stream_type: i.stream_type || 'customer_inbound',
+          is_test: isTestInviteToken(i),
+          entity_name: ent,
+          store_branch: ent
+        });
+      });
+    };
+
+    // 1. Primary: public.rma_invites table
     try {
       const { data, error } = await supabase
         .from('rma_invites')
@@ -137,24 +153,13 @@ export const inviteService = {
         .order('created_at', { ascending: false });
 
       if (!error && Array.isArray(data)) {
-        const normalized = data.map(i => {
-          const ent = normalizeEntityName(i.store_branch) || normalizeEntityName(i.entity_name);
-          return {
-            ...i,
-            stream_type: i.stream_type || 'customer_inbound',
-            is_test: isTestInviteToken(i),
-            entity_name: ent,
-            store_branch: ent
-          };
-        });
-        saveLocalInvites(normalized);
-        return normalized;
+        absorbList(data);
       }
     } catch {
       // Table may not exist yet, fallback to rma_settings
     }
 
-    // 2. Try public.rma_settings fallback
+    // 2. Merge universal rma_settings fallback (prevents losing test/offline-created invites)
     try {
       const { data, error } = await supabase
         .from('rma_settings')
@@ -163,21 +168,18 @@ export const inviteService = {
         .maybeSingle();
 
       if (!error && data?.value && Array.isArray(data.value)) {
-        const normalized = data.value.map(i => {
-          const ent = normalizeEntityName(i.store_branch) || normalizeEntityName(i.entity_name);
-          return {
-            ...i,
-            stream_type: i.stream_type || 'customer_inbound',
-            is_test: isTestInviteToken(i),
-            entity_name: ent,
-            store_branch: ent
-          };
-        });
-        saveLocalInvites(normalized);
-        return normalized;
+        absorbList(data.value);
       }
     } catch (e) {
       console.warn('Failed to fetch invites from rma_settings:', e);
+    }
+
+    if (mergedMap.size > 0) {
+      const combined = Array.from(mergedMap.values()).sort(
+        (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+      );
+      saveLocalInvites(combined);
+      return combined;
     }
 
     return getLocalInvites();

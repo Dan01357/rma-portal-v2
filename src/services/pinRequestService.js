@@ -46,7 +46,7 @@ export const pinRequestService = {
           .from('rma_settings')
           .select('value')
           .eq('key', SETTINGS_KEY)
-          .single();
+          .maybeSingle();
 
         if (!error && data?.value && Array.isArray(data.value)) {
           remoteRequests = data.value;

@@ -43,7 +43,8 @@ import {
   isItemRejected,
   cleanExplanationText,
   formatFourChoiceOutcome,
-  formatDateYmd
+  formatDateYmd,
+  findConsolidatedRtvBatchReports
 } from '../utils/rmaHelpers';
 
 export default function SupplierClaimsTab({
@@ -550,6 +551,60 @@ export default function SupplierClaimsTab({
     }
   };
 
+  // Map claim numbers to all RMA numbers sharing that consolidated claim
+  const claimBatchMap = useMemo(() => {
+    const map = new Map();
+    const addLink = (claimNo, rmaNo) => {
+      const c = String(claimNo || '').trim();
+      const rma = String(rmaNo || '').trim();
+      if (!c || !rma) return;
+      if (!map.has(c)) map.set(c, new Set());
+      map.get(c).add(rma);
+    };
+    (savedClaims || []).forEach((cl) => {
+      const cNo = cl.claimNumber || cl.claim_number;
+      (Array.isArray(cl.items) ? cl.items : []).forEach((it) => addLink(cNo, it.rma_number));
+    });
+    (reportsList || []).forEach((rep) => {
+      if (!rep || (rep.rma_type === 'supplier_outbound') === false) return;
+      if (isTestRecord(rep) !== Boolean(isTestMode)) return;
+      const p = rep.ai_document_metadata?.supplier_pickup || {};
+      const cNo = p.claim_number || String(rep.notes || '').match(/\[RTV:\s*([^\]]+)\]/i)?.[1];
+      if (cNo) {
+        addLink(cNo, rep.rma_number);
+        (Array.isArray(p.consolidated_rma_numbers) ? p.consolidated_rma_numbers : []).forEach((n) => addLink(cNo, n));
+      }
+    });
+    return map;
+  }, [savedClaims, reportsList, isTestMode]);
+
+  const activeSupplierForQuickSelect = useMemo(() => {
+    if (selectedSupplier !== 'All') return selectedSupplier;
+    if (selectedItems.length > 0) {
+      const sup = resolveReportProduct(selectedItems[0]).supplier;
+      if (sup && !sup.toLowerCase().includes('pending') && !sup.toLowerCase().includes('unassigned')) {
+        return sup;
+      }
+    }
+    return '';
+  }, [selectedSupplier, selectedItems, savedProductsList]);
+
+  const unclaimedForSupplier = useMemo(() => {
+    if (!activeSupplierForQuickSelect) return [];
+    const target = activeSupplierForQuickSelect.trim().toLowerCase();
+    return rtvCandidates.filter((r) => {
+      const sup = String(resolveReportProduct(r).supplier || '').trim().toLowerCase();
+      if (sup !== target) return false;
+      const out = formatFourChoiceOutcome(r);
+      return !out.isPickedUp && String(r.status || '').toLowerCase() !== 'picked_up';
+    });
+  }, [activeSupplierForQuickSelect, rtvCandidates, savedProductsList]);
+
+  const handleSelectAllUnclaimedSupplier = () => {
+    if (unclaimedForSupplier.length === 0) return;
+    setSelectedRmaIds(new Set(unclaimedForSupplier.map((r) => r.id || r.rma_number)));
+  };
+
   const handleClearSelection = () => {
     setSelectedRmaIds(new Set());
   };
@@ -780,11 +835,34 @@ export default function SupplierClaimsTab({
               {selectedRmaIds.size === rtvCandidates.length && rtvCandidates.length > 0 ? 'Deselect All' : `Select All (${rtvCandidates.length})`}
             </button>
 
+            {activeSupplierForQuickSelect && unclaimedForSupplier.length > 0 && (
+              <button
+                type="button"
+                onClick={handleSelectAllUnclaimedSupplier}
+                className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700 font-bold text-[11px] cursor-pointer transition-colors"
+                title={`Select all unclaimed RMAs for ${activeSupplierForQuickSelect} in one click`}
+              >
+                Select All Unclaimed for {activeSupplierForQuickSelect} ({unclaimedForSupplier.length})
+              </button>
+            )}
+
             {selectedRmaIds.size > 0 && (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-bold text-slate-700 dark:text-slate-300 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-lg border border-amber-200 dark:border-amber-900">
                   {selectedRmaIds.size} selected • ₱{totalClaimAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </span>
+
+                {/* Process Consolidated Batch */}
+                {onOpenSimpleWizard && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenSimpleWizard(selectedItems.length > 1 ? selectedItems : selectedItems[0])}
+                    className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-black flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                    title="Open 4-Choice Outcome & Driver Pickup Wizard for all selected RMAs in one consolidated batch"
+                  >
+                    <span>⚡ Process Consolidated Batch ({selectedRmaIds.size} RMA{selectedRmaIds.size > 1 ? 's' : ''})</span>
+                  </button>
+                )}
 
                 {/* Archive Selected */}
                 {effectiveBulkArchiveReports && (
@@ -1140,14 +1218,33 @@ export default function SupplierClaimsTab({
                               </button>
                             </div>
                           )}
-                          {(outcome.claimNumber || existingClaim) && (
-                            <div className="mt-1">
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 inline-flex items-center gap-0.5 shadow-2xs" title={`Claim Reference: ${outcome.claimNumber || existingClaim?.claimNumber || existingClaim?.claim_number}`}>
-                                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
-                                <span>{outcome.claimNumber || existingClaim?.claimNumber || existingClaim?.claim_number}</span>
-                              </span>
-                            </div>
-                          )}
+                          {(() => {
+                            const claimId = outcome.claimNumber || existingClaim?.claimNumber || existingClaim?.claim_number;
+                            const batchReports = findConsolidatedRtvBatchReports(r, reportsList);
+                            const pickupListedCount = Array.isArray(r.ai_document_metadata?.supplier_pickup?.consolidated_rma_numbers)
+                              ? r.ai_document_metadata.supplier_pickup.consolidated_rma_numbers.length
+                              : 0;
+                            const mapCount = claimId && claimBatchMap.has(claimId) ? claimBatchMap.get(claimId).size : 0;
+                            const batchCount = Math.max(batchReports.length, pickupListedCount, mapCount);
+                            if (!claimId && batchCount <= 1) return null;
+                            return (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {batchCount > 1 ? (
+                                  <span
+                                    className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-200 border border-indigo-300 dark:border-indigo-700 inline-flex items-center gap-0.5 shadow-2xs"
+                                    title={`Consolidated Batch Claim${claimId ? ` ${claimId}` : ''} (${batchCount} RMAs)`}
+                                  >
+                                    <span>🔗 Batch Claim: {claimId || 'Consolidated'} ({batchCount} RMAs)</span>
+                                  </span>
+                                ) : (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 inline-flex items-center gap-0.5 shadow-2xs" title={`Claim Reference: ${claimId}`}>
+                                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
+                                    <span>{claimId}</span>
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
 
                         {/* Quick-View RMA Box QR Code Button */}
@@ -1310,7 +1407,10 @@ export default function SupplierClaimsTab({
                             {onOpenSimpleWizard && (
                               <button
                                 type="button"
-                                onClick={() => onOpenSimpleWizard(r)}
+                                onClick={() => {
+                                  const batchGroup = findConsolidatedRtvBatchReports(r, reportsList);
+                                  onOpenSimpleWizard(batchGroup.length > 1 ? batchGroup : r);
+                                }}
                                 className={`px-2 py-1 rounded-lg text-[10px] font-black transition-colors cursor-pointer whitespace-nowrap border ${
                                   outcome.hasDecision
                                     ? 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-700'
@@ -1326,7 +1426,10 @@ export default function SupplierClaimsTab({
                             {onOpenPickupForm && (outcome.formType || r.status === 'picked_up' || r.ai_document_metadata?.supplier_pickup?.picked_up_at) && (
                               <button
                                 type="button"
-                                onClick={() => onOpenPickupForm(r)}
+                                onClick={() => {
+                                  const batchGroup = findConsolidatedRtvBatchReports(r, reportsList);
+                                  onOpenPickupForm(batchGroup.length > 1 ? batchGroup : r);
+                                }}
                                 className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap shadow-2xs"
                                 title={outcome.formType === 'replacement' ? 'View / Re-print Dual-Copy Replacement Form' : 'View / Re-print Dual-Copy Debit Claim Form'}
                               >

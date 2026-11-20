@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X,
   ShieldCheck,
@@ -46,7 +46,8 @@ import {
   isTestRecord,
   formatFourChoiceOutcome,
   getItemNeedsReorder,
-  formatDateYmd
+  formatDateYmd,
+  doesCreditMemoLinkReport
 } from '../utils/rmaHelpers';
 import { copyTextSafe } from '../utils/clipboard';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -175,6 +176,8 @@ export default function QuickRMAActionModal({
   const [adminPiecesPerCase, setAdminPiecesPerCase] = useState(null);
 
   const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
+  const isEditingAiDetailsRef = useRef(false);
+  isEditingAiDetailsRef.current = isEditingAiDetails;
   const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
   const [copyDrSuccess, setCopyDrSuccess] = useState(false);
 
@@ -725,9 +728,14 @@ export default function QuickRMAActionModal({
     return Array.from(set).sort();
   }, [savedProductsList, recentReportsList]);
 
-  // Synchronize AI-extracted or existing paperwork document details whenever report changes
+  // Reset edit mode only when opening modal or switching to a different RMA ticket
   useEffect(() => {
-    if (report) {
+    setIsEditingAiDetails(false);
+  }, [isOpen, report?.id, report?.rma_number]);
+
+  // Synchronize AI-extracted or existing paperwork document details whenever report changes (unless actively editing)
+  useEffect(() => {
+    if (report && !isEditingAiDetailsRef.current) {
       const meta = report.ai_document_metadata || {};
       const pickup = meta.supplier_pickup || {};
       const bc = String(report.barcode || '').trim();
@@ -768,8 +776,6 @@ export default function QuickRMAActionModal({
       setAdminPrice(netP);
       setAdminPriceWithVat(Number(report.price_with_vat || report.priceWithVat || (netP > 0 ? Number((netP * 1.12).toFixed(2)) : 0)));
       setAdminPiecesPerCase(report.pieces_per_case || matchedCatalogProd?.pieces_per_case || null);
-
-      setIsEditingAiDetails(false);
     }
   }, [
     report?.id,
@@ -1096,7 +1102,7 @@ export default function QuickRMAActionModal({
     : null;
 
   const existingMemo = report
-    ? creditMemosList.find(m => m.rma_number === report?.rma_number || String(m.report_id) === String(report?.id))
+    ? creditMemosList.find(m => doesCreditMemoLinkReport(m, report))
     : null;
 
   const isMultiItemManifest = Boolean(

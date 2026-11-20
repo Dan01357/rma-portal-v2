@@ -1299,9 +1299,10 @@ export const catalogService = {
       rmaNumber = this.generateRMANumber(null, isTestSubmission);
     }
 
-    // Auto-resolve product from database if not passed in or still pending client-side detection
+    // Auto-resolve product from database if not passed in (skip synthetic MANIFEST / RMA- / NO-LABEL- keys)
     let resolvedProduct = product;
-    if (!resolvedProduct || !resolvedProduct.name || resolvedProduct.name.startsWith('Unidentified Item')) {
+    const isSyntheticKey = isBatch || is_parent || /^(RMA-|MANIFEST|NO-LABEL-)/i.test(cleanBarcode);
+    if (!isSyntheticKey && (!resolvedProduct || !resolvedProduct.name || resolvedProduct.name.startsWith('Unidentified Item'))) {
       try {
         const found = await this.findProduct(cleanBarcode);
         if (found) {

@@ -134,33 +134,12 @@ import {
   DEFECT_REASONS,
   getDocumentNumbers,
   formatDateYmd,
-  formatDateTimeYmdHm
+  formatDateTimeYmdHm,
+  findConsolidatedRtvBatchReports,
+  doesCreditMemoLinkReport,
+  getCreditMemoRmaNumbers,
+  isManifestSubItem
 } from './utils/rmaHelpers';
-
-
-/**
- * Helper to identify whether a row is a manifest line-item child row.
- * Manifest line-item children share the identical rma_number with their parent and should be collapsed into the parent ticket.
- * Split tickets (e.g. -B, -C) have their own distinct RMA number and are standalone tickets.
- */
-export function isManifestSubItem(item, allReports = []) {
-  if (!item) return false;
-  // Standalone split tickets (e.g. -B, -C, -D) must ALWAYS be visible in the table
-  if (/-(?:B|C|D|E)$/i.test(String(item.rma_number || ''))) {
-    return false;
-  }
-  // Only collapse child items that share the EXACT same rma_number as an existing parent manifest container
-  if (Array.isArray(allReports) && item.rma_number) {
-    const parent = allReports.find(p => (
-      p && p.rma_number === item.rma_number &&
-      (p.is_parent === true || String(p.name || '').toLowerCase().startsWith('batch return manifest'))
-    ));
-    if (parent && String(parent.id) !== String(item.id)) {
-      return true;
-    }
-  }
-  return false;
-}
 
 /**
  * Universal Lifecycle Stage Formatter & Color Resolver supporting 4-Pillar Resolutions
@@ -302,6 +281,7 @@ export default function App() {
   const [creditMemosList, setCreditMemosList] = useState([]);
   const [isCreditMemoModalOpen, setIsCreditMemoModalOpen] = useState(false);
   const [selectedCreditMemoReport, setSelectedCreditMemoReport] = useState(null);
+  const [selectedCreditMemoReports, setSelectedCreditMemoReports] = useState([]);
   const [editingCreditMemo, setEditingCreditMemo] = useState(null);
   const [creditMemoWarningTarget, setCreditMemoWarningTarget] = useState(null);
   const [voucherModalMemo, setVoucherModalMemo] = useState(null);
@@ -751,9 +731,41 @@ export default function App() {
     (!gateSession?.stream_type && gateSession?.type === 'internal_warehouse')
   );
 
-  // Simple 4-Option Supplier RTV Wizard, A4 Pickup Validation Form & Daily Matrix Exporter State
-  const [simpleRtvWizard, setSimpleRtvWizard] = useState({ isOpen: false, report: null, initialMode: 'wizard' });
+  // Simple 4-Option Supplier RTV Wizard, Letter Pickup Validation Form & Daily Matrix Exporter State
+  const [simpleRtvWizard, setSimpleRtvWizard] = useState({ isOpen: false, report: null, reports: [], initialMode: 'wizard' });
   const [pickupFormReport, setPickupFormReport] = useState(null);
+  const [pickupFormReports, setPickupFormReports] = useState([]);
+
+  const openSimpleWizardModal = (reportOrList, initialMode = 'wizard') => {
+    if (Array.isArray(reportOrList)) {
+      const list = reportOrList.filter(Boolean);
+      if (list.length === 0) return;
+      setSimpleRtvWizard({ isOpen: true, report: list[0], reports: list, initialMode });
+      return;
+    }
+    if (!reportOrList) return;
+    const expanded = findConsolidatedRtvBatchReports(reportOrList, recentReportsList);
+    setSimpleRtvWizard({
+      isOpen: true,
+      report: reportOrList,
+      reports: expanded.length > 1 ? expanded : [reportOrList],
+      initialMode
+    });
+  };
+
+  const openPickupFormModal = (reportOrList) => {
+    if (Array.isArray(reportOrList)) {
+      const list = reportOrList.filter(Boolean);
+      if (list.length === 0) return;
+      setPickupFormReport(list[0]);
+      setPickupFormReports(list);
+      return;
+    }
+    if (!reportOrList) return;
+    const expanded = findConsolidatedRtvBatchReports(reportOrList, recentReportsList);
+    setPickupFormReport(reportOrList);
+    setPickupFormReports(expanded.length > 1 ? expanded : [reportOrList]);
+  };
   const [matrixExportModal, setMatrixExportModal] = useState({ isOpen: false, stream: 'overall', isTestMode: false });
   const [portalScanAlert, setPortalScanAlert] = useState(null); // { type: 'error' | 'warning' | 'info', title: string, message: string }
 
@@ -896,13 +908,13 @@ export default function App() {
 
       // On the Public Portal ('/'), scanning any valid generated RMA QR immediately opens the 4-option wizard
       if (!isAdminView) {
-        setSimpleRtvWizard({ isOpen: true, report: matchedReport, initialMode: 'wizard' });
+        openSimpleWizardModal(matchedReport, 'wizard');
         return;
       }
 
       const isSupplierRtvItem = matchedReport.rma_type === 'supplier_outbound';
       if (isSupplierRtvItem) {
-        setSimpleRtvWizard({ isOpen: true, report: matchedReport, initialMode: 'wizard' });
+        openSimpleWizardModal(matchedReport, 'wizard');
       } else if (hasAdminAuth) {
         setQuickRmaNumber(scannedRma);
         setIsQuickRmaModalOpen(true);
@@ -1259,17 +1271,23 @@ export default function App() {
   };
 
   // Credit Memo Handlers
-  const handleOpenCreditMemoForReport = (report) => {
-    if (!report) return;
-    if (!hasAssignedSku(report, savedProductsList)) {
+  const handleOpenCreditMemoForReport = (reportOrList) => {
+    const list = Array.isArray(reportOrList)
+      ? reportOrList.filter(Boolean)
+      : (reportOrList ? [reportOrList] : []);
+    if (list.length === 0) return;
+
+    if (list.length === 1 && !hasAssignedSku(list[0], savedProductsList)) {
       setCreditMemoWarningTarget({
-        item: report,
+        item: list[0],
         title: "Financial Validation & Safety Guard",
         message: "Cannot issue Finance Credit Memo for ₱0.00 or unassigned SKU. Please click 'Assign SKU' first to register the official item code and verified price into the catalog."
       });
       return;
     }
-    setSelectedCreditMemoReport(report);
+
+    setSelectedCreditMemoReport(list[0]);
+    setSelectedCreditMemoReports(list);
     setEditingCreditMemo(null);
     setIsCreditMemoModalOpen(true);
   };
@@ -1283,12 +1301,14 @@ export default function App() {
 
   const handleOpenCreateCreditMemo = () => {
     setSelectedCreditMemoReport(null);
+    setSelectedCreditMemoReports([]);
     setEditingCreditMemo(null);
     setIsCreditMemoModalOpen(true);
   };
 
   const handleEditCreditMemo = (memo) => {
     setSelectedCreditMemoReport(null);
+    setSelectedCreditMemoReports([]);
     setEditingCreditMemo(memo);
     setIsCreditMemoModalOpen(true);
   };
@@ -3346,12 +3366,12 @@ export default function App() {
                     <span>Resize / Print Sticker</span>
                   </button>
 
-                  {submitSuccessReport.rma_type === 'supplier_outbound' && (
+                  {currentUser && (
                     <button
                       type="button"
-                      onClick={() => setSimpleRtvWizard({ isOpen: true, report: submitSuccessReport, initialMode: 'wizard' })}
+                      onClick={() => openSimpleWizardModal(submitSuccessReport, 'wizard')}
                       className="touch-target w-full py-3 px-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-2xl shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 sm:col-span-3"
-                      title="Open the 4 simple Supplier RTV choices or log Driver Pickup & print A4 form"
+                      title="Open the 4 simple Supplier RTV choices or log Driver Pickup & print Letter form"
                     >
                       <Truck className="w-4 h-4 shrink-0" />
                       <span>Choose Disposition / Log Driver Pickup →</span>
@@ -4480,7 +4500,7 @@ export default function App() {
                 </div>
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Customer Inbound</div>
                 <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">
-                  {customerInboundReports.filter(r => !liveCreditMemosList.some(m => m.rma_number === r.rma_number || m.report_id === r.id)).length} pending credit
+                  {customerInboundReports.filter(r => !liveCreditMemosList.some(m => doesCreditMemoLinkReport(m, r))).length} pending credit
                 </div>
               </div>
 
@@ -4788,8 +4808,8 @@ export default function App() {
                 onOpenReportsModal={() => setIsReportsModalOpen(true)}
                 onOpenMatrixExport={() => setMatrixExportModal({ isOpen: true, stream: 'overall', isTestMode: false })}
                 onInspectTriage={handleInspectTriageForReport}
-                onOpenSimpleWizard={(report) => setSimpleRtvWizard({ isOpen: true, report, initialMode: 'wizard' })}
-                onOpenPickupForm={(report) => setPickupFormReport(report)}
+                onOpenSimpleWizard={(reportOrList) => openSimpleWizardModal(reportOrList, 'wizard')}
+                onOpenPickupForm={(reportOrList) => openPickupFormModal(reportOrList)}
                 onViewQR={(reportObj) => setQrModalReport(reportObj)}
                 onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
                 onViewExplanation={(info) => setViewingExplanationModal(info)}
@@ -4844,8 +4864,8 @@ export default function App() {
                 }}
                 onViewQR={(report) => setQrModalReport(report)}
                 onViewExplanation={(info) => setViewingExplanationModal(info)}
-                onOpenSimpleWizard={(report) => setSimpleRtvWizard({ isOpen: true, report, initialMode: 'wizard' })}
-                onOpenPickupForm={(report) => setPickupFormReport(report)}
+                onOpenSimpleWizard={(reportOrList) => openSimpleWizardModal(reportOrList, 'wizard')}
+                onOpenPickupForm={(reportOrList) => openPickupFormModal(reportOrList)}
                 onOpenMatrixExport={() => setMatrixExportModal({ isOpen: true, stream: 'overall', isTestMode: false })}
                 savedProductsList={savedProductsList}
                 coworkerQueueFilter={coworkerQueueFilter}
@@ -4890,8 +4910,8 @@ export default function App() {
                   setIsQuickRmaModalOpen(true);
                 }}
                 onViewExplanation={(info) => setViewingExplanationModal(info)}
-                onOpenSimpleWizard={(report) => setSimpleRtvWizard({ isOpen: true, report, initialMode: 'wizard' })}
-                onOpenPickupForm={(report) => setPickupFormReport(report)}
+                onOpenSimpleWizard={(reportOrList) => openSimpleWizardModal(reportOrList, 'wizard')}
+                onOpenPickupForm={(reportOrList) => openPickupFormModal(reportOrList)}
                 onOpenMatrixExport={() => setMatrixExportModal({
                   isOpen: true,
                   stream: 'overall',
@@ -5248,25 +5268,38 @@ export default function App() {
         onClose={() => {
           setIsCreditMemoModalOpen(false);
           setSelectedCreditMemoReport(null);
+          setSelectedCreditMemoReports([]);
           setEditingCreditMemo(null);
           restoreQuickRmaIfPending();
         }}
         report={selectedCreditMemoReport}
+        reports={selectedCreditMemoReports}
         creditMemo={editingCreditMemo}
         currentUser={currentUser}
         isTestMode={Boolean(
           adminActiveTab === 'sandbox' ||
           isTestRecord(editingCreditMemo) ||
-          isTestRecord(selectedCreditMemoReport)
+          isTestRecord(selectedCreditMemoReport) ||
+          selectedCreditMemoReports.some(r => isTestRecord(r))
         )}
         reportsList={
-          Boolean(adminActiveTab === 'sandbox' || isTestRecord(editingCreditMemo) || isTestRecord(selectedCreditMemoReport))
+          Boolean(
+            adminActiveTab === 'sandbox' ||
+            isTestRecord(editingCreditMemo) ||
+            isTestRecord(selectedCreditMemoReport) ||
+            selectedCreditMemoReports.some(r => isTestRecord(r))
+          )
             ? testReportsList.filter(r => (r.rma_type === 'customer_inbound' || !r.rma_type) && !isManifestSubItem(r, testReportsList))
             : customerInboundReports
         }
         savedProductsList={savedProductsList}
         creditMemosCount={
-          Boolean(adminActiveTab === 'sandbox' || isTestRecord(editingCreditMemo) || isTestRecord(selectedCreditMemoReport))
+          Boolean(
+            adminActiveTab === 'sandbox' ||
+            isTestRecord(editingCreditMemo) ||
+            isTestRecord(selectedCreditMemoReport) ||
+            selectedCreditMemoReports.some(r => isTestRecord(r))
+          )
             ? testCreditMemosList.length
             : liveCreditMemosList.length
         }
@@ -5276,8 +5309,16 @@ export default function App() {
         }}
         onSaved={(memo) => {
           if (memo) {
+            const linkedRmas = new Set(getCreditMemoRmaNumbers(memo).map(String));
+            const linkedIds = new Set([
+              ...(Array.isArray(memo.consolidated_report_ids) ? memo.consolidated_report_ids : []),
+              memo.report_id
+            ].filter(Boolean).map(String));
             setRecentReportsList(prev => prev.map(r => {
-              if (r.rma_number === memo.rma_number || String(r.id) === String(memo.report_id)) {
+              if (
+                (r.rma_number && linkedRmas.has(String(r.rma_number))) ||
+                (r.id && linkedIds.has(String(r.id)))
+              ) {
                 return { ...r, status: 'credit_memo_issued' };
               }
               return r;
@@ -5381,7 +5422,7 @@ export default function App() {
 
           setQrModalReport(null);
           if (repObj?.rma_type === 'supplier_outbound' || isSupplierRtvPortal) {
-            setSimpleRtvWizard({ isOpen: true, report: repObj || { rma_number: rmaStr }, initialMode: 'wizard' });
+            openSimpleWizardModal(repObj || { rma_number: rmaStr }, 'wizard');
           } else {
             setQuickRmaNumber(rmaStr);
             setIsQuickRmaModalOpen(true);
@@ -5405,14 +5446,14 @@ export default function App() {
           setQuickRmaNumber(currentRma);
           setPendingQuickRmaNumber(currentRma);
           setIsQuickRmaModalOpen(false);
-          setSimpleRtvWizard({ isOpen: true, report: rep, initialMode: 'wizard' });
+          openSimpleWizardModal(rep, 'wizard');
         }}
         onOpenSupplierPickupForm={(rep) => {
           const currentRma = rep?.rma_number || quickRmaNumber;
           setQuickRmaNumber(currentRma);
           setPendingQuickRmaNumber(currentRma);
           setIsQuickRmaModalOpen(false);
-          setPickupFormReport(rep);
+          openPickupFormModal(rep);
         }}
         onAssignSku={(reportToEdit) => {
           const currentRma = reportToEdit?.rma_number || quickRmaNumber;
@@ -5429,6 +5470,7 @@ export default function App() {
           if (existing) {
             setEditingCreditMemo(existing);
             setSelectedCreditMemoReport(rep);
+            setSelectedCreditMemoReports([]);
             setIsCreditMemoModalOpen(true);
           } else {
             handleOpenCreditMemoForReport(rep);
@@ -5503,47 +5545,58 @@ export default function App() {
       <SimpleSupplierRtvWizardModal
         isOpen={simpleRtvWizard.isOpen}
         onClose={() => {
-          setSimpleRtvWizard({ isOpen: false, report: null, initialMode: 'wizard' });
+          setSimpleRtvWizard({ isOpen: false, report: null, reports: [], initialMode: 'wizard' });
           restoreQuickRmaIfPending();
         }}
         report={simpleRtvWizard.report}
+        reports={simpleRtvWizard.reports}
         allReports={recentReportsList}
         catalogProducts={savedProductsList}
         activeUser={currentUser || gateSession}
         isAdmin={Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin'))}
         initialMode={simpleRtvWizard.initialMode}
-        onSuccess={(updated) => {
-          if (updated && (updated.id || updated.rma_number)) {
+        onSuccess={(updatedOrList) => {
+          const updatedList = Array.isArray(updatedOrList)
+            ? updatedOrList.filter(Boolean)
+            : (updatedOrList ? [updatedOrList] : []);
+          if (updatedList.length > 0) {
             setRecentReportsList(prev => prev.map(r => {
-              const idMatch = r && r.id && updated.id && String(r.id) === String(updated.id);
-              const rmaMatch = r && r.rma_number && updated.rma_number && String(r.rma_number) === String(updated.rma_number) && !r.parent_rma_id;
-              return (idMatch || rmaMatch) ? { ...r, ...updated } : r;
+              const match = updatedList.find(updated => {
+                const idMatch = r && r.id && updated.id && String(r.id) === String(updated.id);
+                const rmaMatch = r && r.rma_number && updated.rma_number && String(r.rma_number) === String(updated.rma_number) && !r.parent_rma_id;
+                return idMatch || rmaMatch;
+              });
+              return match ? { ...r, ...match } : r;
             }));
           }
           refreshAllData();
+          const primaryUpdated = updatedList[0];
+          const batchSuffix = updatedList.length > 1 ? ` (${updatedList.length} RMAs)` : '';
           showToast(
-            updated?.rma_type === 'supplier_outbound'
-              ? 'Supplier RTV decision saved!'
-              : 'Customer RMA decision saved!',
+            primaryUpdated?.rma_type === 'supplier_outbound'
+              ? `Supplier RTV decision saved${batchSuffix}!`
+              : `Customer RMA decision saved${batchSuffix}!`,
             'success'
           );
         }}
         onOpenFullAdminModal={(rep) => {
           setPendingQuickRmaNumber(null);
-          setSimpleRtvWizard({ isOpen: false, report: null, initialMode: 'wizard' });
+          setSimpleRtvWizard({ isOpen: false, report: null, reports: [], initialMode: 'wizard' });
           setQuickRmaNumber(rep?.rma_number || rep?.rmaNumber);
           setIsQuickRmaModalOpen(true);
         }}
       />
 
-      {/* Standalone Dual-Copy A4 Pickup Form Preview / Re-print Modal */}
+      {/* Standalone Dual-Copy US Letter Pickup Form Preview / Re-print Modal */}
       <SupplierPickupFormModal
-        isOpen={Boolean(pickupFormReport)}
+        isOpen={Boolean(pickupFormReport) || pickupFormReports.length > 0}
         onClose={() => {
           setPickupFormReport(null);
+          setPickupFormReports([]);
           restoreQuickRmaIfPending();
         }}
         report={pickupFormReport}
+        reports={pickupFormReports}
         allReports={recentReportsList}
         catalogProducts={savedProductsList}
       />

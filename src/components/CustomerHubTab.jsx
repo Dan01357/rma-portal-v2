@@ -47,7 +47,9 @@ import {
   isUnlabeledBarcode,
   normalizeWarehouseLocation,
   resolveBatchManifestLifecycle,
-  formatDateYmd
+  formatDateYmd,
+  doesCreditMemoLinkReport,
+  findConsolidatedRtvBatchReports
 } from '../utils/rmaHelpers';
 
 export default function CustomerHubTab({
@@ -393,7 +395,6 @@ export default function CustomerHubTab({
     reportsConditionGradeFilter,
     coworkerQueueFilter,
     isItemReadyToRestock,
-    isItemReadyForSupplierReorder,
     reportsDateFrom,
     reportsDateTo,
     reportsSortField,
@@ -446,6 +447,87 @@ export default function CustomerHubTab({
   const selectedReportsList = React.useMemo(() => {
     return reportsList.filter(r => selectedReportIds.has(r.id || r.rma_number));
   }, [reportsList, selectedReportIds]);
+
+  const renderBulkActionBar = (isCardView = false) => {
+    if (selectedReportIds.size === 0) return null;
+    const eligibleForCm = selectedReportsList.filter(
+      (r) => !isItemOnHold(r, reportsList) && !isItemRejected(r, reportsList)
+    );
+    return (
+      <div
+        className={`p-3 sm:px-4 bg-slate-900/95 dark:bg-slate-950/95 text-white flex flex-wrap items-center justify-between gap-3 animate-in fade-in ${
+          isCardView ? 'rounded-2xl border border-slate-700' : 'border-t border-slate-700'
+        }`}
+      >
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black">
+            {selectedReportIds.size}
+          </span>
+          <span className="text-xs font-bold text-slate-200">
+            {selectedReportIds.size} report{selectedReportIds.size > 1 ? 's' : ''} selected
+          </span>
+          {selectedReportIds.size < processedReports.length && (
+            <button
+              type="button"
+              onClick={selectAllFilteredReports}
+              className="text-xs text-blue-300 hover:text-white underline font-semibold ml-1 cursor-pointer"
+            >
+              Select all {processedReports.length} filtered
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {canEditProducts && onOpenCreditMemo && eligibleForCm.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onOpenCreditMemo(eligibleForCm.length > 1 ? eligibleForCm : eligibleForCm[0])}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+              title="Issue ONE Consolidated Credit Memo for all selected Customer Hub RMAs"
+            >
+              <Receipt className="w-3.5 h-3.5 shrink-0" />
+              <span>+ Consolidated Credit Memo ({eligibleForCm.length} RMA{eligibleForCm.length > 1 ? 's' : ''})</span>
+            </button>
+          )}
+          {onOpenSimpleWizard && (
+            <button
+              type="button"
+              onClick={() => onOpenSimpleWizard(selectedReportsList.length > 1 ? selectedReportsList : selectedReportsList[0])}
+              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+              title="Process 4-Choice Outcome & Pickup Form for all selected Customer Hub RMAs in one consolidated batch"
+            >
+              <span>⚡ Process Consolidated 4-Choice ({selectedReportIds.size} RMA{selectedReportIds.size > 1 ? 's' : ''})</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={clearReportsSelection}
+            className="px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+          >
+            Deselect
+          </button>
+          <button
+            type="button"
+            onClick={() => onBulkArchiveReports(selectedReportsList)}
+            className="px-3.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+          >
+            <Archive className="w-3.5 h-3.5 text-slate-300" />
+            <span>Archive Selected ({selectedReportIds.size})</span>
+          </button>
+          {canDeleteReports && (
+            <button
+              type="button"
+              onClick={() => onRequestBulkDeleteReports(selectedReportsList)}
+              className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Move to Trash ({selectedReportIds.size})</span>
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 w-full min-w-0 box-border">
@@ -1261,7 +1343,10 @@ export default function CustomerHubTab({
                           {onOpenSimpleWizard && (
                             <button
                               type="button"
-                              onClick={() => onOpenSimpleWizard(item)}
+                              onClick={() => {
+                                const batchGroup = findConsolidatedRtvBatchReports(item, reportsList);
+                                onOpenSimpleWizard(batchGroup.length > 1 ? batchGroup : item);
+                              }}
                               className={`px-2 py-1 rounded-lg text-[10px] font-black transition-colors cursor-pointer whitespace-nowrap border ${
                                 outcome.hasDecision
                                   ? 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-700'
@@ -1277,7 +1362,10 @@ export default function CustomerHubTab({
                           {onOpenPickupForm && outcome.formType && (
                             <button
                               type="button"
-                              onClick={() => onOpenPickupForm(item)}
+                              onClick={() => {
+                                const batchGroup = findConsolidatedRtvBatchReports(item, reportsList);
+                                onOpenPickupForm(batchGroup.length > 1 ? batchGroup : item);
+                              }}
                               className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap shadow-2xs"
                               title={outcome.formType === 'replacement' ? 'View / Re-print Replacement Form' : 'View / Re-print Debit Claim Form'}
                             >
@@ -1376,7 +1464,7 @@ export default function CustomerHubTab({
 
                           {(() => {
                             if (isManifest) {
-                              const linkedMemos = creditMemosList.filter(m => m.rma_number === item.rma_number || m.report_id === item.id);
+                              const linkedMemos = creditMemosList.filter(m => doesCreditMemoLinkReport(m, item));
                               if (linkedMemos.length > 0) {
                                 return (
                                   <button
@@ -1403,7 +1491,7 @@ export default function CustomerHubTab({
                               );
                             }
 
-                            const existingMemo = creditMemosList.find(m => m.rma_number === item.rma_number || m.report_id === item.id);
+                            const existingMemo = creditMemosList.find(m => doesCreditMemoLinkReport(m, item));
                             if (existingMemo) {
                               return (
                                 <button
@@ -1811,55 +1899,7 @@ export default function CustomerHubTab({
         </div>
 
         {/* Floating Bulk Action Bar for Return Reports Table */}
-        {selectedReportIds.size > 0 && (
-          <div className="p-3 sm:px-4 bg-slate-900/95 dark:bg-slate-950/95 text-white border-t border-slate-700 flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
-            <div className="flex items-center gap-2.5">
-              <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black">
-                {selectedReportIds.size}
-              </span>
-              <span className="text-xs font-bold text-slate-200">
-                {selectedReportIds.size} report{selectedReportIds.size > 1 ? 's' : ''} selected
-              </span>
-              {selectedReportIds.size < processedReports.length && (
-                <button
-                  type="button"
-                  onClick={selectAllFilteredReports}
-                  className="text-xs text-blue-300 hover:text-white underline font-semibold ml-1 cursor-pointer"
-                >
-                  Select all {processedReports.length} filtered
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={clearReportsSelection}
-                className="px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-              >
-                Deselect
-              </button>
-              <button
-                type="button"
-                onClick={() => onBulkArchiveReports(selectedReportsList)}
-                className="px-3.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-              >
-                <Archive className="w-3.5 h-3.5 text-slate-300" />
-                <span>Archive Selected ({selectedReportIds.size})</span>
-              </button>
-              {canDeleteReports && (
-                <button
-                  type="button"
-                  onClick={() => onRequestBulkDeleteReports(selectedReportsList)}
-                  className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Move to Trash ({selectedReportIds.size})</span>
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+        {renderBulkActionBar(false)}
 
         <TablePagination
           currentPage={reportsCurrentPage}
@@ -2008,7 +2048,10 @@ export default function CustomerHubTab({
                     {onOpenSimpleWizard && (
                       <button
                         type="button"
-                        onClick={() => onOpenSimpleWizard(item)}
+                        onClick={() => {
+                          const batchGroup = findConsolidatedRtvBatchReports(item, reportsList);
+                          onOpenSimpleWizard(batchGroup.length > 1 ? batchGroup : item);
+                        }}
                         className={`px-2 py-0.5 rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap border ${
                           outcome.hasDecision
                             ? 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-700'
@@ -2024,7 +2067,10 @@ export default function CustomerHubTab({
                     {onOpenPickupForm && outcome.formType && (
                       <button
                         type="button"
-                        onClick={() => onOpenPickupForm(item)}
+                        onClick={() => {
+                          const batchGroup = findConsolidatedRtvBatchReports(item, reportsList);
+                          onOpenPickupForm(batchGroup.length > 1 ? batchGroup : item);
+                        }}
                         className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap shadow-2xs"
                         title={outcome.formType === 'replacement' ? 'View / Re-print Replacement Form' : 'View / Re-print Debit Claim Form'}
                       >
@@ -2121,7 +2167,7 @@ export default function CustomerHubTab({
                     )}
                     {(() => {
                       if (isManifest) {
-                        const linkedMemos = creditMemosList.filter(m => m.rma_number === item.rma_number || m.report_id === item.id);
+                        const linkedMemos = creditMemosList.filter(m => doesCreditMemoLinkReport(m, item));
                         if (linkedMemos.length > 0) {
                           return (
                             <button
@@ -2148,7 +2194,7 @@ export default function CustomerHubTab({
                         );
                       }
 
-                      const existingMemo = creditMemosList.find(m => m.rma_number === item.rma_number || m.report_id === item.id);
+                      const existingMemo = creditMemosList.find(m => doesCreditMemoLinkReport(m, item));
                       if (existingMemo) {
                         return (
                           <button
@@ -2477,55 +2523,7 @@ export default function CustomerHubTab({
         </div>
 
         {/* Floating Bulk Action Bar for Grid Cards */}
-        {selectedReportIds.size > 0 && (
-          <div className="p-3 sm:px-4 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-2xl border border-slate-700 flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
-            <div className="flex items-center gap-2.5">
-              <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black">
-                {selectedReportIds.size}
-              </span>
-              <span className="text-xs font-bold text-slate-200">
-                {selectedReportIds.size} report{selectedReportIds.size > 1 ? 's' : ''} selected
-              </span>
-              {selectedReportIds.size < processedReports.length && (
-                <button
-                  type="button"
-                  onClick={selectAllFilteredReports}
-                  className="text-xs text-blue-300 hover:text-white underline font-semibold ml-1 cursor-pointer"
-                >
-                  Select all {processedReports.length} filtered
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={clearReportsSelection}
-                className="px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-              >
-                Deselect
-              </button>
-              <button
-                type="button"
-                onClick={() => onBulkArchiveReports(selectedReportsList)}
-                className="px-3.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-              >
-                <Archive className="w-3.5 h-3.5 text-slate-300" />
-                <span>Archive Selected ({selectedReportIds.size})</span>
-              </button>
-              {canDeleteReports && (
-                <button
-                  type="button"
-                  onClick={() => onRequestBulkDeleteReports(selectedReportsList)}
-                  className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Move to Trash ({selectedReportIds.size})</span>
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+        {renderBulkActionBar(true)}
 
         <TablePagination
           currentPage={reportsCurrentPage}

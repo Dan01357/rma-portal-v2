@@ -1,14 +1,15 @@
-import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
+import { test, expect } from '@playwright/test';
 import {
   PNG_BUFFER,
   VERIFIED_BARCODE,
   attachStrictGuards,
   installPrintStubs,
   interceptAndCaptureEmails,
-  isoDateDaysOffset,
+  mockPhotoUploadSuccess,
+  setPublicPortalTestMode,
   gotoAdmin,
-  readSupabasePublicEnv
+  cleanupTestRecords
 } from './helpers/testUtils.js';
 
 function assertEmailPayloadClean({ payload, expectedExpiry, expectTestMode }) {
@@ -27,10 +28,9 @@ function assertEmailPayloadClean({ payload, expectedExpiry, expectTestMode }) {
   expect(payload.html).toContain('Expiry Date (YYYY-MM-DD):');
   expect(payload.html).toContain('Submission Date (YYYY-MM-DD HH:mm):');
   expect(payload.html).toContain(expectedExpiry);
-  expect(payload.text).toContain('Expiry Date:');
+  expect(payload.text).toContain('Expiry Date (YYYY-MM-DD):');
   expect(payload.text).toContain(expectedExpiry);
 
-  // Pingcon branding present, zero "wholesale" (case-insensitive) anywhere
   const combined = [payload.subject, payload.fromName, payload.html, payload.text].join('\n');
   expect(combined).toContain('Pingcon');
   expect(combined.toLowerCase()).not.toContain('wholesale');
@@ -40,7 +40,7 @@ function decodeBase64Header(b64) {
   return Buffer.from(String(b64 || ''), 'base64').toString('latin1');
 }
 
-test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2go.net Sandbox & Overall RMA Matrix (.xlsx)', () => {
+test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2go.net Sandbox, Date Format Audit & Overall Matrix (.xlsx)', () => {
   test('New RMA intake email (Live & Test), 4 lifecycle emails (Scrapped, Restocked, Debit Pickup + PDF, Replacement Pickup + PDF), & Overall Matrix (.xlsx) deep XML verification', async ({
     page,
     context
@@ -49,29 +49,9 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
     const capturedEmails = await interceptAndCaptureEmails(page);
+    await mockPhotoUploadSuccess(page);
     const seededTestRmas = [];
-
-    // Mock photo upload endpoint so 5-photo driver pickup runs deterministically without Drive network flakiness
-    await page.route('**/api/upload-photo**', async (route) => {
-      const req = route.request();
-      if (req.method() === 'POST') {
-        const idx = Date.now() % 10000;
-        return route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            success: true,
-            url: `https://drive.google.com/uc?id=pw_mock_photo_${idx}`,
-            previewUrl: `https://drive.google.com/uc?id=pw_mock_photo_${idx}`,
-            rmaFolderId: 'pw_mock_folder_id',
-            rmaFolderUrl: 'https://drive.google.com/drive/folders/pw_mock_folder_id',
-            fileId: `pw_mock_photo_${idx}`,
-            provider: 'google_drive'
-          })
-        });
-      }
-      return route.continue();
-    });
+    let createdClaimNum = null;
 
     try {
       // =========================================================================
@@ -103,18 +83,14 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       await page.goto('/', { waitUntil: 'domcontentloaded' });
       await expect(page.getByText(/Scan Product Barcode or RMA Sticker QR/i)).toBeVisible({ timeout: 20_000 });
 
-      const toggleBtn = page.locator('button[title="Toggle Test / Sandbox Mode"]');
-      await expect(toggleBtn).toBeVisible();
-      if (/Test Mode:\s*ON/i.test(await toggleBtn.innerText())) {
-        await toggleBtn.click();
-      }
-      await expect(page.getByText('🟢 Live Delivery Mode Active')).toBeVisible();
+      await setPublicPortalTestMode(page, false);
 
       const barcodeField = page.locator('input[placeholder*="Barcode" i], input[placeholder*="barcode" i]').first();
       await barcodeField.fill(VERIFIED_BARCODE);
       await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 12_000 });
 
       await page.locator('input[type="date"]').first().fill('2027-03-15');
+      await expect(page.getByText(/ISO \(YYYY-MM-DD\):\s*2027-03-15/)).toBeVisible();
       await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({
         name: 'pw-live-expiry.png',
         mimeType: 'image/png',
@@ -138,9 +114,8 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       // 2. TEST MODE SEEDING + ALL 4 LIFECYCLE EMAILS (Scrapped, Restocked, Debit PDF, Replacement PDF)
       // =========================================================================
       await page.getByRole('button', { name: /Report Another/i }).click();
-      await toggleBtn.click();
-      await expect(page.getByText('🧪 Super Admin Sandbox Active')).toBeVisible();
-      await expect(page.getByText(/mgan@a2z2go\.net/)).toBeVisible();
+      await setPublicPortalTestMode(page, true);
+      await expect(page.getByText(/mgan@a2z2go\.net/).first()).toBeVisible();
 
       await page.locator('input[placeholder*="barcode" i]').first().fill(VERIFIED_BARCODE);
       await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 12_000 });
@@ -173,43 +148,40 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
         expectTestMode: true
       });
 
-      // Open 4-Choice Wizard directly from Success Screen!
-      await page.getByRole('button', { name: /Choose Disposition \/ Driver Pickup/i }).click();
+      // Open 4-Choice Wizard directly from Success Screen
+      await page.getByRole('button', { name: /Choose Disposition \/ (?:Log )?Driver Pickup/i }).click();
       await expect(page.getByText('What do you want to do with this item?')).toBeVisible({ timeout: 10_000 });
 
       // (a) Scrapped lifecycle email
       const countBeforeScrap = capturedEmails.length;
       await page.getByRole('button', { name: /Throw Away \/ Dispose \(Scrap\)/i }).click();
       await page.getByRole('button', { name: /Confirm & Save: Throw Away \/ Dispose \(Scrap\)/i }).click();
-      await expect(page.getByText(/Decision Saved/i).first()).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole('button', { name: /Edit Choice \/ Details/i })).toBeVisible({ timeout: 15_000 });
       await expect.poll(() => capturedEmails.length, { timeout: 12_000 }).toBeGreaterThan(countBeforeScrap);
       const scrapMail = capturedEmails[capturedEmails.length - 1];
       expect(scrapMail.isTestMode).toBe(true);
       expect(scrapMail.subject).toMatch(/^Test - \[RMA Scrapped\]/);
 
       // (b) Restocked lifecycle email
-      await page.getByRole('button', { name: /Change Decision/i }).click();
+      await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
       const countBeforeRestock = capturedEmails.length;
       await page.getByRole('button', { name: /Put Back on Good Shelf \(Restock\)/i }).click();
       await page.getByRole('button', { name: /Confirm & Save: Put Back on Good Shelf \(Restock\)/i }).click();
-      await expect(page.getByText(/Decision Saved/i).first()).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole('button', { name: /Edit Choice \/ Details/i })).toBeVisible({ timeout: 15_000 });
       await expect.poll(() => capturedEmails.length, { timeout: 12_000 }).toBeGreaterThan(countBeforeRestock);
       const restockMail = capturedEmails[capturedEmails.length - 1];
       expect(restockMail.isTestMode).toBe(true);
       expect(restockMail.subject).toMatch(/^Test - \[RMA Restocked\]/);
 
-      // Helper for completing 5-photo driver pickup for Debit Claim or Replacement
       const completeDriverPickup = async (optionRegex) => {
-        await page.getByRole('button', { name: /Change Decision/i }).click();
+        await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
         await page.locator('input[placeholder*="Supplier Company Name" i]').fill('Suy Sing Commercial Corp');
         await page.getByRole('button', { name: optionRegex }).click();
         await page.getByRole('button', { name: /Driver Is Here — Upload Photos & Print Letter/i }).click();
-        await expect(page.getByText(/Driver Pickup Verification/i)).toBeVisible();
+        await expect(page.getByText(/Driver Pickup Verification \(0\/5 Photos\)/i)).toBeVisible();
 
-        const emailToInput = page.locator('input[placeholder*="claims@supplier.com" i]');
-        await emailToInput.fill('vendor-claims@example.com');
-        const emailCcInput = page.locator('input[placeholder*="ap@supplier.com" i]');
-        await emailCcInput.fill('vendor-cc@example.com');
+        await page.locator('input[placeholder*="claims@supplier.com" i]').fill('vendor-claims@example.com');
+        await page.locator('input[placeholder*="rep@supplier.com" i]').fill('vendor-cc@example.com');
 
         const photoFileInputs = page.locator('input[type="file"][accept="image/*"]');
         const slotCount = await photoFileInputs.count();
@@ -222,8 +194,8 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
         }
         await expect(page.getByText(/Driver Pickup Verification \(5\/5 Photos\)/i)).toBeVisible();
 
-        await page.locator('input[placeholder*="Juan Dela Cruz" i]').fill('Playwright Driver');
-        await page.locator('input[placeholder*="ABC 1234" i]').fill('PW-8899');
+        await page.locator('input[placeholder*="Auto-filled or type name" i]').fill('Playwright Driver');
+        await page.locator('input[placeholder*="NAA 1234" i]').fill('PW-8899');
 
         const mailCountBefore = capturedEmails.length;
         await page
@@ -239,13 +211,17 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
         await formPrintBtn.click();
         await expect.poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 8_000 }).toBeGreaterThan(formPrintsBefore);
 
+        const claimTxt = await page.locator('#supplier-pickup-form-sheet').innerText().catch(() => '');
+        const cMatch = claimTxt.match(/(RTV-TEST-\d{4}-\d+-[A-Z0-9]+)/i);
+        if (cMatch) createdClaimNum = cMatch[1];
+
         await page.locator('button[aria-label="Close form"]').click();
         await expect.poll(() => capturedEmails.length, { timeout: 15_000 }).toBeGreaterThan(mailCountBefore);
         return capturedEmails[capturedEmails.length - 1];
       };
 
       // (c) Driver Picked Up for Debit Claim -> PDF + Supplier To/CC + 5 photos
-      const debitMail = await completeDriverPickup(/Return to supplier for Debit Claim/i);
+      const debitMail = await completeDriverPickup(/Accepted for Debit \/ Credit|Return to supplier for Debit Claim/i);
       expect(debitMail.isTestMode).toBe(true);
       expect(debitMail.subject).toMatch(/^Test - \[Driver Picked Up - Debit Claim\]/);
       expect(debitMail.to).toContain('vendor-claims@example.com');
@@ -257,7 +233,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       expect(decodeBase64Header(debitPdfAtt.content).startsWith('%PDF-1.4')).toBe(true);
 
       // (d) Driver Picked Up for Replacement -> PDF + Supplier To/CC + 5 photos
-      const replaceMail = await completeDriverPickup(/Return to supplier for Replacement \/ Exchange/i);
+      const replaceMail = await completeDriverPickup(/Replaced with Good Stock|Return to supplier for Replacement \/ Exchange/i);
       expect(replaceMail.isTestMode).toBe(true);
       expect(replaceMail.subject).toMatch(/^Test - \[Driver Picked Up - Replacement\]/);
       expect(replaceMail.to).toContain('vendor-claims@example.com');
@@ -270,12 +246,22 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       await page.locator('button[aria-label="Close modal"]').first().click();
 
       // =========================================================================
-      // 3. OVERALL RMA MATRIX (.XLSX) EXPORT VERIFICATION IN ADMIN SANDBOX + LIVE
+      // 3. OVERALL RMA MATRIX (.XLSX) + DATE FORMAT AUDIT IN ADMIN SANDBOX
       // =========================================================================
       await gotoAdmin(page);
       await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
       await page.getByRole('button', { name: /Sandbox Overall Matrix \(\.xlsx\)/i }).first().click();
       await expect(page.getByText('Overall RMA Matrix (.xlsx)')).toBeVisible();
+      await expect(page.getByText(/Start Date \(YYYY-MM-DD\)/i)).toBeVisible();
+      await expect(page.getByText(/End Date \(YYYY-MM-DD\)/i)).toBeVisible();
+
+      // Toggle Include zero catalog SKUs checkbox and Quick Range Last 14 Days
+      const zeroSkuCb = page.locator('input[type="checkbox"]').first();
+      if (await zeroSkuCb.isVisible().catch(() => false)) {
+        await zeroSkuCb.click();
+        await zeroSkuCb.click();
+      }
+
       await page.getByRole('button', { name: /Last 14 Days/i }).click();
       const [testMatrixDl] = await Promise.all([
         page.waitForEvent('download'),
@@ -288,55 +274,54 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
         const xmlStr = fs.readFileSync(testMatrixPath).toString('utf8');
         expect(xmlStr).toContain('xSplit="5" ySplit="5" topLeftCell="F6"');
         expect(xmlStr).toContain('Serial No.');
+        expect(xmlStr).toContain('Category');
         expect(xmlStr).toContain('Supplier Name');
+        expect(xmlStr).toContain('SKU');
+        expect(xmlStr).toContain('Description');
         expect(xmlStr).toContain('Return Bad Stock (pcs)');
         expect(xmlStr).toContain('Return Good Stock (pcs)');
         expect(xmlStr).toContain('DAILY RETURNED PIECES (YYYY-MM-DD)');
         expect(xmlStr).toContain('Danilo RMA');
         expect(xmlStr).toContain('RMA ITEM DETAILS &amp; WORKFLOW STATUS');
+        expect(xmlStr).toContain('Source / Hub');
+        expect(xmlStr).toContain('RMA ID');
+        expect(xmlStr).toContain('Re-Ordered?');
+        expect(xmlStr).toContain('Restocked?');
+        expect(xmlStr).toContain('Scrapped?');
+        expect(xmlStr).toContain('Replaced?');
         expect(xmlStr).toContain('Picked Up by Driver?');
         expect(xmlStr).toContain('Driver Pickup Date &amp; Time (YYYY-MM-DD HH:mm)');
+        expect(xmlStr).toContain('Debit Claim / Credit Memo #');
         expect(xmlStr).toContain('outlineLevel="1"');
         expect(xmlStr).toContain('SUM(');
         expect(xmlStr).toContain(rmaNum);
-        expect(xmlStr).not.toContain('BASKETPOPROC');
-        expect(xmlStr).not.toContain('Buffer (30%)');
-        expect(xmlStr).not.toContain('Cases to PO');
-        expect(xmlStr).not.toContain('Total Quantity Needed');
+        if (createdClaimNum) expect(xmlStr).toContain(createdClaimNum);
+
+        // Banned legacy columns must never reappear
+        for (const banned of [
+          'BASKETPOPROC',
+          'Arlito',
+          'Jarmen',
+          'PJ to Mendez',
+          'Physical Stock',
+          'Final Quantity to Order',
+          'Middle Packaging',
+          'Case Amount',
+          'Buffer (30%)',
+          'Cases to PO',
+          'Total Quantity Needed'
+        ]) {
+          expect(xmlStr).not.toContain(banned);
+        }
       }
       await page.getByRole('button', { name: 'Close', exact: true }).click();
 
       guard.assertClean('suite 07 lifecycle emails + pdf + overall matrix xlsx');
     } finally {
-      const { supaUrl, anonKey } = readSupabasePublicEnv();
-      for (const targetRma of seededTestRmas) {
-        await page
-          .evaluate(async ({ rma, url, key }) => {
-            try {
-              const supaKey = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'));
-              const token = supaKey ? JSON.parse(localStorage.getItem(supaKey))?.access_token : null;
-              if (url && key && token) {
-                await fetch(`${url}/rest/v1/rma_reports?rma_number=eq.${encodeURIComponent(rma)}`, {
-                  method: 'DELETE',
-                  headers: { apikey: key, Authorization: `Bearer ${token}` }
-                });
-                const sRes = await fetch(`${url}/rest/v1/rma_settings?key=eq.supplier_claims_store&select=value`, {
-                  headers: { apikey: key, Authorization: `Bearer ${token}` }
-                });
-                const sJson = await sRes.json();
-                if (Array.isArray(sJson?.[0]?.value)) {
-                  const filtered = sJson[0].value.filter((c) => !c.items?.some((it) => it.rma_number === rma));
-                  await fetch(`${url}/rest/v1/rma_settings?key=eq.supplier_claims_store`, {
-                    method: 'PATCH',
-                    headers: { apikey: key, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ value: filtered })
-                  });
-                }
-              }
-            } catch {}
-          }, { rma: targetRma, url: supaUrl, key: anonKey })
-          .catch(() => {});
-      }
+      await cleanupTestRecords(page, {
+        rmaNumbers: seededTestRmas,
+        claimNumbers: [createdClaimNum]
+      });
       guard.detach();
     }
   });

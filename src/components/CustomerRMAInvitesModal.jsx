@@ -133,6 +133,9 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       setGeneratedInvite(newInv);
       setAuthorizedEmail('');
       setEntityName('');
+      setStreamFilter('all');
+      setCurrentPage(1);
+      setInvites((prev) => [newInv, ...(prev || []).filter((i) => i.token !== newInv.token)]);
       showToast(
         `${inviteIsTestMode ? '🧪 TEST MODE ' : ''}${streamType === 'supplier_outbound'
           ? 'Supplier RTV Invite generated successfully!'

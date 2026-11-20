@@ -19,8 +19,7 @@ import {
   formatDateYmd,
   formatDateTimeYmdHm,
   getRealPhotos,
-  getReportManifestItems,
-  computeItemPiecesAndValue,
+  getConsolidatedPickupItems,
   formatPeso
 } from '../utils/rmaHelpers';
 import { generatePickupFormPdfAttachment } from '../utils/pickupFormPdf';
@@ -78,7 +77,7 @@ export const notificationService = {
         .from('rma_settings')
         .select('*')
         .eq('key', 'email_recipients')
-        .single();
+        .maybeSingle();
 
       if (!error && data?.value?.toEmail) {
         const settings = {
@@ -450,7 +449,7 @@ export const notificationService = {
           html: htmlBody,
           isTestMode: testActive,
           attachments,
-          text: `${testActive ? 'Test - ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Expiry Date: ${expiryInfo.text}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}`
+          text: `${testActive ? 'Test - ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Expiry Date (YYYY-MM-DD): ${expiryInfo.text}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}`
         })
       });
 
@@ -659,6 +658,7 @@ export const notificationService = {
   generateLifecycleEmailHtml({
     eventType,
     report,
+    reports = [],
     allReports = [],
     catalogProducts = [],
     config,
@@ -668,73 +668,82 @@ export const notificationService = {
     intakePhotos = [],
     pdfAttachedFilename = null
   }) {
-    const rmaNumber = report.rma_number || report.rmaNumber || report.id || 'RMA-PENDING';
-    const meta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
-      ? report.ai_document_metadata
+    const effectiveReports = Array.isArray(reports) && reports.length > 0 ? reports : (report ? [report] : []);
+    const primaryReport = report || effectiveReports[0] || {};
+    const isBatch = effectiveReports.length > 1;
+    const rmaNumbersList = Array.from(new Set(
+      effectiveReports.map((r) => r.rma_number || r.rmaNumber || String(r.id || '')).filter(Boolean)
+    ));
+    const rmaNumber = primaryReport.rma_number || primaryReport.rmaNumber || primaryReport.id || 'RMA-PENDING';
+    const meta = (primaryReport.ai_document_metadata && typeof primaryReport.ai_document_metadata === 'object')
+      ? primaryReport.ai_document_metadata
       : {};
     const pickup = (meta.supplier_pickup && typeof meta.supplier_pickup === 'object')
       ? meta.supplier_pickup
       : {};
+    const claimNo = pickup.claim_number || (String(primaryReport.notes || '').match(/\[RTV:\s*([^\]]+)\]/i)?.[1]?.trim()) || '';
+    const refHeadline = isBatch
+      ? `${effectiveReports.length} Consolidated RMAs (${claimNo || rmaNumber})`
+      : rmaNumber;
 
     const eventMetaMap = {
       scrapped: {
-        badge: 'RMA SCRAPPED / DISPOSED',
-        title: `RMA Scrapped / Disposed: ${rmaNumber}`,
+        badge: isBatch ? `BATCH RMA SCRAPPED (${effectiveReports.length} RMAs)` : 'RMA SCRAPPED / DISPOSED',
+        title: `RMA Scrapped / Disposed: ${refHeadline}`,
         headerBg: '#9f1239',
         subtitle: 'Warehouse Disposal & Scrap Confirmation'
       },
       restocked: {
-        badge: 'RMA RESTOCKED TO GOOD INVENTORY',
-        title: `RMA Restocked: ${rmaNumber}`,
+        badge: isBatch ? `BATCH RMA RESTOCKED (${effectiveReports.length} RMAs)` : 'RMA RESTOCKED TO GOOD INVENTORY',
+        title: `RMA Restocked: ${refHeadline}`,
         headerBg: '#0f766e',
         subtitle: 'Good Stock Restock & ERP Inventory Verification'
       },
       pickup_debit_claim: {
-        badge: 'DRIVER PICKUP — DEBIT CLAIM',
-        title: `Driver Picked Up for Debit Claim: ${rmaNumber}`,
+        badge: isBatch ? `CONSOLIDATED DRIVER PICKUP — DEBIT CLAIM (${effectiveReports.length} RMAs)` : 'DRIVER PICKUP — DEBIT CLAIM',
+        title: `Driver Picked Up for Debit Claim: ${refHeadline}`,
         headerBg: '#1e3a8a',
         subtitle: 'Supplier Return Picked Up • Debit Claim Form PDF Attached'
       },
       pickup_replacement: {
-        badge: 'DRIVER PICKUP — REPLACEMENT / EXCHANGE',
-        title: `Driver Picked Up for Replacement: ${rmaNumber}`,
+        badge: isBatch ? `CONSOLIDATED DRIVER PICKUP — REPLACEMENT (${effectiveReports.length} RMAs)` : 'DRIVER PICKUP — REPLACEMENT / EXCHANGE',
+        title: `Driver Picked Up for Replacement: ${refHeadline}`,
         headerBg: '#4338ca',
         subtitle: 'Supplier Replacement / Exchange Picked Up • Replacement Form PDF Attached'
       }
     };
     const ev = eventMetaMap[eventType] || eventMetaMap.scrapped;
+    const isPickupEvent = eventType === 'pickup_debit_claim' || eventType === 'pickup_replacement';
 
-    const manifestChildren = getReportManifestItems(report, allReports);
-    const rawItems = manifestChildren.length > 0 ? manifestChildren : [report];
-    const itemsTable = rawItems.map((it, idx) => {
-      const calc = computeItemPiecesAndValue(it, catalogProducts);
-      const exp = formatDateYmd(it.expiry_date || it.ai_document_metadata?.expiry_date || report.expiry_date) || 'Not specified';
-      const sku = (it.code && it.code !== it.barcode ? it.code : (it.sku && it.sku !== it.barcode ? it.sku : '')) || it.barcode || '—';
-      const desc = it.name || it.product_name || it.productName || `Item ${it.barcode || idx + 1}`;
-      return {
-        idx: idx + 1,
-        desc,
-        sku,
-        exp,
-        ...calc
-      };
+    const { items: itemsTable } = getConsolidatedPickupItems({
+      report: primaryReport,
+      reports: effectiveReports,
+      allReports,
+      catalogProducts,
+      combineIdentical: isPickupEvent
     });
 
     const grandPieces = itemsTable.reduce((s, it) => s + it.totalPieces, 0);
     const grandValue = itemsTable.reduce((s, it) => s + it.lineTotal, 0);
 
-    const supplierName = pickup.supplier_name || report.supplier_name || report.supplierName || 'Pending Assignment';
-    const claimNo = pickup.claim_number || (String(report.notes || '').match(/\[RTV:\s*([^\]]+)\]/i)?.[1]?.trim()) || '';
-    const isPickupEvent = eventType === 'pickup_debit_claim' || eventType === 'pickup_replacement';
+    const supplierName = pickup.supplier_name || primaryReport.supplier_name || primaryReport.supplierName || 'Pending Assignment';
     const eventTimeStr = formatDateTimeYmdHm(
       (isPickupEvent && pickup.picked_up_at) ||
       meta.resolved_at ||
       meta.simple_rtv_updated_at ||
       new Date()
     );
-    const driveUrl = report.google_drive_folder_url || pickup.drive_folder_url || '';
-    const needsReorderFlag = report.needs_reorder === true || meta.needs_reorder === true || String(report.notes || '').includes('[REORDER: YES]');
-    const hubLabel = report.rma_type === 'supplier_outbound' ? 'Supplier RTV' : 'Customer Hub';
+    const driveUrl = primaryReport.google_drive_folder_url || pickup.drive_folder_url || '';
+    const needsReorderFlag = primaryReport.needs_reorder === true || meta.needs_reorder === true || String(primaryReport.notes || '').includes('[REORDER: YES]');
+    const hubLabel = primaryReport.rma_type === 'supplier_outbound' ? 'Supplier RTV' : 'Customer Hub';
+    const branchSummary = Array.from(new Set(
+      effectiveReports.map((r) => String(r.store_branch || '').trim()).filter(Boolean)
+    )).join(', ') || 'Warehouse / N/A';
+    const aeSummary = Array.from(new Set(
+      effectiveReports
+        .map((r) => r.ae_name ? `${r.ae_name}${r.ae_email ? ` (${r.ae_email})` : ''}` : (r.ae_email || ''))
+        .filter(Boolean)
+    )).join(', ');
 
     return `
       <!DOCTYPE html>
@@ -778,8 +787,8 @@ export const notificationService = {
             <div class="card">
               <div class="grid">
                 <div class="row">
-                  <div class="col-label">RMA Number:</div>
-                  <div class="col-val" style="font-family: monospace; font-size: 14px; color: #1e3a8a;">${escapeEmailHtml(rmaNumber)}</div>
+                  <div class="col-label">${isBatch ? `Bundled RMA Numbers (${rmaNumbersList.length}):` : 'RMA Number:'}</div>
+                  <div class="col-val" style="font-family: monospace; font-size: 13px; color: #1e3a8a;">${escapeEmailHtml(isBatch ? rmaNumbersList.join(', ') : rmaNumber)}</div>
                 </div>
                 <div class="row">
                   <div class="col-label">Stream / Hub:</div>
@@ -796,15 +805,15 @@ export const notificationService = {
                 </div>
                 <div class="row">
                   <div class="col-label">Store / Branch:</div>
-                  <div class="col-val">${escapeEmailHtml(report.store_branch || 'Warehouse / N/A')}</div>
+                  <div class="col-val">${escapeEmailHtml(branchSummary)}</div>
                 </div>
                 <div class="row">
                   <div class="col-label">Defect / Return Reason:</div>
-                  <div class="col-val">${escapeEmailHtml(report.reason || 'Damaged / Defective')}</div>
+                  <div class="col-val">${escapeEmailHtml(primaryReport.reason || 'Damaged / Defective')}</div>
                 </div>
                 <div class="row">
                   <div class="col-label">Warehouse Location:</div>
-                  <div class="col-val">${escapeEmailHtml(report.warehouse_location || 'Receiving / Warehouse')}</div>
+                  <div class="col-val">${escapeEmailHtml(primaryReport.warehouse_location || 'Receiving / Warehouse')}</div>
                 </div>
                 ${eventType === 'scrapped' ? `
                 <div class="row">
@@ -819,10 +828,10 @@ export const notificationService = {
                   <div class="col-label">Processed By:</div>
                   <div class="col-val">${escapeEmailHtml(actorName || pickup.processed_by || 'Warehouse Staff')}</div>
                 </div>
-                ${(report.ae_name || report.ae_email) ? `
+                ${aeSummary ? `
                 <div class="row">
                   <div class="col-label">Customer AE:</div>
-                  <div class="col-val">${escapeEmailHtml(report.ae_name || 'Assigned AE')} ${report.ae_email ? `(${escapeEmailHtml(report.ae_email)})` : ''}</div>
+                  <div class="col-val">${escapeEmailHtml(aeSummary)}</div>
                 </div>` : ''}
                 ${driveUrl ? `
                 <div class="row">
@@ -878,10 +887,11 @@ export const notificationService = {
                 <tr>
                   <td style="font-family: monospace;">${it.idx}</td>
                   <td>
-                    <strong>${escapeEmailHtml(it.desc)}</strong><br/>
+                    <strong>${escapeEmailHtml(it.name)}</strong><br/>
                     <span style="font-size: 11px; color: #64748b; font-family: monospace;">SKU: ${escapeEmailHtml(it.sku)}</span>
+                    ${(isBatch || (it.rmaNumbers && it.rmaNumbers.length > 1)) ? `<br/><span style="font-size: 10px; color: #1e3a8a; font-family: monospace; font-weight: 700;">RMAs: ${escapeEmailHtml(it.rmaNumbers.join(', '))}</span>` : ''}
                   </td>
-                  <td style="font-family: monospace; white-space: nowrap;">${escapeEmailHtml(it.exp)}</td>
+                  <td style="font-family: monospace; white-space: nowrap;">${escapeEmailHtml(it.expiry)}</td>
                   <td style="text-align:right; font-family: monospace; font-weight: 700; white-space: nowrap;">
                     ${it.isCaseUnit && it.piecesPerCase > 1
                       ? `${it.totalPieces.toLocaleString()} pcs (${it.rawQty} ${escapeEmailHtml(it.unitName)} × ${it.piecesPerCase})`
@@ -936,25 +946,35 @@ export const notificationService = {
    */
   async sendRmaLifecycleNotification({
     eventType,
-    report,
+    report = null,
+    reports = [],
     allReports = [],
     catalogProducts = [],
     actorName = 'Warehouse Staff',
     isTestMode = false
   }) {
-    if (!report || !eventType) return { success: false, error: 'Missing report or eventType' };
+    const effectiveReports = Array.isArray(reports) && reports.length > 0
+      ? reports
+      : (report ? [report] : []);
+    const primaryReport = report || effectiveReports[0];
+    if (!primaryReport || !eventType) return { success: false, error: 'Missing report or eventType' };
 
-    const testActive = this.resolveTestModeActive(report, isTestMode);
+    const testActive = Boolean(
+      this.resolveTestModeActive(primaryReport, isTestMode) ||
+      effectiveReports.some((r) => isTestRecord(r))
+    );
 
     try {
-      const config = this.resolveCompanyConfig(report);
-      const rmaNumber = report.rma_number || report.rmaNumber || report.id || 'RMA';
-      const meta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
-        ? report.ai_document_metadata
+      const config = this.resolveCompanyConfig(primaryReport);
+      const isBatch = effectiveReports.length > 1;
+      const rmaNumber = primaryReport.rma_number || primaryReport.rmaNumber || primaryReport.id || 'RMA';
+      const meta = (primaryReport.ai_document_metadata && typeof primaryReport.ai_document_metadata === 'object')
+        ? primaryReport.ai_document_metadata
         : {};
       const pickup = (meta.supplier_pickup && typeof meta.supplier_pickup === 'object')
         ? meta.supplier_pickup
         : {};
+      const claimNo = pickup.claim_number || (String(primaryReport.notes || '').match(/\[RTV:\s*([^\]]+)\]/i)?.[1]?.trim()) || '';
 
       const isPickupEvent = eventType === 'pickup_debit_claim' || eventType === 'pickup_replacement';
       const supplierToList = isPickupEvent ? splitEmailList(pickup.supplier_email_to) : [];
@@ -970,21 +990,24 @@ export const notificationService = {
         ...(Array.isArray(config.baseCcList) ? config.baseCcList : []),
         ...supplierCcList
       ]);
-      if (report.ae_email && String(report.ae_email).includes('@')) {
-        ccSet.add(String(report.ae_email).trim());
-      }
+      effectiveReports.forEach((r) => {
+        if (r?.ae_email && String(r.ae_email).includes('@')) {
+          ccSet.add(String(r.ae_email).trim());
+        }
+      });
       const finalCcList = Array.from(ccSet);
 
+      const batchTag = isBatch ? `Consolidated (${effectiveReports.length} RMAs) — ` : '';
       const subjectLabelMap = {
-        scrapped: `[RMA Scrapped] ${rmaNumber}: ${report.name || report.barcode || 'Item'}`,
-        restocked: `[RMA Restocked] ${rmaNumber}: ${report.name || report.barcode || 'Item'}`,
-        pickup_debit_claim: `[Driver Picked Up - Debit Claim] ${rmaNumber}: ${pickup.supplier_name || report.supplier_name || 'Supplier'}`,
-        pickup_replacement: `[Driver Picked Up - Replacement] ${rmaNumber}: ${pickup.supplier_name || report.supplier_name || 'Supplier'}`
+        scrapped: `[RMA Scrapped] ${batchTag}${claimNo || rmaNumber}: ${primaryReport.name || primaryReport.barcode || 'Items'}`,
+        restocked: `[RMA Restocked] ${batchTag}${claimNo || rmaNumber}: ${primaryReport.name || primaryReport.barcode || 'Items'}`,
+        pickup_debit_claim: `[Driver Picked Up - Debit Claim] ${batchTag}${claimNo || rmaNumber}: ${pickup.supplier_name || primaryReport.supplier_name || 'Supplier'}`,
+        pickup_replacement: `[Driver Picked Up - Replacement] ${batchTag}${claimNo || rmaNumber}: ${pickup.supplier_name || primaryReport.supplier_name || 'Supplier'}`
       };
-      const baseSubject = subjectLabelMap[eventType] || `[RMA Update] ${rmaNumber}`;
+      const baseSubject = subjectLabelMap[eventType] || `[RMA Update] ${batchTag}${rmaNumber}`;
       const subject = testActive ? `Test - ${baseSubject}` : baseSubject;
 
-      // Collect pickup verification photos + RMA intake photos
+      // Collect pickup verification photos + RMA intake photos across all bundled RMAs
       const pickupPhotoLabels = [
         { key: 'id_license', label: 'Driver License / ID' },
         { key: 'driver_face', label: 'Driver Face / Selfie' },
@@ -998,16 +1021,24 @@ export const notificationService = {
         .filter((e) => Boolean(e.url));
 
       const pickupUrlSet = new Set(pickupPhotoEntries.map((e) => e.url));
-      const allIntakePhotos = getRealPhotos(report).filter((u) => u && !pickupUrlSet.has(u));
+      const intakePhotoSet = new Set();
+      effectiveReports.forEach((r) => {
+        getRealPhotos(r).forEach((u) => {
+          if (u && !pickupUrlSet.has(u)) intakePhotoSet.add(u);
+        });
+      });
+      const allIntakePhotos = Array.from(intakePhotoSet);
 
       const attachments = [];
       let pdfAttachedFilename = null;
       if (isPickupEvent) {
         const pdfAttachment = generatePickupFormPdfAttachment({
-          report,
+          report: primaryReport,
+          reports: effectiveReports,
           allReports,
           catalogProducts,
-          preparedByOverride: actorName
+          preparedByOverride: actorName,
+          combineIdentical: true
         });
         if (pdfAttachment) {
           attachments.push({
@@ -1043,7 +1074,8 @@ export const notificationService = {
 
       const htmlBody = this.generateLifecycleEmailHtml({
         eventType,
-        report,
+        report: primaryReport,
+        reports: effectiveReports,
         allReports,
         catalogProducts,
         config,

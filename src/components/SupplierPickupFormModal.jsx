@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { X, Printer, Scissors, CheckCircle2, FileCheck2, FolderOpen } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { X, Printer, Scissors, CheckCircle2, FileCheck2, FolderOpen, Layers } from 'lucide-react';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
 import {
   formatPeso,
-  getReportManifestItems,
-  computeItemPiecesAndValue,
+  getConsolidatedPickupItems,
   formatFourChoiceOutcome,
   isTestRecord
 } from '../utils/rmaHelpers';
@@ -24,41 +23,65 @@ const isPlaceholderSupplier = (val) => {
 export default function SupplierPickupFormModal({
   isOpen,
   onClose,
-  report,
+  report = null,
+  reports = [],
   allReports = [],
   catalogProducts = []
 }) {
+  const effectiveReports = useMemo(() => {
+    const raw = Array.isArray(reports) && reports.length > 0 ? reports : (report ? [report] : []);
+    const seen = new Set();
+    return raw.filter((r) => {
+      if (!r) return false;
+      const k = String(r.rma_number || r.rmaNumber || r.id || '');
+      if (!k || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }, [report, reports]);
+
+  const primaryReport = effectiveReports[0] || null;
+
   // Always declare hooks unconditionally before any early returns
   const [copyLayoutMode, setCopyLayoutMode] = useState('auto'); // 'auto' | 'full_page'
+  const [combineIdentical, setCombineIdentical] = useState(true);
   const [preparedBy, setPreparedBy] = useState('Warehouse Staff');
 
   useEffect(() => {
-    if (!isOpen || !report) return;
+    if (!isOpen || !primaryReport) return;
     setCopyLayoutMode('auto');
-    const pickupMeta = report?.ai_document_metadata?.supplier_pickup || {};
+    setCombineIdentical(true);
+    const pickupMeta = primaryReport?.ai_document_metadata?.supplier_pickup || {};
     const initialPrepared = String(
       pickupMeta.processed_by ||
-      report.inspected_by ||
-      report?.ai_document_metadata?.simple_rtv_updated_by ||
+      primaryReport.inspected_by ||
+      primaryReport?.ai_document_metadata?.simple_rtv_updated_by ||
       'Warehouse Staff'
     )
       .replace(/\s*\([^)]*\)/g, '')
       .trim() || 'Warehouse Staff';
     setPreparedBy(initialPrepared);
-  }, [isOpen, report?.id, report?.rma_number]);
+  }, [isOpen, primaryReport?.id, primaryReport?.rma_number, effectiveReports.length]);
 
-  if (!isOpen || !report) return null;
+  if (!isOpen || !primaryReport) return null;
 
-  const meta = report.ai_document_metadata || {};
+  const meta = primaryReport.ai_document_metadata || {};
   const pickup = meta.supplier_pickup || {};
-  const outcome = formatFourChoiceOutcome(report);
+  const outcome = formatFourChoiceOutcome(primaryReport);
 
-  const rmaNumber = report.rma_number || report.rmaNumber || report.id || 'N/A';
-  const isTest = isTestRecord(report);
-  const isSupplierStream = report.rma_type === 'supplier_outbound';
+  const isBatch = effectiveReports.length > 1;
+  const rmaNumbersList = effectiveReports
+    .map((r) => r.rma_number || r.rmaNumber || String(r.id || ''))
+    .filter(Boolean);
+  const rmaNumber = primaryReport.rma_number || primaryReport.rmaNumber || primaryReport.id || 'N/A';
+  const rmaDisplayHeadline = isBatch
+    ? `${effectiveReports.length} Consolidated RMAs (${rmaNumbersList[0]} + ${effectiveReports.length - 1})`
+    : rmaNumber;
+  const isTest = effectiveReports.some((r) => isTestRecord(r));
+  const isSupplierStream = primaryReport.rma_type === 'supplier_outbound';
 
-  const bc = String(report.barcode || '').trim();
-  const skuCode = String(report.code || report.sku || '').trim();
+  const bc = String(primaryReport.barcode || '').trim();
+  const skuCode = String(primaryReport.code || primaryReport.sku || '').trim();
   const matchedCatalogProd = (catalogProducts || []).find((p) =>
     (bc && p.barcode && String(p.barcode).trim() === bc) ||
     (skuCode && (String(p.code || '').trim() === skuCode || String(p.sku || '').trim() === skuCode))
@@ -66,9 +89,9 @@ export default function SupplierPickupFormModal({
 
   const supplierName = [
     pickup.supplier_name,
-    report.supplier_name,
-    report.supplierName,
-    report.supplier,
+    primaryReport.supplier_name,
+    primaryReport.supplierName,
+    primaryReport.supplier,
     matchedCatalogProd?.supplier_name,
     matchedCatalogProd?.supplierName
   ].find((cand) => !isPlaceholderSupplier(cand)) || 'Pending Assignment';
@@ -76,13 +99,13 @@ export default function SupplierPickupFormModal({
   const supplierEmailTo = pickup.supplier_email_to || '';
   const supplierEmailCc = pickup.supplier_email_cc || '';
   const claimNumber = outcome.claimNumber || pickup.claim_number || '';
-  const driverName = pickup.driver_name || report.driver_name || '';
+  const driverName = pickup.driver_name || primaryReport.driver_name || '';
   const driverLicense = pickup.driver_license_no || '';
   const truckPlate = pickup.truck_plate || '';
-  const driveUrl = report.google_drive_folder_url || pickup.drive_folder_url || '';
+  const driveUrl = primaryReport.google_drive_folder_url || pickup.drive_folder_url || '';
   const photoCount = pickup.photos && typeof pickup.photos === 'object' ? Object.keys(pickup.photos).length : 0;
 
-  const dispositionCode = String(pickup.disposition || meta.simple_rtv_disposition || report.disposition || '').toLowerCase();
+  const dispositionCode = String(pickup.disposition || meta.simple_rtv_disposition || primaryReport.disposition || '').toLowerCase();
   const isReplacementForm =
     dispositionCode === 'supplier_exchange' ||
     dispositionCode === 'customer_exchange' ||
@@ -102,20 +125,16 @@ export default function SupplierPickupFormModal({
 
   const modalTitleLabel = isReplacementForm ? 'Replacement & Pickup Form' : 'Debit Claim & Pickup Form';
 
-  const manifestChildren = getReportManifestItems(report, allReports);
-  const rawItems = manifestChildren.length > 0 ? manifestChildren : [report];
-
-  const normalizedItems = rawItems.map((it, idx) => {
-    const calc = computeItemPiecesAndValue(it, catalogProducts);
-    const rawExp = String(it.expiry_date || it.ai_document_metadata?.expiry_date || report.expiry_date || '').trim();
-    const cleanExpiry = rawExp && /^\d{4}-\d{2}-\d{2}/.test(rawExp) ? rawExp.slice(0, 10) : (rawExp || '—');
-    return {
-      idx: idx + 1,
-      name: it.name || it.product_name || it.productName || `Item ${it.barcode || idx + 1}`,
-      sku: (it.code && it.code !== it.barcode ? it.code : (it.sku && it.sku !== it.barcode ? it.sku : '')) || it.barcode || '—',
-      expiry: cleanExpiry,
-      ...calc
-    };
+  const {
+    items: normalizedItems,
+    rawCount: rawLineCount,
+    hasCombinableDuplicates
+  } = getConsolidatedPickupItems({
+    report: primaryReport,
+    reports: effectiveReports,
+    allReports,
+    catalogProducts,
+    combineIdentical
   });
 
   const grandTotalPieces = normalizedItems.reduce((sum, it) => sum + it.totalPieces, 0);
@@ -215,7 +234,7 @@ export default function SupplierPickupFormModal({
 
     printIsolatedElement({
       elementId: 'letter-supplier-pickup-form',
-      documentTitle: `${isReplacementForm ? 'RMA-Replacement-Pickup' : 'RMA-Debit-Claim-Pickup'}-${rmaNumber}`,
+      documentTitle: `${isReplacementForm ? 'RMA-Replacement-Pickup' : 'RMA-Debit-Claim-Pickup'}-${claimNumber || rmaNumber}`,
       pageSize: 'letter portrait',
       pageMargin: isCompactMode ? '0' : '0.4in',
       allowMultiPage: useFullPagePerCopy,
@@ -242,6 +261,11 @@ export default function SupplierPickupFormModal({
             <span className="px-2 py-0.5 border-[1.5px] border-black bg-white text-black font-black uppercase tracking-wider text-[8.5px]">
               {copyTitle}
             </span>
+            {isBatch && (
+              <span className="px-2 py-0.5 border-[1.5px] border-black bg-white text-black font-black uppercase tracking-wider text-[8.5px]">
+                BATCH ({effectiveReports.length} RMAs)
+              </span>
+            )}
             {isTest && (
               <span className="px-2 py-0.5 border-[1.5px] border-black bg-white text-black font-black uppercase tracking-wider text-[8.5px]">
                 [TEST MODE RECORD]
@@ -261,7 +285,7 @@ export default function SupplierPickupFormModal({
             {refLineLabel}
           </div>
           <div className={`font-mono font-black text-black leading-tight ${isCompactMode ? 'text-xs' : 'text-sm'}`}>
-            RMA #: {rmaNumber}
+            {isBatch ? `Batch (${effectiveReports.length} RMAs)` : `RMA #: ${rmaNumber}`}
           </div>
           <div className="text-[8.5px] text-black font-semibold">
             {outcome.formattedTime ? `${outcome.formattedTime} • ` : ''}
@@ -338,6 +362,11 @@ export default function SupplierPickupFormModal({
                 <td className="py-1 px-1.5 border-r border-black">
                   <div className="font-bold text-black leading-tight">{it.name}</div>
                   <div className="text-[8px] font-mono text-black">SKU: {it.sku}</div>
+                  {(isBatch || (Array.isArray(it.rmaNumbers) && it.rmaNumbers.length > 1)) && Array.isArray(it.rmaNumbers) && it.rmaNumbers.length > 0 && (
+                    <div className="text-[8px] font-mono font-bold text-black break-words">
+                      {it.rmaNumbers.length > 1 ? `RMAs: ${it.rmaNumbers.join(', ')}` : `RMA: ${it.rmaNumbers[0]}`}
+                    </div>
+                  )}
                 </td>
                 <td className="py-1 px-1.5 text-center font-mono text-black whitespace-nowrap border-r border-black">
                   {it.expiry}
@@ -424,7 +453,7 @@ export default function SupplierPickupFormModal({
             </div>
             <div className="min-w-0">
               <h2 className="text-sm sm:text-base font-bold truncate">
-                Letter {modalTitleLabel} — {rmaNumber}
+                Letter {modalTitleLabel} — {rmaDisplayHeadline}
               </h2>
               <p className="text-[11px] sm:text-xs text-slate-300 truncate">
                 8.5&quot; × 11&quot; Letter • Plain B&amp;W Print • {outcome.label}
@@ -464,6 +493,26 @@ export default function SupplierPickupFormModal({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Auto-Combine Identical Items Toggle (SKU + Price + Expiry Date) */}
+            {(isBatch || rawLineCount > 1) && (
+              <button
+                type="button"
+                onClick={() => setCombineIdentical((prev) => !prev)}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-black border flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  combineIdentical
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                title="Automatically combine items sharing the exact same SKU, Unit Price, and Expiry Date across bundled RMAs"
+              >
+                <Layers className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  Auto-Combine Identical Items: {combineIdentical ? 'ON' : 'OFF'}
+                  {hasCombinableDuplicates ? (combineIdentical ? ` (${rawLineCount}→${normalizedItems.length})` : ` (${rawLineCount} rows)`) : ''}
+                </span>
+              </button>
+            )}
+
             {/* Auto | Full Page per Copy Layout Toggle */}
             <div className="inline-flex rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 p-0.5 shadow-2xs">
               <button

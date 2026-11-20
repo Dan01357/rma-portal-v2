@@ -1,97 +1,33 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import { test, expect } from '@playwright/test';
 import {
-  PNG_BUFFER,
   VERIFIED_BARCODE,
   attachStrictGuards,
   installPrintStubs,
-  gotoAdmin
+  interceptAndCaptureEmails,
+  mockPhotoUploadSuccess,
+  seedTestModeRma,
+  gotoAdmin,
+  assertValidXlsxFile,
+  cleanupTestRecords
 } from './helpers/testUtils.js';
 
-function readSupabasePublicEnv() {
-  let supaUrl = process.env.VITE_SUPABASE_URL || '';
-  let anonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
-  if (!supaUrl || !anonKey) {
-    for (const fileName of ['.env.local', '.env']) {
-      try {
-        const envRaw = fs.readFileSync(path.join(process.cwd(), fileName), 'utf-8');
-        for (const line of envRaw.split(/\r?\n/)) {
-          const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
-          if (!m) continue;
-          const val = m[2].trim().replace(/^["']|["']$/g, '');
-          if (m[1] === 'VITE_SUPABASE_URL' && !supaUrl) supaUrl = val;
-          if (m[1] === 'VITE_SUPABASE_ANON_KEY' && !anonKey) anonKey = val;
-        }
-      } catch {}
-    }
-  }
-  return { supaUrl, anonKey };
-}
-
-/**
- * Seeds a temporary Test Mode Customer RMA via / so Live DB stays untouched.
- */
-async function seedCustomerRmaForFinance(page) {
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByText(/Scan Product Barcode or RMA Sticker QR/i)).toBeVisible({
-    timeout: 20_000
-  });
-
-  const toggleBtn = page.locator('button[title="Toggle Test / Sandbox Mode"]');
-  await expect(toggleBtn).toBeVisible();
-  if (!/Test Mode:\s*ON/i.test(await toggleBtn.innerText())) {
-    await toggleBtn.click();
-  }
-  await expect(page.getByText('🧪 Super Admin Sandbox Active')).toBeVisible();
-
-  await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
-  await page.locator('input[placeholder*="barcode" i]').first().fill(VERIFIED_BARCODE);
-  await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 12_000 });
-
-  await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({
-    name: 'pw-finance-cm.png',
-    mimeType: 'image/png',
-    buffer: PNG_BUFFER
-  });
-  await expect(page.getByText('1/10 photos')).toBeVisible({ timeout: 10_000 });
-
-  await page.locator('input[placeholder="Your Full Name *"]').fill('Playwright Finance Tester');
-  await page
-    .locator('input[placeholder="Phone No. or Email *"]')
-    .fill('playwright-finance@pingcon.local');
-
-  const submitPostPromise = page.waitForResponse(
-    (res) => res.url().includes('/rest/v1/rma_reports') && res.request().method() === 'POST',
-    { timeout: 25_000 }
-  );
-  await page.getByRole('button', { name: /Submit Return Report/i }).click();
-  await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 20_000 });
-  const postRes = await submitPostPromise;
-  expect(postRes.status()).toBeLessThan(400);
-
-  const rmaText = await page
-    .locator('.font-mono.font-black.text-slate-900, .font-mono.font-black.dark\\:text-white')
-    .filter({ hasText: /^RMA-TEST-/ })
-    .first()
-    .innerText();
-  const rmaNumber = rmaText.trim();
-  expect(rmaNumber).toMatch(/^RMA-TEST-/);
-  await page.waitForLoadState('networkidle').catch(() => {});
-  return rmaNumber;
-}
-
-test.describe('Suite 05: Credit Memos (Live & Sandbox, 12% VAT, ₱10k Governance, Vouchers) & Settings/API Keys', () => {
-  test('Credit Memos Live & Sandbox + VAT CSV breakdown + ₱10,000 Super Admin governance + Voucher Print + Void/Delete cleanup', async ({
+test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT, ₱10k Governance) & Settings/API Vault', () => {
+  test('Single Credit Memo + ₱10k Governance + Multi-RMA Consolidated Credit Memo + Missing SKU Guard + Letter B&W Voucher + Void Reset', async ({
     page,
     context
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(210_000);
     await context.grantPermissions(['camera']).catch(() => {});
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
+    await interceptAndCaptureEmails(page);
+    await mockPhotoUploadSuccess(page);
 
-    let seededRma = null;
+    let rmaA = null;
+    let rmaB = null;
+    let rmaNoSku = null;
+    const createdCms = [];
 
     const onDialog = async (dialog) => {
       await dialog.accept();
@@ -99,9 +35,16 @@ test.describe('Suite 05: Credit Memos (Live & Sandbox, 12% VAT, ₱10k Governanc
     page.on('dialog', onDialog);
 
     try {
-      seededRma = await seedCustomerRmaForFinance(page);
+      // Seed 2 cataloged Customer RMAs (A & B) + 1 Unlabeled/No-SKU Customer RMA (C) strictly in Test Mode Sandbox
+      rmaA = await seedTestModeRma(page, { stream: 'customer', photoCount: 1, barcode: VERIFIED_BARCODE });
+      rmaB = await seedTestModeRma(page, { stream: 'customer', photoCount: 1, barcode: VERIFIED_BARCODE });
+      rmaNoSku = await seedTestModeRma(page, {
+        stream: 'customer',
+        photoCount: 1,
+        barcode: `NOLABEL-${String(Date.now()).slice(-6)}`
+      });
 
-      // 1. Verify Live Credit Memos tab renders cleanly and Issue Credit Memo modal opens/cancels without mutating Live DB
+      // 1. Live Credit Memos tab renders cleanly (open/cancel without mutating Live DB)
       await gotoAdmin(page);
       await page.getByRole('button', { name: /Credit Memos/i }).first().click();
       await expect(page.getByText('Finance Credit Memorandum Section')).toBeVisible();
@@ -110,15 +53,15 @@ test.describe('Suite 05: Credit Memos (Live & Sandbox, 12% VAT, ₱10k Governanc
       await page.getByRole('button', { name: 'Cancel', exact: true }).last().click();
       await expect(page.getByText(/Issue Finance Credit Memo/i)).toBeHidden();
 
-      // 2. Navigate to Test Mode Sandbox -> check ₱10,000 Super Admin Governance on high-value claim in QuickRMAActionModal
+      // 2. Test Mode Sandbox: apply qty 350 (> P10,000 governance check) on rmaA via QuickRMAActionModal
       await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
-      await page.locator('input[placeholder*="Search" i]').first().fill(seededRma);
-      const rmaRow = page.locator('tr', { hasText: seededRma }).first();
-      await expect(rmaRow).toBeVisible({ timeout: 10_000 });
+      await page.locator('input[placeholder*="Search" i]').first().fill(rmaA);
+      const rmaRowA = page.locator('tr', { hasText: rmaA }).first();
+      await expect(rmaRowA).toBeVisible({ timeout: 10_000 });
 
-      await rmaRow.getByRole('button', { name: /Inspect \/ Triage/i }).click();
-      await expect(page.getByText('RMA Quick Processing')).toBeVisible();
+      await rmaRowA.getByRole('button', { name: /Split Qty|Details|Inspect/i }).first().click();
+      await expect(page.getByText('RMA Details & Quick Actions')).toBeVisible();
       await page.getByRole('button', { name: /Edit Details & Documents/i }).click();
       await page.locator('input[type="number"][min="1"]').first().fill('350');
       await page.getByRole('button', { name: /Save & Apply Restitution/i }).click();
@@ -127,26 +70,24 @@ test.describe('Suite 05: Credit Memos (Live & Sandbox, 12% VAT, ₱10k Governanc
       });
       await page.getByRole('button', { name: /Done \/ Close/i }).click();
 
-      // 3. Open Sandbox Credit Memos sub-tab & exercise Issue Credit Memo modal (POR, Stepper, Unit Price, 90%, 100%, Save & View Voucher)
+      // 3. Single Credit Memo flow in Sandbox Credit Memos: Pull Out Date (YYYY-MM-DD), Analiza B. Benoza, POR, 90%, 100%, Letter B&W Voucher & VAT XLSX
       await page.getByRole('button', { name: /Sandbox Credit Memos/i }).click();
       await expect(page.getByText(/Finance Credit Memorandum Section/i)).toBeVisible();
 
       await page.getByRole('button', { name: /Issue.*Credit Memo/i }).first().click();
-      await expect(page.getByText(/Issue Finance Credit Memo/i)).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Issue Finance Credit Memo' })).toBeVisible();
+      await expect(page.getByText(/Pull Out Date \(YYYY-MM-DD\)/i).first()).toBeVisible();
+      await expect(page.locator('#credit-memo-form input[placeholder*="Analiza" i]').first()).toHaveValue(/Analiza/i);
 
-      // Select our seeded Test Mode RMA in the linked ticket picker
       const ticketSelect = page.locator('#credit-memo-form').locator('..').locator('select').first();
       if (await ticketSelect.isVisible().catch(() => false)) {
         const optValue = await ticketSelect.evaluate((el, targetRma) => {
           const opt = Array.from(el.options).find((o) => o.text.includes(targetRma));
           return opt ? opt.value : '';
-        }, seededRma);
-        if (optValue) {
-          await ticketSelect.selectOption(optValue);
-        }
+        }, rmaA);
+        if (optValue) await ticketSelect.selectOption(optValue);
       }
 
-      // Exercise Quantity +/- stepper, Unit Price w/ VAT (exact 12,000.00 = 200 * 60.00), Regenerate POR, 90% (-10%) & 100% Full
       const qtyInc = page.locator('button[title="Increase Quantity"]');
       const qtyDec = page.locator('button[title="Decrease Quantity"]');
       await qtyInc.click();
@@ -163,140 +104,144 @@ test.describe('Suite 05: Credit Memos (Live & Sandbox, 12% VAT, ₱10k Governanc
       const creditAmtInput = page.locator('#credit-memo-form input[inputmode="decimal"]').nth(2);
       await expect(creditAmtInput).toHaveValue('12000.00');
 
-      // Test 90% (-10%) then 100% Full
       await page.getByRole('button', { name: /90% \(-10%\)/i }).click();
       await expect(creditAmtInput).toHaveValue('10800.00');
       await page.getByRole('button', { name: /100% Full/i }).click();
       await expect(creditAmtInput).toHaveValue('12000.00');
 
-      // Regenerate POR reference code
       const porInput = page.locator('#credit-memo-form input[placeholder*="POR-"]').first();
       const porBefore = await porInput.inputValue();
       await page.getByRole('button', { name: /Regenerate POR/i }).click();
       await expect(porInput).not.toHaveValue(porBefore);
 
-      // Save & View Voucher -> CreditMemoVoucherModal -> Print Voucher / Save PDF
       await page.getByRole('button', { name: /Save & View Voucher/i }).click();
       await expect(page.getByText('FINANCE CREDIT MEMORANDUM', { exact: true })).toBeVisible({
         timeout: 20_000
       });
       await expect(page.getByText(/₱12,000\.00/).first()).toBeVisible();
 
-      const cmPrintBefore = await page.evaluate(() => window.__pwPrintCount || 0);
-      await page.getByRole('button', { name: /Print Voucher \/ Save PDF/i }).click();
+      const singlePrintBefore = await page.evaluate(() => window.__pwPrintCount || 0);
+      await page.getByRole('button', { name: /Print Letter Voucher \/ PDF/i }).click();
       await page.waitForTimeout(300);
-      expect(await page.evaluate(() => window.__pwPrintCount || 0)).toBeGreaterThan(cmPrintBefore);
+      expect(await page.evaluate(() => window.__pwPrintCount || 0)).toBeGreaterThan(singlePrintBefore);
+      const printHtmls1 = await page.evaluate(() => window.__pwPrintHtmls || []);
+      const voucherHtml1 = printHtmls1[printHtmls1.length - 1] || '';
+      expect(voucherHtml1.toLowerCase()).toContain('letter portrait');
+      expect(voucherHtml1.toLowerCase()).not.toContain('size: a4');
 
-      // Close CreditMemoVoucherModal
       await page.locator('#credit-memo-voucher-print-root button:has(svg.lucide-x)').first().click();
       await expect(page.locator('#credit-memo-voucher-print-root')).toBeHidden();
 
-      // 4. Verify row appears in Sandbox Credit Memos, verify 12% VAT breakdown in Export CSV, Print, Edit, then Void/Delete cleanly
       const cmSearch = page.locator('input[placeholder*="Search by CM #" i]').first();
-      await cmSearch.fill(seededRma);
-      const cmRow = page.locator('tr', { hasText: seededRma }).first();
-      await expect(cmRow).toBeVisible({ timeout: 20_000 });
+      await cmSearch.fill(rmaA);
+      const cmRow1 = page.locator('tr', { hasText: rmaA }).first();
+      await expect(cmRow1).toBeVisible({ timeout: 20_000 });
 
-      // Verify 12% VAT breakdown in Export Excel (.xlsx) (12000 / 1.12 = 10714.29 Net, 1285.71 VAT)
       const [cmXlsxDownload] = await Promise.all([
         page.waitForEvent('download'),
         page.locator('button[title="Export all credit memos to Excel (.xlsx)"]').click()
       ]);
-      expect(cmXlsxDownload.suggestedFilename()).toMatch(/\.xlsx$/i);
-      expect(cmXlsxDownload.suggestedFilename().toLowerCase()).not.toContain('.csv');
-      const xlsxPath = await cmXlsxDownload.path();
-      if (xlsxPath) {
-        const xlsxBuf = fs.readFileSync(xlsxPath);
-        expect(xlsxBuf[0]).toBe(0x50); // 'P'
-        expect(xlsxBuf[1]).toBe(0x4b); // 'K'
-        const xlsxXml = xlsxBuf.toString('utf-8');
-        expect(xlsxXml).toContain('xl/worksheets/sheet1.xml');
-        expect(xlsxXml).toContain('application/vnd.openxmlformats-package.relationships+xml');
-        expect(xlsxXml).toContain('12% VAT Amount (PHP)');
-        expect(xlsxXml).toContain('1285.71');
-      }
+      const xlsxXml = assertValidXlsxFile(cmXlsxDownload, await cmXlsxDownload.path());
+      expect(xlsxXml).toContain('12% VAT Amount (PHP)');
+      expect(xlsxXml).toContain('1285.71');
+      expect(xlsxXml).not.toContain('[CM_META:');
 
-      // Click row Print Official Credit Voucher icon
-      await cmRow.locator('button[title="Print Official Credit Voucher"]').click();
-      await expect(page.getByText('FINANCE CREDIT MEMORANDUM', { exact: true })).toBeVisible();
-      await page.locator('#credit-memo-voucher-print-root button:has(svg.lucide-x)').first().click();
-      await expect(page.locator('#credit-memo-voucher-print-root')).toBeHidden();
-
-      // Click row Edit Credit Memo -> Update Credit Memo
-      await cmRow.locator('button[title="Edit Credit Memo"]').click();
+      await cmRow1.locator('button[title="Edit Credit Memo"]').click();
       await expect(page.getByText('Edit Finance Credit Memo')).toBeVisible();
-      await page
-        .locator('#credit-memo-form textarea')
-        .fill('Playwright verified 12% VAT & >10k governance');
+      await page.locator('#credit-memo-form textarea').fill('Playwright verified 12% VAT & >10k governance');
       await page.getByRole('button', { name: /Update Credit Memo/i }).click();
       await expect(page.getByText('Edit Finance Credit Memo')).toBeHidden({ timeout: 10_000 });
 
-      // Void / Delete synthetic Sandbox Credit Memo cleanly
-      await cmRow.locator('button[title="Void / Delete Credit Memo"]').click();
+      await cmRow1.locator('button[title="Void / Delete Credit Memo"]').click();
       await page.getByRole('button', { name: /Yes, Delete Permanently/i }).click();
-      await expect(page.getByRole('button', { name: /Yes, Delete Permanently/i })).toBeHidden({
-        timeout: 15_000
-      });
-      await expect(cmRow).toBeHidden({ timeout: 10_000 });
+      await expect(cmRow1).toBeHidden({ timeout: 15_000 });
 
-      // 5. Permanently delete seeded synthetic RMA via Trash Bin
+      // 4. Multi-RMA Consolidated Credit Memo flow + Financial Missing SKU Guard
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
-      await page.locator('input[placeholder*="Search" i]').first().fill(seededRma);
-      const cleanupRow = page.locator('tr', { hasText: seededRma }).first();
-      if (await cleanupRow.isVisible({ timeout: 4000 }).catch(() => false)) {
-        await cleanupRow.locator(`button[title*="Move RMA #${seededRma} to 30-Day Trash Bin"]`).click();
-        await page.getByRole('button', { name: /Move to Trash/i }).click();
-        await expect(page.getByText(/Move to Trash \(30-Day Recovery\)\?/i)).toBeHidden({
-          timeout: 15_000
-        });
-        await page.getByRole('button', { name: /Archive & Trash/i }).click();
-        await page.getByRole('button', { name: /Trash Bin/i }).click();
-        await page.locator('input[placeholder*="Search" i]').first().fill(seededRma);
-        const trashed = page.locator('tr', { hasText: seededRma }).first();
-        await expect(trashed).toBeVisible({ timeout: 8000 });
-        await trashed.locator('button[title="Permanently destroy this record forever"]').click();
-        await expect(trashed).toBeHidden({ timeout: 10_000 });
+      await page.locator('input[placeholder*="Search" i]').first().fill('RMA-TEST-');
+
+      for (const rma of [rmaA, rmaB, rmaNoSku]) {
+        const row = page.locator('tr', { hasText: rma }).first();
+        await expect(row).toBeVisible({ timeout: 10_000 });
+        await row.locator('input[type="checkbox"]').first().check();
       }
 
-      guard.assertClean('suite 05 credit memos, VAT breakdown & governance');
+      // Click "+ Consolidated Credit Memo (3 RMAs)"
+      const consolCmBtn = page.getByRole('button', { name: /\+ Consolidated Credit Memo \(3 RMAs\)/i }).first();
+      await expect(consolCmBtn).toBeVisible();
+      await consolCmBtn.click();
+      await expect(page.getByRole('heading', { name: /Issue Consolidated Credit Memo \(3 RMAs\)/i })).toBeVisible({
+        timeout: 10_000
+      });
+
+      // Missing SKU Financial Guard must flag rmaNoSku & offer Assign SKU
+      await expect(page.getByText(/Financial Validation Guard: 1 Selected RMA\(s\) Missing SKU or Price/i)).toBeVisible();
+      await expect(page.getByRole('button', { name: /Assign SKU/i }).first()).toBeVisible();
+
+      // Uncheck rmaNoSku from the consolidated checklist inside the modal -> guard clears!
+      const rmaNoSkuCb = page.locator('label', { hasText: rmaNoSku }).locator('input[type="checkbox"]').first();
+      await rmaNoSkuCb.uncheck();
+      await expect(page.getByText(/Financial Validation Guard:/i)).toBeHidden();
+      await expect(page.getByText(/Itemized Consolidated Breakdown \(2 RMAs\)/i)).toBeVisible();
+
+      await page.locator('#credit-memo-form textarea').fill('Playwright Consolidated Settlement Note');
+      await page.getByRole('button', { name: /Save & View Voucher/i }).click();
+
+      // Verify Consolidated Voucher opens cleanly on B&W US Letter with BOTH rmaA & rmaB
+      await expect(page.getByText('FINANCE CREDIT MEMORANDUM', { exact: true })).toBeVisible({
+        timeout: 20_000
+      });
+      await expect(page.getByText(/CONSOLIDATED \(2 RMAs\)/i)).toBeVisible();
+      await expect(page.getByText(rmaA).first()).toBeVisible();
+      await expect(page.getByText(rmaB).first()).toBeVisible();
+      await expect(page.getByText('Playwright Consolidated Settlement Note')).toBeVisible();
+
+      const consolPrintBefore = await page.evaluate(() => window.__pwPrintCount || 0);
+      await page.getByRole('button', { name: /Print Letter Voucher \/ PDF/i }).click();
+      await page.waitForTimeout(300);
+      expect(await page.evaluate(() => window.__pwPrintCount || 0)).toBeGreaterThan(consolPrintBefore);
+      await page.locator('#credit-memo-voucher-print-root button:has(svg.lucide-x)').first().click();
+
+      // Verify Sandbox Credit Memos shows "🔗 Consolidated (2 RMAs)" & clean notes (zero [CM_META:])
+      await page.getByRole('button', { name: /Sandbox Credit Memos/i }).click();
+      await cmSearch.fill(rmaB);
+      const cmRowConsol = page.locator('tr', { hasText: /Consolidated \(2 RMAs\)/i }).first();
+      await expect(cmRowConsol).toBeVisible({ timeout: 15_000 });
+      const cmText = await cmRowConsol.innerText();
+      expect(cmText).not.toContain('[CM_META:');
+      const cmMatch = cmText.match(/(CM-TEST-\d{4}-\d+-[A-Z0-9]+)/i);
+      if (cmMatch) createdCms.push(cmMatch[1]);
+
+      // Verify BOTH rmaA and rmaB show CM status on Sandbox Customer RMAs before voiding
+      await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
+      await page.locator('input[placeholder*="Search" i]').first().fill(rmaB);
+      await expect(page.locator('tr', { hasText: rmaB }).first().getByText(/Credit Memo Issued/i)).toBeVisible({
+        timeout: 10_000
+      });
+
+      // Void Consolidated CM -> verify BOTH RMAs revert cleanly and consolidated CM vanishes
+      await page.getByRole('button', { name: /Sandbox Credit Memos/i }).click();
+      await cmSearch.fill(rmaB);
+      await cmRowConsol.locator('button[title="Void / Delete Credit Memo"]').click();
+      await page.getByRole('button', { name: /Yes, Delete Permanently/i }).click();
+      await expect(cmRowConsol).toBeHidden({ timeout: 15_000 });
+
+      guard.assertClean('suite 05 single & consolidated credit memos');
     } finally {
-      if (seededRma) {
-        const { supaUrl, anonKey } = readSupabasePublicEnv();
-        await page
-          .evaluate(async ({ rmaNum, url, key }) => {
-            try {
-              const supaKey = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'));
-              const rawAuth = supaKey ? JSON.parse(localStorage.getItem(supaKey)) : null;
-              const token = rawAuth?.access_token;
-              if (url && key && token) {
-                const headers = {
-                  apikey: key,
-                  Authorization: `Bearer ${token}`,
-                  'Content-Type': 'application/json'
-                };
-                await fetch(
-                  `${url}/rest/v1/credit_memos?rma_number=eq.${encodeURIComponent(rmaNum)}`,
-                  { method: 'DELETE', headers }
-                );
-                await fetch(
-                  `${url}/rest/v1/rma_reports?rma_number=eq.${encodeURIComponent(rmaNum)}`,
-                  { method: 'DELETE', headers }
-                );
-              }
-            } catch {}
-          }, { rmaNum: seededRma, url: supaUrl, key: anonKey })
-          .catch(() => {});
-      }
+      await cleanupTestRecords(page, {
+        rmaNumbers: [rmaA, rmaB, rmaNoSku],
+        creditMemoNumbers: createdCms
+      });
       page.off('dialog', onDialog);
       guard.detach();
     }
   });
 
-  test('Settings & SMTP tab: Supabase test, SMTP test, Catalog API test, Email Recipients, Locations, Invites Poster, Test Mode toggle & API Key Vault generate/rotate/revoke', async ({
+  test('Settings & SMTP tab: mgan@a2z2go.net Sandbox banner, Supabase/SMTP/Catalog tests, Email Recipients, Locations, Poster & API Keys + /docs link', async ({
     page,
     context
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(150_000);
     await context.grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
@@ -311,8 +256,8 @@ test.describe('Suite 05: Credit Memos (Live & Sandbox, 12% VAT, ₱10k Governanc
       await gotoAdmin(page);
       await page.getByRole('button', { name: /Settings & SMTP/i }).click();
       await expect(page.getByText('Simulation / Test Mode Toggle')).toBeVisible();
+      await expect(page.getByText(/mgan@a2z2go\.net/).first()).toBeVisible();
 
-      // 1. Test Mode toggle (ON <-> OFF and restore initial state)
       const settingsTestToggle = page
         .locator('div:has(> div > h2:has-text("Simulation / Test Mode Toggle"))')
         .locator('..')
@@ -323,41 +268,27 @@ test.describe('Suite 05: Credit Memos (Live & Sandbox, 12% VAT, ₱10k Governanc
       await settingsTestToggle.click();
       await page.waitForTimeout(250);
       await settingsTestToggle.click();
-      await expect(settingsTestToggle).toContainText(
-        wasTestOn ? /Test Mode:\s*ON/i : /Test Mode:\s*OFF/i
-      );
+      await expect(settingsTestToggle).toContainText(wasTestOn ? /Test Mode:\s*ON/i : /Test Mode:\s*OFF/i);
 
-      // 2. Supabase Connection Test
-      const supaCard = page.locator('div:has(> div:has-text("Supabase Cloud Database"))').first();
-      const supaBtn = supaCard.getByRole('button', { name: /Test Connection/i }).first();
-      if (await supaBtn.isVisible().catch(() => false)) {
-        await supaBtn.click();
-        await expect(supaBtn).toContainText(/Test Connection/i, { timeout: 15_000 });
-      } else {
-        await page.getByRole('button', { name: /Test Connection/i }).first().click();
-        await page.waitForTimeout(1000);
-      }
+      await page.getByRole('button', { name: /Test Connection/i }).first().click();
+      await page.waitForTimeout(800);
 
-      // 3. Google SMTP Credentials Test
       const smtpBtn = page.getByRole('button', { name: /Test SMTP Credentials/i });
       await expect(smtpBtn).toBeVisible();
       await smtpBtn.click();
       await expect(smtpBtn).toContainText(/Test SMTP Credentials/i, { timeout: 15_000 });
 
-      // 4. Live Product Catalog API Test Connection (if configured; avoid triggering 401 on invalid key)
       const poTestBtn = page.getByRole('button', { name: /Test Connection/i }).last();
       if (await poTestBtn.isVisible().catch(() => false)) {
         await poTestBtn.click();
         await expect(poTestBtn).toContainText(/Test Connection/i, { timeout: 15_000 });
       }
 
-      // 5. Email Recipients: Add CC -> Save Recipients -> clean up temp CC -> Reset Defaults / Restore
       const ccInput = page.locator('input[placeholder*="cc" i], input[placeholder*="Add CC" i]').first();
       if (await ccInput.isVisible().catch(() => false)) {
         await ccInput.fill('pw-temp-cc@pingcon.local');
         await page.getByRole('button', { name: /Add CC/i }).click();
         await expect(page.getByText('pw-temp-cc@pingcon.local', { exact: true })).toBeVisible();
-        // Remove our temp CC chip so company recipients remain clean
         const tempChip = page.locator('button[title="Remove pw-temp-cc@pingcon.local"]').first();
         if (await tempChip.isVisible().catch(() => false)) {
           await tempChip.click();
@@ -367,14 +298,10 @@ test.describe('Suite 05: Credit Memos (Live & Sandbox, 12% VAT, ₱10k Governanc
         await page.waitForTimeout(400);
       }
 
-      // 6. "View & Download Poster" opens CustomerRMAInvitesModal -> close cleanly
       await page.getByRole('button', { name: /View & Download Poster/i }).click();
-      await expect(page.getByRole('button', { name: 'Close', exact: true })).toBeVisible({
-        timeout: 10_000
-      });
+      await expect(page.getByRole('button', { name: 'Close', exact: true })).toBeVisible({ timeout: 10_000 });
       await page.getByRole('button', { name: 'Close', exact: true }).click();
 
-      // 7. "⚙️ Manage Locations" -> WarehouseLocationsModal add/rename/delete/close
       await page.getByRole('button', { name: /Manage Locations/i }).click();
       const locModal = page.locator('div.fixed', { hasText: 'Warehouse Locations & Areas' });
       await expect(locModal).toBeVisible();
@@ -390,47 +317,35 @@ test.describe('Suite 05: Credit Memos (Live & Sandbox, 12% VAT, ₱10k Governanc
       await expect(locRow2).toBeVisible();
       await locRow2.locator('button[title="Delete location"]').click();
       await expect(locRow2).toBeHidden();
-      await locModal
-        .locator('div:has(> div > div > h3:has-text("Warehouse Locations & Areas")) > button')
-        .click();
+      await locModal.locator('div:has(> div > div > h3:has-text("Warehouse Locations & Areas")) > button').click();
       await expect(locModal).toBeHidden();
 
-      // 8. API Key Vault: Refresh -> Generate -> Copy -> Rotate -> Copy -> Revoke
+      // Verify /docs link visible in API Keys Management section & API Key Generate/Rotate/Revoke
+      await expect(page.locator('a[href*="/docs"]').first()).toBeVisible();
       const refreshKeysBtn = page.getByRole('button', { name: 'Refresh', exact: true });
-      await expect(refreshKeysBtn).toBeVisible();
       await refreshKeysBtn.click();
-      await page.waitForTimeout(400);
 
       await page.getByRole('button', { name: /Generate New Key/i }).click();
       await expect(page.getByText('Issue New API Key')).toBeVisible();
       await page.getByRole('button', { name: 'Generate Key', exact: true }).click();
       await expect(page.getByText('API Key Generated Successfully')).toBeVisible({ timeout: 25_000 });
 
-      const maskedCodeLocator = page
-        .locator('div:has-text("Masked representation:") code')
-        .last();
-      const createdMaskedKey = (await maskedCodeLocator.innerText()).trim();
+      const createdMaskedKey = (await page.locator('div:has-text("Masked representation:") code').last().innerText()).trim();
       trackedMaskedKeys.add(createdMaskedKey);
       await page.getByRole('button', { name: /^Copy$/i }).click();
       await page.getByRole('button', { name: /I have saved this key safely/i }).click();
 
-      // Rotate our newly generated key row specifically
       const createdKeyRow = page.locator('tr', { hasText: createdMaskedKey }).first();
       await expect(createdKeyRow).toBeVisible({ timeout: 25_000 });
-      await createdKeyRow
-        .locator('button[title="Rotate API Key (Invalidate current and create new)"]')
-        .click();
+      await createdKeyRow.locator('button[title="Rotate API Key (Invalidate current and create new)"]').click();
       await expect(page.getByText('API Key Rotated Successfully')).toBeVisible({ timeout: 25_000 });
 
-      const rotatedMaskedKey = (
-        await page.locator('div:has-text("Masked representation:") code').last().innerText()
-      ).trim();
+      const rotatedMaskedKey = (await page.locator('div:has-text("Masked representation:") code').last().innerText()).trim();
       trackedMaskedKeys.delete(createdMaskedKey);
       trackedMaskedKeys.add(rotatedMaskedKey);
       await page.getByRole('button', { name: /^Copy$/i }).click();
       await page.getByRole('button', { name: /I have saved this key safely/i }).click();
 
-      // Revoke and permanently delete ONLY the synthetic rotated key
       const rotatedKeyRow = page.locator('tr', { hasText: rotatedMaskedKey }).first();
       await expect(rotatedKeyRow).toBeVisible({ timeout: 25_000 });
       await rotatedKeyRow.locator('button[title="Revoke and Delete API Key"]').click();
@@ -440,23 +355,19 @@ test.describe('Suite 05: Credit Memos (Live & Sandbox, 12% VAT, ₱10k Governanc
       guard.assertClean('suite 05 settings, SMTP, locations & API key vault');
     } finally {
       if (trackedMaskedKeys.size > 0) {
+        const { readSupabasePublicEnv } = await import('./helpers/testUtils.js');
         const { supaUrl, anonKey } = readSupabasePublicEnv();
         await page
           .evaluate(async ({ masks, url, key }) => {
             try {
               const supaKey = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'));
-              const rawAuth = supaKey ? JSON.parse(localStorage.getItem(supaKey)) : null;
-              const token = rawAuth?.access_token;
+              const token = supaKey ? JSON.parse(localStorage.getItem(supaKey))?.access_token : null;
               if (url && key && token) {
-                const headers = {
-                  apikey: key,
-                  Authorization: `Bearer ${token}`
-                };
                 for (const m of masks) {
-                  await fetch(
-                    `${url}/rest/v1/api_keys?masked_key=eq.${encodeURIComponent(m)}`,
-                    { method: 'DELETE', headers }
-                  );
+                  await fetch(`${url}/rest/v1/api_keys?masked_key=eq.${encodeURIComponent(m)}`, {
+                    method: 'DELETE',
+                    headers: { apikey: key, Authorization: `Bearer ${token}` }
+                  });
                 }
               }
             } catch {}

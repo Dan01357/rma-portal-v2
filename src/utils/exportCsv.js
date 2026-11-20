@@ -3,7 +3,7 @@
  * Formats financial and warehouse records into genuine OOXML (.xlsx) spreadsheets
  * with bold frozen headers, clean column widths, numeric/currency cells, and plain-text IDs/barcodes.
  */
-import { normalizeWarehouseLocation, isTestRecord, formatDateYmd, formatDateTimeYmdHm } from './rmaHelpers';
+import { normalizeWarehouseLocation, isTestRecord, formatDateYmd, formatDateTimeYmdHm, stripCreditMemoMetaTag } from './rmaHelpers';
 import { downloadTableXlsx } from './exportXlsx';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -423,7 +423,7 @@ export function exportCreditMemosToXlsx(memos, filename = null, isTestMode = und
       cm.credit_issued_by || '',
       cm.customer_ae_name || '',
       cm.customer_ae_email || '',
-      cm.notes || ''
+      stripCreditMemoMetaTag(cm.clean_notes ?? cm.notes ?? '')
     ];
   });
 

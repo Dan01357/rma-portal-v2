@@ -15,6 +15,8 @@ import {
   getItemNeedsReorder,
   formatFourChoiceOutcome,
   computeItemPiecesAndValue,
+  formatPeso,
+  getConsolidatedPickupItems,
   isTestRecord,
   formatDateYmd
 } from '../utils/rmaHelpers';
@@ -207,7 +209,8 @@ function extractExistingClaimIdFromReport(report) {
 export default function SimpleSupplierRtvWizardModal({
   isOpen,
   onClose,
-  report,
+  report = null,
+  reports = [],
   allReports = [],
   catalogProducts = [],
   activeUser = null,
@@ -216,11 +219,30 @@ export default function SimpleSupplierRtvWizardModal({
   onOpenFullAdminModal,
   initialMode = 'wizard'
 }) {
+  const rawBatchReports = useMemo(() => {
+    const base = Array.isArray(reports) && reports.length > 0 ? reports : (report ? [report] : []);
+    const seen = new Set();
+    return base.filter((r) => {
+      if (!r) return false;
+      const k = String(r.rma_number || r.rmaNumber || r.id || '');
+      if (!k || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }, [reports, report]);
+
+  const primaryInputReport = rawBatchReports[0] || null;
+  const batchKey = useMemo(
+    () => rawBatchReports.map((r) => r.id || r.rma_number).join('|'),
+    [rawBatchReports]
+  );
+
   const [step, setStep] = useState('choose'); // 'choose' | 'pickup' | 'done'
   const [selectedOption, setSelectedOption] = useState(null);
   const [supplierName, setSupplierName] = useState('');
   const [supplierEmailTo, setSupplierEmailTo] = useState('');
   const [supplierEmailCc, setSupplierEmailCc] = useState('');
+  const [confirmUnifySupplier, setConfirmUnifySupplier] = useState(false);
   const [scrapNeedsReorder, setScrapNeedsReorder] = useState(true);
   const [driverName, setDriverName] = useState('');
   const [driverLicenseNo, setDriverLicenseNo] = useState('');
@@ -237,6 +259,7 @@ export default function SimpleSupplierRtvWizardModal({
   const [uploadProgress, setUploadProgress] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [savedReport, setSavedReport] = useState(null);
+  const [savedBatchReports, setSavedBatchReports] = useState(null);
   const [showA4Form, setShowA4Form] = useState(false);
 
   // Known suppliers list for autocomplete datalist
@@ -261,32 +284,43 @@ export default function SimpleSupplierRtvWizardModal({
     objectUrlsRef.current = [];
   };
 
+  // Keep freshest snapshots in refs so background report/catalog refreshes never wipe active user selections mid-flow
+  const allReportsRef = useRef(allReports);
+  allReportsRef.current = allReports;
+  const catalogProductsRef = useRef(catalogProducts);
+  catalogProductsRef.current = catalogProducts;
+  const rawBatchReportsRef = useRef(rawBatchReports);
+  rawBatchReportsRef.current = rawBatchReports;
+  const primaryInputReportRef = useRef(primaryInputReport);
+  primaryInputReportRef.current = primaryInputReport;
+
   useEffect(() => {
-    if (!isOpen || !report) return;
+    const targetReport = primaryInputReportRef.current;
+    if (!isOpen || !targetReport) return;
     let isMounted = true;
     clearObjectUrls();
 
-    const meta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
-      ? report.ai_document_metadata
+    const meta = (targetReport.ai_document_metadata && typeof targetReport.ai_document_metadata === 'object')
+      ? targetReport.ai_document_metadata
       : {};
     const pickup = (meta.supplier_pickup && typeof meta.supplier_pickup === 'object')
       ? meta.supplier_pickup
       : {};
-    const reportIsSupplier = report.rma_type === 'supplier_outbound';
+    const reportIsSupplier = targetReport.rma_type === 'supplier_outbound';
 
-    const bc = String(report.barcode || '').trim();
-    const sku = String(report.code || report.sku || '').trim();
-    const matchedProd = (catalogProducts || []).find((p) => {
+    const bc = String(targetReport.barcode || '').trim();
+    const sku = String(targetReport.code || targetReport.sku || '').trim();
+    const matchedProd = (catalogProductsRef.current || []).find((p) => {
       const pBc = String(p.barcode || '').trim();
       const pCode = String(p.code || '').trim();
       const pSku = String(p.sku || '').trim();
       return (bc && pBc === bc) || (sku && (pCode === sku || pSku === sku));
     });
 
-    const manifestFirstItem = Array.isArray(report.items) && report.items.length > 0 ? report.items[0] : null;
-    const relatedReport = (allReports || []).find((r) => {
-      if (!r || (report.id && r.id === report.id)) return false;
-      const sameParent = report.id && r.parent_rma_id && String(r.parent_rma_id) === String(report.id);
+    const manifestFirstItem = Array.isArray(targetReport.items) && targetReport.items.length > 0 ? targetReport.items[0] : null;
+    const relatedReport = (allReportsRef.current || []).find((r) => {
+      if (!r || (targetReport.id && r.id === targetReport.id)) return false;
+      const sameParent = targetReport.id && r.parent_rma_id && String(r.parent_rma_id) === String(targetReport.id);
       const sameBc = bc && String(r.barcode || '').trim() === bc;
       const sameSku = sku && (String(r.code || '').trim() === sku || String(r.sku || '').trim() === sku);
       return (sameParent || sameBc || sameSku) && !isPendingSupplierName(r.supplier_name || r.supplierName || r.supplier);
@@ -294,9 +328,9 @@ export default function SimpleSupplierRtvWizardModal({
 
     const supplierCandidates = [
       pickup.supplier_name,
-      report.supplier_name,
-      report.supplierName,
-      report.supplier,
+      targetReport.supplier_name,
+      targetReport.supplierName,
+      targetReport.supplier,
       matchedProd?.supplier_name,
       matchedProd?.supplierName,
       matchedProd?.supplier,
@@ -309,34 +343,39 @@ export default function SimpleSupplierRtvWizardModal({
     setSupplierName(String(initialSupplier).trim());
     setSupplierEmailTo(pickup.supplier_email_to || '');
     setSupplierEmailCc(pickup.supplier_email_cc || '');
+    setConfirmUnifySupplier(false);
 
-    const matchedOptId = resolveSavedOptionId(report, reportIsSupplier);
+    const matchedOptId = resolveSavedOptionId(targetReport, reportIsSupplier);
     setSelectedOption(matchedOptId);
-    setScrapNeedsReorder(getItemNeedsReorder(report));
+    setScrapNeedsReorder(getItemNeedsReorder(targetReport));
 
-    setDriverName(pickup.driver_name || report.driver_name || '');
+    setDriverName(pickup.driver_name || targetReport.driver_name || '');
     setDriverLicenseNo(pickup.driver_license_no || '');
     setTruckPlate(pickup.truck_plate || '');
 
-    const savedPhotos = pickup.photos || {};
+    const activeBatchSnapshot = rawBatchReportsRef.current || [];
+    const hydratedPhotos = activeBatchSnapshot.find((r) => r?.ai_document_metadata?.supplier_pickup?.photos)?.ai_document_metadata?.supplier_pickup?.photos || pickup.photos || {};
     const hydratedSlots = {};
     PICKUP_PHOTO_SLOTS.forEach((slot) => {
-      const url = savedPhotos[slot.key] || '';
+      const url = hydratedPhotos[slot.key] || '';
       if (url) {
         hydratedSlots[slot.key] = { file: null, previewUrl: url, existingUrl: url };
       }
     });
     setPhotoSlots(hydratedSlots);
 
-    const directClaimId = extractExistingClaimIdFromReport(report);
+    const directClaimId = activeBatchSnapshot
+      .map((r) => extractExistingClaimIdFromReport(r))
+      .find(Boolean) || null;
     setExistingClaimNumber(directClaimId);
 
     // Also look up saved claims store so an existing RTV- ID is never duplicated on edit
-    if (!directClaimId && report.rma_number) {
+    const rmaNumsToCheck = activeBatchSnapshot.map((r) => r.rma_number).filter(Boolean);
+    if (!directClaimId && rmaNumsToCheck.length > 0) {
       supplierClaimService.getClaims().then((claims) => {
         if (!isMounted || !Array.isArray(claims)) return;
         const found = claims.find((c) =>
-          Array.isArray(c.items) && c.items.some((it) => it.rma_number === report.rma_number)
+          Array.isArray(c.items) && c.items.some((it) => rmaNumsToCheck.includes(it.rma_number))
         );
         const foundNum = found?.claimNumber || found?.claim_number || null;
         if (foundNum) {
@@ -349,11 +388,12 @@ export default function SimpleSupplierRtvWizardModal({
     setOcrNotice(null);
     setUploadProgress('');
     setSavedReport(null);
+    setSavedBatchReports(null);
 
-    const isPickedUpNow = Boolean(
-      pickup.picked_up_at ||
-      String(report.status || '').toLowerCase() === 'picked_up'
-    );
+    const isPickedUpNow = activeBatchSnapshot.some((r) => Boolean(
+      r?.ai_document_metadata?.supplier_pickup?.picked_up_at ||
+      String(r?.status || '').toLowerCase() === 'picked_up'
+    ));
 
     if (initialMode === 'pickup_form' && isPickedUpNow) {
       setShowA4Form(true);
@@ -366,24 +406,63 @@ export default function SimpleSupplierRtvWizardModal({
     return () => {
       isMounted = false;
     };
-  }, [isOpen, report?.id, report?.rma_number, initialMode, catalogProducts, allReports]);
+  }, [isOpen, batchKey, initialMode]);
 
   useEffect(() => () => clearObjectUrls(), []);
 
-  if (!isOpen || !report) return null;
+  const distinctSuppliersInBatch = useMemo(() => {
+    const map = new Map();
+    rawBatchReports.forEach((r) => {
+      const cand = [
+        r?.ai_document_metadata?.supplier_pickup?.supplier_name,
+        r?.supplier_name,
+        r?.supplierName,
+        r?.supplier
+      ].find((s) => !isPendingSupplierName(s));
+      if (cand) {
+        const clean = String(cand).trim();
+        const k = clean.toLowerCase();
+        if (!map.has(k)) map.set(k, clean);
+      }
+    });
+    return Array.from(map.values());
+  }, [rawBatchReports]);
 
-  const activeReport = savedReport || report;
+  if (!isOpen || !primaryInputReport) return null;
+
+  const activeBatchReports = (Array.isArray(savedBatchReports) && savedBatchReports.length > 0)
+    ? savedBatchReports
+    : rawBatchReports;
+  const activeReport = savedReport || activeBatchReports[0];
+  const isConsolidatedBatch = activeBatchReports.length > 1;
+  const batchRmaNumbers = activeBatchReports.map((r) => r.rma_number || r.rmaNumber || String(r.id || '')).filter(Boolean);
   const rmaNumber = activeReport.rma_number || activeReport.rmaNumber || activeReport.id || 'N/A';
-  const isTest = isTestRecord(activeReport);
+  const isTest = activeBatchReports.some((r) => isTestRecord(r));
   const isSupplierStream = activeReport.rma_type === 'supplier_outbound';
   const optionsList = getFourOptions(isSupplierStream);
+
+  const hasMultipleSuppliersConflict = isConsolidatedBatch && distinctSuppliersInBatch.length > 1;
+
+  const batchSummary = getConsolidatedPickupItems({
+    report: activeReport,
+    reports: activeBatchReports,
+    allReports,
+    catalogProducts,
+    combineIdentical: false
+  });
+  const grandBatchPieces = batchSummary.items.reduce((s, it) => s + it.totalPieces, 0);
+  const grandBatchValue = batchSummary.items.reduce((s, it) => s + it.lineTotal, 0);
 
   const manifestItems = getReportManifestItems(activeReport, allReports);
   const isManifest = manifestItems.length > 1 || Number(activeReport.total_items) > 1;
   const currentOutcome = formatFourChoiceOutcome(activeReport);
   const isAlreadyPickedUp = currentOutcome.isPickedUp;
   const supplierMissing = isPendingSupplierName(supplierName);
-  const effectiveClaimNumber = existingClaimNumber || currentOutcome.claimNumber || extractExistingClaimIdFromReport(activeReport);
+  const effectiveClaimNumber =
+    existingClaimNumber ||
+    currentOutcome.claimNumber ||
+    activeBatchReports.map((r) => extractExistingClaimIdFromReport(r)).find(Boolean) ||
+    null;
 
   const actorName =
     activeUser?.user_name ||
@@ -451,6 +530,13 @@ export default function SimpleSupplierRtvWizardModal({
       return;
     }
 
+    if (opt.needsPickupForm && hasMultipleSuppliersConflict && !confirmUnifySupplier) {
+      setErrorMsg(
+        `Single-Supplier Guard: Bundled RMAs come from different suppliers (${distinctSuppliersInBatch.join(', ')}). Check "Unify supplier across all bundled RMAs" below or go back and filter to one supplier.`
+      );
+      return;
+    }
+
     // If Debit Claim or Replacement and staff chose "Driver Is Here Now" / "Edit Pickup"
     if (opt.needsPickupForm && !waitOnly) {
       setSelectedOption(optionId);
@@ -462,7 +548,11 @@ export default function SimpleSupplierRtvWizardModal({
     const nowIso = new Date().toISOString();
 
     setIsSaving(true);
-    setUploadProgress('Saving your decision...');
+    setUploadProgress(
+      isConsolidatedBatch
+        ? `Updating ${activeBatchReports.length} bundled RMAs...`
+        : 'Saving your decision...'
+    );
     try {
       const nextStatus = opt.needsPickupForm
         ? (isSupplierStream ? 'vendor_claimed' : 'under_inspection')
@@ -475,60 +565,73 @@ export default function SimpleSupplierRtvWizardModal({
         nextLocation = 'Good Stock Area';
       }
 
-      const existingMeta = (activeReport.ai_document_metadata && typeof activeReport.ai_document_metadata === 'object')
-        ? activeReport.ai_document_metadata
-        : {};
-      const existingPickup = (existingMeta.supplier_pickup && typeof existingMeta.supplier_pickup === 'object')
-        ? existingMeta.supplier_pickup
-        : {};
-
-      // Preserve saved emails / photos / claim_number if present, while clearing picked_up_at when saving Waiting / Scrap / Restock
-      const updatedPickup = (Object.keys(existingPickup).length > 0 || supplierEmailTo.trim() || supplierEmailCc.trim())
-        ? {
-            ...existingPickup,
-            disposition: optionId,
-            disposition_label: opt.title,
-            supplier_name: effectiveSupplier,
-            supplier_email_to: supplierEmailTo.trim(),
-            supplier_email_cc: supplierEmailCc.trim(),
-            picked_up_at: null,
-            updated_at: nowIso
-          }
-        : undefined;
-
-      const metadataPatch = {
-        simple_rtv_disposition: optionId,
-        simple_rtv_label: opt.title,
-        simple_rtv_updated_at: nowIso,
-        simple_rtv_updated_by: actorName,
-        needs_reorder: optionId === 'scrap' ? Boolean(scrapNeedsReorder) : false
-      };
-      if (updatedPickup) {
-        metadataPatch.supplier_pickup = updatedPickup;
-      }
-
       const auditDetail = optionId === 'scrap'
         ? ` [Re-Order: ${scrapNeedsReorder ? 'YES' : 'NO'}]`
         : (waitOnly ? ' (waiting for driver)' : '');
 
-      const updated = await catalogService.saveSimpleSupplierRtvDisposition(activeReport, {
-        disposition: optionId,
-        status: nextStatus,
-        warehouse_location: nextLocation,
-        supplier_name: effectiveSupplier,
-        actorName,
-        clearWorkflowResolution: true,
-        auditAction: 'SIMPLE_4CHOICE_DECISION',
-        auditNote: `Staff selected "${opt.title}"${auditDetail}`,
-        metadataPatch
-      });
+      const updatedBatchList = [];
+      for (let i = 0; i < activeBatchReports.length; i++) {
+        const rep = activeBatchReports[i];
+        if (isConsolidatedBatch) {
+          setUploadProgress(`Updating RMA ${i + 1} of ${activeBatchReports.length} (${rep.rma_number})...`);
+        }
+        const repMeta = (rep.ai_document_metadata && typeof rep.ai_document_metadata === 'object')
+          ? rep.ai_document_metadata
+          : {};
+        const repPickup = (repMeta.supplier_pickup && typeof repMeta.supplier_pickup === 'object')
+          ? repMeta.supplier_pickup
+          : {};
+
+        const updatedPickup = (Object.keys(repPickup).length > 0 || supplierEmailTo.trim() || supplierEmailCc.trim() || isConsolidatedBatch)
+          ? {
+              ...repPickup,
+              disposition: optionId,
+              disposition_label: opt.title,
+              supplier_name: effectiveSupplier,
+              supplier_email_to: supplierEmailTo.trim(),
+              supplier_email_cc: supplierEmailCc.trim(),
+              ...(isConsolidatedBatch ? { consolidated_rma_numbers: batchRmaNumbers } : {}),
+              picked_up_at: null,
+              updated_at: nowIso
+            }
+          : undefined;
+
+        const metadataPatch = {
+          simple_rtv_disposition: optionId,
+          simple_rtv_label: opt.title,
+          simple_rtv_updated_at: nowIso,
+          simple_rtv_updated_by: actorName,
+          needs_reorder: optionId === 'scrap' ? Boolean(scrapNeedsReorder) : false
+        };
+        if (updatedPickup) {
+          metadataPatch.supplier_pickup = updatedPickup;
+        }
+
+        const updated = await catalogService.saveSimpleSupplierRtvDisposition(rep, {
+          disposition: optionId,
+          status: nextStatus,
+          warehouse_location: nextLocation,
+          supplier_name: effectiveSupplier,
+          actorName,
+          clearWorkflowResolution: true,
+          auditAction: isConsolidatedBatch ? 'CONSOLIDATED_4CHOICE_DECISION' : 'SIMPLE_4CHOICE_DECISION',
+          auditNote: `Staff selected "${opt.title}"${auditDetail}${isConsolidatedBatch ? ` [Batch of ${activeBatchReports.length} RMAs]` : ''}`,
+          metadataPatch
+        });
+        updatedBatchList.push(updated);
+      }
 
       if (optionId === 'scrap' || optionId === 'restock_good') {
-        setUploadProgress('Sending lifecycle email notification...');
+        setUploadProgress(
+          isConsolidatedBatch
+            ? `Sending ONE consolidated email for ${updatedBatchList.length} RMAs...`
+            : 'Sending lifecycle email notification...'
+        );
         try {
           await notificationService.sendRmaLifecycleNotification({
             eventType: optionId === 'scrap' ? 'scrapped' : 'restocked',
-            report: updated,
+            report: updatedBatchList[0],
+            reports: updatedBatchList,
             allReports,
             catalogProducts,
             actorName,
@@ -539,9 +642,10 @@ export default function SimpleSupplierRtvWizardModal({
         }
       }
 
-      setSavedReport(updated);
+      setSavedReport(updatedBatchList[0]);
+      setSavedBatchReports(updatedBatchList);
       setStep('done');
-      onSuccess?.(updated);
+      onSuccess?.(updatedBatchList.length > 1 ? updatedBatchList : updatedBatchList[0]);
     } catch (err) {
       console.error('Failed saving 4-Choice decision:', err);
       setErrorMsg(err?.message || 'Could not save choice. Please try again.');
@@ -556,6 +660,13 @@ export default function SimpleSupplierRtvWizardModal({
     const cleanSupplier = supplierName.trim();
     if (!cleanSupplier) {
       setErrorMsg('Please type or select the Supplier Company Name.');
+      return;
+    }
+
+    if (hasMultipleSuppliersConflict && !confirmUnifySupplier) {
+      setErrorMsg(
+        `Single-Supplier Guard: Bundled RMAs come from different suppliers (${distinctSuppliersInBatch.join(', ')}). Check "Unify supplier across all bundled RMAs" or go back and filter to one supplier.`
+      );
       return;
     }
 
@@ -628,16 +739,19 @@ export default function SimpleSupplierRtvWizardModal({
         ? existingMeta.supplier_pickup
         : {};
 
-      // Reuse existing RTV- claim ID if already present; only generate a new one for a new Supplier Debit Claim
+      // Reuse existing RTV- claim ID if present across any bundled RMA; only generate ONE shared ID
       let resolvedClaimNumber = effectiveClaimNumber || existingPickup.claim_number || null;
-      const shouldPersistSupplierClaim = isSupplierStream && activeOpt.id === 'supplier_credit';
+      const shouldPersistSupplierClaim =
+        (isSupplierStream && activeOpt.id === 'supplier_credit') ||
+        isConsolidatedBatch ||
+        activeOpt.id === 'supplier_exchange';
 
       let existingClaimsList = null;
       if (shouldPersistSupplierClaim && !resolvedClaimNumber) {
         setUploadProgress('Checking existing claim records...');
         existingClaimsList = await supplierClaimService.getClaims();
         const existingInStore = (existingClaimsList || []).find((c) =>
-          Array.isArray(c.items) && c.items.some((it) => it.rma_number === rmaNumber)
+          Array.isArray(c.items) && c.items.some((it) => batchRmaNumbers.includes(it.rma_number))
         );
         if (existingInStore) {
           resolvedClaimNumber = existingInStore.claimNumber || existingInStore.claim_number;
@@ -650,59 +764,90 @@ export default function SimpleSupplierRtvWizardModal({
         setExistingClaimNumber(resolvedClaimNumber);
       }
 
-      setUploadProgress('Saving pickup verification & generating Letter form...');
+      setUploadProgress(
+        isConsolidatedBatch
+          ? `Synchronizing ${activeBatchReports.length} bundled RMAs (${resolvedClaimNumber || rmaNumber})...`
+          : 'Saving pickup verification & generating Letter form...'
+      );
       const nowIso = new Date().toISOString();
       const pickedUpAtIso = existingPickup.picked_up_at || nowIso;
 
-      const pickupPayload = {
-        ...existingPickup,
-        disposition: activeOpt.id,
-        disposition_label: activeOpt.title,
-        claim_number: resolvedClaimNumber || null,
-        supplier_name: cleanSupplier,
-        supplier_email_to: cleanEmailTo,
-        supplier_email_cc: cleanEmailCc,
-        driver_name: driverName.trim(),
-        driver_license_no: driverLicenseNo.trim(),
-        truck_plate: truckPlate.trim().toUpperCase(),
-        photos: uploadedUrlMap,
-        drive_folder_id: currentFolderId || null,
-        drive_folder_url: currentFolderUrl || null,
-        picked_up_at: pickedUpAtIso,
-        updated_at: nowIso,
-        processed_by: actorName
-      };
+      const updatedBatchList = [];
+      for (let idx = 0; idx < activeBatchReports.length; idx++) {
+        const rep = activeBatchReports[idx];
+        const repMeta = (rep.ai_document_metadata && typeof rep.ai_document_metadata === 'object')
+          ? rep.ai_document_metadata
+          : {};
+        const repPickup = (repMeta.supplier_pickup && typeof repMeta.supplier_pickup === 'object')
+          ? repMeta.supplier_pickup
+          : {};
 
-      const nextStatus = isSupplierStream ? 'vendor_claimed' : 'under_inspection';
-      const nextLocation = isSupplierStream ? 'Supplier Return Area (RTV)' : 'Customer Return Area';
+        const pickupPayload = {
+          ...repPickup,
+          disposition: activeOpt.id,
+          disposition_label: activeOpt.title,
+          claim_number: resolvedClaimNumber || null,
+          consolidated_rma_numbers: batchRmaNumbers,
+          supplier_name: cleanSupplier,
+          supplier_email_to: cleanEmailTo,
+          supplier_email_cc: cleanEmailCc,
+          driver_name: driverName.trim(),
+          driver_license_no: driverLicenseNo.trim(),
+          truck_plate: truckPlate.trim().toUpperCase(),
+          photos: uploadedUrlMap,
+          drive_folder_id: currentFolderId || null,
+          drive_folder_url: currentFolderUrl || null,
+          picked_up_at: repPickup.picked_up_at || pickedUpAtIso,
+          updated_at: nowIso,
+          processed_by: actorName
+        };
 
-      let updated = await catalogService.saveSimpleSupplierRtvDisposition(activeReport, {
-        disposition: activeOpt.id,
-        status: nextStatus,
-        warehouse_location: nextLocation,
-        supplier_name: cleanSupplier,
-        actorName,
-        clearWorkflowResolution: true,
-        google_drive_folder_id: currentFolderId || null,
-        google_drive_folder_url: currentFolderUrl || null,
-        appendPhotoUrls: newPhotoUrls,
-        auditAction: existingPickup.picked_up_at ? 'PICKUP_DETAILS_UPDATED' : 'SUPPLIER_DRIVER_PICKUP_VERIFIED',
-        auditNote: `${existingPickup.picked_up_at ? 'Updated' : 'Picked up by'} ${driverName.trim()} (Plate ${truckPlate.trim().toUpperCase()}) for "${activeOpt.title}"${resolvedClaimNumber ? ` [${resolvedClaimNumber}]` : ''} with 5 Drive photos archived.`,
-        metadataPatch: {
-          simple_rtv_disposition: activeOpt.id,
-          simple_rtv_label: activeOpt.title,
-          simple_rtv_updated_at: pickedUpAtIso,
-          simple_rtv_updated_by: actorName,
-          needs_reorder: false,
-          supplier_pickup: pickupPayload
-        }
-      });
+        const nextLocation = isSupplierStream ? 'Supplier Return Area (RTV)' : 'Customer Return Area';
+        const updatedRep = await catalogService.saveSimpleSupplierRtvDisposition(rep, {
+          disposition: activeOpt.id,
+          status: 'picked_up',
+          warehouse_location: nextLocation,
+          supplier_name: cleanSupplier,
+          actorName,
+          clearWorkflowResolution: true,
+          google_drive_folder_id: currentFolderId || null,
+          google_drive_folder_url: currentFolderUrl || null,
+          appendPhotoUrls: newPhotoUrls,
+          auditAction: repPickup.picked_up_at ? 'PICKUP_DETAILS_UPDATED' : 'SUPPLIER_DRIVER_PICKUP_VERIFIED',
+          auditNote: `${repPickup.picked_up_at ? 'Updated' : 'Picked up by'} ${driverName.trim()} (Plate ${truckPlate.trim().toUpperCase()}) for "${activeOpt.title}"${resolvedClaimNumber ? ` [${resolvedClaimNumber}]` : ''}${isConsolidatedBatch ? ` (Consolidated Batch: ${batchRmaNumbers.length} RMAs)` : ''} with 5 Drive photos archived.`,
+          metadataPatch: {
+            simple_rtv_disposition: activeOpt.id,
+            simple_rtv_label: activeOpt.title,
+            simple_rtv_updated_at: pickupPayload.picked_up_at,
+            simple_rtv_updated_by: actorName,
+            needs_reorder: false,
+            supplier_pickup: pickupPayload
+          }
+        });
+        updatedBatchList.push(updatedRep);
+      }
 
-      // Keep Supplier Debit Claim record synchronized without creating duplicate RTV- IDs or overwriting 4-Choice disposition
+      // Persist ONE consolidated Claim record across all bundled RMAs (without creating duplicate RTV- IDs)
       if ((shouldPersistSupplierClaim || resolvedClaimNumber) && isSupplierStream && resolvedClaimNumber) {
-        const calcItems = manifestItems.length > 0 ? manifestItems : [updated];
-        const totalUnits = calcItems.reduce((sum, it) => sum + (Number(it.quantity || it.qty) || 1), 0);
-        const totalClaimAmt = calcItems.reduce((sum, it) => {
+        const claimItems = [];
+        updatedBatchList.forEach((rep) => {
+          const repRma = rep.rma_number || rep.rmaNumber;
+          const repChildren = getReportManifestItems(rep, allReports);
+          const lines = repChildren.length > 0 ? repChildren : [rep];
+          lines.forEach((it) => {
+            const calc = computeItemPiecesAndValue(it, catalogProducts);
+            claimItems.push({
+              ...it,
+              rma_number: repRma,
+              supplier_name: cleanSupplier,
+              quantity: calc.rawQty || Number(it.quantity) || 1,
+              price: calc.recordedUnitPrice,
+              price_with_vat: calc.recordedUnitPrice
+            });
+          });
+        });
+        const totalUnits = claimItems.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
+        const totalClaimAmt = claimItems.reduce((sum, it) => {
           const calc = computeItemPiecesAndValue(it, catalogProducts);
           return sum + calc.lineTotal;
         }, 0);
@@ -711,42 +856,41 @@ export default function SimpleSupplierRtvWizardModal({
           claimNumber: resolvedClaimNumber,
           supplierName: cleanSupplier,
           generatedBy: actorName,
-          items: calcItems.map((it) => {
-            const calc = computeItemPiecesAndValue(it, catalogProducts);
-            return {
-              ...it,
-              rma_number: rmaNumber,
-              supplier_name: cleanSupplier,
-              quantity: calc.rawQty || Number(it.quantity) || 1,
-              price: calc.recordedUnitPrice,
-              price_with_vat: calc.recordedUnitPrice
-            };
-          }),
+          items: claimItems,
           totalQuantity: totalUnits,
           totalClaimAmount: totalClaimAmt,
-          notes: isTest ? '[TEST_MODE] Sandbox RTV Claim' : '',
+          notes: isTest
+            ? `[TEST_MODE] Sandbox${isConsolidatedBatch ? ' Consolidated' : ''} RTV Claim (${batchRmaNumbers.length} RMAs)`
+            : (isConsolidatedBatch ? `Consolidated Claim (${batchRmaNumbers.length} RMAs): ${batchRmaNumbers.join(', ')}` : ''),
           isTest,
           preserveReportFields: true
         });
 
         const tag = `[RTV: ${resolvedClaimNumber}]`;
-        const curNotes = String(updated?.notes || '');
-        if (!curNotes.includes(tag)) {
-          updated = {
-            ...updated,
-            notes: curNotes ? `${curNotes}\n${tag}` : tag
-          };
+        for (let i = 0; i < updatedBatchList.length; i++) {
+          const curNotes = String(updatedBatchList[i]?.notes || '');
+          if (!curNotes.includes(tag)) {
+            updatedBatchList[i] = {
+              ...updatedBatchList[i],
+              notes: curNotes ? `${curNotes}\n${tag}` : tag
+            };
+          }
         }
       }
 
       const isExchangeOutcome =
         activeOpt.id === 'supplier_exchange' ||
         activeOpt.id === 'customer_exchange';
-      setUploadProgress('Generating PDF form & dispatching email notification...');
+      setUploadProgress(
+        isConsolidatedBatch
+          ? `Generating consolidated PDF & emailing for ${updatedBatchList.length} RMAs...`
+          : 'Generating PDF form & dispatching email notification...'
+      );
       try {
         await notificationService.sendRmaLifecycleNotification({
           eventType: isExchangeOutcome ? 'pickup_replacement' : 'pickup_debit_claim',
-          report: updated,
+          report: updatedBatchList[0],
+          reports: updatedBatchList,
           allReports,
           catalogProducts,
           actorName,
@@ -756,10 +900,11 @@ export default function SimpleSupplierRtvWizardModal({
         console.warn('Non-blocking error sending pickup notification email:', mailErr);
       }
 
-      setSavedReport(updated);
+      setSavedReport(updatedBatchList[0]);
+      setSavedBatchReports(updatedBatchList);
       setStep('done');
       setShowA4Form(true);
-      onSuccess?.(updated);
+      onSuccess?.(updatedBatchList.length > 1 ? updatedBatchList : updatedBatchList[0]);
     } catch (err) {
       console.error('Pickup verification failed:', err);
       setErrorMsg(err?.message || 'Failed to upload photos or save pickup verification. Please try again.');
@@ -785,7 +930,7 @@ export default function SimpleSupplierRtvWizardModal({
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-mono font-black text-base sm:text-lg tracking-tight">
-                  {rmaNumber}
+                  {isConsolidatedBatch ? `Consolidated Batch (${activeBatchReports.length} RMAs)` : rmaNumber}
                 </span>
                 {isTest && (
                   <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider">
@@ -825,6 +970,63 @@ export default function SimpleSupplierRtvWizardModal({
 
           {/* Scrollable Body */}
           <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-5">
+
+            {/* Consolidated Batch Summary Banner */}
+            {isConsolidatedBatch && (
+              <div className="p-3.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border-2 border-indigo-300 dark:border-indigo-700 space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="text-xs sm:text-sm font-black text-indigo-950 dark:text-indigo-100">
+                    ⚡ Consolidated Batch: {activeBatchReports.length} RMAs Selected
+                  </div>
+                  <div className="text-xs font-mono font-black text-indigo-800 dark:text-indigo-200">
+                    {batchSummary.items.length} Line(s) • {grandBatchPieces.toLocaleString()} pcs • {formatPeso(grandBatchValue)}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {batchRmaNumbers.map((num) => (
+                    <span
+                      key={num}
+                      className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 font-mono text-[10px] font-bold text-indigo-800 dark:text-indigo-200"
+                    >
+                      {num}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Single-Supplier Guard Banner when bundled RMAs contain different suppliers */}
+            {hasMultipleSuppliersConflict && (
+              <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-400 dark:border-amber-600 space-y-2">
+                <div className="flex items-start gap-2 text-xs text-amber-900 dark:text-amber-200 font-bold">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div>
+                      Single-Supplier Guard: Bundled RMAs currently belong to multiple suppliers:{' '}
+                      <span className="font-black underline">{distinctSuppliersInBatch.join(', ')}</span>.
+                    </div>
+                    <p className="font-normal text-[11px] mt-0.5">
+                      Debit Claim &amp; Replacement forms must belong to a single supplier. Either filter the table to one supplier first, or confirm unifying all bundled RMAs under <strong>{supplierName || distinctSuppliersInBatch[0]}</strong> below:
+                    </p>
+                  </div>
+                </div>
+                <label className="inline-flex items-center gap-2 text-xs font-black text-amber-950 dark:text-amber-100 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={confirmUnifySupplier}
+                    onChange={(e) => {
+                      setConfirmUnifySupplier(e.target.checked);
+                      if (e.target.checked && !supplierName.trim() && distinctSuppliersInBatch[0]) {
+                        setSupplierName(distinctSuppliersInBatch[0]);
+                      }
+                      setErrorMsg('');
+                    }}
+                    className="rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                  />
+                  <span>Unify all {activeBatchReports.length} RMAs under &quot;{supplierName || distinctSuppliersInBatch[0]}&quot;</span>
+                </label>
+              </div>
+            )}
 
             {/* Existing Saved Outcome / Instant View & Edit Banner */}
             {currentOutcome.hasDecision && step !== 'pickup' && (
@@ -877,17 +1079,21 @@ export default function SimpleSupplierRtvWizardModal({
                   Reported Product / Contents
                 </div>
                 <div className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                  {isManifest
-                    ? `Batch Manifest (${manifestItems.length} SKUs) — ${activeReport.name || rmaNumber}`
-                    : (activeReport.name || activeReport.product_name || activeReport.barcode)}
+                  {isConsolidatedBatch
+                    ? `${activeBatchReports.length} Consolidated RMAs (${batchSummary.items.length} Line Item${batchSummary.items.length > 1 ? 's' : ''})`
+                    : isManifest
+                      ? `Batch Manifest (${manifestItems.length} SKUs) — ${activeReport.name || rmaNumber}`
+                      : (activeReport.name || activeReport.product_name || activeReport.barcode)}
                 </div>
                 <div className="text-xs text-slate-600 dark:text-slate-300 font-mono mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
                   <span>
                     Qty:{' '}
                     <strong>
-                      {isManifest
-                        ? formatManifestBreakdown(manifestItems, false)
-                        : formatQuantityWithPackSize(activeReport.quantity || 1, activeReport.unit_name || 'pc', activeReport.pieces_per_case)}
+                      {isConsolidatedBatch
+                        ? `${grandBatchPieces.toLocaleString()} pcs (${formatPeso(grandBatchValue)})`
+                        : isManifest
+                          ? formatManifestBreakdown(manifestItems, false)
+                          : formatQuantityWithPackSize(activeReport.quantity || 1, activeReport.unit_name || 'pc', activeReport.pieces_per_case)}
                     </strong>
                   </span>
                   {(activeReport.expiry_date || activeReport.ai_document_metadata?.expiry_date) && (
@@ -1405,11 +1611,12 @@ export default function SimpleSupplierRtvWizardModal({
         </div>
       </div>
 
-      {/* Dual-Copy A4 Printable Form Modal */}
+      {/* Dual-Copy Letter Printable Form Modal */}
       <SupplierPickupFormModal
         isOpen={showA4Form}
         onClose={() => setShowA4Form(false)}
         report={activeReport}
+        reports={activeBatchReports}
         allReports={allReports}
         catalogProducts={catalogProducts}
       />

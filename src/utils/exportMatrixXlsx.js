@@ -15,12 +15,14 @@ import {
   formatDateYmd,
   formatFourChoiceOutcome,
   getCleanSku,
+  getCreditMemoRmaNumbers,
   getItemNeedsReorder,
   getReportManifestItems,
   isBatchManifest,
   isManifestSubItem,
   isTestRecord,
-  isTrashedRecord
+  isTrashedRecord,
+  parseCreditMemoMeta
 } from './rmaHelpers.js';
 import { buildStoredZip, colToLetter, escapeXml } from './exportXlsx.js';
 
@@ -156,13 +158,42 @@ export function buildRmaMatrixDataset({
 
   const creditMemoByRma = new Map();
   (Array.isArray(creditMemos) ? creditMemos : []).forEach((cm) => {
-    if (!cm) return;
+    if (!cm || !cm.credit_memo_number) return;
     if (Boolean(isTestMode) !== isTestRecord(cm)) return;
-    if (cm.rma_number && cm.credit_memo_number) {
-      creditMemoByRma.set(String(cm.rma_number).trim(), String(cm.credit_memo_number).trim());
+    const cmNo = String(cm.credit_memo_number).trim();
+    getCreditMemoRmaNumbers(cm).forEach((rmaNum) => {
+      if (rmaNum) creditMemoByRma.set(rmaNum, cmNo);
+    });
+    if (cm.report_id) {
+      creditMemoByRma.set(`id:${cm.report_id}`, cmNo);
     }
-    if (cm.report_id && cm.credit_memo_number) {
-      creditMemoByRma.set(`id:${cm.report_id}`, String(cm.credit_memo_number).trim());
+    const meta = parseCreditMemoMeta(cm.notes);
+    (Array.isArray(cm.consolidated_report_ids) ? cm.consolidated_report_ids : (meta?.report_ids || [])).forEach((rid) => {
+      if (rid != null) creditMemoByRma.set(`id:${rid}`, cmNo);
+    });
+    (Array.isArray(cm.consolidated_items) ? cm.consolidated_items : (meta?.consolidated_items || [])).forEach((it) => {
+      if (it?.report_id != null) creditMemoByRma.set(`id:${it.report_id}`, cmNo);
+    });
+  });
+
+  // Index consolidated pickup metadata by RMA # so every sibling RMA row inherits shared claim_number/pickup_at cleanly
+  const consolidatedPickupByRma = new Map();
+  (Array.isArray(reports) ? reports : []).forEach((r) => {
+    if (!r || isTrashedRecord(r)) return;
+    if (Boolean(isTestMode) !== isTestRecord(r)) return;
+    const p = r.ai_document_metadata?.supplier_pickup;
+    if (p && typeof p === 'object' && Array.isArray(p.consolidated_rma_numbers)) {
+      p.consolidated_rma_numbers.forEach((rmaNum) => {
+        const clean = String(rmaNum || '').trim();
+        if (clean && !consolidatedPickupByRma.has(clean)) {
+          consolidatedPickupByRma.set(clean, {
+            pickup: p,
+            simpleDisp: r.ai_document_metadata?.simple_rtv_disposition,
+            simpleLabel: r.ai_document_metadata?.simple_rtv_label,
+            updatedAt: r.ai_document_metadata?.simple_rtv_updated_at
+          });
+        }
+      });
     }
   });
 
@@ -198,15 +229,23 @@ export function buildRmaMatrixDataset({
     const meta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
       ? report.ai_document_metadata
       : {};
+    const batchFallback = consolidatedPickupByRma.get(String(rmaNumber).trim()) || null;
     const pickup = (meta.supplier_pickup && typeof meta.supplier_pickup === 'object')
       ? meta.supplier_pickup
-      : {};
+      : (batchFallback?.pickup || {});
     const dateReported = formatDateTimeYmdHm(report.created_at || report.updated_at);
+    let noteCmNumber = '';
+    if (typeof report.notes === 'string' && report.notes.includes('credit_memo_number')) {
+      try {
+        noteCmNumber = JSON.parse(report.notes)?.credit_memo_number || '';
+      } catch {}
+    }
     const linkedMemo =
       creditMemoByRma.get(String(rmaNumber).trim()) ||
       creditMemoByRma.get(`id:${report.id}`) ||
       report.credit_memo_no ||
       report.credit_memo_number ||
+      noteCmNumber ||
       '';
 
     effectiveLines.forEach((line) => {
@@ -256,12 +295,14 @@ export function buildRmaMatrixDataset({
         distinctSkuSet.add(bc.toUpperCase());
       }
 
-      // Per-line outcome resolution (supports split/child metadata cleanly with parent fallback)
+      // Per-line outcome resolution (supports split/child/consolidated metadata cleanly)
       const lineWithParentMeta = {
         ...report,
         ...line,
         ai_document_metadata: {
+          ...(batchFallback?.simpleDisp ? { simple_rtv_disposition: batchFallback.simpleDisp, simple_rtv_label: batchFallback.simpleLabel, simple_rtv_updated_at: batchFallback.updatedAt } : {}),
           ...meta,
+          ...(pickup && Object.keys(pickup).length > 0 ? { supplier_pickup: pickup } : {}),
           ...((line.ai_document_metadata && typeof line.ai_document_metadata === 'object') ? line.ai_document_metadata : {})
         }
       };
