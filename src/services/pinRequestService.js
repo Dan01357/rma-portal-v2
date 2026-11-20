@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseClient';
 import { notificationService } from './notificationService';
+import { formatDateTimeYmdHm } from '../utils/rmaHelpers';
 
 const STORAGE_KEY = 'rma_pin_requests_v2';
 const SETTINGS_KEY = 'pin_requests_store';
@@ -241,8 +242,8 @@ export const pinRequestService = {
                     <div class="col-val" style="color: #475569; font-weight: 500;">${requestRecord.notes || 'No specific notes provided'}</div>
                   </div>
                   <div class="row">
-                    <div class="col-label">Time Requested:</div>
-                    <div class="col-val">${new Date(requestRecord.created_at).toLocaleString()}</div>
+                    <div class="col-label">Time Requested (YYYY-MM-DD HH:mm):</div>
+                    <div class="col-val">${formatDateTimeYmdHm(requestRecord.created_at)}</div>
                   </div>
                 </div>
               </div>

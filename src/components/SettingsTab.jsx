@@ -443,7 +443,7 @@ export default function SettingsTab({
               )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xl">
-              When ON, test emails are safely sent exclusively to <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">finance2@keysysincorporated.com</code> with <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">Test - </code> in the subject. <strong>This setting is strictly restricted to Super Admin; all other staff roles and public intake users operate permanently in Live Mode.</strong>
+              When ON, test emails are safely sent exclusively to <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">mgan@a2z2go.net</code> with <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">Test - </code> in the subject. <strong>This setting is strictly restricted to Super Admin; all other staff roles and public intake users operate permanently in Live Mode.</strong>
             </p>
           </div>
 
@@ -477,7 +477,7 @@ export default function SettingsTab({
           </span>
           <div className="text-slate-700 dark:text-slate-300">
             <strong>Target TO:</strong> <span className={isTestMode ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-emerald-600 dark:text-emerald-400 font-bold'}>
-              {isTestMode ? `finance2@keysysincorporated.com (Live target "${mainRecipient}" safely bypassed)` : mainRecipient}
+              {isTestMode ? `mgan@a2z2go.net (Live target "${mainRecipient}" safely bypassed)` : mainRecipient}
             </span>
           </div>
           <div className="text-slate-700 dark:text-slate-300">

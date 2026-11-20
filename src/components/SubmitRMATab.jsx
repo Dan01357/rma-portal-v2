@@ -29,7 +29,7 @@ import ScannerModal from './ScannerModal';
 import { AE_ROSTERS } from '../data/mockData';
 import { rmaApi } from '../supabaseClient';
 import { catalogService } from '../services/catalogService';
-import { generateTicketId, playBeep, formatPeso, generateAiDiagnosis } from '../utils/rmaHelpers';
+import { generateTicketId, playBeep, formatPeso, generateAiDiagnosis, formatDateTimeYmdHm } from '../utils/rmaHelpers';
 
 export default function SubmitRMATab({ 
   catalog = [], 
@@ -331,7 +331,7 @@ export default function SubmitRMATab({
         credit_issued_date: null,
         supplier_po_no: `PO-RET-${new Date().getFullYear()}-${String(existingTickets.length + 1).padStart(3, '0')}`,
         buffer_days_left: 7,
-        notes: `Submitted by Repacker/Customer at ${new Date().toLocaleTimeString()}`
+        notes: `Submitted by Repacker/Customer at ${formatDateTimeYmdHm(new Date())} (YYYY-MM-DD HH:mm)`
       };
 
       await rmaApi.createTicket(newTicket);

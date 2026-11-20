@@ -84,7 +84,6 @@ import SupplierClaimsTab from './components/SupplierClaimsTab';
 import TestModeSandboxTab from './components/TestModeSandboxTab';
 import CustomerHubTab from './components/CustomerHubTab';
 import ArchiveAndTrashTab from './components/ArchiveAndTrashTab';
-import ThermalBoxLabelModal from './components/ThermalBoxLabelModal';
 import { exportRMAReportsToXlsx, exportCustomerInboundRMAsToXlsx, exportSupplierOutboundClaimsToXlsx } from './utils/exportCsv';
 import CreditMemoModal from './components/CreditMemoModal';
 import CreditMemoVoucherModal from './components/CreditMemoVoucherModal';
@@ -94,7 +93,6 @@ import NotificationBell from './components/NotificationBell';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
 import ReturnQRModal from './components/ReturnQRModal';
 import QuickRMAActionModal from './components/QuickRMAActionModal';
-import DriverDeliveryHandoverModal from './components/DriverDeliveryHandoverModal';
 import SimpleSupplierRtvWizardModal from './components/SimpleSupplierRtvWizardModal';
 import SupplierPickupFormModal from './components/SupplierPickupFormModal';
 import RMAMatrixExportModal from './components/RMAMatrixExportModal';
@@ -134,7 +132,9 @@ import {
   parsePortalQrPayload,
   playBeep,
   DEFECT_REASONS,
-  getDocumentNumbers
+  getDocumentNumbers,
+  formatDateYmd,
+  formatDateTimeYmdHm
 } from './utils/rmaHelpers';
 
 
@@ -315,10 +315,6 @@ export default function App() {
   const [pendingQuickRmaNumber, setPendingQuickRmaNumber] = useState(null);
   const [isCustomerInvitesModalOpen, setIsCustomerInvitesModalOpen] = useState(false);
   const [viewingExplanationModal, setViewingExplanationModal] = useState(null);
-
-  // Delivery Driver Handover QR Modal State (mobile widget for delivery personnel)
-  const [isDriverDeliveryModalOpen, setIsDriverDeliveryModalOpen] = useState(false);
-  const [driverDeliveryRma, setDriverDeliveryRma] = useState(null);
 
   // 1-Click Google Identity Lock Gatekeeper Session
   const [intakeSlug, setIntakeSlug] = useState(() => getIntakeSlugFromUrl());
@@ -758,7 +754,7 @@ export default function App() {
   // Simple 4-Option Supplier RTV Wizard, A4 Pickup Validation Form & Daily Matrix Exporter State
   const [simpleRtvWizard, setSimpleRtvWizard] = useState({ isOpen: false, report: null, initialMode: 'wizard' });
   const [pickupFormReport, setPickupFormReport] = useState(null);
-  const [matrixExportModal, setMatrixExportModal] = useState({ isOpen: false, stream: 'customer_inbound', isTestMode: false });
+  const [matrixExportModal, setMatrixExportModal] = useState({ isOpen: false, stream: 'overall', isTestMode: false });
   const [portalScanAlert, setPortalScanAlert] = useState(null); // { type: 'error' | 'warning' | 'info', title: string, message: string }
 
   // Unified QR Scan Handler for in-app ScannerModal (with strict Test vs Live isolation + zero double OTP login)
@@ -980,7 +976,7 @@ export default function App() {
       window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'test-mode-toggled', isTestMode: next } }));
     } catch (e) { }
     if (next) {
-      showToast('🧪 Test Mode Enabled: Emails safely sent exclusively to finance2@keysysincorporated.com', 'success');
+      showToast('🧪 Test Mode Enabled: Emails safely sent exclusively to mgan@a2z2go.net', 'success');
     } else {
       showToast('Live Mode Enabled: Real email delivery active.', 'success');
     }
@@ -1594,7 +1590,6 @@ export default function App() {
   const [pendingBarcodesList, setPendingBarcodesList] = useState([]);
   const [recentReportsList, setRecentReportsList] = useState([]);
   const [toastMessage, setToastMessage] = useState(null);
-  const [thermalPrintReport, setThermalPrintReport] = useState(null);
 
   // Automatically prune orphan report selection IDs whenever recentReportsList updates
   useEffect(() => {
@@ -1741,6 +1736,27 @@ export default function App() {
         warehouseLocation: item.warehouse_location || null,
         actorName
       });
+      try {
+        await notificationService.sendRmaLifecycleNotification({
+          eventType: cleanStatus === 'scrapped' ? 'scrapped' : 'restocked',
+          report: {
+            ...item,
+            status: 'resolved',
+            ai_document_metadata: {
+              ...((item.ai_document_metadata && typeof item.ai_document_metadata === 'object') ? item.ai_document_metadata : {}),
+              workflow_resolution: cleanStatus === 'scrapped' ? 'reordered' : 'restocked',
+              resolved_at: new Date().toISOString(),
+              resolved_by: actorName
+            }
+          },
+          allReports: recentReportsList,
+          catalogProducts: savedProductsList,
+          actorName,
+          isTestMode: isTestRecord(item) || isTestMode
+        });
+      } catch (mailErr) {
+        console.warn('Non-blocking error sending coworker action email:', mailErr);
+      }
       showToast(
         cleanStatus === 'restocked'
           ? `✓ Marked ${item.rma_number} as 6- Restocked in WMS!`
@@ -1827,23 +1843,23 @@ export default function App() {
       const manifestChildren = isManifest ? getReportManifestItems(r, sourceReports) : [];
       const hasRtvChild = manifestChildren.some(c => {
         const cDisp = String(c.disposition || '').toLowerCase();
-        return c.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+        return c.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor') || cDisp.includes('supplier_credit') || cDisp.includes('supplier_exchange');
       });
 
       if (!isExplicitSupplierOutbound && !hasRtvChild) {
         if (disp.includes('restock') || disp.includes('scrap') || disp.includes('quarantine') || disp.includes('buffer') || disp.includes('pending triage')) {
           return;
         }
-        const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor');
+        const isRtvDisposition = disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor') || disp.includes('supplier_credit') || disp.includes('supplier_exchange');
         if (!isRtvDisposition) return;
       }
 
       if (isManifest && manifestChildren.length > 0) {
         manifestChildren.forEach((child, cIdx) => {
           const cDisp = String(child.disposition || '').toLowerCase();
-          if (cDisp.includes('restock') || cDisp.includes('scrap') || cDisp.includes('quarantine') || cDisp.includes('buffer')) return;
-          const isParentRtvOrSupplier = isExplicitSupplierOutbound || disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor');
-          const isChildRtvOrSupplier = child.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+          if (!isExplicitSupplierOutbound && child.rma_type !== 'supplier_outbound' && (cDisp.includes('restock') || cDisp.includes('scrap') || cDisp.includes('quarantine') || cDisp.includes('buffer'))) return;
+          const isParentRtvOrSupplier = isExplicitSupplierOutbound || disp.includes('return to vendor') || disp.includes('rtv') || disp.includes('vendor') || disp.includes('supplier_credit') || disp.includes('supplier_exchange');
+          const isChildRtvOrSupplier = child.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor') || cDisp.includes('supplier_credit') || cDisp.includes('supplier_exchange');
           if (!isParentRtvOrSupplier && !isChildRtvOrSupplier) return;
           unpacked.push({ ...r, ...child, id: child.id || `${r.id}_${cIdx}` });
         });
@@ -2139,6 +2155,14 @@ export default function App() {
         if (found?.unit_name || found?.unitName) {
           const u = (found.unit_name || found.unitName).toLowerCase();
           setUnitName(u.includes('case') ? 'case' : 'pc');
+        }
+        const foundSup = String(found?.supplier_name || found?.supplierName || found?.supplier || '').trim();
+        if (
+          isSupplierRtvPortal &&
+          foundSup &&
+          !/^(pending assignment|pending|unassigned|warehouse|n\/a)$/i.test(foundSup)
+        ) {
+          setStoreBranch((prev) => (prev && prev.trim() ? prev : foundSup));
         }
       } catch (e) {
         if (!isCurrent) return;
@@ -2443,6 +2467,13 @@ export default function App() {
       ? detectedProduct.code
       : ((detectedProduct?.sku && detectedProduct.sku !== cleanBarcode) ? detectedProduct.sku : '');
 
+    const resolvedDetectedSupplier = String(
+      detectedProduct?.supplier_name ||
+      detectedProduct?.supplierName ||
+      detectedProduct?.supplier ||
+      ''
+    ).trim() || 'Pending Assignment';
+
     const newItem = {
       id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
       barcode: cleanBarcode,
@@ -2454,8 +2485,9 @@ export default function App() {
       unit_name: finalUnit,
       unit: finalUnit,
       pieces_per_case: detectedProduct?.pieces_per_case || detectedProduct?.piecesPerCase || null,
-      supplier_name: (detectedProduct?.supplier_name && detectedProduct.supplier_name !== 'Savemore') ? detectedProduct.supplier_name : (detectedProduct?.supplier_name || 'Pending Assignment'),
-      supplier: (detectedProduct?.supplier_name && detectedProduct.supplier_name !== 'Savemore') ? detectedProduct.supplier_name : (detectedProduct?.supplier_name || 'Pending Assignment'),
+      supplier_name: resolvedDetectedSupplier,
+      supplierName: resolvedDetectedSupplier,
+      supplier: resolvedDetectedSupplier,
       price: Number(detectedProduct?.price || 0),
       price_with_vat: Number(detectedProduct?.price_with_vat || detectedProduct?.priceWithVat || detectedProduct?.price || 0),
       reason: selectedReason,
@@ -2552,6 +2584,13 @@ export default function App() {
         ? detectedProduct.code
         : ((detectedProduct?.sku && detectedProduct.sku !== activeBarcode) ? detectedProduct.sku : '');
 
+      const resolvedActiveSupplier = String(
+        detectedProduct?.supplier_name ||
+        detectedProduct?.supplierName ||
+        detectedProduct?.supplier ||
+        ''
+      ).trim() || 'Pending Assignment';
+
       itemsToSubmit.push({
         id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
         barcode: activeBarcode,
@@ -2563,8 +2602,9 @@ export default function App() {
         unit_name: finalUnit,
         unit: finalUnit,
         pieces_per_case: detectedProduct?.pieces_per_case || detectedProduct?.piecesPerCase || null,
-        supplier_name: (detectedProduct?.supplier_name && detectedProduct.supplier_name !== 'Savemore') ? detectedProduct.supplier_name : (detectedProduct?.supplier_name || 'Pending Assignment'),
-        supplier: (detectedProduct?.supplier_name && detectedProduct.supplier_name !== 'Savemore') ? detectedProduct.supplier_name : (detectedProduct?.supplier_name || 'Pending Assignment'),
+        supplier_name: resolvedActiveSupplier,
+        supplierName: resolvedActiveSupplier,
+        supplier: resolvedActiveSupplier,
         price: Number(detectedProduct?.price || 0),
         price_with_vat: Number(detectedProduct?.price_with_vat || detectedProduct?.priceWithVat || detectedProduct?.price || 0),
         reason: selectedReason,
@@ -2605,17 +2645,24 @@ export default function App() {
     }
 
     const inviteEntity = inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch);
-    const resolvedBranch = storeBranch.trim() || inviteEntity || 'Direct Return';
+    const rawBranchInput = storeBranch.trim();
+    const isExplicitNA = /^n\/?a$/i.test(rawBranchInput);
+    const cleanBranchInput = (!rawBranchInput || isExplicitNA) ? '' : rawBranchInput;
     const isSuperAdminSupplierOutbound = Boolean(currentUser?.role === 'super_admin' && !gateSession && testModeStreamType === 'supplier_outbound');
-    const resolvedSupplierFromPortal =
-      (itemsToSubmit[0]?.supplier_name &&
-        itemsToSubmit[0].supplier_name !== 'Warehouse' &&
-        itemsToSubmit[0].supplier_name !== 'Savemore' &&
-        itemsToSubmit[0].supplier_name !== 'Pending Assignment')
-        ? itemsToSubmit[0].supplier_name
-        : ((gateSession?.stream_type === 'supplier_outbound' || isSuperAdminSupplierOutbound) && (storeBranch.trim() || inviteEntity))
-          ? (storeBranch.trim() || inviteEntity)
-          : (itemsToSubmit[0]?.supplier_name || 'Pending Assignment');
+    const isSupplierStream = isSupplierRtvPortal || isSuperAdminSupplierOutbound || gateSession?.stream_type === 'supplier_outbound';
+    const resolvedBranch = isExplicitNA
+      ? null
+      : (cleanBranchInput || (!isSupplierStream ? (inviteEntity || null) : null));
+    const isPlaceholderSup = (val) => {
+      const s = String(val || '').trim().toLowerCase();
+      return !s || s === 'warehouse' || s === 'pending assignment' || s === 'unassigned' || s === 'n/a';
+    };
+    const itemSup = itemsToSubmit[0]?.supplier_name || itemsToSubmit[0]?.supplierName || itemsToSubmit[0]?.supplier;
+    const resolvedSupplierFromPortal = !isPlaceholderSup(itemSup)
+      ? itemSup
+      : (isSupplierStream && (cleanBranchInput || inviteEntity))
+        ? (cleanBranchInput || inviteEntity)
+        : (itemSup || 'Pending Assignment');
 
     // Persist reporter contact info in localStorage for 1-tap zero-typing returns
     try {
@@ -2970,11 +3017,10 @@ export default function App() {
             {portalScanAlert && (
               <div
                 role="alert"
-                className={`p-4 rounded-2xl border-2 shadow-sm flex items-start justify-between gap-3 animate-in fade-in slide-in-from-top-2 ${
-                  portalScanAlert.type === 'error'
-                    ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-400 dark:border-rose-700 text-rose-900 dark:text-rose-100'
-                    : 'bg-amber-50 dark:bg-amber-950/60 border-amber-400 dark:border-amber-700 text-amber-900 dark:text-amber-100'
-                }`}
+                className={`p-4 rounded-2xl border-2 shadow-sm flex items-start justify-between gap-3 animate-in fade-in slide-in-from-top-2 ${portalScanAlert.type === 'error'
+                  ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-400 dark:border-rose-700 text-rose-900 dark:text-rose-100'
+                  : 'bg-amber-50 dark:bg-amber-950/60 border-amber-400 dark:border-amber-700 text-amber-900 dark:text-amber-100'
+                  }`}
               >
                 <div className="flex items-start gap-2.5 min-w-0">
                   <AlertTriangle className={`w-5 h-5 shrink-0 mt-0.5 ${portalScanAlert.type === 'error' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'}`} />
@@ -3024,7 +3070,7 @@ export default function App() {
                         </div>
                         <p className="text-[11px] opacity-85 leading-relaxed">
                           {isTestMode
-                            ? 'Test emails routed safely to finance2@keysysincorporated.com • Reports saved to database.'
+                            ? 'Test emails routed safely to mgan@a2z2go.net • Reports saved to database.'
                             : 'Official return reports saved to database & sent directly to supplier & Assigned AEs.'}
                         </p>
                       </div>
@@ -3225,7 +3271,7 @@ export default function App() {
                       {submitSuccessReport.invoice_dr_number && (
                         <div>DR/Invoice #: <strong className="font-mono text-violet-700 dark:text-violet-300">{submitSuccessReport.invoice_dr_number}</strong> {submitSuccessReport.store_branch ? `(${submitSuccessReport.store_branch})` : ''}</div>
                       )}
-                      <div>Date & Time: <span className="font-mono">{new Date(submitSuccessReport.created_at || Date.now()).toLocaleString()}</span></div>
+                      <div>Date &amp; Time (YYYY-MM-DD HH:mm): <span className="font-mono">{formatDateTimeYmdHm(submitSuccessReport.created_at || Date.now())}</span></div>
                     </div>
 
                     {/* Reporter Signature Area */}
@@ -3252,13 +3298,7 @@ export default function App() {
                     type="button"
                     onClick={async () => {
                       try {
-                        const dateFormatted = new Date(submitSuccessReport.created_at || Date.now()).toLocaleString('en-US', {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        });
+                        const dateFormatted = formatDateTimeYmdHm(submitSuccessReport.created_at || Date.now());
                         await downloadCustomSizedStickerPng({
                           svgElementOrId: 'filed-report-qr-svg',
                           widthMm: 95,
@@ -3590,7 +3630,7 @@ export default function App() {
                           {detectedProduct.name}
                         </div>
                         <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
-                          SKU: {detectedProduct.code} • ₱${Number(detectedProduct.priceWithVat || 0).toFixed(2)}
+                          SKU: {detectedProduct.code} • ₱{Number(detectedProduct.priceWithVat || 0).toFixed(2)}
                         </div>
                       </div>
                     </div>
@@ -3629,18 +3669,25 @@ export default function App() {
                         <label className="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
                           <Calendar className={`w-4 h-4 ${expiryDate ? 'text-emerald-600 dark:text-emerald-400' : isSupplierRtvPortal ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500'}`} />
                           <span>
-                            Product Expiration Date{' '}
+                            Product Expiration Date (YYYY-MM-DD){' '}
                             {isSupplierRtvPortal && <span className="text-rose-500 font-black">*</span>}
                           </span>
                         </label>
-                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${expiryDate
-                          ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
-                          : isSupplierRtvPortal
-                            ? 'bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
-                            : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                          }`}>
-                          {expiryDate ? '✓ Verified' : isSupplierRtvPortal ? 'Required *' : 'Optional'}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {expiryDate && (
+                            <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                              ISO (YYYY-MM-DD): {formatDateYmd(expiryDate) || expiryDate}
+                            </span>
+                          )}
+                          <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${expiryDate
+                            ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
+                            : isSupplierRtvPortal
+                              ? 'bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
+                              : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                            }`}>
+                            {expiryDate ? '✓ Verified' : isSupplierRtvPortal ? 'Required *' : 'Optional'}
+                          </span>
+                        </div>
                       </div>
                       <input
                         type="date"
@@ -3866,7 +3913,7 @@ export default function App() {
                                 </span>
                                 {item.expiry_date && (
                                   <span className="bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-1.5 py-0.2 rounded-full font-bold">
-                                    Exp: {item.expiry_date}
+                                    Expiry Date (YYYY-MM-DD): {formatDateYmd(item.expiry_date) || item.expiry_date}
                                   </span>
                                 )}
                                 <span className="bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 px-1.5 py-0.2 rounded-full font-bold">
@@ -4177,24 +4224,24 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 3. STORE / BRANCH OR SUPPLIER LOCATION (OPTIONAL) */}
+                {/* 3. SUPPLIER NAME (SUPPLIER RTV) OR COMPANY / STORE NAME (CUSTOMER HUB) */}
                 <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                       <Building className="w-4 h-4 text-blue-600" />
                       <span>
-                        {gateSession?.stream_type === 'supplier_outbound'
-                          ? '3. Master Supplier / Vendor Name (Optional)'
-                          : '3. Store / Branch / Supplier Location (Optional)'}
+                        {isSupplierRtvPortal
+                          ? '3. Supplier Name (Optional)'
+                          : '3. Company / Store Name (Optional)'}
                       </span>
                     </label>
                     {inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch) ? (
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${gateSession?.stream_type === 'supplier_outbound'
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${isSupplierRtvPortal
                         ? 'text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 border-purple-200 dark:border-purple-800'
                         : 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800'
                         }`}>
                         <CheckCircle className="w-3 h-3" />
-                        <span>Auto-Populated via {gateSession?.stream_type === 'supplier_outbound' ? 'Supplier RTV' : 'Customer'} Invite</span>
+                        <span>Auto-Populated via {isSupplierRtvPortal ? 'Supplier RTV' : 'Customer'} Invite</span>
                       </span>
                     ) : storeBranch && paperworkMetadata?.store_branch ? (
                       <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
@@ -4214,9 +4261,9 @@ export default function App() {
                       value={storeBranch}
                       onChange={(e) => setStoreBranch(e.target.value)}
                       placeholder={
-                        gateSession?.stream_type === 'supplier_outbound'
-                          ? 'Optional: e.g., Walter Mart, Liwayway Marketing, Mondelez'
-                          : 'Optional: e.g., Walter Mart, Savemore Taguig, Puregold Cubao (or auto-filled)'
+                        isSupplierRtvPortal
+                          ? 'Optional: e.g., Suy Sing Commercial Corp, Mondelez (auto-filled if product has saved supplier, or type N/A)'
+                          : 'Optional: e.g., Walter Mart, Savemore Taguig, Puregold Cubao (or type N/A if not applicable)'
                       }
                       className="w-full px-3.5 py-3 border-2 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none shadow-2xs transition-all bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20"
                     />
@@ -4225,16 +4272,16 @@ export default function App() {
                         type="button"
                         onClick={() => setStoreBranch('')}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full cursor-pointer"
-                        title="Clear location / supplier"
+                        title={isSupplierRtvPortal ? 'Clear supplier name' : 'Clear company / store name'}
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                    {gateSession?.stream_type === 'supplier_outbound'
-                      ? 'Optional: Auto-populated from your invite link or catalog item if specified.'
-                      : 'Optional: Auto-populated if specified in your invite link or detected from paperwork.'}
+                    {isSupplierRtvPortal
+                      ? 'Optional: Auto-filled from product catalog or invite link. Leave blank or type N/A if not applicable.'
+                      : 'Optional: Enter your company or store name, or leave blank / type N/A if not applicable.'}
                   </p>
                 </div>
 
@@ -4739,12 +4786,13 @@ export default function App() {
                 updatingQueueId={updatingQueueId}
                 isTestMode={false}
                 onOpenReportsModal={() => setIsReportsModalOpen(true)}
-                onOpenMatrixExport={() => setMatrixExportModal({ isOpen: true, stream: 'customer_inbound', isTestMode: false })}
+                onOpenMatrixExport={() => setMatrixExportModal({ isOpen: true, stream: 'overall', isTestMode: false })}
                 onInspectTriage={handleInspectTriageForReport}
+                onOpenSimpleWizard={(report) => setSimpleRtvWizard({ isOpen: true, report, initialMode: 'wizard' })}
+                onOpenPickupForm={(report) => setPickupFormReport(report)}
                 onViewQR={(reportObj) => setQrModalReport(reportObj)}
                 onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
                 onViewExplanation={(info) => setViewingExplanationModal(info)}
-                onPrintLabel={(reportObj) => setThermalPrintReport(reportObj)}
                 onEditProductFromReport={handleEditProductFromReport}
                 onOpenCreditMemo={handleOpenCreditMemoForReport}
                 onViewCreditMemoVoucher={handleViewCreditMemoVoucher}
@@ -4794,12 +4842,11 @@ export default function App() {
                   setQuickRmaNumber(rmaNumber);
                   setIsQuickRmaModalOpen(true);
                 }}
-                onPrintLabel={(report) => setThermalPrintReport(report)}
                 onViewQR={(report) => setQrModalReport(report)}
                 onViewExplanation={(info) => setViewingExplanationModal(info)}
                 onOpenSimpleWizard={(report) => setSimpleRtvWizard({ isOpen: true, report, initialMode: 'wizard' })}
                 onOpenPickupForm={(report) => setPickupFormReport(report)}
-                onOpenMatrixExport={() => setMatrixExportModal({ isOpen: true, stream: 'supplier_outbound', isTestMode: false })}
+                onOpenMatrixExport={() => setMatrixExportModal({ isOpen: true, stream: 'overall', isTestMode: false })}
                 savedProductsList={savedProductsList}
                 coworkerQueueFilter={coworkerQueueFilter}
                 isTestMode={false}
@@ -4842,13 +4889,12 @@ export default function App() {
                   setQuickRmaNumber(rmaNumber);
                   setIsQuickRmaModalOpen(true);
                 }}
-                onPrintLabel={(report) => setThermalPrintReport(report)}
                 onViewExplanation={(info) => setViewingExplanationModal(info)}
                 onOpenSimpleWizard={(report) => setSimpleRtvWizard({ isOpen: true, report, initialMode: 'wizard' })}
                 onOpenPickupForm={(report) => setPickupFormReport(report)}
-                onOpenMatrixExport={(subStream) => setMatrixExportModal({
+                onOpenMatrixExport={() => setMatrixExportModal({
                   isOpen: true,
-                  stream: subStream === 'supplier' ? 'supplier_outbound' : 'customer_inbound',
+                  stream: 'overall',
                   isTestMode: true
                 })}
               />
@@ -5404,10 +5450,6 @@ export default function App() {
           setQrModalReport(rep);
         }}
         onOpenLightbox={setLightboxPhoto}
-        onOpenDriverHandover={(rma) => {
-          setDriverDeliveryRma(rma);
-          setIsDriverDeliveryModalOpen(true);
-        }}
         onReportUpdated={(updated) => {
           if (updated?.rma_number) {
             setQuickRmaNumber(updated.rma_number);
@@ -5457,20 +5499,7 @@ export default function App() {
         }}
       />
 
-      {/* Driver Delivery Handover Proof Modal & QR Mobile Widget */}
-      <DriverDeliveryHandoverModal
-        isOpen={isDriverDeliveryModalOpen}
-        onClose={() => {
-          setIsDriverDeliveryModalOpen(false);
-          setDriverDeliveryRma(null);
-        }}
-        rmaNumber={driverDeliveryRma}
-        onDeliveryConfirmed={() => {
-          refreshAllData();
-        }}
-      />
-
-      {/* Simple 4-Option Supplier RTV & Driver Pickup Wizard (Zero OTP Re-login + Drive Upload + A4 Form) */}
+      {/* Unified 4-Choice Outcome & Driver Pickup Wizard (Customer Hub + Supplier RTV) */}
       <SimpleSupplierRtvWizardModal
         isOpen={simpleRtvWizard.isOpen}
         onClose={() => {
@@ -5483,10 +5512,21 @@ export default function App() {
         activeUser={currentUser || gateSession}
         isAdmin={Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin'))}
         initialMode={simpleRtvWizard.initialMode}
-        onSuccess={() => {
+        onSuccess={(updated) => {
+          if (updated && (updated.id || updated.rma_number)) {
+            setRecentReportsList(prev => prev.map(r => {
+              const idMatch = r && r.id && updated.id && String(r.id) === String(updated.id);
+              const rmaMatch = r && r.rma_number && updated.rma_number && String(r.rma_number) === String(updated.rma_number) && !r.parent_rma_id;
+              return (idMatch || rmaMatch) ? { ...r, ...updated } : r;
+            }));
+          }
           refreshAllData();
-          showToast('Supplier RTV status saved!', 'success');
-          restoreQuickRmaIfPending();
+          showToast(
+            updated?.rma_type === 'supplier_outbound'
+              ? 'Supplier RTV decision saved!'
+              : 'Customer RMA decision saved!',
+            'success'
+          );
         }}
         onOpenFullAdminModal={(rep) => {
           setPendingQuickRmaNumber(null);
@@ -5508,12 +5548,13 @@ export default function App() {
         catalogProducts={savedProductsList}
       />
 
-      {/* Customer Hub / Supplier RTV Separated Excel Matrix (.xlsx) Exporter */}
+      {/* Overall RMA Excel Matrix (.xlsx) Exporter (Customer Hub + Supplier RTV, Live/Test Isolated) */}
       <RMAMatrixExportModal
         isOpen={matrixExportModal.isOpen}
         onClose={() => setMatrixExportModal((prev) => ({ ...prev, isOpen: false }))}
         reports={recentReportsList}
         catalogProducts={savedProductsList}
+        creditMemos={creditMemosList}
         stream={matrixExportModal.stream}
         isTestMode={matrixExportModal.isTestMode}
       />
@@ -5617,17 +5658,6 @@ export default function App() {
         onClose={() => setIsCustomerInvitesModalOpen(false)}
         currentUser={currentUser}
       />
-
-
-      {/* 4x6" Thermal Box Label Generator Modal */}
-      {thermalPrintReport && (
-        <ThermalBoxLabelModal
-          isOpen={Boolean(thermalPrintReport)}
-          onClose={() => setThermalPrintReport(null)}
-          report={thermalPrintReport}
-          currentUser={currentUser}
-        />
-      )}
 
       {/* Full Reporter Explanation / Notes Viewer Modal */}
       {viewingExplanationModal && (

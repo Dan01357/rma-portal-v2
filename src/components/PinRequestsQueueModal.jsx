@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { pinRequestService } from '../services/pinRequestService';
 import { accessKeyService } from '../services/accessKeyService';
+import { formatDateTimeYmdHm } from '../utils/rmaHelpers';
 
 export default function PinRequestsQueueModal({
   isOpen,
@@ -614,13 +615,13 @@ export default function PinRequestsQueueModal({
                               <div className="pt-1 text-[11px] text-slate-400 flex items-center gap-2">
                                 <span>Reviewed by: <strong>{req.approved_by || 'Admin'}</strong></span>
                                 {req.reviewed_at && (
-                                  <span>&bull; {new Date(req.reviewed_at).toLocaleString()}</span>
+                                  <span className="font-mono">&bull; {formatDateTimeYmdHm(req.reviewed_at)} (YYYY-MM-DD HH:mm)</span>
                                 )}
                               </div>
                             )}
 
-                            <div className="text-[10px] text-slate-400">
-                              Requested: {new Date(req.created_at).toLocaleString()}
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              Requested (YYYY-MM-DD HH:mm): {formatDateTimeYmdHm(req.created_at)}
                             </div>
                           </div>
                         </div>

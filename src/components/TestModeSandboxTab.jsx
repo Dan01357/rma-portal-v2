@@ -37,7 +37,6 @@ export default function TestModeSandboxTab({
   onViewQR,
   onViewPhoto,
   onViewExplanation,
-  onPrintLabel,
   onEditProductFromReport,
   onResetToPending,
   onConfirmCoworkerAction,
@@ -89,11 +88,11 @@ export default function TestModeSandboxTab({
         const children = getReportManifestItems(r, testReportsList);
         return children.some((c) => {
           const cDisp = String(c?.disposition || '').toLowerCase();
-          return c?.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor');
+          return c?.rma_type === 'supplier_outbound' || cDisp.includes('rtv') || cDisp.includes('vendor') || cDisp.includes('supplier_credit') || cDisp.includes('supplier_exchange');
         });
       }
       const disp = String(r.disposition || '').toLowerCase();
-      return disp.includes('rtv') || disp.includes('vendor') || disp.includes('supplier exchange') || disp.includes('supplier credit');
+      return disp.includes('rtv') || disp.includes('vendor') || disp.includes('supplier exchange') || disp.includes('supplier credit') || disp.includes('supplier_credit') || disp.includes('supplier_exchange');
     }).length;
   }, [testReportsList]);
 
@@ -163,12 +162,12 @@ export default function TestModeSandboxTab({
             {onOpenMatrixExport && activeSubTab !== 'memos' && (
               <button
                 type="button"
-                onClick={() => onOpenMatrixExport(activeSubTab)}
+                onClick={() => onOpenMatrixExport('overall')}
                 className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
-                title={`Download Test Sandbox ${activeSubTab === 'supplier' ? 'Supplier RTV' : 'Customer Hub'} Matrix (.xlsx)`}
+                title="Download Test Sandbox Overall RMA Matrix (.xlsx) combining Customer Hub & Supplier RTV"
               >
                 <FileSpreadsheet className="w-4 h-4" />
-                <span>Sandbox {activeSubTab === 'supplier' ? 'Supplier RTV' : 'Customer'} Matrix (.xlsx)</span>
+                <span>Sandbox Overall Matrix (.xlsx)</span>
               </button>
             )}
 
@@ -297,12 +296,13 @@ export default function TestModeSandboxTab({
           updatingQueueId={updatingQueueId}
           isTestMode={true}
           onOpenReportsModal={() => onOpenReportsModal && onOpenReportsModal()}
-          onOpenMatrixExport={() => onOpenMatrixExport && onOpenMatrixExport('customer')}
+          onOpenMatrixExport={() => onOpenMatrixExport && onOpenMatrixExport('overall')}
           onInspectTriage={onInspectTriage}
+          onOpenSimpleWizard={onOpenSimpleWizard}
+          onOpenPickupForm={onOpenPickupForm}
           onViewQR={onViewQR}
           onViewPhoto={onViewPhoto}
           onViewExplanation={onViewExplanation}
-          onPrintLabel={onPrintLabel}
           onEditProductFromReport={onEditProductFromReport}
           onOpenCreditMemo={onOpenCreditMemoForReport}
           onViewCreditMemoVoucher={onViewCreditMemoVoucher}
@@ -330,12 +330,11 @@ export default function TestModeSandboxTab({
           onAssignSku={onAssignSku}
           onEditProductFromReport={onEditProductFromReport}
           onOpenQuickAction={onOpenQuickAction}
-          onPrintLabel={onPrintLabel}
           onViewQR={onViewQR}
           onViewExplanation={onViewExplanation}
           onOpenSimpleWizard={onOpenSimpleWizard}
           onOpenPickupForm={onOpenPickupForm}
-          onOpenMatrixExport={() => onOpenMatrixExport && onOpenMatrixExport('supplier')}
+          onOpenMatrixExport={() => onOpenMatrixExport && onOpenMatrixExport('overall')}
           savedProductsList={savedProductsList}
           coworkerQueueFilter={coworkerQueueFilter}
           isTestMode={true}

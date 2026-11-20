@@ -8,6 +8,44 @@ import {
 import { purchaseOrdersApi } from '../services/purchaseOrdersApi';
 import { catalogService } from '../services/catalogService';
 
+function mapSuggestionProduct(item, defaultSource, isCatalog) {
+  const rawBrand = item.brandName || item.brand_name || item.brand || item.raw_data?.brandName || '';
+  const pcsMatch = String(rawBrand).match(/\[Pcs\/Cs:(\d+)\]/);
+  const rawPcs = item.pieces_per_case ?? item.piecesPerCase ?? (pcsMatch ? parseInt(pcsMatch[1], 10) : null);
+  const numPcs = Number(rawPcs);
+  const parsedPcs = Number.isFinite(numPcs) && numPcs > 0 ? numPcs : null;
+  const barcodeStr = String(item.barcode || item.raw_data?.ean_code || '').trim();
+  const rawCode = String(item.code || item.sku || '').trim();
+  const rawSku = (rawCode && rawCode !== barcodeStr) ? rawCode : '';
+  const netPrice = Number(item.price ?? item.unit_price ?? 0);
+  const vatRaw = item.priceWithVat ?? item.price_with_vat ?? item.raw_data?.priceWithVat;
+  const priceWithVat = Number(vatRaw || (netPrice > 0 ? netPrice * 1.12 : 0));
+  const rawSup = String(item.supplierName || item.supplier_name || item.supplier || item.raw_data?.supplierName || '').trim();
+  const cleanSup = rawSup.toLowerCase() === 'pending assignment' ? '' : rawSup;
+  const cleanUnit = String(item.unitName || item.unit_name || item.raw_data?.unitName || 'pc').trim() || 'pc';
+
+  return {
+    id: item.id || rawSku || barcodeStr,
+    name: item.name || '',
+    code: rawSku,
+    sku: rawSku,
+    barcode: barcodeStr,
+    supplierName: cleanSup,
+    supplier_name: cleanSup,
+    price: Number(netPrice.toFixed(2)),
+    priceWithVat: priceWithVat.toFixed(2),
+    price_with_vat: priceWithVat.toFixed(2),
+    unitName: cleanUnit,
+    unit_name: cleanUnit,
+    pieces_per_case: parsedPcs,
+    piecesPerCase: parsedPcs,
+    imageUrl: item.imageUrl || item.image_url || '',
+    brandName: String(rawBrand).replace(/\s*\[Pcs\/Cs:\d+\]/g, '').trim(),
+    source: isCatalog ? defaultSource : (item.source || defaultSource),
+    isCatalog
+  };
+}
+
 /**
  * Product & SKU Real-Time Auto-Suggest Input
  * 
@@ -121,86 +159,32 @@ export default function ProductAutoSuggest({
             const pBarcode = String(p.barcode || '').toLowerCase();
             return pName.includes(cleanLower) || pCode.includes(cleanLower) || pBarcode.includes(cleanLower);
           })
-          .map(p => {
-            const rawSku = (p.code && p.code !== p.barcode) ? p.code : ((p.sku && p.sku !== p.barcode) ? p.sku : '');
-            return {
-              id: p.id || p.code || p.sku,
-              name: p.name || '',
-              code: rawSku,
-              sku: rawSku,
-              barcode: p.barcode || '',
-              supplierName: p.supplier_name || p.supplierName || '',
-              price: Number(p.price || 0),
-              priceWithVat: Number(p.price_with_vat || (p.price ? p.price * 1.12 : 0)).toFixed(2),
-              unitName: p.unit_name || p.unitName || 'pc',
-              imageUrl: p.image_url || p.imageUrl || '',
-              brandName: p.brand_name || p.brand || '',
-              source: 'Master Catalog',
-              isCatalog: true
-            };
-          });
+          .map(p => mapSuggestionProduct(p, 'Master Catalog', true));
 
         // 2. Query live database API (via unified catalogService serverless proxy & purchaseOrdersApi)
         let apiMatches = [];
         try {
           const remoteResults = await catalogService.searchAllProducts(query, 30);
           if (Array.isArray(remoteResults) && remoteResults.length > 0) {
-            apiMatches = remoteResults.map(item => {
-              const rawSku = (item.code && item.code !== item.barcode) ? item.code : ((item.sku && item.sku !== item.barcode) ? item.sku : '');
-              return {
-                id: item.id || item.code || item.sku,
-                name: item.name || '',
-                code: rawSku,
-                sku: rawSku,
-                barcode: item.barcode || '',
-                supplierName: item.supplierName || item.supplier_name || '',
-                price: Number(item.price || 0),
-                priceWithVat: Number(item.priceWithVat || item.price_with_vat || (item.price ? item.price * 1.12 : 0)).toFixed(2),
-                unitName: item.unitName || item.unit_name || 'pc',
-                imageUrl: item.imageUrl || item.image_url || '',
-                brandName: item.brandName || item.brand_name || '',
-                source: item.source || 'Catalog API',
-                isCatalog: false
-              };
-            });
+            apiMatches = remoteResults.map(item => mapSuggestionProduct(item, 'Catalog API', false));
           } else {
             const fallbackResults = await purchaseOrdersApi.searchProducts(query, 30);
             if (Array.isArray(fallbackResults)) {
-              apiMatches = fallbackResults.map(item => {
-                const basePrice = item.unit_price ? Number(item.unit_price) : 0;
-                const pVat = item.raw_data?.priceWithVat 
-                  ? Number(item.raw_data.priceWithVat).toFixed(2)
-                  : (basePrice ? (basePrice * 1.12).toFixed(2) : '0.00');
-                const rawSku = (item.sku && item.sku !== item.barcode) ? item.sku : ((item.code && item.code !== item.barcode) ? item.code : '');
-
-                return {
-                  id: item.id || item.sku,
-                  name: item.name || '',
-                  code: rawSku,
-                  sku: rawSku,
-                  barcode: item.barcode || '',
-                  supplierName: item.supplier || item.raw_data?.supplierName || '',
-                  price: Number(basePrice.toFixed(2)),
-                  priceWithVat: pVat,
-                  unitName: item.raw_data?.unitName || 'pc',
-                  imageUrl: item.image_url || item.imageUrl || '',
-                  brandName: item.brand || item.raw_data?.brandName || '',
-                  source: 'Erply Catalog',
-                  isCatalog: false
-                };
-              });
+              apiMatches = fallbackResults.map(item => mapSuggestionProduct(item, 'Erply Catalog', false));
             }
           }
         } catch (apiErr) {
           console.warn('[ProductAutoSuggest] API query notice:', apiErr.message);
         }
 
-        // 3. Deduplicate by code / sku / name (local catalog takes priority)
+        // 3. Deduplicate by code / barcode / name (local catalog takes priority)
         const combined = [...localMatches];
-        const seenKeys = new Set(localMatches.map(m => `${(m.code || '').toLowerCase()}-${(m.name || '').toLowerCase()}`));
+        const seenKeys = new Set(
+          localMatches.map(m => `${(m.code || m.barcode || '').toLowerCase()}-${(m.name || '').toLowerCase()}`)
+        );
 
         for (const item of apiMatches) {
-          const key = `${(item.code || '').toLowerCase()}-${(item.name || '').toLowerCase()}`;
+          const key = `${(item.code || item.barcode || '').toLowerCase()}-${(item.name || '').toLowerCase()}`;
           if (!seenKeys.has(key)) {
             seenKeys.add(key);
             combined.push(item);
@@ -209,7 +193,7 @@ export default function ProductAutoSuggest({
 
         // Open dropdown if user typed in this field
         if (userTypedRef.current) {
-          setSuggestions(combined.slice(0, 15));
+          setSuggestions(combined.slice(0, 20));
           setIsOpen(combined.length > 0);
           setHighlightedIndex(-1);
         }

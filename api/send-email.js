@@ -125,21 +125,21 @@ export default async function handler(req, res) {
 
     // If Test Mode is active:
     // DO NOT send to actual recipients or customer AE!
-    // Instead, reroute the delivery to finance2@keysysincorporated.com so Danilo sees the sent and received email in Gmail without disturbing anyone!
+    // Instead, reroute delivery exclusively to mgan@a2z2go.net so sandbox testing never disturbs live stakeholders.
     if (isTestMode) {
       const originalTo = to;
       const originalCc = validCc.join(', ');
 
-      finalTo = smtpUser; // 'finance2@keysysincorporated.com'
+      finalTo = 'mgan@a2z2go.net';
       finalCc = []; // empty to prevent other recipients from receiving anything
-      finalSubject = finalSubject.toLowerCase().startsWith('test') || finalSubject.startsWith('[TEST')
+      finalSubject = (/^(test\s*-|\[test)/i.test(finalSubject))
         ? finalSubject
-        : `[TEST MODE] ${finalSubject}`;
+        : `[TEST MODE] Test - ${finalSubject}`;
 
       const testBanner = `
         <div style="background-color: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 14px 18px; border-radius: 12px; margin-bottom: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px;">
           <div style="font-weight: 800; font-size: 14px; margin-bottom: 6px;">🧪 TEST MODE ACTIVE (Safe Sandbox Delivery)</div>
-          <div>This test email was safely sent exclusively to <strong>${finalTo}</strong> so you can verify the layout, calculations, and photo attachments in your Gmail.</div>
+          <div>This test email was safely routed exclusively to <strong>mgan@a2z2go.net</strong> so you can verify the layout, calculations, attachments, and photo embeds without notifying live stakeholders.</div>
           <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #fde68a; font-size: 11px; color: #78350f;">
             <strong>Live Production Recipients (Bypassed in Test Mode):</strong><br/>
             • <strong>Target TO:</strong> ${originalTo}<br/>
@@ -149,7 +149,7 @@ export default async function handler(req, res) {
       `;
 
       finalHtml = testBanner + finalHtml;
-      finalText = `[TEST MODE ACTIVE - Safe Sandbox Delivery]\nTarget TO: ${originalTo}\nTarget CC: ${originalCc}\n\n${finalText}`;
+      finalText = `[TEST MODE ACTIVE - Safe Sandbox Delivery -> mgan@a2z2go.net]\nTarget TO: ${originalTo}\nTarget CC: ${originalCc}\n\n${finalText}`;
       console.log(`🧪 [TEST MODE] Dispatched safely via SMTP to ${finalTo} (Original TO: ${originalTo}, CC: ${originalCc})`);
     }
 

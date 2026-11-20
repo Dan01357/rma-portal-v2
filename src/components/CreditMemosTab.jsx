@@ -24,6 +24,7 @@ import {
 import TablePagination from './TablePagination';
 import { formatFilenameDateTime } from '../utils/exportCsv';
 import { downloadTableXlsx } from '../utils/exportXlsx';
+import { formatDateYmd } from '../utils/rmaHelpers';
 
 export default function CreditMemosTab({
   creditMemosList = [],
@@ -263,7 +264,7 @@ export default function CreditMemosTab({
       { header: 'SN', width: 7, type: 'number' },
       { header: 'Credit Memo #', width: 20, type: 'text' },
       { header: 'RMA #', width: 20, type: 'text' },
-      { header: 'Issue Date', width: 14, type: 'text' },
+      { header: 'Issue Date (YYYY-MM-DD)', width: 22, type: 'text' },
       { header: 'Supplier / Vendor', width: 24, type: 'text' },
       { header: 'Barcode', width: 18, type: 'text' },
       { header: 'Product Description', width: 38, type: 'text' },
@@ -274,7 +275,7 @@ export default function CreditMemosTab({
       { header: 'Total Credited Amount (PHP)', width: 22, type: 'currency' },
       { header: 'Gross Amount (PHP)', width: 18, type: 'currency' },
       { header: 'Pull Out Ref', width: 18, type: 'text' },
-      { header: 'Pull Out Date', width: 14, type: 'text' },
+      { header: 'Pull Out Date (YYYY-MM-DD)', width: 22, type: 'text' },
       { header: 'Issued By', width: 20, type: 'text' },
       { header: 'Customer AE', width: 22, type: 'text' }
     ];
@@ -283,7 +284,7 @@ export default function CreditMemosTab({
       const totalAmt = Number(m.credit_amount) || Number(m.amount) || 0;
       const netPrice = totalAmt / 1.12;
       const vatAmt = totalAmt - netPrice;
-      const dateStr = m.credit_issued_at ? new Date(m.credit_issued_at).toISOString().slice(0, 10) : '';
+      const dateStr = m.credit_issued_at ? formatDateYmd(m.credit_issued_at) : '';
 
       return [
         idx + 1,
@@ -484,8 +485,8 @@ export default function CreditMemosTab({
 
               {/* Custom Date Range Filter */}
               <div className="grid grid-cols-2 gap-1 w-full sm:w-auto min-w-0">
-                <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1.5 rounded-xl text-xs min-w-0 box-border">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">From</span>
+                <div className="flex flex-col gap-0.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1 rounded-xl text-xs min-w-0 box-border">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase truncate">From (YYYY-MM-DD)</span>
                   <input
                     type="date"
                     value={dateFrom}
@@ -494,11 +495,16 @@ export default function CreditMemosTab({
                       setCurrentPage(1);
                     }}
                     className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
-                    title="Filter credit memos from date"
+                    title="Filter credit memos from date (YYYY-MM-DD)"
                   />
+                  {dateFrom && (
+                    <span className="text-[9px] font-mono font-bold text-emerald-700 dark:text-emerald-300 truncate">
+                      ISO (YYYY-MM-DD): {dateFrom}
+                    </span>
+                  )}
                 </div>
-                <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1.5 rounded-xl text-xs min-w-0 box-border">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">To</span>
+                <div className="flex flex-col gap-0.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1 rounded-xl text-xs min-w-0 box-border">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase truncate">To (YYYY-MM-DD)</span>
                   <input
                     type="date"
                     value={dateTo}
@@ -507,8 +513,13 @@ export default function CreditMemosTab({
                       setCurrentPage(1);
                     }}
                     className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
-                    title="Filter credit memos to date"
+                    title="Filter credit memos to date (YYYY-MM-DD)"
                   />
+                  {dateTo && (
+                    <span className="text-[9px] font-mono font-bold text-emerald-700 dark:text-emerald-300 truncate">
+                      ISO (YYYY-MM-DD): {dateTo}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -638,7 +649,7 @@ export default function CreditMemosTab({
                       className="py-3 px-3 font-black text-slate-900 dark:text-white cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
                       <div className="flex items-center gap-1">
-                        <span>CM #</span>
+                        <span>CM # / Date (YYYY-MM-DD)</span>
                         {sortField === 'credit_memo_number' ? (
                           sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
@@ -761,8 +772,8 @@ export default function CreditMemosTab({
                             <span>{memo.credit_memo_number}</span>
                           </button>
                           <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-sans">
-                              {memo.credit_issued_at ? new Date(memo.credit_issued_at).toLocaleDateString() : ''}
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+                              {memo.credit_issued_at ? formatDateYmd(memo.credit_issued_at) : ''}
                             </span>
                             <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.2 rounded-full" title="Stored in Supabase database">
                               <Database className="w-2.5 h-2.5" />

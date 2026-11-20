@@ -4,6 +4,7 @@ import {
   VERIFIED_BARCODE,
   attachStrictGuards,
   installPrintStubs,
+  interceptAndCaptureEmails,
   isoDateDaysOffset,
   gotoAdmin
 } from './helpers/testUtils.js';
@@ -21,16 +22,23 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Test Mode Validation & 
     const guard = attachStrictGuards(page);
 
     try {
-      // 1. Public root without invite token shows Protected Portal Gatekeeper lock
+      // 1. Public root & /intake without invite token show Protected Portal Gatekeeper lock and zero admin controls
       await page.goto('/', { waitUntil: 'domcontentloaded' });
       await expect(page.getByText('Protected Portal')).toBeVisible({ timeout: 15_000 });
       await expect(page.getByText('Authorization Required')).toBeVisible();
+      await expect(page.getByRole('button', { name: /Admin Portal/i })).toBeHidden();
 
-      // 2. Visiting /admin without session opens AdminLoginModal OTP form
+      await page.goto('/intake', { waitUntil: 'domcontentloaded' });
+      await expect(page.getByText('Authorization Required')).toBeVisible({ timeout: 15_000 });
+
+      // 2. Visiting /admin without session opens AdminLoginModal OTP form and rejects non-company emails
       await page.goto('/admin', { waitUntil: 'domcontentloaded' });
-      await expect(page.getByRole('button', { name: /Send OTP Verification Code/i })).toBeVisible({
-        timeout: 15_000
-      });
+      const sendOtpBtn = page.getByRole('button', { name: /Send OTP Verification Code/i });
+      await expect(sendOtpBtn).toBeVisible({ timeout: 15_000 });
+      const emailField = page.locator('input[type="email"]').first();
+      await emailField.fill('unauthorized@gmail.com');
+      await sendOtpBtn.click();
+      await expect(page.getByText(/company email|restricted|keysys|pingcon|a2z2go/i).first()).toBeVisible({ timeout: 8_000 });
 
       guard.assertClean('unauthenticated gatekeeper & admin OTP check');
     } finally {
@@ -45,6 +53,7 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Test Mode Validation & 
   }) => {
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
+    await interceptAndCaptureEmails(page);
     let createdRmaNumber = null;
 
     try {
@@ -65,19 +74,22 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Test Mode Validation & 
         await expect(page.getByText('🟢 Live Delivery Mode Active')).toBeVisible();
       }
 
-      // 2. Customer Inbound vs Supplier RTV expiration rules in LIVE Mode
+      // 2. Customer Inbound vs Supplier RTV expiration & Section 3 labels in LIVE Mode
       await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
+      await expect(page.getByText('3. Company / Store Name (Optional)')).toBeVisible();
       const expiryInput = page.locator('input[type="date"]').first();
       await expect(expiryInput).not.toHaveAttribute('required', /.*/);
       await expect(page.getByText('Optional', { exact: true }).first()).toBeVisible();
 
       await page.getByRole('button', { name: /Supplier RTV Hub/i }).click();
+      await expect(page.getByText('3. Supplier Name (Optional)')).toBeVisible();
       await expect(expiryInput).toHaveAttribute('required', '');
       await expect(page.getByText('Required *', { exact: true }).first()).toBeVisible();
 
-      // 3. Enforce strict mandatory expiration validation in TEST Mode too (zero optional bypass)
+      // 3. Enforce strict mandatory expiration validation in TEST Mode too (zero optional bypass) & mgan@a2z2go.net sandbox notice
       await toggleBtn.click();
       await expect(page.getByText('🧪 Super Admin Sandbox Active')).toBeVisible();
+      await expect(page.getByText(/mgan@a2z2go\.net/)).toBeVisible();
       await expect(toggleBtn).toContainText(/Test Mode:\s*ON/i);
       await expect(expiryInput).toHaveAttribute('required', '');
 
@@ -169,13 +181,16 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Test Mode Validation & 
       ]);
       expect(directPngDownload.suggestedFilename()).toContain('.png');
 
-      // Open ReturnQRModal ("Resize / Print Sticker") & exercise every preset + download + Print button
+      // Open ReturnQRModal ("Resize / Print Sticker") & exercise every preset (incl. Half Letter, zero A4) + download + Print button
       await page.getByRole('button', { name: /Resize \/ Print Sticker/i }).click();
       await expect(page.getByText('Print RMA Sticker Label')).toBeVisible();
 
       await page.getByRole('button', { name: /Small \(Tuna Can\)/i }).click();
       await page.getByRole('button', { name: /Large \(Carton\)/i }).click();
+      await page.getByRole('button', { name: /Extra Large \(Half Letter\)/i }).click();
       await page.getByRole('button', { name: /Medium \(Inner Box\)/i }).click();
+      const modalText = await page.locator('div.fixed', { hasText: 'Print RMA Sticker Label' }).innerText();
+      expect(modalText).not.toMatch(/\bA4\b/);
 
       const [qrPngDownload] = await Promise.all([
         page.waitForEvent('download'),
@@ -194,6 +209,9 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Test Mode Validation & 
       await page.waitForTimeout(350);
       const printsAfter = await page.evaluate(() => window.__pwPrintCount || 0);
       expect(printsAfter).toBeGreaterThan(printsBefore);
+      const printedHtmls = await page.evaluate(() => window.__pwPrintHtmls || []);
+      const lastPrint = printedHtmls[printedHtmls.length - 1] || '';
+      expect(lastPrint.toLowerCase()).not.toContain('size: a4');
 
       await page.getByRole('button', { name: 'Done', exact: true }).click();
       await expect(page.getByText('Print RMA Sticker Label')).toBeHidden();

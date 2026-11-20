@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Printer, Receipt, CheckCircle2, Building2, UserCheck } from 'lucide-react';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
+import { formatDateYmd, formatDateTimeYmdHm } from '../utils/rmaHelpers';
 
 export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, creditMemos = [] }) {
   if (!isOpen) return null;
@@ -80,7 +81,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
 
   return (
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-6 md:p-8 bg-slate-900/70 backdrop-blur-md animate-in fade-in overflow-y-auto">
-      
+
       {/* Print Specific Stylesheet Injection */}
       <style>{`
         @media print {
@@ -129,7 +130,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
         }
       `}</style>
 
-      <div 
+      <div
         id="credit-memo-voucher-print-root"
         className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 max-w-2xl w-full flex flex-col max-h-[92dvh] sm:max-h-[95vh] overflow-hidden text-slate-900 my-0 sm:my-auto pb-safe"
       >
@@ -165,11 +166,11 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
         {/* Scrollable Document Container (Contains 1 or multiple vouchers) */}
         <div className="flex-1 overflow-y-auto divide-y-4 divide-slate-200 print:divide-y-0 print:overflow-visible">
           {memosToRender.map((memo, idx) => (
-            <div 
+            <div
               key={memo.credit_memo_number || idx}
               className="voucher-sheet p-6 sm:p-8 space-y-4 sm:space-y-5 print:p-2 print:space-y-3.5"
             >
-              
+
               {/* Header with Unified Corporate Identity */}
               <div className="border-b-2 border-slate-900 pb-3 sm:pb-4">
                 <div className="flex items-start justify-between gap-4">
@@ -192,8 +193,8 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
                     <div className="font-mono font-black text-sm text-slate-900 mt-1">
                       {memo.credit_memo_number}
                     </div>
-                    <div className="text-[11px] text-slate-500">
-                      Date: {memo.credit_issued_at ? new Date(memo.credit_issued_at).toLocaleDateString() : new Date().toLocaleDateString()}
+                    <div className="text-[11px] text-black font-mono">
+                      Date (YYYY-MM-DD): {formatDateYmd(memo.credit_issued_at || new Date())}
                     </div>
                   </div>
                 </div>
@@ -221,7 +222,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
                     Pull Out Ref: <strong className="font-semibold">{memo.pull_out_ref || 'N/A'}</strong>
                   </div>
                   <div className="text-[11px] text-slate-500">
-                    Pull Out Date: {memo.pull_out_date || 'N/A'}
+                    Pull Out Date (YYYY-MM-DD): {memo.pull_out_date ? (formatDateYmd(memo.pull_out_date) || memo.pull_out_date) : 'N/A'}
                   </div>
                 </div>
               </div>
@@ -304,7 +305,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
                     Finance Head
                   </span>
                   <span className="text-[10px] text-slate-500 font-mono block">
-                    {memo.credit_issued_at ? new Date(memo.credit_issued_at).toLocaleString() : ''}
+                    {memo.credit_issued_at ? `${formatDateTimeYmdHm(memo.credit_issued_at)} (YYYY-MM-DD HH:mm)` : ''}
                   </span>
                 </div>
 

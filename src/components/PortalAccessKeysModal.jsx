@@ -83,8 +83,8 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
   const [cooldownDurationVal, setCooldownDurationVal] = useState(6);
   const [cooldownDurationUnit, setCooldownDurationUnit] = useState('hrs');
 
-  // Dynamic Print Sizes: 'a4' | '4x6' | '3x3' | '2x2'
-  const [printSize, setPrintSize] = useState('a4');
+  // Dynamic Print Sizes: 'letter' | '4x6' | '3x3' | '2x2'
+  const [printSize, setPrintSize] = useState('letter');
 
   // Print Poster Options
   const [isDownloadingPoster, setIsDownloadingPoster] = useState(false);
@@ -322,14 +322,20 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
   // High-Fidelity Isolated Print Handler (Guarantees exactly 1 page & 100% preview match)
   const handlePrintPoster = () => {
     const sizeConfig = {
-      'a4': {
-        pageSize: 'A4 portrait',
-        pageMargin: '0.3in',
+      'letter': {
+        pageSize: 'letter portrait',
+        pageMargin: '0.35in',
         scale: 1.0,
         customStyles: `
+          #portal-poster-print-mount, #portal-poster-print-mount * {
+            background: #ffffff !important;
+            color: #000000 !important;
+            border-color: #000000 !important;
+            box-shadow: none !important;
+          }
           #portal-poster-print-mount {
             width: 100% !important;
-            max-width: 180mm !important;
+            max-width: 7.5in !important;
             box-shadow: none !important;
             margin: 0 auto !important;
             box-sizing: border-box !important;
@@ -341,6 +347,12 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
         pageMargin: '0.2in',
         scale: 1.0,
         customStyles: `
+          #portal-poster-print-mount, #portal-poster-print-mount * {
+            background: #ffffff !important;
+            color: #000000 !important;
+            border-color: #000000 !important;
+            box-shadow: none !important;
+          }
           #portal-poster-print-mount {
             width: 3.0in !important;
             max-width: 3.0in !important;
@@ -355,6 +367,12 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
         pageMargin: '0.1in',
         scale: 1.0,
         customStyles: `
+          #portal-poster-print-mount, #portal-poster-print-mount * {
+            background: #ffffff !important;
+            color: #000000 !important;
+            border-color: #000000 !important;
+            box-shadow: none !important;
+          }
           #portal-poster-print-mount {
             width: 2.15in !important;
             max-width: 2.15in !important;
@@ -371,6 +389,12 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
         pageMargin: '0.05in',
         scale: 1.0,
         customStyles: `
+          #portal-poster-print-mount, #portal-poster-print-mount * {
+            background: #ffffff !important;
+            color: #000000 !important;
+            border-color: #000000 !important;
+            box-shadow: none !important;
+          }
           #portal-poster-print-mount {
             width: 1.45in !important;
             max-width: 1.45in !important;
@@ -382,7 +406,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
           }
         `
       }
-    }[printSize] || { pageSize: 'A4 portrait', pageMargin: '0.3in', scale: 1.0, customStyles: '' };
+    }[printSize] || { pageSize: 'letter portrait', pageMargin: '0.35in', scale: 1.0, customStyles: '' };
 
     printIsolatedElement({
       elementId: 'portal-poster-print-mount',
@@ -1028,7 +1052,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                   Select Output Print Size:
                 </label>
                 <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400">
-                  {printSize === 'a4' && 'Full Sheet Wall Poster (A4 / Letter)'}
+                  {printSize === 'letter' && 'Full Sheet Wall Poster (US Letter 8.5" × 11")'}
                   {printSize === '4x6' && 'Standard 4" x 6" Carton Sticker'}
                   {printSize === '3x3' && 'Medium 3" x 3" Parcel Label'}
                   {printSize === '2x2' && 'Small 2" x 2" Tag (Unboxed / Loose Items)'}
@@ -1037,7 +1061,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {[
-                  { id: 'a4', label: 'Wall Poster', sub: 'A4 / Letter Sheet', badge: 'Dock Wall' },
+                  { id: 'letter', label: 'Wall Poster', sub: 'Letter (8.5" × 11")', badge: 'Dock Wall' },
                   { id: '4x6', label: 'Carton Sticker', sub: '4" x 6" Thermal', badge: 'Box/Crate' },
                   { id: '3x3', label: 'Medium Label', sub: '3" x 3" Thermal', badge: 'Polybag' },
                   { id: '2x2', label: 'Small Item Tag', sub: '2" x 2" Mini Tag', badge: 'Unboxed / Loose' }
@@ -1067,8 +1091,8 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
             {/* Poster Sheet Preview Mount (Strict Target for Print) */}
             <div className="flex justify-center p-2 sm:p-5 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-x-hidden max-w-full">
               
-              {/* VARIANT 1: A4 FULL SHEET WALL POSTER (Responsive & Zero Overflow) */}
-              {printSize === 'a4' && (
+              {/* VARIANT 1: LETTER FULL SHEET WALL POSTER (Plain B&W Outline & Zero Overflow) */}
+              {printSize === 'letter' && (
                 <div 
                   id="portal-poster-print-mount"
                   className="bg-white text-black p-4 sm:p-8 md:p-10 rounded-2xl sm:rounded-3xl border-2 sm:border-4 border-black shadow-xl text-center font-sans space-y-3.5 sm:space-y-5 w-full max-w-[540px] mx-auto transition-all box-border overflow-hidden"
@@ -1098,9 +1122,9 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                     />
                   </div>
 
-                  {/* Slug Pill */}
+                  {/* Slug Pill (Plain B&W outline) */}
                   <div className="px-2">
-                    <span className="bg-black text-white font-mono text-[10px] sm:text-xs md:text-sm font-bold py-1 sm:py-1.5 px-3 sm:px-4 rounded-xl inline-block max-w-full truncate shadow-xs">
+                    <span className="bg-white text-black border-[1.5px] border-black font-mono text-[10px] sm:text-xs md:text-sm font-bold py-1 sm:py-1.5 px-3 sm:px-4 rounded-xl inline-block max-w-full truncate">
                       {originUrl.replace(/^https?:\/\//, '')}/intake/{selectedProfile.access_slug}
                     </span>
                   </div>
@@ -1144,9 +1168,9 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                     />
                   </div>
 
-                  {/* Slug Pill */}
+                  {/* Slug Pill (Plain B&W outline) */}
                   <div>
-                    <span className="bg-black text-white font-mono text-[9.5px] font-bold py-1 px-3 rounded-lg inline-block max-w-full truncate">
+                    <span className="bg-white text-black border-[1.5px] border-black font-mono text-[9.5px] font-bold py-1 px-3 rounded-lg inline-block max-w-full truncate">
                       {originUrl.replace(/^https?:\/\//, '')}/intake/{selectedProfile.access_slug}
                     </span>
                   </div>
@@ -1187,9 +1211,9 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                     />
                   </div>
 
-                  {/* Slug Pill */}
+                  {/* Slug Pill (Plain B&W outline) */}
                   <div>
-                    <span className="bg-black text-white font-mono text-[8px] font-bold py-0.5 px-2 rounded-md inline-block max-w-full truncate">
+                    <span className="bg-white text-black border border-black font-mono text-[8px] font-bold py-0.5 px-2 rounded-md inline-block max-w-full truncate">
                       /{selectedProfile.access_slug}
                     </span>
                   </div>
@@ -1248,7 +1272,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
                   className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-blue-600/20 cursor-pointer active:scale-95 transition-all"
                 >
                   <Printer className="w-4 h-4" />
-                  <span>Print {printSize === 'a4' ? 'Wall Poster' : printSize === '4x6' ? '4x6" Sticker' : printSize === '3x3' ? '3x3" Label' : '2x2" Tag'}</span>
+                  <span>Print {printSize === 'letter' ? 'Wall Poster' : printSize === '4x6' ? '4x6" Sticker' : printSize === '3x3' ? '3x3" Label' : '2x2" Tag'}</span>
                 </button>
               </div>
             </div>

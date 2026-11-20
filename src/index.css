@@ -241,7 +241,7 @@
 /* ========================================================================= */
 @media print {
   @page {
-    size: portrait;
+    size: letter portrait;
     margin: 4mm !important;
   }
 

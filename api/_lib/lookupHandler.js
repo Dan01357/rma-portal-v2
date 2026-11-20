@@ -49,6 +49,72 @@ async function getCatalogApiKey() {
   return envKey || 'pk_live_po_cloud_db_2026_dev_key';
 }
 
+function extractPcsPerCase(item) {
+  const rawBrand = item?.brand_name || item?.brandName || '';
+  const pcsMatch = String(rawBrand).match(/\[Pcs\/Cs:(\d+)\]/);
+  const parsedBrandPcs = pcsMatch ? parseInt(pcsMatch[1], 10) : null;
+  const rawPcs = item?.pieces_per_case ?? item?.piecesPerCase ?? parsedBrandPcs ?? null;
+  const numPcs = Number(rawPcs);
+  return Number.isFinite(numPcs) && numPcs > 0 ? numPcs : null;
+}
+
+function normalizeLookupItem(raw, source, fallbackBarcode = null) {
+  if (!raw) return null;
+  const isErply = source === 'erply_api';
+  const isMock = source === 'verified_catalog';
+  const barcodeVal = isErply
+    ? (raw.ean_code || raw.code2 || raw.barcode || fallbackBarcode || null)
+    : (raw.barcode || fallbackBarcode || null);
+  const rawSku = raw.code || raw.sku || null;
+  const cleanSku = (rawSku && rawSku !== barcodeVal) ? rawSku : null;
+  const rawBrand = raw.brand_name || raw.brandName || raw.brand || '';
+  const cleanBrand = String(rawBrand).replace(/\s*\[Pcs\/Cs:\d+\]/g, '').trim() || null;
+  const parsedPcs = extractPcsPerCase(raw);
+
+  const rawPrice = Number(isMock ? (raw.unit_price || 0) : (raw.price || 0));
+  const priceWithVat = isMock
+    ? rawPrice * 1.12
+    : (parseFloat(raw.priceWithVat) || parseFloat(raw.price_with_vat) || parseFloat(raw.price) || 0);
+  const netPrice = isMock
+    ? rawPrice
+    : (parseFloat(raw.price) || (priceWithVat > 0 ? priceWithVat / 1.12 : 0));
+
+  const supplierVal = raw.supplierName || raw.supplier_name || raw.supplier || 'Savemore';
+  const unitVal = raw.unitName || raw.unit_name || 'pc';
+
+  return {
+    id: String(raw.id || cleanSku || barcodeVal || ''),
+    barcode: barcodeVal || cleanSku || null,
+    code: cleanSku,
+    sku: cleanSku,
+    ean_code: raw.ean_code || (!isErply && !isMock ? raw.barcode : null) || null,
+    name: raw.name || '',
+    price: netPrice,
+    price_with_vat: priceWithVat,
+    priceWithVat: priceWithVat,
+    supplier_name: supplierVal,
+    supplierName: supplierVal,
+    supplier: supplierVal,
+    brand_name: cleanBrand,
+    brandName: cleanBrand,
+    brand: cleanBrand,
+    unit_name: unitVal,
+    unitName: unitVal,
+    pieces_per_case: parsedPcs,
+    piecesPerCase: parsedPcs,
+    has_serial_numbers: Boolean(raw.hasSerialNumbers || raw.has_serial_numbers || raw.requires_serial),
+    hasSerialNumbers: Boolean(raw.hasSerialNumbers || raw.has_serial_numbers || raw.requires_serial),
+    image_url: raw.image_url || raw.imageUrl || null,
+    imageUrl: raw.imageUrl || raw.image_url || null,
+    ae_name: raw.ae_name || null,
+    ae_email: raw.ae_email || null,
+    company: raw.company || null,
+    is_verified: isErply || isMock ? true : (raw.is_verified !== false),
+    isVerified: isErply || isMock ? true : (raw.is_verified !== false),
+    source
+  };
+}
+
 /**
  * Public Secure Product Lookup Endpoint:
  * GET /api/v1/products/lookup?barcode=[barcode]&search=[search]
@@ -96,30 +162,7 @@ export default async function handler(req, res) {
             success: true,
             found: true,
             source: 'database',
-            product: {
-              id: item.id,
-              barcode: item.barcode,
-              code: (item.code && item.code !== item.barcode) ? item.code : null,
-              sku: (item.code && item.code !== item.barcode) ? item.code : null,
-              ean_code: item.ean_code || item.barcode,
-              name: item.name,
-              price: Number(item.price || 0),
-              price_with_vat: Number(item.price_with_vat || item.price || 0),
-              priceWithVat: Number(item.price_with_vat || item.price || 0),
-              supplier_name: item.supplier_name || 'Savemore',
-              supplier: item.supplier_name || 'Savemore',
-              brand_name: item.brand_name || null,
-              brand: item.brand_name || null,
-              unit_name: item.unit_name || 'pc',
-              has_serial_numbers: Boolean(item.has_serial_numbers),
-              image_url: item.image_url || null,
-              imageUrl: item.image_url || null,
-              ae_name: item.ae_name || null,
-              ae_email: item.ae_email || null,
-              company: item.company || null,
-              is_verified: item.is_verified !== false,
-              isVerified: item.is_verified !== false
-            }
+            product: normalizeLookupItem(item, 'database')
           });
         }
       }
@@ -172,43 +215,13 @@ export default async function handler(req, res) {
       }
 
       if (matchedItem) {
-        const barcodeVal = matchedItem.ean_code || matchedItem.code2 || cleanBarcode;
-        const rawSku = matchedItem.code || matchedItem.sku || null;
-        const cleanSku = (rawSku && rawSku !== barcodeVal) ? rawSku : null;
-        const priceWithVat = parseFloat(matchedItem.priceWithVat) || parseFloat(matchedItem.price) || 0;
-        const netPrice = parseFloat(matchedItem.price) || (priceWithVat / 1.12);
-
-        const normalized = {
-          id: String(matchedItem.id || cleanSku || barcodeVal),
-          barcode: barcodeVal,
-          code: cleanSku,
-          sku: cleanSku,
-          ean_code: matchedItem.ean_code || null,
-          name: matchedItem.name || '',
-          price: netPrice,
-          price_with_vat: priceWithVat,
-          priceWithVat: priceWithVat,
-          supplier_name: matchedItem.supplierName || 'Savemore',
-          supplier: matchedItem.supplierName || 'Savemore',
-          brand_name: matchedItem.brandName || null,
-          brand: matchedItem.brandName || null,
-          unit_name: matchedItem.unitName || 'pc',
-          has_serial_numbers: Boolean(matchedItem.hasSerialNumbers),
-          image_url: null,
-          imageUrl: null,
-          ae_name: null,
-          ae_email: null,
-          company: null,
-          is_verified: true,
-          isVerified: true,
-          source: 'erply_api'
-        };
+        const normalized = normalizeLookupItem(matchedItem, 'erply_api', cleanBarcode);
 
         // Cache into Supabase so subsequent scans find it directly in Supabase
         try {
           await supabase.from('products').upsert({
-            barcode: barcodeVal,
-            code: sku,
+            barcode: normalized.barcode,
+            code: normalized.code,
             name: normalized.name,
             supplier_name: normalized.supplier_name,
             price: normalized.price,
@@ -239,27 +252,7 @@ export default async function handler(req, res) {
           success: true,
           found: true,
           source: 'verified_catalog',
-          product: {
-            id: mock.id,
-            barcode: mock.barcode,
-            code: (mock.sku && mock.sku !== mock.barcode) ? mock.sku : null,
-            sku: (mock.sku && mock.sku !== mock.barcode) ? mock.sku : null,
-            name: mock.name,
-            price: Number(mock.unit_price || 0),
-            price_with_vat: Number(mock.unit_price || 0) * 1.12,
-            priceWithVat: Number(mock.unit_price || 0) * 1.12,
-            supplier_name: mock.supplier || 'Savemore',
-            supplier: mock.supplier || 'Savemore',
-            brand_name: mock.brand || null,
-            brand: mock.brand || null,
-            unit_name: 'pc',
-            image_url: mock.image_url || null,
-            imageUrl: mock.image_url || null,
-            ae_name: null,
-            ae_email: null,
-            is_verified: true,
-            isVerified: true
-          }
+          product: normalizeLookupItem(mock, 'verified_catalog')
         });
       }
 
@@ -301,69 +294,51 @@ export default async function handler(req, res) {
         for (const item of supaItems) {
           if (item.name?.startsWith('[DELETED]') || item.barcode?.startsWith('__CONFIG_')) continue;
           const key = String(item.barcode || item.code || item.id).trim().toLowerCase();
-          seenKeys.add(key);
-          results.push({
-            id: item.id,
-            barcode: item.barcode,
-            code: (item.code && item.code !== item.barcode) ? item.code : null,
-            name: item.name,
-            price: Number(item.price || 0),
-            price_with_vat: Number(item.price_with_vat || item.price || 0),
-            priceWithVat: Number(item.price_with_vat || item.price || 0),
-            supplier_name: item.supplier_name || 'Savemore',
-            supplier: item.supplier_name || 'Savemore',
-            brand_name: item.brand_name || null,
-            brand: item.brand_name || null,
-            unit_name: item.unit_name || 'pc',
-            image_url: item.image_url || null,
-            imageUrl: item.image_url || null,
-            is_verified: item.is_verified !== false,
-            isVerified: item.is_verified !== false,
-            source: 'database'
-          });
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            results.push(normalizeLookupItem(item, 'database'));
+          }
         }
       }
 
-      // 2. Search Laravel Cloud API
+      // 2. Search Laravel Cloud API (test case variations + direct ?code= if term has no spaces)
       const key = await getCatalogApiKey();
       const baseUrl = process.env.PO_API_URL || process.env.VITE_PO_API_URL || 'https://purchase-order-db-production-ff1oho.laravel.cloud/api/v1';
+      const cols = 'id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers';
+      const capitalized = cleanSearch.charAt(0).toUpperCase() + cleanSearch.slice(1);
+      const uppercase = cleanSearch.toUpperCase();
+      const lowercase = cleanSearch.toLowerCase();
+      const searchVariations = Array.from(new Set([cleanSearch, capitalized, uppercase, lowercase]));
+      const erplyUrls = searchVariations.map(
+        (term) => `${baseUrl}/data/erply_products?search=${encodeURIComponent(term)}&per_page=25&columns=${cols}`
+      );
+      if (!/\s/.test(cleanSearch)) {
+        const codeVariations = Array.from(new Set([cleanSearch, uppercase, lowercase]));
+        codeVariations.forEach((codeTerm) => {
+          erplyUrls.push(`${baseUrl}/data/erply_products?code=${encodeURIComponent(codeTerm)}&per_page=25&columns=${cols}`);
+        });
+      }
 
       try {
-        const searchUrl = `${baseUrl}/data/erply_products?search=${encodeURIComponent(cleanSearch)}&per_page=25&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
-        const resSearch = await fetch(searchUrl, { headers: { 'X-API-Key': key, 'Accept': 'application/json' } });
-        if (resSearch.ok) {
-          const jsonSearch = await resSearch.json();
-          if (jsonSearch.data && Array.isArray(jsonSearch.data)) {
-            for (const item of jsonSearch.data) {
-              const barcodeVal = item.ean_code || item.code2 || item.barcode || null;
-              const rawSku = item.code || item.sku || null;
-              const cleanSku = (rawSku && rawSku !== barcodeVal) ? rawSku : null;
-              const prodKey = String(barcodeVal || cleanSku || item.id).trim().toLowerCase();
-              if (!seenKeys.has(prodKey)) {
-                seenKeys.add(prodKey);
-                const priceWithVat = parseFloat(item.priceWithVat) || parseFloat(item.price) || 0;
-                const netPrice = parseFloat(item.price) || (priceWithVat / 1.12);
-                results.push({
-                  id: String(item.id || cleanSku || barcodeVal),
-                  barcode: barcodeVal || cleanSku,
-                  code: cleanSku,
-                  sku: cleanSku,
-                  name: item.name || '',
-                  price: netPrice,
-                  price_with_vat: priceWithVat,
-                  priceWithVat: priceWithVat,
-                  supplier_name: item.supplierName || 'Savemore',
-                  supplier: item.supplierName || 'Savemore',
-                  brand_name: item.brandName || null,
-                  brand: item.brandName || null,
-                  unit_name: item.unitName || 'pc',
-                  image_url: null,
-                  imageUrl: null,
-                  is_verified: true,
-                  isVerified: true,
-                  source: 'erply_api'
-                });
-              }
+        const responses = await Promise.all(
+          erplyUrls.map(async (url) => {
+            try {
+              const r = await fetch(url, { headers: { 'X-API-Key': key, 'Accept': 'application/json' } });
+              if (!r.ok) return [];
+              const j = await r.json();
+              return Array.isArray(j?.data) ? j.data : [];
+            } catch {
+              return [];
+            }
+          })
+        );
+        for (const batch of responses) {
+          for (const item of batch) {
+            const normalized = normalizeLookupItem(item, 'erply_api');
+            const prodKey = String(normalized.barcode || normalized.code || normalized.id).trim().toLowerCase();
+            if (!seenKeys.has(prodKey)) {
+              seenKeys.add(prodKey);
+              results.push(normalized);
             }
           }
         }
@@ -373,27 +348,10 @@ export default async function handler(req, res) {
       for (const mock of INITIAL_PRODUCTS) {
         const matchText = `${mock.name} ${mock.brand || ''} ${mock.category || ''} ${mock.sku || ''} ${mock.barcode || ''}`.toLowerCase();
         if (matchText.includes(cleanSearch.toLowerCase())) {
-          const key = String(mock.barcode || mock.sku || mock.id).trim().toLowerCase();
-          if (!seenKeys.has(key)) {
-            seenKeys.add(key);
-            results.push({
-              id: mock.id,
-              barcode: mock.barcode,
-              code: (mock.sku && mock.sku !== mock.barcode) ? mock.sku : null,
-              sku: (mock.sku && mock.sku !== mock.barcode) ? mock.sku : null,
-              name: mock.name,
-              price: Number(mock.unit_price || 0),
-              price_with_vat: Number(mock.unit_price || 0) * 1.12,
-              priceWithVat: Number(mock.unit_price || 0) * 1.12,
-              supplier_name: mock.supplier || 'Savemore',
-              brand_name: mock.brand || null,
-              unit_name: 'pc',
-              image_url: mock.image_url || null,
-              imageUrl: mock.image_url || null,
-              is_verified: true,
-              isVerified: true,
-              source: 'verified_catalog'
-            });
+          const mockKey = String(mock.barcode || mock.sku || mock.id).trim().toLowerCase();
+          if (!seenKeys.has(mockKey)) {
+            seenKeys.add(mockKey);
+            results.push(normalizeLookupItem(mock, 'verified_catalog'));
           }
         }
       }

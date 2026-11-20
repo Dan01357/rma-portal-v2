@@ -21,6 +21,7 @@ import {
 import { inviteService, formatRemainingCountdown } from '../services/inviteService';
 import TablePagination from './TablePagination';
 import { copyTextSafe } from '../utils/clipboard';
+import { formatDateTimeYmdHm } from '../utils/rmaHelpers';
 
 const PRESET_EXPIRIES = [
   { label: '15 Mins', num: 15, unit: 'minutes' },
@@ -101,7 +102,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     else if (unit.startsWith('day')) ms = num * 24 * 3600 * 1000;
 
     const expDate = new Date(Date.now() + ms);
-    return `Expires: ${expDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}, ${expDate.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
+    return `Expires (YYYY-MM-DD HH:mm): ${formatDateTimeYmdHm(expDate)}`;
   }, [expiryNumber, expiryUnit]);
 
   const handleGenerate = async (e) => {
@@ -580,7 +581,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                     ? 'text-purple-800 dark:text-purple-300 bg-purple-200/60 dark:bg-purple-900/60'
                     : 'text-emerald-800 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/60'
                 }`}>
-                  Validity: {generatedInvite.duration_display || 'Custom'} • Expires: {new Date(generatedInvite.expires_at).toLocaleString()}
+                  Validity: {generatedInvite.duration_display || 'Custom'} • Expires (YYYY-MM-DD HH:mm): {formatDateTimeYmdHm(generatedInvite.expires_at)}
                 </span>
               </div>
 

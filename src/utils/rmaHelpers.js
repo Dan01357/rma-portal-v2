@@ -119,7 +119,7 @@ export function applyEmailTestMode(email, isTestMode) {
   if (!email) return '';
   const clean = email.trim();
   if (!isTestMode) return clean;
-  return 'finance2@keysysincorporated.com (Sandbox)';
+  return 'mgan@a2z2go.net (Sandbox)';
 }
 
 /**
@@ -413,6 +413,305 @@ export function formatManifestBreakdown(items = [], includeLineCount = true) {
 }
 
 /**
+ * Format any date input strictly as unambiguous YYYY-MM-DD in Asia/Manila timezone.
+ */
+export function formatDateYmd(val) {
+  if (!val) return '';
+  const trimmed = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const d = new Date(val);
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(d);
+  } catch {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+}
+
+/**
+ * Format any date/time input strictly as unambiguous YYYY-MM-DD HH:mm (24h Asia/Manila).
+ */
+export function formatDateTimeYmdHm(val) {
+  if (!val) return '';
+  const trimmed = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return `${trimmed} 00:00`;
+  const d = new Date(val);
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).formatToParts(d);
+    const map = {};
+    parts.forEach((p) => {
+      if (p.type !== 'literal') map[p.type] = p.value;
+    });
+    const hh = map.hour === '24' ? '00' : map.hour;
+    return `${map.year}-${map.month}-${map.day} ${hh}:${map.minute}`;
+  } catch {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+  }
+}
+
+export function formatDateTimeMinute(val) {
+  return formatDateTimeYmdHm(val);
+}
+
+/**
+ * Formats an RMA report's 4-Choice decision / pickup status into a human-readable label
+ * with exact YYYY-MM-DD HH:mm date/time and normalized metadata flags.
+ */
+export function formatFourChoiceOutcome(item) {
+  const meta = (item?.ai_document_metadata && typeof item.ai_document_metadata === 'object')
+    ? item.ai_document_metadata
+    : {};
+  const pickup = (meta.supplier_pickup && typeof meta.supplier_pickup === 'object')
+    ? meta.supplier_pickup
+    : {};
+
+  const simpleDisp = String(meta.simple_rtv_disposition || '').trim();
+  const rawDisp = String(simpleDisp || pickup.disposition || item?.disposition || '').trim();
+  const dispLower = rawDisp.toLowerCase();
+  const statusLower = String(item?.status || '').toLowerCase().trim();
+  const workflowResolution = String(meta.workflow_resolution || '').toLowerCase().trim();
+
+  const pickedUpAt = pickup.picked_up_at || null;
+  const isPickedUp = Boolean(pickedUpAt) || statusLower === 'picked_up' || statusLower === 'picked_up_by_supplier';
+
+  const notesMatch = String(item?.notes || '').match(/\[RTV:\s*([^\]]+)\]/i);
+  const auditRtv = Array.isArray(item?.audit_trail)
+    ? item.audit_trail.find((a) => a?.rtv_number)?.rtv_number
+    : null;
+  const claimNumber = pickup.claim_number || (notesMatch && notesMatch[1]?.trim()) || auditRtv || null;
+
+  const decisionTs =
+    pickedUpAt ||
+    meta.simple_rtv_updated_at ||
+    meta.resolved_at ||
+    item?.inspected_at ||
+    item?.updated_at ||
+    null;
+  const formattedTime = formatDateTimeMinute(decisionTs);
+  const tsSuffix = formattedTime ? ` (${formattedTime})` : '';
+
+  if (workflowResolution === 'restocked' || statusLower === 'restocked') {
+    return {
+      choiceKey: 'restock',
+      formType: null,
+      isPickedUp: false,
+      hasDecision: true,
+      claimNumber,
+      timestamp: decisionTs,
+      formattedTime,
+      shortStatus: 'Restocked',
+      label: `Restocked${tsSuffix}`,
+      badgeColor: 'bg-teal-50 text-teal-800 border-teal-300 dark:bg-teal-950/70 dark:text-teal-300 dark:border-teal-700'
+    };
+  }
+
+  if (
+    workflowResolution === 'reordered' ||
+    workflowResolution === 'scrapped_no_reorder' ||
+    statusLower === 'scrapped' ||
+    statusLower === 'disposed'
+  ) {
+    return {
+      choiceKey: 'scrap',
+      formType: null,
+      isPickedUp: false,
+      hasDecision: true,
+      claimNumber,
+      timestamp: decisionTs,
+      formattedTime,
+      shortStatus: 'Scrapped',
+      label: `Scrapped${tsSuffix}`,
+      badgeColor: 'bg-rose-50 text-rose-800 border-rose-300 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-700'
+    };
+  }
+
+  if (
+    dispLower === 'supplier_credit' ||
+    dispLower === 'customer_credit' ||
+    dispLower.includes('debit claim') ||
+    dispLower.includes('vendor credit') ||
+    dispLower.includes('ap deduction') ||
+    dispLower.includes('debit / credit')
+  ) {
+    if (isPickedUp) {
+      return {
+        choiceKey: 'debit',
+        formType: 'debit',
+        isPickedUp: true,
+        hasDecision: true,
+        claimNumber,
+        timestamp: decisionTs,
+        formattedTime,
+        shortStatus: 'Picked Up for Debit Claim',
+        label: `Picked Up for Debit Claim${tsSuffix}`,
+        badgeColor: 'bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-700'
+      };
+    }
+    return {
+      choiceKey: 'debit',
+      formType: null,
+      isPickedUp: false,
+      hasDecision: true,
+      claimNumber,
+      timestamp: decisionTs,
+      formattedTime,
+      shortStatus: 'Waiting Driver (Debit Claim)',
+      label: 'Waiting Driver (Debit Claim)',
+      badgeColor: 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-700'
+    };
+  }
+
+  if (
+    dispLower === 'supplier_exchange' ||
+    dispLower === 'customer_exchange' ||
+    dispLower.includes('replacement') ||
+    dispLower.includes('exchange')
+  ) {
+    if (isPickedUp) {
+      return {
+        choiceKey: 'replacement',
+        formType: 'replacement',
+        isPickedUp: true,
+        hasDecision: true,
+        claimNumber,
+        timestamp: decisionTs,
+        formattedTime,
+        shortStatus: 'Picked Up for Replacement',
+        label: `Picked Up for Replacement${tsSuffix}`,
+        badgeColor: 'bg-sky-50 text-sky-800 border-sky-300 dark:bg-sky-950/70 dark:text-sky-300 dark:border-sky-700'
+      };
+    }
+    return {
+      choiceKey: 'replacement',
+      formType: null,
+      isPickedUp: false,
+      hasDecision: true,
+      claimNumber,
+      timestamp: decisionTs,
+      formattedTime,
+      shortStatus: 'Waiting Driver (Replacement)',
+      label: 'Waiting Driver (Replacement)',
+      badgeColor: 'bg-sky-50 text-sky-800 border-sky-300 dark:bg-sky-950/70 dark:text-sky-300 dark:border-sky-700'
+    };
+  }
+
+  if (
+    dispLower === 'scrap' ||
+    dispLower.includes('scrap') ||
+    dispLower.includes('dispose') ||
+    dispLower.includes('claim rejected by vendor')
+  ) {
+    return {
+      choiceKey: 'scrap',
+      formType: null,
+      isPickedUp: false,
+      hasDecision: true,
+      claimNumber,
+      timestamp: decisionTs,
+      formattedTime,
+      shortStatus: 'Scrapped',
+      label: `Scrapped${tsSuffix}`,
+      badgeColor: 'bg-rose-50 text-rose-800 border-rose-300 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-700'
+    };
+  }
+
+  if (dispLower === 'restock_good' || dispLower.includes('restock')) {
+    return {
+      choiceKey: 'restock',
+      formType: null,
+      isPickedUp: false,
+      hasDecision: true,
+      claimNumber,
+      timestamp: decisionTs,
+      formattedTime,
+      shortStatus: 'Restocked',
+      label: `Restocked${tsSuffix}`,
+      badgeColor: 'bg-teal-50 text-teal-800 border-teal-300 dark:bg-teal-950/70 dark:text-teal-300 dark:border-teal-700'
+    };
+  }
+
+  if (isPickedUp) {
+    return {
+      choiceKey: 'debit',
+      formType: 'debit',
+      isPickedUp: true,
+      hasDecision: true,
+      claimNumber,
+      timestamp: decisionTs,
+      formattedTime,
+      shortStatus: 'Picked Up for Debit Claim',
+      label: `Picked Up for Debit Claim${tsSuffix}`,
+      badgeColor: 'bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-700'
+    };
+  }
+
+  if (dispLower.includes('quarantine') || dispLower.includes('hold') || statusLower === 'quarantine' || statusLower === 'hold') {
+    return {
+      choiceKey: 'hold',
+      formType: null,
+      isPickedUp: false,
+      hasDecision: true,
+      claimNumber,
+      timestamp: decisionTs,
+      formattedTime,
+      shortStatus: 'On Hold / Quarantine',
+      label: `On Hold / Quarantine${tsSuffix}`,
+      badgeColor: 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-700'
+    };
+  }
+
+  if (statusLower === 'rejected' || dispLower.includes('8- rejected')) {
+    return {
+      choiceKey: 'rejected',
+      formType: null,
+      isPickedUp: false,
+      hasDecision: true,
+      claimNumber,
+      timestamp: decisionTs,
+      formattedTime,
+      shortStatus: 'Rejected',
+      label: `Rejected${tsSuffix}`,
+      badgeColor: 'bg-slate-200 text-slate-800 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+    };
+  }
+
+  return {
+    choiceKey: 'pending',
+    formType: null,
+    isPickedUp: false,
+    hasDecision: false,
+    claimNumber,
+    timestamp: null,
+    formattedTime: '',
+    shortStatus: 'Pending Decision',
+    label: 'Pending Decision',
+    badgeColor: 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+  };
+}
+
+/**
  * Dynamically resolves parent batch manifest lifecycle status from child line item dispositions.
  * - All child items 'Restock to Inventory' -> '6- Restocked' (status: 'restocked')
  * - All child items 'Scrap / Dispose' -> '7- Scrapped / Disposed' (status: 'scrapped')
@@ -420,22 +719,27 @@ export function formatManifestBreakdown(items = [], includeLineCount = true) {
  * - Child items are pending inspection -> '3- Under Inspection' (status: 'under_inspection')
  */
 export function resolveBatchManifestLifecycle(report, allReports = []) {
-  if (
-    String(report?.status || '').toLowerCase() === 'picked_up' ||
-    Boolean(report?.ai_document_metadata?.supplier_pickup?.picked_up_at)
-  ) {
+  const outcome = formatFourChoiceOutcome(report);
+  if (outcome.isPickedUp) {
     return {
       status: 'picked_up',
-      label: '🚚 Picked Up',
-      color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
+      label: outcome.label,
+      color: outcome.badgeColor
     };
   }
 
   const items = getReportManifestItems(report, allReports);
   if (!Array.isArray(items) || items.length === 0) {
+    if (outcome.hasDecision) {
+      return {
+        status: outcome.choiceKey,
+        label: outcome.label,
+        color: outcome.badgeColor
+      };
+    }
     return {
       status: 'under_inspection',
-      label: '3- Under Inspection',
+      label: 'Pending Decision',
       color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800'
     };
   }
@@ -512,11 +816,21 @@ export function cleanExplanationText(text) {
  * Standardized Lifecycle Stage Formatter supporting 4-Pillar Resolutions
  */
 export function formatLifecycleStage(status, item = null) {
-  if (
-    item?.ai_document_metadata?.supplier_pickup?.picked_up_at &&
-    !['closed', 'resolved', 'restocked', 'scrapped', 'disposed', 'credit_memo_issued'].includes(String(status || '').toLowerCase())
-  ) {
-    return { label: '🚚 Picked Up', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' };
+  if (item) {
+    const outcome = formatFourChoiceOutcome(item);
+    if (
+      outcome.isPickedUp &&
+      !['closed', 'resolved', 'restocked', 'scrapped', 'disposed', 'credit_memo_issued'].includes(String(status || '').toLowerCase())
+    ) {
+      return { label: outcome.shortStatus, color: outcome.badgeColor };
+    }
+    if (
+      outcome.hasDecision &&
+      ['scrap', 'restock', 'debit', 'replacement'].includes(outcome.choiceKey) &&
+      !['closed', 'resolved', 'credit_memo_issued'].includes(String(status || '').toLowerCase())
+    ) {
+      return { label: outcome.shortStatus, color: outcome.badgeColor };
+    }
   }
   if (!status) return { label: '2- Received at Dock', color: 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
   const s = String(status).toLowerCase();

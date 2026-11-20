@@ -3,7 +3,7 @@
  * Formats financial and warehouse records into genuine OOXML (.xlsx) spreadsheets
  * with bold frozen headers, clean column widths, numeric/currency cells, and plain-text IDs/barcodes.
  */
-import { normalizeWarehouseLocation, isTestRecord } from './rmaHelpers';
+import { normalizeWarehouseLocation, isTestRecord, formatDateYmd, formatDateTimeYmdHm } from './rmaHelpers';
 import { downloadTableXlsx } from './exportXlsx';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -38,32 +38,14 @@ export function resolveFilenameWithTimestamp(defaultPrefix, customFilename, isTe
  * YYYY-MM-DD HHMM (e.g. 2026-11-06 0845)
  */
 export function formatMilitaryDateTime(val) {
-  if (!val) return '';
-  const d = new Date(val);
-  if (isNaN(d.getTime())) return String(val);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  const hh = String(d.getHours()).padStart(2, '0');
-  const min = String(d.getMinutes()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd} ${hh}${min}`;
+  return formatDateTimeYmdHm(val);
 }
 
 /**
  * Format date cleanly as YYYY-MM-DD stripping time parts to prevent overflow in Excel.
  */
 export function formatCleanDateOnly(val) {
-  if (!val) return '';
-  const str = String(val).trim();
-  if (str.includes('T')) {
-    return str.split('T')[0];
-  }
-  const d = new Date(val);
-  if (isNaN(d.getTime())) return str;
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+  return formatDateYmd(val);
 }
 
 function extractPhotoLink(r) {
@@ -123,13 +105,13 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
   const columns = [
     { header: 'SN', width: 7, type: 'number' },
     { header: 'RMA Number', width: 20, type: 'text' },
-    { header: 'Date Logged (YYYY-MM-DD HHMM)', width: 24, type: 'text' },
+    { header: 'Date Logged (YYYY-MM-DD HH:mm)', width: 25, type: 'text' },
     { header: 'Store / Branch', width: 24, type: 'text' },
     { header: 'Sales Invoice (SI) #', width: 18, type: 'text' },
     { header: 'Delivery Receipt (DR) #', width: 18, type: 'text' },
     { header: 'Purchase Order (PO) #', width: 18, type: 'text' },
     { header: 'Batch / Lot #', width: 16, type: 'text' },
-    { header: 'Expiry Date', width: 14, type: 'text' },
+    { header: 'Expiry Date (YYYY-MM-DD)', width: 22, type: 'text' },
     { header: 'Status', width: 18, type: 'text' },
     { header: 'Disposition', width: 24, type: 'text' },
     { header: 'Condition Grade', width: 18, type: 'text' },
@@ -220,7 +202,7 @@ export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedP
   const columns = [
     { header: 'SN', width: 7, type: 'number' },
     { header: 'RMA Number', width: 20, type: 'text' },
-    { header: 'Date Logged (YYYY-MM-DD HHMM)', width: 24, type: 'text' },
+    { header: 'Date Logged (YYYY-MM-DD HH:mm)', width: 25, type: 'text' },
     { header: 'Customer Store / Branch', width: 26, type: 'text' },
     { header: 'Reporter Name', width: 20, type: 'text' },
     { header: 'Reporter Contact', width: 22, type: 'text' },
@@ -308,11 +290,11 @@ export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, sav
   const columns = [
     { header: 'SN', width: 7, type: 'number' },
     { header: 'RMA Number', width: 20, type: 'text' },
-    { header: 'Date Logged (YYYY-MM-DD HHMM)', width: 24, type: 'text' },
+    { header: 'Date Logged (YYYY-MM-DD HH:mm)', width: 25, type: 'text' },
     { header: 'Master Supplier / Vendor', width: 26, type: 'text' },
     { header: 'Warehouse Bin / Location', width: 22, type: 'text' },
     { header: 'Batch / Lot #', width: 16, type: 'text' },
-    { header: 'Expiry Date', width: 14, type: 'text' },
+    { header: 'Expiry Date (YYYY-MM-DD)', width: 22, type: 'text' },
     { header: 'Barcode', width: 18, type: 'text' },
     { header: 'Assigned SKU', width: 16, type: 'text' },
     { header: 'Product Description', width: 38, type: 'text' },
@@ -399,8 +381,8 @@ export function exportCreditMemosToXlsx(memos, filename = null, isTestMode = und
     { header: 'Credit Memo Number', width: 20, type: 'text' },
     { header: 'RMA Number', width: 20, type: 'text' },
     { header: 'Pull-Out Slip Ref', width: 18, type: 'text' },
-    { header: 'Pull-Out Date', width: 14, type: 'text' },
-    { header: 'Date Issued (YYYY-MM-DD HHMM)', width: 24, type: 'text' },
+    { header: 'Pull-Out Date (YYYY-MM-DD)', width: 22, type: 'text' },
+    { header: 'Date Issued (YYYY-MM-DD HH:mm)', width: 26, type: 'text' },
     { header: 'Supplier / Vendor', width: 24, type: 'text' },
     { header: 'Product Description', width: 38, type: 'text' },
     { header: 'SKU', width: 16, type: 'text' },

@@ -1,4 +1,5 @@
 import { supabase } from '../supabaseClient';
+import { formatDateTimeYmdHm } from '../utils/rmaHelpers';
 
 const SETTINGS_KEY = 'customer_rma_invites_store';
 const LOCAL_STORAGE_KEY = 'rma_customer_invites_v1';
@@ -545,7 +546,7 @@ export const inviteService = {
     const inviteUrl = `${baseUrl}/intake?token=${encodeURIComponent(invite.token)}`;
     const isSupplierRtv = invite.stream_type === 'supplier_outbound';
     const entityLabel = invite.entity_name || invite.store_branch || (isSupplierRtv ? 'Vendor Partner' : 'Store Partner');
-    const expDateStr = new Date(invite.expires_at).toLocaleString();
+    const expDateStr = `${formatDateTimeYmdHm(invite.expires_at)} (YYYY-MM-DD HH:mm)`;
 
     const subject = isSupplierRtv
       ? `[Authorized Supplier RTV Access] Pingcon Return to Vendor Portal Link (${entityLabel})`

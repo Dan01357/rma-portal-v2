@@ -12,18 +12,9 @@ import {
   ExternalLink,
   Printer,
   Edit3,
-  Calendar,
-  User,
-  Phone,
-  Image as ImageIcon,
-  Check,
   Building2,
   Sparkles,
   RefreshCw,
-  Clock,
-  ArrowRight,
-  Layers,
-  MapPin,
   Tag,
   Shield,
   KeyRound,
@@ -32,118 +23,92 @@ import {
   Copy,
   Scissors,
   Truck,
-  Unlock,
   Plus,
   Minus,
   ArrowRightLeft,
   Info,
   FileText,
-  RotateCcw
+  FileCheck2,
+  Zap
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
-import { supplierClaimService } from '../services/supplierClaimService';
-import { 
-  isSplitChildTicket, 
-  isSplitParentTicket, 
-  hasAssignedSku, 
-  resolveBatchManifestLifecycle, 
-  getItemNeedsReorder, 
-  cleanExplanationText, 
+import {
+  isSplitChildTicket,
+  isSplitParentTicket,
+  hasAssignedSku,
+  cleanExplanationText,
   mapReasonToConditionGrade,
-  getWarehouseLocations,
   normalizeWarehouseLocation,
   getRealPhotos,
   isUnlabeledBarcode,
-  isTestRecord
+  isTestRecord,
+  formatFourChoiceOutcome,
+  getItemNeedsReorder,
+  formatDateYmd
 } from '../utils/rmaHelpers';
 import { copyTextSafe } from '../utils/clipboard';
-import ThermalBoxLabelModal from './ThermalBoxLabelModal';
-import BufferExchangeSlipModal from './BufferExchangeSlipModal';
 import RMATimelineAudit from './RMATimelineAudit';
-import WarehouseLocationsModal from './WarehouseLocationsModal';
+import ProductAutoSuggest from './ProductAutoSuggest';
 
 const QUICK_AUTH_STORAGE_KEY = 'rma_quick_auth_admin';
 
-const CUSTOMER_DISPOSITION_OPTIONS = [
-  '1- Pending Triage',
-  '2- Restock to Inventory',
-  '3- Return to Vendor (RTV)',
-  '4- Quarantine',
-  '5- Scrap / Dispose',
-  '6- Buffer Stock Exchange'
-];
-
-const SUPPLIER_DISPOSITION_OPTIONS = [
-  '1 - Pending Vendor Pickup',
-  '2 - In Transit to Vendor',
-  '3 - Vendor Credit / AP Deduction Settled',
-  '4 - Vendor Replacement Stock Received',
-  '5 - Claim Rejected by Vendor'
-];
-
-const DISPOSITION_OPTIONS = [
-  ...CUSTOMER_DISPOSITION_OPTIONS,
-  ...SUPPLIER_DISPOSITION_OPTIONS
-];
-
-function normalizeDispositionOption(disp) {
-  if (!disp) return '1- Pending Triage';
-  const found = DISPOSITION_OPTIONS.find(opt => 
-    opt.toLowerCase() === disp.toLowerCase() || 
-    opt.replace(/^\d+-\s*/, '').toLowerCase() === disp.replace(/^\d+-\s*/, '').toLowerCase()
-  );
-  return found || disp;
+function resolveSplitMetadata(choiceValue, timestamp, actorName, isTest) {
+  const val = String(choiceValue || '').trim();
+  const baseMeta = isTest ? { is_test: true, test_mode: true } : {};
+  if (val === 'restock_good') {
+    return {
+      ...baseMeta,
+      simple_rtv_disposition: 'restock_good',
+      simple_rtv_label: 'Put Back on Good Shelf (Restock)',
+      simple_rtv_updated_at: timestamp,
+      simple_rtv_updated_by: actorName,
+      needs_reorder: false
+    };
+  }
+  if (val === 'scrap') {
+    return {
+      ...baseMeta,
+      simple_rtv_disposition: 'scrap',
+      simple_rtv_label: 'Throw Away / Dispose (Scrap)',
+      simple_rtv_updated_at: timestamp,
+      simple_rtv_updated_by: actorName,
+      needs_reorder: true
+    };
+  }
+  if (val === 'supplier_credit' || val === 'customer_credit') {
+    return {
+      ...baseMeta,
+      simple_rtv_disposition: val,
+      simple_rtv_updated_at: timestamp,
+      simple_rtv_updated_by: actorName,
+      needs_reorder: false
+    };
+  }
+  if (val === 'supplier_exchange' || val === 'customer_exchange') {
+    return {
+      ...baseMeta,
+      simple_rtv_disposition: val,
+      simple_rtv_updated_at: timestamp,
+      simple_rtv_updated_by: actorName,
+      needs_reorder: false
+    };
+  }
+  return baseMeta;
 }
 
-/**
- * Enterprise Automatic Lifecycle Status Calculator
- * Lifecycle status is 100% computed automatically from triage disposition and financial records.
- */
-export function computeAutomaticLifecycleStatus(disposition, hasCreditMemo = false, currentStatus = null, reportOrItem = null) {
-  if (hasCreditMemo) return 'credit_memo_issued';
-  const disp = String(disposition || '').toLowerCase().trim();
-  const curr = String(currentStatus || '').toLowerCase().trim();
-  const resolution = reportOrItem?.ai_document_metadata?.workflow_resolution;
+function resolveSplitLocation(choiceValue, report) {
+  if (choiceValue === 'restock_good') return 'Good Stock Area';
+  if (choiceValue === 'scrap') return 'Disposal / Scrap Area';
+  if (choiceValue === 'supplier_credit' || choiceValue === 'supplier_exchange') return 'Supplier Return Area (RTV)';
+  if (choiceValue === 'customer_credit' || choiceValue === 'customer_exchange') return 'Customer Return Area';
+  return normalizeWarehouseLocation(report?.warehouse_location, report);
+}
 
-  if (resolution === 'restocked' || curr === 'restocked') {
-    return '6- Restocked';
-  }
-  if (resolution === 'reordered') {
-    return '7- Re-Ordered (PO Placed)';
-  }
-  if (resolution === 'scrapped_no_reorder' || curr === 'scrapped' || curr === 'disposed') {
-    return '7- Scrapped / Written Off';
-  }
-  if (curr === 'resolved') {
-    if (disp.includes('restock')) return '6- Restocked';
-    if (disp.includes('scrap') || disp.includes('dispose')) return '7- Scrapped / Written Off';
-    return '6- Restocked';
-  }
-
-  if (
-    disp.includes('restock') || 
-    disp.includes('accepted replacement') || 
-    disp.includes('replacement stock received')
-  ) {
-    return 'under_inspection';
-  }
-  if (
-    disp.includes('scrap') || 
-    disp.includes('dispose') || 
-    disp.includes('local destruction')
-  ) {
-    return 'under_inspection';
-  }
-  if (disp.includes('buffer stock') || disp.includes('buffer replacement')) {
-    return 'buffer_replacement_dispatched';
-  }
-  if (disp.includes('rejected') || disp.includes('invalid claim')) {
-    return 'rejected';
-  }
-  if (disp.includes('deduction') || disp.includes('ap deduction') || disp.includes('vendor credit') || disp.includes('credit memo')) {
-    return 'credit_memo_issued';
+function resolveSplitDbStatus(choiceValue, isSupplier) {
+  if (isSupplier && (choiceValue === 'supplier_credit' || choiceValue === 'supplier_exchange')) {
+    return 'vendor_claimed';
   }
   return 'under_inspection';
 }
@@ -162,7 +127,6 @@ export default function QuickRMAActionModal({
   onViewCreditMemoVoucher,
   onViewReportQR,
   onOpenLightbox,
-  onOpenDriverHandover,
   onReportUpdated,
   onRefresh,
   gateSession = null,
@@ -175,140 +139,29 @@ export default function QuickRMAActionModal({
   const [syncAttempt, setSyncAttempt] = useState(1);
   const [retryTrigger, setRetryTrigger] = useState(0);
 
-  // Enterprise Warehouse Triage & Disposition State
-  const [conditionGrade, setConditionGrade] = useState('B - Damaged Packaging Only');
-  const [disposition, setDisposition] = useState('1- Pending Triage');
-  const [warehouseLocation, setWarehouseLocation] = useState('');
-  const [isLocationsModalOpen, setIsLocationsModalOpen] = useState(false);
-  const [availableLocations, setAvailableLocations] = useState(() => getWarehouseLocations());
-
-  useEffect(() => {
-    const handleLocs = () => setAvailableLocations(getWarehouseLocations());
-    window.addEventListener('rma-locations-changed', handleLocs);
-    return () => window.removeEventListener('rma-locations-changed', handleLocs);
-  }, []);
-
-  const [rmaStatus, setRmaStatus] = useState('received_at_dock');
-  const [holdReason, setHoldReason] = useState('');
-  const [needsReorder, setNeedsReorder] = useState(true);
-  const [rejectionReason, setRejectionReason] = useState('');
-  const [isSavingTriage, setIsSavingTriage] = useState(false);
-  const [triageSavedSuccess, setTriageSavedSuccess] = useState(false);
-  const [triageSaveError, setTriageSaveError] = useState(null);
-  const isSupplierStream = report?.rma_type === 'supplier_outbound';
-
-  const isOnHold = Boolean(
-    (disposition && (disposition.toLowerCase().includes('quarantine') || disposition.toLowerCase().includes('hold'))) ||
-    (report?.disposition && (String(report.disposition).toLowerCase().includes('quarantine') || String(report.disposition).toLowerCase().includes('hold'))) ||
-    report?.status === 'quarantine' ||
-    report?.status === 'hold'
-  );
-
-  const isCustomerRejected = Boolean(
-    !isSupplierStream && (
-      (disposition && (disposition.toLowerCase().includes('rejected / return to customer') || disposition.toLowerCase().includes('8- rejected') || (disposition.toLowerCase().includes('rejected') && !disposition.toLowerCase().includes('claim rejected by vendor')))) ||
-      (report?.disposition && (String(report.disposition).toLowerCase().includes('rejected / return to customer') || String(report.disposition).toLowerCase().includes('8- rejected') || (String(report.disposition).toLowerCase().includes('rejected') && !String(report.disposition).toLowerCase().includes('claim rejected by vendor')))) ||
-      report?.status === 'rejected'
-    )
-  );
-
-  const isVendorRejectedClaim = Boolean(
-    (disposition && disposition.toLowerCase().includes('claim rejected by vendor')) ||
-    (report?.disposition && String(report.disposition).toLowerCase().includes('claim rejected by vendor'))
-  );
-
-  const isRejected = isCustomerRejected || isVendorRejectedClaim;
-
-  const printRejectedGatePass = () => {
-    const win = window.open('', '_blank');
-    if (win) {
-      win.document.write(`
-        <html>
-          <head>
-            <title>Rejected Return Gate Pass - ${report?.rma_number}</title>
-            <style>
-              @page { size: A4 portrait; margin: 12mm; }
-              body { font-family: Arial, sans-serif; padding: 18px; color: #111; border: 2px solid #dc2626; border-radius: 6px; box-sizing: border-box; }
-              h2 { margin: 0 0 6px 0; font-size: 18px; color: #dc2626; }
-              table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
-              th, td { border: 1px solid #333; padding: 8px; text-align: left; }
-              th { background: #fee2e2; color: #991b1b; }
-              .header { border-bottom: 2px solid #dc2626; padding-bottom: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <div>
-                <h2>PINGCON MARKETING - REJECTED RETURN GATE PASS</h2>
-                <div>Return Reference: <strong>${report?.rma_number}</strong></div>
-                <div>Customer / Store: <strong>${adminStoreBranch || report?.store_branch || report?.reporter_name || report?.supplier_name || 'Customer'}</strong></div>
-              </div>
-              <div style="text-align: right;">
-                <div>Date: <strong>${new Date().toLocaleDateString()}</strong></div>
-                <div>Location: <strong>${warehouseLocation || 'OUTBOUND-RETURN-TO-STORE'}</strong></div>
-              </div>
-            </div>
-            <p style="font-size: 12px; color: #b91c1c; font-weight: bold;">
-              NOTICE: This item has been formally REJECTED and is unauthorized for credit memo or restock. Authorizes physical dispatch back to the customer store / branch.
-            </p>
-            <div style="background: #f8fafc; border: 1px solid #cbd5e1; padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 12px;">
-              <strong>Formal Rejection Reason:</strong>
-              <p style="margin: 4px 0 0 0; color: #334155;">${rejectionReason || report?.notes || 'Customer damaged item / Outside return window / Defect not covered'}</p>
-            </div>
-            <table>
-              <tr><th>Item Description</th><th>Barcode / SKU</th><th>Qty & Unit</th><th>Disposition</th></tr>
-              <tr>
-                <td>${report?.name || 'Product'}</td>
-                <td>${report?.code || report?.sku || report?.barcode || 'N/A'}</td>
-                <td>${report?.quantity || 1} ${report?.unit_name || 'pc'}</td>
-                <td>Rejected / Return to Customer</td>
-              </tr>
-            </table>
-            <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 12px;">
-              <div>Warehouse Dispatch Signature: _______________________</div>
-              <div>Driver / Courier Acknowledgment: _______________________</div>
-            </div>
-            <script>window.print();</script>
-          </body>
-        </html>
-      `);
-      win.document.close();
-    }
-  };
-  const [isThermalLabelOpen, setIsThermalLabelOpen] = useState(false);
-  const [isBufferSlipOpen, setIsBufferSlipOpen] = useState(false);
   const [isUpdatingType, setIsUpdatingType] = useState(false);
   const [typeFeedback, setTypeFeedback] = useState(null);
 
-  // Multi-Item Manifest Line-Item Triage State
+  // Multi-Item Manifest Line-Item Count Check
   const [manifestItems, setManifestItems] = useState([]);
-  const [isSavingManifestTriage, setIsSavingManifestTriage] = useState(false);
-  const [manifestTriageSuccess, setManifestTriageSuccess] = useState(false);
 
   // Partial Triage & Line Item Split State
   const [isSplitting, setIsSplitting] = useState(false);
   const [splitPart1Qty, setSplitPart1Qty] = useState(1);
-  const [splitPart1Grade, setSplitPart1Grade] = useState('A - Like New / Resellable');
-  const [splitPart1Disposition, setSplitPart1Disposition] = useState('2- Restock to Inventory');
-  const [splitPart1Location, setSplitPart1Location] = useState('');
-  const [splitPart2Grade, setSplitPart2Grade] = useState('D - Total Loss / Scrap');
-  const [splitPart2Disposition, setSplitPart2Disposition] = useState('5- Scrap / Dispose');
-  const [splitPart2Location, setSplitPart2Location] = useState('SCRAP-BIN');
+  const [splitPart1Choice, setSplitPart1Choice] = useState('restock_good');
+  const [splitPart2Choice, setSplitPart2Choice] = useState('scrap');
   const [splitPart2Reason, setSplitPart2Reason] = useState('Damaged packaging / Defective units');
   const [isExecutingSplit, setIsExecutingSplit] = useState(false);
   const [splitSuccessMessage, setSplitSuccessMessage] = useState('');
-  const [isClosingHandover, setIsClosingHandover] = useState(false);
 
   // Official Logistics Paperwork (SI / DR / PO), Supplier & Metadata Overrides
   const [adminSiNumber, setAdminSiNumber] = useState('');
   const [adminDrNumber, setAdminDrNumber] = useState('');
   const [adminPoNumber, setAdminPoNumber] = useState('');
   const [adminSupplierName, setAdminSupplierName] = useState('');
-  const [adminStoreBranch, setAdminStoreBranch] = useState('');
   const [adminExpiryDate, setAdminExpiryDate] = useState('');
-  const [adminBatchLot, setAdminBatchLot] = useState('');
 
-  // Super Admin Silent Restitution & Record Re-creation Hooks
+  // Super Admin Silent Restitution & Product Details Hooks
   const [adminRmaNumber, setAdminRmaNumber] = useState('');
   const [adminCreatedAt, setAdminCreatedAt] = useState('');
   const [adminIsTest, setAdminIsTest] = useState(false);
@@ -318,10 +171,22 @@ export default function QuickRMAActionModal({
   const [adminQuantity, setAdminQuantity] = useState(1);
   const [adminUnitName, setAdminUnitName] = useState('pc');
   const [adminPrice, setAdminPrice] = useState(0);
+  const [adminPriceWithVat, setAdminPriceWithVat] = useState(0);
+  const [adminPiecesPerCase, setAdminPiecesPerCase] = useState(null);
 
   const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
   const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
   const [copyDrSuccess, setCopyDrSuccess] = useState(false);
+
+  // Authentication & Verification State
+  const [verifiedAdmin, setVerifiedAdmin] = useState(null);
+  const [authStep, setAuthStep] = useState('email'); // 'email' | 'otp'
+  const [emailInput, setEmailInput] = useState('');
+  const [otpInput, setOtpInput] = useState('');
+  const [countdown, setCountdown] = useState(0);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [authError, setAuthError] = useState(null);
+  const [authSuccessMsg, setAuthSuccessMsg] = useState(null);
 
   // Reclassify RMA Type between customer_inbound and supplier_outbound
   const handleToggleRmaType = async (newType) => {
@@ -332,43 +197,55 @@ export default function QuickRMAActionModal({
     setIsUpdatingType(true);
     setTypeFeedback(null);
     try {
-      // Automatically update disposition and status when switching streams
+      const curDisp = String(report.ai_document_metadata?.simple_rtv_disposition || report.disposition || '').toLowerCase();
       let targetDisposition;
-      let targetStatus;
+      let targetStatus = 'under_inspection';
+
       if (newType === 'customer_inbound') {
-        targetDisposition = '2- Restock to Inventory';
-        targetStatus = 'under_inspection';
+        if (curDisp === 'supplier_credit') targetDisposition = 'customer_credit';
+        else if (curDisp === 'supplier_exchange') targetDisposition = 'customer_exchange';
+        else if (curDisp === 'scrap' || curDisp === 'restock_good') targetDisposition = curDisp;
+        else targetDisposition = 'Pending Triage';
       } else {
-        targetDisposition = '1 - Pending Vendor Pickup';
-        targetStatus = 'vendor_claimed';
+        if (curDisp === 'customer_credit') {
+          targetDisposition = 'supplier_credit';
+          targetStatus = 'vendor_claimed';
+        } else if (curDisp === 'customer_exchange') {
+          targetDisposition = 'supplier_exchange';
+          targetStatus = 'vendor_claimed';
+        } else if (curDisp === 'scrap' || curDisp === 'restock_good') {
+          targetDisposition = curDisp;
+        } else {
+          targetDisposition = '3- Return to Vendor (RTV)';
+        }
       }
 
-      // Optimistic update — applied BEFORE the network call so UI is immediately correct
-      const updatedReport = { 
-        ...report, 
+      const updatedMeta = { ...(report.ai_document_metadata || {}) };
+      if (['supplier_credit', 'customer_credit', 'supplier_exchange', 'customer_exchange', 'scrap', 'restock_good'].includes(targetDisposition)) {
+        updatedMeta.simple_rtv_disposition = targetDisposition;
+      }
+
+      const updatedReport = {
+        ...report,
         rma_type: newType,
         disposition: targetDisposition,
-        status: targetStatus
+        status: targetStatus,
+        ai_document_metadata: updatedMeta
       };
       setReport(updatedReport);
-      setDisposition(targetDisposition);
-      setRmaStatus(targetStatus);
 
-      // Push the optimistic state into recentReportsList immediately (in-memory only) so that
-      // sub-modal restoration picks up the correct stream without launching a premature network sync.
       if (onReportUpdated) {
         onReportUpdated(updatedReport);
       }
 
       const cleanId = report.id || report.rma_number;
       const savedData = await catalogService.updateRMAType(cleanId, newType, targetDisposition, targetStatus);
-      const finalReport = { ...updatedReport, ...(savedData || {}) };
+      const finalReport = { ...updatedReport, ...(savedData || {}), ai_document_metadata: updatedMeta };
       setReport(finalReport);
 
-      setTypeFeedback(newType === 'customer_inbound' ? 'Moved to Customer RMA Hub (Inbound)' : 'Moved to Supplier RMA Hub (Outbound / RTV)');
+      setTypeFeedback(newType === 'customer_inbound' ? 'Moved to Customer Hub (Inbound)' : 'Moved to Supplier RTV Hub (Outbound)');
       setTimeout(() => setTypeFeedback(null), 3000);
-      
-      // Push confirmed state into recentReportsList and sync
+
       if (onRefresh) {
         onRefresh(finalReport);
       }
@@ -379,7 +256,6 @@ export default function QuickRMAActionModal({
       } catch {}
     } catch (err) {
       console.error('Failed to update RMA type:', err);
-      // Revert optimistic update in local state and in recentReportsList
       const revertedReport = { ...report, rma_type: currentType };
       setReport(revertedReport);
       if (onReportUpdated) {
@@ -391,423 +267,43 @@ export default function QuickRMAActionModal({
     }
   };
 
-  // Synchronize triage inputs when report loads or updates
+  // Synchronize split and manifest items when report updates
   useEffect(() => {
-    if (report) {
-      const autoGrade = mapReasonToConditionGrade(report.reason);
-      const resolvedGrade = (report.condition_grade && report.condition_grade !== 'B - Damaged Packaging Only')
-        ? report.condition_grade
-        : (autoGrade || report.condition_grade || 'B - Damaged Packaging Only');
-      setConditionGrade(resolvedGrade);
-      setDisposition(normalizeDispositionOption(report.disposition));
-      setWarehouseLocation(normalizeWarehouseLocation(report.warehouse_location, report));
-      setNeedsReorder(getItemNeedsReorder(report));
-      const extractedHoldReason = report.hold_reason || report.ai_document_metadata?.hold_reason || (
-        report.notes && report.notes.match(/\[HOLD REASON: ([^\]]+)\]/) ? report.notes.match(/\[HOLD REASON: ([^\]]+)\]/)[1] : ''
-      ) || '';
-      setHoldReason(extractedHoldReason);
+    if (!report) {
+      setManifestItems([]);
+      return;
+    }
 
-      const extractedRejectReason = report.rejection_reason || report.ai_document_metadata?.rejection_reason || (
-        report.notes && report.notes.match(/\[REJECTED: ([^\]]+)\]/) ? report.notes.match(/\[REJECTED: ([^\]]+)\]/)[1] : ''
-      ) || '';
-      setRejectionReason(extractedRejectReason);
-      const rawStatus = String(report.status || '').toLowerCase().trim();
-      if (rawStatus === 'resolved' || rawStatus === 'restocked' || rawStatus === 'closed' || rawStatus.includes('closed') || rawStatus.includes('restock')) {
-        setRmaStatus('restocked');
-      } else if (rawStatus === 'scrapped' || rawStatus === 'disposed' || rawStatus.includes('scrap') || rawStatus.includes('dispose')) {
-        setRmaStatus('scrapped');
-      } else {
-        setRmaStatus(report.status || 'received_at_dock');
-      }
+    const qty = Number(report.quantity) || 1;
+    if (qty > 1) {
+      setSplitPart1Qty(Math.max(1, qty - 1));
+      setSplitPart2Reason(report.reason || 'Damaged packaging / Defective units');
+    }
 
-      const qty = Number(report.quantity) || 1;
-      if (qty > 1) {
-        setSplitPart1Qty(Math.max(1, qty - 1));
-        setSplitPart1Location(normalizeWarehouseLocation(report.warehouse_location, report));
-        setSplitPart2Reason(report.reason || 'Damaged packaging / Defective units');
-      }
+    const directItems = Array.isArray(report.items) && report.items.length > 0
+      ? report.items
+      : (typeof report.items === 'string' && report.items.trim()
+          ? (() => { try { const p = JSON.parse(report.items); return Array.isArray(p) ? p : []; } catch { return []; } })()
+          : []);
 
-      // Synchronize multi-item manifest items for line-item level triage
-      const directItems = Array.isArray(report.items) && report.items.length > 0
-        ? report.items
-        : (typeof report.items === 'string' && report.items.trim()
-            ? (() => { try { const p = JSON.parse(report.items); return Array.isArray(p) ? p : []; } catch(e){ return []; } })()
-            : []);
-
-      if (directItems.length > 0) {
-        setManifestItems(directItems.map((it, idx) => {
-          const itBarcode = String(it.barcode || '').trim();
-          const itSku = String(it.code || it.sku || '').trim();
-          const cleanSku = (itSku && itSku !== itBarcode && !itSku.toLowerCase().includes('awaiting')) ? itSku : '';
-          return {
-            index: idx,
-            id: it.id || `item-${idx}`,
-            name: it.name || it.productName || `Item #${idx + 1}`,
-            barcode: itBarcode,
-            sku: cleanSku,
-            quantity: Number(it.quantity) || 1,
-            unit_name: it.unit_name || it.unit || 'pc',
-            price: Number(it.price || 0),
-            reason: it.reason || report.reason || 'Damaged packaging',
-            condition_grade: it.condition_grade || report.condition_grade || 'B - Damaged Packaging Only',
-            warehouse_location: normalizeWarehouseLocation(it.warehouse_location || report.warehouse_location, report),
-            disposition: it.disposition || report.disposition || '1- Pending Triage'
-          };
-        }));
-      } else if (report.id) {
-        supabase.from('rma_items')
-          .select('*')
-          .eq('rma_report_id', report.id)
-          .then(({ data, error }) => {
-            if (!error && Array.isArray(data) && data.length > 1) {
-              setManifestItems(data.map((it, idx) => {
-                const itBarcode = String(it.barcode || '').trim();
-                const itSku = String(it.sku || it.code || '').trim();
-                const cleanSku = (itSku && itSku !== itBarcode && !itSku.toLowerCase().includes('awaiting')) ? itSku : '';
-                return {
-                  index: idx,
-                  id: it.id || `item-${idx}`,
-                  name: it.name || `Item #${idx + 1}`,
-                  barcode: itBarcode,
-                  sku: cleanSku,
-                  quantity: Number(it.quantity) || 1,
-                  unit_name: it.unit_name || 'pc',
-                  price: Number(it.price || 0),
-                  reason: it.reason || report.reason || 'Damaged packaging',
-                  condition_grade: it.condition_grade || report.condition_grade || 'B - Damaged Packaging Only',
-                  warehouse_location: it.warehouse_location || report.warehouse_location || '',
-                  disposition: it.disposition || report.disposition || '1- Pending Triage'
-                };
-              }));
-            } else {
-              setManifestItems([]);
-            }
-          })
-          .catch(() => setManifestItems([]));
-      } else {
-        setManifestItems([]);
-      }
+    if (directItems.length > 0) {
+      setManifestItems(directItems);
+    } else if (report.id) {
+      supabase.from('rma_items')
+        .select('*')
+        .eq('rma_report_id', report.id)
+        .then(({ data, error }) => {
+          if (!error && Array.isArray(data) && data.length > 1) {
+            setManifestItems(data);
+          } else {
+            setManifestItems([]);
+          }
+        })
+        .catch(() => setManifestItems([]));
     } else {
       setManifestItems([]);
     }
   }, [report]);
-
-  const handleSaveTriage = async () => {
-    if (!report) return;
-    if (!isMultiItemManifest && !hasAssignedSku(report, savedProductsList)) {
-      setTriageSaveError("Cannot save physical triage: Official catalog SKU must be assigned first.");
-      return;
-    }
-
-    const isHoldAction = disposition && (disposition.toLowerCase().includes('quarantine') || disposition.toLowerCase().includes('hold'));
-    const isRejectAction = disposition && (disposition.toLowerCase().includes('rejected') || disposition.toLowerCase().includes('8- rejected'));
-    const isRestockAction = disposition && (disposition.toLowerCase().includes('restock') || disposition.toLowerCase().includes('replacement stock received'));
-    const isRtvAction = disposition && (disposition.toLowerCase().includes('return to vendor') || disposition.toLowerCase().includes('rtv') || disposition.toLowerCase().includes('pending vendor pickup'));
-    const isScrapAction = disposition && (disposition.toLowerCase().includes('scrap') || disposition.toLowerCase().includes('dispose') || disposition.toLowerCase().includes('claim rejected by vendor'));
-
-    if (isHoldAction && !holdReason.trim()) {
-      setTriageSaveError("Please enter a mandatory hold note / reason before placing this item on Hold / Quarantine.");
-      return;
-    }
-
-    if (isRejectAction && !rejectionReason.trim()) {
-      setTriageSaveError("Please enter a mandatory customer rejection reason before rejecting this return.");
-      return;
-    }
-
-    setIsSavingTriage(true);
-    setTriageSaveError(null);
-    try {
-      const inspectorName = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
-      const existingAudit = Array.isArray(report.audit_trail) ? [...report.audit_trail] : [];
-
-      let autoStatus = 'under_inspection';
-      let auditStage = 'TRIAGE';
-      let auditNote = `Physical triage completed by ${inspectorName}: ${disposition}`;
-
-      if (isHoldAction) {
-        autoStatus = 'under_inspection';
-        auditStage = 'HOLD_QUARANTINE';
-        auditNote = `Placed on Hold / Quarantine by ${inspectorName}: ${holdReason.trim()}`;
-      } else if (isRejectAction) {
-        autoStatus = 'rejected';
-        auditStage = 'CLAIM_REJECTED';
-        auditNote = `Return rejected by ${inspectorName}: ${rejectionReason.trim()}`;
-      } else if (isRtvAction) {
-        autoStatus = 'vendor_claimed';
-        auditStage = 'VENDOR_RTV';
-        auditNote = `Vendor Recovery / RTV triage confirmed by ${inspectorName}`;
-      } else if (isScrapAction) {
-        autoStatus = (report.status === 'scrapped' || report.status === 'disposed') ? 'scrapped' : 'under_inspection';
-        auditStage = 'SUPPLIER_REORDER';
-        auditNote = `Supplier Re-order / Scrap staged by ${inspectorName} [Re-Order: ${needsReorder ? 'YES' : 'NO'}]`;
-      } else if (isRestockAction) {
-        autoStatus = report.status === 'restocked' ? 'restocked' : 'under_inspection';
-        auditStage = 'RESTOCK_TRIAGE';
-        auditNote = `Restock to Inventory staged by ${inspectorName}`;
-      } else {
-        autoStatus = computeAutomaticLifecycleStatus(disposition, hasLinkedCreditMemo, report.status);
-      }
-
-      const wasOnHold = report.status === 'quarantine' || (report.disposition && report.disposition.toLowerCase().includes('quarantine'));
-      if (wasOnHold && !isHoldAction) {
-        auditNote = `Hold released by ${inspectorName}. New action: ${disposition}`;
-      }
-
-      // Determine final location
-      let finalLocation = warehouseLocation ? warehouseLocation.trim().toUpperCase() : null;
-      if (isScrapAction) {
-        finalLocation = 'SCRAP-BIN';
-      } else if (isHoldAction) {
-        finalLocation = 'QUARANTINE-HOLD';
-      } else if (isRejectAction) {
-        finalLocation = 'OUTBOUND-RETURN-TO-STORE';
-      } else if (isRtvAction && !finalLocation) {
-        finalLocation = 'RTV-DOCK';
-      }
-
-      const effectiveNeedsReorder = isRestockAction ? false : (isRejectAction ? false : needsReorder);
-
-      const newAuditEvent = {
-        timestamp: new Date().toISOString(),
-        stage: auditStage,
-        actor: inspectorName,
-        condition_grade: conditionGrade,
-        disposition: disposition,
-        warehouse_location: finalLocation,
-        needs_reorder: effectiveNeedsReorder,
-        hold_reason: isHoldAction ? holdReason.trim() : undefined,
-        rejection_reason: isRejectAction ? rejectionReason.trim() : undefined,
-        note: auditNote
-      };
-
-      setRmaStatus(autoStatus);
-
-      // Clean metadata and notes to avoid 400 Bad Request
-      const cleanAiMetadata = {
-        ...(report.ai_document_metadata || {}),
-        needs_reorder: effectiveNeedsReorder,
-        hold_reason: isHoldAction ? holdReason.trim() : undefined,
-        rejection_reason: isRejectAction ? rejectionReason.trim() : undefined
-      };
-
-      // Clean notes of internal bracket tags (operational state is safely tracked in ai_document_metadata & audit_trail)
-      const updatedNotes = cleanExplanationText(report.notes || '') || null;
-
-      const updates = {
-        condition_grade: conditionGrade,
-        disposition: disposition,
-        warehouse_location: finalLocation,
-        status: autoStatus,
-        inspected_by: inspectorName,
-        inspected_at: new Date().toISOString(),
-        audit_trail: [...existingAudit, newAuditEvent],
-        ai_document_metadata: cleanAiMetadata,
-        notes: updatedNotes
-      };
-
-      // In Customer Hub: Transfers item to Supplier Hub if Vendor RTV action selected
-      if (isRtvAction && report.rma_type === 'customer_inbound') {
-        updates.rma_type = 'supplier_outbound';
-      }
-
-      // Synchronize across both parent and any child items under this ticket
-      const targetQuery = report.rma_number
-        ? supabase.from('rma_reports').update(updates).eq('rma_number', report.rma_number)
-        : supabase.from('rma_reports').update(updates).eq('id', report.id);
-
-      const { data, error } = await targetQuery.select('*');
-
-      if (error) {
-        console.error('Failed to save warehouse triage:', error);
-        setTriageSaveError(error.message || 'Failed to save warehouse triage');
-      } else {
-        const rows = Array.isArray(data) ? data : (data && typeof data === 'object' ? [data] : []);
-        const primaryReport = rows.find(r => r && !r.parent_rma_id) || rows[0] || { ...report, ...updates };
-        const cleanReport = { ...report, ...updates, ...(primaryReport || {}) };
-        setReport(cleanReport);
-        setTriageSavedSuccess(true);
-        setTriageSaveError(null);
-        setTimeout(() => setTriageSavedSuccess(false), 3000);
-        if (onRefresh) {
-          try {
-            onRefresh(cleanReport);
-          } catch (refErr) {
-            console.warn('onRefresh error caught safely:', refErr);
-          }
-        }
-        try {
-          window.dispatchEvent(new CustomEvent('rma-data-changed', {
-            detail: { type: 'triage-updated', reportId: cleanReport.id, rmaNumber: cleanReport.rma_number, report: cleanReport }
-          }));
-          catalogService.notifyChange('triage-updated', {
-            reportId: cleanReport.id,
-            rmaNumber: cleanReport.rma_number,
-            disposition: cleanReport.disposition,
-            status: cleanReport.status,
-            report: cleanReport
-          });
-        } catch {}
-      }
-    } catch (err) {
-      console.error('Error updating triage:', err);
-      setTriageSaveError(err.message || 'Error updating physical triage');
-    } finally {
-      setIsSavingTriage(false);
-    }
-  };
-
-  const updateManifestItemField = (index, field, value) => {
-    setManifestItems(prev => prev.map((item, idx) => {
-      if (idx === index) {
-        return { ...item, [field]: value };
-      }
-      return item;
-    }));
-  };
-
-  const handleSaveManifestTriage = async () => {
-    if (!report || !manifestItems.length) return;
-    setIsSavingManifestTriage(true);
-    try {
-      const inspectorName = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
-      const existingAudit = Array.isArray(report.audit_trail) ? [...report.audit_trail] : [];
-      existingAudit.push({
-        timestamp: new Date().toISOString(),
-        stage: 'MANIFEST_TRIAGE',
-        actor: inspectorName,
-        note: `Manifest line-item triage completed for ${manifestItems.length} items by ${inspectorName}`
-      });
-
-      // 1. Dynamically compute parent lifecycle status from child item dispositions (Subject 3)
-      const dynamicParentLifecycle = resolveBatchManifestLifecycle({ ...report, items: manifestItems });
-      setRmaStatus(dynamicParentLifecycle.status);
-
-      // 2. Update items and dynamic status in parent report
-      const updatedReportRow = {
-        ...report,
-        items: manifestItems,
-        status: dynamicParentLifecycle.status,
-        inspected_by: inspectorName,
-        inspected_at: new Date().toISOString(),
-        audit_trail: existingAudit
-      };
-
-      const { error: repErr } = await supabase
-        .from('rma_reports')
-        .update({
-          items: manifestItems,
-          status: dynamicParentLifecycle.status,
-          inspected_by: inspectorName,
-          inspected_at: new Date().toISOString(),
-          audit_trail: existingAudit
-        })
-        .eq('id', report.id);
-
-      if (repErr) {
-        console.warn('Notice updating rma_reports with manifest triage:', repErr.message);
-      }
-
-      // 2. Update child rma_items records in Supabase if schema permits
-      try {
-        for (const item of manifestItems) {
-          const itemUpdates = {};
-          if (item.sku) itemUpdates.sku = item.sku;
-          if (item.name) itemUpdates.name = item.name;
-          if (Object.keys(itemUpdates).length > 0) {
-            await supabase
-              .from('rma_items')
-              .update(itemUpdates)
-              .eq('rma_report_id', report.id)
-              .eq('barcode', item.barcode);
-          }
-        }
-      } catch (e) {
-        console.warn('Notice updating rma_items table:', e?.message);
-      }
-
-      // 3. Update child rma_reports records if they exist
-      try {
-        for (const item of manifestItems) {
-          await supabase
-            .from('rma_reports')
-            .update({
-              condition_grade: item.condition_grade,
-              warehouse_location: (item.warehouse_location || '').trim().toUpperCase(),
-              disposition: item.disposition,
-              status: computeAutomaticLifecycleStatus(item.disposition, false, null),
-              inspected_by: inspectorName,
-              inspected_at: new Date().toISOString()
-            })
-            .eq('parent_rma_id', report.id)
-            .eq('barcode', item.barcode);
-        }
-      } catch (e) {
-        console.warn('Notice updating child rma_reports:', e?.message);
-      }
-
-      setReport(updatedReportRow);
-      setManifestTriageSuccess(true);
-      setTimeout(() => setManifestTriageSuccess(false), 4000);
-
-      if (onRefresh) onRefresh(updatedReportRow);
-      window.dispatchEvent(new CustomEvent('rma-data-changed', {
-        detail: { type: 'manifest-triage-updated', report: updatedReportRow }
-      }));
-      catalogService.notifyChange('manifest-triage-updated', {
-        reportId: updatedReportRow.id,
-        rmaNumber: updatedReportRow.rma_number,
-        status: updatedReportRow.status,
-        report: updatedReportRow
-      });
-    } catch (err) {
-      alert(`Error saving manifest triage: ${err.message}`);
-    } finally {
-      setIsSavingManifestTriage(false);
-    }
-  };
-
-  const handleMarkStoreHandoverComplete = async () => {
-    if (!report || isClosingHandover) return;
-    setIsClosingHandover(true);
-    try {
-      const timestamp = new Date().toISOString();
-      const inspector = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
-      const updates = {
-        status: 'closed',
-        notes: `${report.notes ? report.notes + ' | ' : ''}Store handover completed. Signed Buffer Replacement Slip received. Ticket closed.`,
-        audit_trail: [
-          ...(Array.isArray(report.audit_trail) ? report.audit_trail : []),
-          {
-            timestamp,
-            stage: 'BUFFER_HANDOVER_COMPLETE',
-            actor: inspector,
-            note: 'Store handover confirmed: signed exchange slip received and ticket closed.'
-          }
-        ]
-      };
-      const { data: updated, error } = await supabase
-        .from('rma_reports')
-        .update(updates)
-        .eq('id', report.id)
-        .select('*')
-        .single();
-
-      if (error) throw error;
-      const finalRep = updated || { ...report, ...updates };
-      setReport(finalRep);
-      setRmaStatus('closed');
-      if (onRefresh) onRefresh(finalRep);
-      window.dispatchEvent(new CustomEvent('rma-data-changed', {
-        detail: { type: 'buffer-closed', rma: report.rma_number }
-      }));
-    } catch (e) {
-      console.error('Failed to close handover:', e);
-      alert(`Failed to close handover: ${e.message}`);
-    } finally {
-      setIsClosingHandover(false);
-    }
-  };
 
   const totalSplitQty = Number(report?.quantity) || 0;
   const maxSplitVal = Math.max(1, totalSplitQty - 1);
@@ -820,13 +316,9 @@ export default function QuickRMAActionModal({
     }
     const parsed = parseInt(val, 10);
     if (!isNaN(parsed)) {
-      if (parsed > maxSplitVal) {
-        setSplitPart1Qty(maxSplitVal);
-      } else if (parsed < 1) {
-        setSplitPart1Qty(1);
-      } else {
-        setSplitPart1Qty(parsed);
-      }
+      if (parsed > maxSplitVal) setSplitPart1Qty(maxSplitVal);
+      else if (parsed < 1) setSplitPart1Qty(1);
+      else setSplitPart1Qty(parsed);
     }
   };
 
@@ -844,13 +336,9 @@ export default function QuickRMAActionModal({
 
   const handleSplitPart1Blur = () => {
     const parsed = parseInt(splitPart1Qty, 10);
-    if (isNaN(parsed) || parsed < 1) {
-      setSplitPart1Qty(1);
-    } else if (parsed > maxSplitVal) {
-      setSplitPart1Qty(maxSplitVal);
-    } else {
-      setSplitPart1Qty(parsed);
-    }
+    if (isNaN(parsed) || parsed < 1) setSplitPart1Qty(1);
+    else if (parsed > maxSplitVal) setSplitPart1Qty(maxSplitVal);
+    else setSplitPart1Qty(parsed);
   };
 
   const stepSplitPart1 = (delta) => {
@@ -885,8 +373,9 @@ export default function QuickRMAActionModal({
     setIsExecutingSplit(true);
     try {
       const inspectorName = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
+      const reportIsTest = isTestRecord(report);
+      const isSupplier = report.rma_type === 'supplier_outbound';
 
-      // 1. Generate unique child RMA Number (e.g. RMA-2026-0005-96LJ-B)
       let childRmaNumber = `${report.rma_number}-B`;
       const { data: existingChild } = await supabase
         .from('rma_reports')
@@ -907,8 +396,23 @@ export default function QuickRMAActionModal({
       }
 
       const timestamp = new Date().toISOString();
+      const autoGrade = mapReasonToConditionGrade(report.reason);
+      const p1Disp = splitPart1Choice === 'pending'
+        ? (isSupplier ? '3- Return to Vendor (RTV)' : 'Pending Triage')
+        : splitPart1Choice;
+      const p2Disp = splitPart2Choice === 'pending'
+        ? (isSupplier ? '3- Return to Vendor (RTV)' : 'Pending Triage')
+        : splitPart2Choice;
 
-      // 2. Insert new child ticket (Part 2)
+      const p1Meta = {
+        ...(report.ai_document_metadata && typeof report.ai_document_metadata === 'object' ? report.ai_document_metadata : {}),
+        ...resolveSplitMetadata(splitPart1Choice, timestamp, inspectorName, reportIsTest)
+      };
+      const p2Meta = resolveSplitMetadata(splitPart2Choice, timestamp, inspectorName, reportIsTest);
+
+      const childBaseNotes = `Split from parent ticket ${report.rma_number} (${p2Qty} of ${totalQty} units).`;
+      const childNotes = reportIsTest ? `[TEST_MODE] ${childBaseNotes}` : childBaseNotes;
+
       const childPayload = {
         rma_number: childRmaNumber,
         barcode: report.barcode,
@@ -920,12 +424,12 @@ export default function QuickRMAActionModal({
         unit_name: report.unit_name || 'pc',
         quantity: p2Qty,
         total_quantity: p2Qty,
-        condition_grade: splitPart2Grade,
-        disposition: splitPart2Disposition,
-        warehouse_location: normalizeWarehouseLocation(splitPart2Location, report),
-        status: computeAutomaticLifecycleStatus(splitPart2Disposition, false, null),
+        condition_grade: autoGrade,
+        disposition: p2Disp,
+        warehouse_location: resolveSplitLocation(splitPart2Choice, report),
+        status: resolveSplitDbStatus(splitPart2Choice, isSupplier),
         reason: splitPart2Reason || report.reason || 'Damaged packaging / Defective units',
-        explanation: `Split from ${report.rma_number} (${p2Qty} of ${totalQty} units). Disposition: ${splitPart2Disposition}`,
+        explanation: `Split from ${report.rma_number} (${p2Qty} of ${totalQty} units).`,
         parent_rma_id: report.id,
         items: Array.isArray(report.items) && report.items.length > 0
           ? [{ ...report.items[0], quantity: p2Qty, reason: splitPart2Reason || report.reason }]
@@ -946,14 +450,14 @@ export default function QuickRMAActionModal({
         rma_type: report.rma_type || 'customer_inbound',
         inspected_by: inspectorName,
         inspected_at: timestamp,
-        notes: `Split from parent ticket ${report.rma_number}. Triage: ${splitPart2Disposition}`,
+        ai_document_metadata: p2Meta,
+        notes: childNotes,
         audit_trail: [
           {
             timestamp,
             stage: 'SPLIT_CREATED',
             actor: inspectorName,
-            condition_grade: splitPart2Grade,
-            disposition: splitPart2Disposition,
+            disposition: p2Disp,
             note: `Created via partial split from ${report.rma_number} (${p2Qty} ${report.unit_name || 'pcs'})`
           }
         ]
@@ -967,29 +471,27 @@ export default function QuickRMAActionModal({
 
       if (childError) throw childError;
 
-      // 3. Update Parent Ticket (Part 1)
       const existingAudit = Array.isArray(report.audit_trail) ? [...report.audit_trail] : [];
       const parentUpdates = {
         quantity: p1Qty,
         total_quantity: p1Qty,
-        status: computeAutomaticLifecycleStatus(splitPart1Disposition, false, report.notes),
-        condition_grade: splitPart1Grade,
-        disposition: splitPart1Disposition,
-        warehouse_location: normalizeWarehouseLocation(splitPart1Location, report),
+        status: resolveSplitDbStatus(splitPart1Choice, isSupplier),
+        disposition: p1Disp,
+        warehouse_location: resolveSplitLocation(splitPart1Choice, report),
         inspected_by: inspectorName,
         inspected_at: timestamp,
+        ai_document_metadata: p1Meta,
         items: Array.isArray(report.items) && report.items.length > 0
           ? report.items.map((it, idx) => idx === 0 ? { ...it, quantity: p1Qty } : it)
           : report.items,
-        notes: `${report.notes ? report.notes + ' | ' : ''}Split: Kept ${p1Qty} units (${splitPart1Disposition}), split ${p2Qty} units to ${childRmaNumber} (${splitPart2Disposition})`,
+        notes: `${report.notes ? report.notes + ' | ' : ''}Split: Kept ${p1Qty} units, split ${p2Qty} units to ${childRmaNumber}`,
         audit_trail: [
           ...existingAudit,
           {
             timestamp,
             stage: 'SPLIT_EXECUTED',
             actor: inspectorName,
-            condition_grade: splitPart1Grade,
-            disposition: splitPart1Disposition,
+            disposition: p1Disp,
             note: `Split ticket: Kept ${p1Qty} units on ${report.rma_number}, created ${childRmaNumber} with ${p2Qty} units`
           }
         ]
@@ -1004,17 +506,12 @@ export default function QuickRMAActionModal({
 
       if (parentError) throw parentError;
 
-      // 4. Update local state
       const finalParent = updatedParent || { ...report, ...parentUpdates };
       setReport(finalParent);
-      setConditionGrade(splitPart1Grade);
-      setDisposition(normalizeDispositionOption(splitPart1Disposition));
-      setWarehouseLocation(splitPart1Location || '');
       setIsSplitting(false);
-      setSplitSuccessMessage(`Successfully split: Kept ${p1Qty} ${report.unit_name || 'pcs'} on this ticket (${splitPart1Disposition}), and created new ticket ${childRmaNumber} with ${p2Qty} ${report.unit_name || 'pcs'} (${splitPart2Disposition})!`);
+      setSplitSuccessMessage(`Successfully split: Kept ${p1Qty} ${report.unit_name || 'pcs'} on this ticket, and created new ticket ${childRmaNumber} with ${p2Qty} ${report.unit_name || 'pcs'}!`);
       setTimeout(() => setSplitSuccessMessage(''), 10000);
 
-      // 5. Notify parent to refresh lists and dispatch event (pass newChild so it immediately appears in UI)
       if (onRefresh) {
         onRefresh(finalParent, newChild);
       }
@@ -1027,47 +524,7 @@ export default function QuickRMAActionModal({
     }
   };
 
-  // Authentication & Verification State
-  const [verifiedAdmin, setVerifiedAdmin] = useState(null);
-  const [authStep, setAuthStep] = useState('email'); // 'email' | 'otp'
-  const [emailInput, setEmailInput] = useState('');
-  const [otpInput, setOtpInput] = useState('');
-  const [countdown, setCountdown] = useState(0);
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [authError, setAuthError] = useState(null);
-  const [authSuccessMsg, setAuthSuccessMsg] = useState(null);
-
-  // Sandbox Test Mode State: Strictly restricted to Super Admin
-  const [isTestMode, setIsTestMode] = useState(() => {
-    try {
-      const user = authService.getCurrentUser();
-      if (user?.role !== 'super_admin') return false;
-      return typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true';
-    } catch (e) {
-      return false;
-    }
-  });
-
-  useEffect(() => {
-    const handleStorage = () => {
-      try {
-        const user = authService.getCurrentUser();
-        if (user?.role === 'super_admin') {
-          setIsTestMode(localStorage.getItem('rma_portal_test_mode') === 'true');
-        } else {
-          setIsTestMode(false);
-        }
-      } catch (e) {}
-    };
-    window.addEventListener('storage', handleStorage);
-    window.addEventListener('rma-data-changed', handleStorage);
-    return () => {
-      window.removeEventListener('storage', handleStorage);
-      window.removeEventListener('rma-data-changed', handleStorage);
-    };
-  }, []);
-
-  // Check if current logged-in user is already admin/super admin OR has an active verified Supplier RTV / portal session
+  // Check if current logged-in user is already admin/super admin OR has an active verified portal session
   useEffect(() => {
     if (!isOpen) return;
 
@@ -1099,7 +556,6 @@ export default function QuickRMAActionModal({
       }
     }
 
-    // Check session storage cache for verified admin in THIS tab only (never localStorage)
     try {
       const cached = sessionStorage.getItem(QUICK_AUTH_STORAGE_KEY);
       if (cached) {
@@ -1109,12 +565,12 @@ export default function QuickRMAActionModal({
           return;
         }
       }
-    } catch (e) {}
+    } catch {}
 
     setVerifiedAdmin(null);
     setAuthStep('email');
     setOtpInput('');
-  }, [isOpen, currentUser]);
+  }, [isOpen, currentUser, gateSession]);
 
   useEffect(() => {
     if (countdown <= 0) return;
@@ -1137,7 +593,6 @@ export default function QuickRMAActionModal({
     let isMounted = true;
     const cleanRma = String(rmaNumber).trim();
 
-    // If report is already loaded in memory and matches this RMA number or ID, don't re-trigger loading!
     if (report && (
       String(report.rma_number || '').toUpperCase() === cleanRma.toUpperCase() ||
       String(report.id) === cleanRma
@@ -1154,7 +609,6 @@ export default function QuickRMAActionModal({
           || list.find(r => String(r.rma_number || '').toUpperCase() === target);
     };
 
-    // Try local list first for instant responsiveness
     const immediateMatch = findInReports(recentReportsList);
     if (immediateMatch) {
       setReport(immediateMatch);
@@ -1163,7 +617,6 @@ export default function QuickRMAActionModal({
       return;
     }
 
-    // Begin asynchronous polling loop (retry every 800ms up to 5 attempts)
     setIsLoadingReport(true);
     setReportError(null);
     setSyncAttempt(1);
@@ -1176,14 +629,12 @@ export default function QuickRMAActionModal({
         if (!isMounted) return;
         setSyncAttempt(attempt);
 
-        // Check recentReportsList on each retry tick
         const tickMatch = findInReports(recentReportsList);
         if (tickMatch) {
           foundRecord = tickMatch;
           break;
         }
 
-        // Query Supabase
         try {
           let query = supabase.from('rma_reports').select('*');
           if (/^\d+$/.test(cleanRma)) {
@@ -1201,7 +652,6 @@ export default function QuickRMAActionModal({
           console.warn(`RMA sync attempt ${attempt} notice:`, e?.message);
         }
 
-        // Delay 1000ms before next attempt if record not yet available
         if (attempt < maxAttempts) {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
@@ -1224,7 +674,7 @@ export default function QuickRMAActionModal({
     };
   }, [isOpen, rmaNumber, retryTrigger]);
 
-  // 2. Silent background sync when recentReportsList updates (WITHOUT triggering loading spinners or unmounting UI)
+  // 2. Silent background sync when recentReportsList updates
   useEffect(() => {
     if (!isOpen || !rmaNumber || !recentReportsList.length) return;
     const cleanRma = String(rmaNumber).trim().toUpperCase();
@@ -1237,18 +687,18 @@ export default function QuickRMAActionModal({
     if (match) {
       setReport(prev => {
         if (!prev) return match;
-        // Do not downgrade an existing parent record to a child record
         if (!prev.parent_rma_id && match.parent_rma_id) return prev;
-        // Do not overwrite an optimistic rma_type change with a stale list entry
         if (prev.rma_type && match.rma_type && prev.rma_type !== match.rma_type) return prev;
         if (
           prev.status !== match.status ||
           prev.disposition !== match.disposition ||
-          prev.condition_grade !== match.condition_grade ||
           prev.warehouse_location !== match.warehouse_location ||
+          prev.supplier_name !== match.supplier_name ||
           prev.code !== match.code ||
           prev.name !== match.name ||
-          prev.notes !== match.notes
+          prev.notes !== match.notes ||
+          prev.updated_at !== match.updated_at ||
+          JSON.stringify(prev.ai_document_metadata) !== JSON.stringify(match.ai_document_metadata)
         ) {
           return match;
         }
@@ -1279,13 +729,30 @@ export default function QuickRMAActionModal({
   useEffect(() => {
     if (report) {
       const meta = report.ai_document_metadata || {};
+      const pickup = meta.supplier_pickup || {};
+      const bc = String(report.barcode || '').trim();
+      const skuCode = String(report.code || report.sku || '').trim();
+      const matchedCatalogProd = (savedProductsList || []).find((p) =>
+        (bc && p.barcode && String(p.barcode).trim() === bc) ||
+        (skuCode && (String(p.code || '').trim() === skuCode || String(p.sku || '').trim() === skuCode))
+      );
+      const isPlaceholderSup = (val) => {
+        const s = String(val || '').trim().toLowerCase();
+        return !s || s === 'pending assignment' || s === 'unassigned' || s === 'warehouse' || s === 'n/a';
+      };
+      const resolvedInitSupplier = [
+        pickup.supplier_name,
+        report.supplier_name,
+        matchedCatalogProd?.supplier_name,
+        matchedCatalogProd?.supplierName,
+        meta.vendor_name
+      ].find((cand) => !isPlaceholderSup(cand)) || '';
+
       setAdminSiNumber(report.si_number || meta.si_number || '');
       setAdminDrNumber(report.dr_number || report.invoice_dr_number || meta.dr_number || meta.invoice_dr_number || '');
       setAdminPoNumber(report.po_number || meta.po_number || '');
-      setAdminSupplierName(report.supplier_name && report.supplier_name !== 'Pending Assignment' ? report.supplier_name : (meta.vendor_name || ''));
-      setAdminStoreBranch(report.store_branch || meta.store_branch || '');
-      setAdminExpiryDate(report.expiry_date || '');
-      setAdminBatchLot(report.batch_lot_number || '');
+      setAdminSupplierName(resolvedInitSupplier);
+      setAdminExpiryDate(report.expiry_date ? String(report.expiry_date).slice(0, 10) : '');
 
       // Super Admin Silent Restitution & Record Re-creation Hooks
       setAdminRmaNumber(report.rma_number || '');
@@ -1297,33 +764,70 @@ export default function QuickRMAActionModal({
       setAdminSku(report.code || report.sku || '');
       setAdminQuantity(Number(report.quantity) || 1);
       setAdminUnitName(report.unit_name || 'pc');
-      setAdminPrice(Number(report.price || 0));
+      const netP = Number(report.price || 0);
+      setAdminPrice(netP);
+      setAdminPriceWithVat(Number(report.price_with_vat || report.priceWithVat || (netP > 0 ? Number((netP * 1.12).toFixed(2)) : 0)));
+      setAdminPiecesPerCase(report.pieces_per_case || matchedCatalogProd?.pieces_per_case || null);
 
       setIsEditingAiDetails(false);
     }
   }, [
-    report?.id, 
-    report?.rma_number, 
-    report?.created_at, 
-    report?.is_test, 
-    report?.name, 
-    report?.barcode, 
-    report?.code, 
-    report?.sku, 
-    report?.quantity, 
-    report?.unit_name, 
-    report?.price, 
-    report?.si_number, 
-    report?.dr_number, 
-    report?.po_number, 
-    report?.invoice_dr_number, 
-    report?.supplier_name, 
-    report?.store_branch, 
-    report?.expiry_date, 
-    report?.batch_lot_number
+    report?.id,
+    report?.rma_number,
+    report?.created_at,
+    report?.is_test,
+    report?.name,
+    report?.barcode,
+    report?.code,
+    report?.sku,
+    report?.quantity,
+    report?.unit_name,
+    report?.price,
+    report?.price_with_vat,
+    report?.si_number,
+    report?.dr_number,
+    report?.po_number,
+    report?.invoice_dr_number,
+    report?.supplier_name,
+    report?.expiry_date,
+    savedProductsList
   ]);
 
-  // Step 1: Request OTP for authorized company admin
+  const handleAutoPopulateEditDetails = (item) => {
+    if (!item) return;
+    if (item.name) setAdminProductName(item.name);
+    const candidateSku = String(item.code || item.sku || '').trim();
+    const lockedBc = String(adminBarcode || report?.barcode || '').trim();
+    if (
+      candidateSku &&
+      candidateSku !== lockedBc &&
+      !candidateSku.toLowerCase().includes('awaiting') &&
+      !candidateSku.toLowerCase().includes('unidentified')
+    ) {
+      setAdminSku(candidateSku);
+    }
+    const sup = String(item.supplierName || item.supplier_name || item.supplier || '').trim();
+    if (sup && !/^(pending assignment|unassigned|warehouse|n\/a)$/i.test(sup)) {
+      setAdminSupplierName(sup);
+    }
+    if (item.unitName || item.unit_name) {
+      setAdminUnitName(item.unitName || item.unit_name);
+    }
+    const netP = Number(item.price || 0);
+    const vatP = Number(item.priceWithVat || item.price_with_vat || 0);
+    if (netP > 0) {
+      setAdminPrice(Number(netP.toFixed(2)));
+      setAdminPriceWithVat(vatP > 0 ? Number(vatP.toFixed(2)) : Number((netP * 1.12).toFixed(2)));
+    } else if (vatP > 0) {
+      setAdminPriceWithVat(Number(vatP.toFixed(2)));
+      setAdminPrice(Number((vatP / 1.12).toFixed(2)));
+    }
+    const pcs = Number(item.pieces_per_case || item.piecesPerCase || 0);
+    if (pcs > 0) {
+      setAdminPiecesPerCase(pcs);
+    }
+  };
+
   const handleRequestOtp = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     const cleanEmail = emailInput.trim().toLowerCase();
@@ -1338,25 +842,20 @@ export default function QuickRMAActionModal({
     if (countdown > 0) return;
 
     setIsVerifying(true);
-
     try {
-      // 1. Verify that email belongs to an active employee
       const employees = await authService.getEmployees();
-      const emp = employees.find(e => e.email?.toLowerCase() === cleanEmail);
+      const emp = employees.find(em => em.email?.toLowerCase() === cleanEmail);
 
       if (!emp) {
-        throw new Error(`Access Denied: "${cleanEmail}" is not recognized as an authorized company account. Public customers and unverified users cannot access Quick Actions.`);
+        throw new Error(`Access Denied: "${cleanEmail}" is not recognized as an authorized company account.`);
       }
-
       if (emp.is_active === false) {
         throw new Error(`Access Denied: The employee account (${cleanEmail}) is marked as Resigned or Inactive.`);
       }
-
       if (emp.role !== 'super_admin' && emp.role !== 'admin') {
-        throw new Error(`Permission Restricted: Account "${cleanEmail}" has role "${emp.role}". Only Admin and Super Admin roles can operate Return Quick Actions.`);
+        throw new Error(`Permission Restricted: Only Admin and Super Admin roles can operate Return Quick Actions.`);
       }
 
-      // 2. Request OTP via authService
       const res = await authService.requestOtp(cleanEmail);
       setAuthStep('otp');
       setCountdown(60);
@@ -1371,7 +870,6 @@ export default function QuickRMAActionModal({
     }
   };
 
-  // Step 2: Verify 6-digit OTP Code
   const handleVerifyOtp = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     const cleanEmail = emailInput.trim().toLowerCase();
@@ -1384,7 +882,6 @@ export default function QuickRMAActionModal({
     }
 
     setIsVerifying(true);
-
     try {
       const res = await authService.verifyOtp(cleanEmail, cleanOtp);
       if (res?.success && res.user) {
@@ -1429,19 +926,22 @@ export default function QuickRMAActionModal({
     if (!report?.id) return;
     setIsSavingAiDetails(true);
     try {
-      const isSuperAdmin = currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin';
+      const isSuperAdminRole = currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin';
       const cleanSi = adminSiNumber.trim();
       const cleanDr = adminDrNumber.trim();
       const cleanPo = adminPoNumber.trim();
       const primaryDoc = cleanDr || cleanSi || cleanPo || null;
-      const cleanBranch = adminStoreBranch.trim();
       const cleanSupplier = adminSupplierName.trim();
-      const cleanLot = adminBatchLot.trim();
-      const cleanExpiry = adminExpiryDate || null;
-      const cleanRmaNum = isSuperAdmin && adminRmaNumber.trim() ? adminRmaNumber.trim() : report.rma_number;
-      const cleanCreated = isSuperAdmin && adminCreatedAt ? new Date(adminCreatedAt).toISOString() : report.created_at;
+      const cleanExpiry = adminExpiryDate ? adminExpiryDate.slice(0, 10) : null;
+      const cleanRmaNum = isSuperAdminRole && adminRmaNumber.trim() ? adminRmaNumber.trim() : report.rma_number;
+      const cleanCreated = isSuperAdminRole && adminCreatedAt ? new Date(adminCreatedAt).toISOString() : report.created_at;
+      const parsedNetPrice = parseFloat(adminPrice);
+      const safeNetPrice = Number.isFinite(parsedNetPrice) && parsedNetPrice >= 0 ? parsedNetPrice : Number(report.price || 0);
+      const parsedVatPrice = parseFloat(adminPriceWithVat);
+      const safeVatPrice = Number.isFinite(parsedVatPrice) && parsedVatPrice > 0
+        ? parsedVatPrice
+        : (safeNetPrice > 0 ? Number((safeNetPrice * 1.12).toFixed(2)) : Number(report.price_with_vat || 0));
 
-      // 1. Prepare updates for main rma_reports row
       const updates = {
         rma_number: cleanRmaNum,
         created_at: cleanCreated,
@@ -1449,28 +949,28 @@ export default function QuickRMAActionModal({
         dr_number: cleanDr || null,
         po_number: cleanPo || null,
         invoice_dr_number: primaryDoc,
-        store_branch: cleanBranch || null,
-        expiry_date: cleanExpiry,
-        batch_lot_number: cleanLot || null
+        expiry_date: cleanExpiry
       };
+
+      if (adminProductName.trim()) updates.name = adminProductName.trim();
+      if (adminSku.trim()) updates.code = adminSku.trim();
+      if (adminUnitName.trim()) updates.unit_name = adminUnitName.trim();
+      if (adminPrice !== undefined && adminPrice !== '') {
+        updates.price = safeNetPrice;
+        updates.price_with_vat = safeVatPrice;
+      }
 
       if (cleanSupplier) {
         updates.supplier_name = cleanSupplier;
       }
 
-      if (isSuperAdmin) {
-        if (adminProductName.trim()) updates.name = adminProductName.trim();
+      if (isSuperAdminRole) {
         if (adminBarcode.trim()) updates.barcode = adminBarcode.trim();
-        if (adminSku.trim()) {
-          updates.code = adminSku.trim();
-        }
         if (adminQuantity) updates.quantity = Number(adminQuantity) || 1;
-        if (adminUnitName.trim()) updates.unit_name = adminUnitName.trim();
-        if (adminPrice !== undefined && adminPrice !== '') updates.price = parseFloat(adminPrice) || 0;
 
-        // Mode switch: Test Mode Sandbox <-> Live Production (100% silent, 0 emails)
-        // Note: rma_reports has no root is_test column in Postgres; mode is strictly stored in ai_document_metadata and notes
-        const currentMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object') ? { ...report.ai_document_metadata } : {};
+        const currentMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
+          ? { ...report.ai_document_metadata }
+          : {};
         let currentNotes = report.notes || '';
         if (adminIsTest === false) {
           delete currentMeta.is_test;
@@ -1488,7 +988,6 @@ export default function QuickRMAActionModal({
         }
       }
 
-      // If multi-item batch manifest, also update child items inside the manifest JSON
       let updatedItems = report.items;
       if (Array.isArray(report.items) && report.items.length > 0) {
         updatedItems = report.items.map(it => ({
@@ -1531,8 +1030,12 @@ export default function QuickRMAActionModal({
         if (fbErr) throw fbErr;
       }
 
-      // 2. Also update child records in rma_reports table for this parent (batch manifest only)
-      if (report.id && (report.is_parent || isMultiItemManifest)) {
+      const isManifestReport = Boolean(
+        report?.is_parent ||
+        manifestItems.length > 1 ||
+        (Array.isArray(report?.items) && report.items.length > 1)
+      );
+      if (report.id && isManifestReport) {
         const childCascade = {};
         if (cleanRmaNum && cleanRmaNum !== report.rma_number) childCascade.rma_number = cleanRmaNum;
         if (cleanSupplier) childCascade.supplier_name = cleanSupplier;
@@ -1548,7 +1051,6 @@ export default function QuickRMAActionModal({
         }
       }
 
-      // 3. Optimistically update local report state
       const updatedReport = {
         ...report,
         ...updates,
@@ -1556,19 +1058,16 @@ export default function QuickRMAActionModal({
         dr_number: cleanDr || null,
         po_number: cleanPo || null,
         invoice_dr_number: primaryDoc,
-        store_branch: cleanBranch || null,
-        store: cleanBranch || null,
         supplier_name: cleanSupplier || report.supplier_name || 'Pending Assignment',
         supplier: cleanSupplier || report.supplier_name || 'Pending Assignment',
         expiry_date: cleanExpiry,
-        batch_lot_number: cleanLot || null,
+        ...(adminPiecesPerCase ? { pieces_per_case: adminPiecesPerCase } : {}),
         ...(updatedItems ? { items: updatedItems } : {})
       };
 
       setReport(updatedReport);
       setIsEditingAiDetails(false);
 
-      // 4. Trigger instant parent refresh across Customer Hub & Supplier Hub
       if (typeof onRefresh === 'function') {
         onRefresh(updatedReport);
       }
@@ -1590,21 +1089,15 @@ export default function QuickRMAActionModal({
 
   if (!isOpen) return null;
 
-  // Derive catalog & memo status for this report
+  const isSupplierStream = report?.rma_type === 'supplier_outbound';
   const cleanBarcode = String(report?.barcode || '').trim();
-  const matchedProduct = cleanBarcode 
-    ? savedProductsList.find(p => p.barcode && String(p.barcode).trim() === cleanBarcode) 
+  const matchedProduct = cleanBarcode
+    ? savedProductsList.find(p => p.barcode && String(p.barcode).trim() === cleanBarcode)
     : null;
-  const isSavedInProducts = Boolean(matchedProduct && matchedProduct.is_verified !== false);
 
   const existingMemo = report
     ? creditMemosList.find(m => m.rma_number === report?.rma_number || String(m.report_id) === String(report?.id))
     : null;
-
-  const hasLinkedCreditMemo = Boolean(
-    existingMemo ||
-    (report?.rma_number && creditMemosList.some(m => m.rma_number === report?.rma_number))
-  );
 
   const isMultiItemManifest = Boolean(
     report?.is_parent ||
@@ -1615,8 +1108,6 @@ export default function QuickRMAActionModal({
 
   const isSkuAssigned = isMultiItemManifest ? true : hasAssignedSku(report, savedProductsList);
 
-  // Enterprise Multi-Tier Financial Threshold Rule:
-  // If total claim exceeds ₱10,000, Super Admin authorization is required to activate Credit Memo button
   const itemQty = Number(report?.quantity) || 1;
   const itemUnitPrice = Number(report?.price_with_vat) || Number(report?.price) || Number(matchedProduct?.price_with_vat) || Number(matchedProduct?.price) || 0;
   const totalClaimValue = itemQty * itemUnitPrice;
@@ -1624,26 +1115,27 @@ export default function QuickRMAActionModal({
   const isSuperAdmin = (verifiedAdmin?.role === 'super_admin' || currentUser?.role === 'super_admin');
   const canIssueCreditMemo = !isHighValueClaim || isSuperAdmin;
 
-  // Photos
-  const photoList = report?.photo_urls 
-    ? (Array.isArray(report.photo_urls) ? report.photo_urls : [report.photo_urls])
-    : (report?.photo_url ? [report.photo_url] : []);
+  const photoList = getRealPhotos(
+    report?.photos ||
+    (report?.photo_urls ? (Array.isArray(report.photo_urls) ? report.photo_urls : [report.photo_urls]) : (report?.photo_url ? [report.photo_url] : []))
+  );
 
   const reporterName = report?.reporter_name || report?.reported_by || report?.customer_name || 'Staff / Customer';
   const reporterContact = report?.reporter_contact || report?.reporter_phone || report?.phone || '';
 
-  // Paperwork & AI Verification Details
   const paperworkList = report?.paperwork_photos
     ? (Array.isArray(report.paperwork_photos) ? report.paperwork_photos : [report.paperwork_photos])
     : [];
   const aiMetadata = report?.ai_document_metadata || null;
+  const outcome = formatFourChoiceOutcome(report);
+  const pickupInfo = aiMetadata?.supplier_pickup || null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden my-0 sm:my-auto max-h-[92dvh] sm:max-h-[92vh] flex flex-col">
         {/* Mobile Drag Indicator */}
         <div className="bottom-sheet-handle sm:hidden" />
-        
+
         {/* Header Bar */}
         <div className="relative shrink-0 bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-900 px-4 sm:px-6 py-3.5 sm:py-4 text-white">
           <div className="flex items-center justify-between gap-3">
@@ -1654,14 +1146,14 @@ export default function QuickRMAActionModal({
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm sm:text-lg font-black tracking-tight truncate">
-                    RMA Quick Processing
+                    RMA Details &amp; Quick Actions
                   </h3>
                   <span className="hidden sm:inline-flex text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/20 text-white font-bold shrink-0">
-                    Box QR Action
+                    {isSupplierStream ? 'Supplier RTV' : 'Customer Hub'}
                   </span>
                 </div>
                 <p className="text-[11px] sm:text-xs text-blue-100 font-medium truncate">
-                  Instant intake, SKU assignment & Credit Memo
+                  4-Choice Outcome, Split Qty, Documents, Credit Memo &amp; Audit Trail
                 </p>
               </div>
             </div>
@@ -1677,25 +1169,23 @@ export default function QuickRMAActionModal({
           </div>
         </div>
 
-
-
         {/* Modal Body */}
         <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto overscroll-contain">
 
-          {/* 1. Loading State with Asynchronous Sync Counter */}
+          {/* 1. Loading State */}
           {isLoadingReport && !report && (
             <div className="py-8 text-center space-y-3">
               <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
               <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                Finalizing return submission sync... Attempt {syncAttempt} of 12
+                Loading return record... Attempt {syncAttempt} of 12
               </p>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Polling local buffer and Supabase database for return authorization <span className="font-mono font-bold text-blue-600">{rmaNumber}</span>...
+                Syncing <span className="font-mono font-bold text-blue-600">{rmaNumber}</span>...
               </p>
             </div>
           )}
 
-          {/* 2. Error Loading Report with Manual Retry Option */}
+          {/* 2. Error State */}
           {reportError && !report && (
             <div className="p-4 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-2xl flex items-start gap-3 text-rose-800 dark:text-rose-200">
               <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
@@ -1726,21 +1216,21 @@ export default function QuickRMAActionModal({
             </div>
           )}
 
-          {/* 3. Report Loaded: Display Summary Card */}
+          {/* 3. Report Loaded */}
           {report && (
             <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-4 space-y-3">
-              {/* TOP SEGMENTED SWITCHER: Customer Inbound vs Supplier Outbound */}
+              {/* (a) Stream Switcher: Customer Hub <-> Supplier RTV */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Logistics Stream Classification:
+                    Stream Switcher:
                   </span>
                   <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
-                    report.rma_type === 'supplier_outbound'
+                    isSupplierStream
                       ? 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
                       : 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
                   }`}>
-                    {report.rma_type === 'supplier_outbound' ? 'Outbound Vendor RTV' : 'Inbound Customer RMA'}
+                    {isSupplierStream ? 'Supplier RTV (Outbound)' : 'Customer Hub (Inbound)'}
                   </span>
                 </div>
                 <div className="bg-slate-200/80 dark:bg-slate-900 p-1 rounded-xl border border-slate-300/80 dark:border-slate-700 flex items-center justify-between gap-1 shadow-2xs">
@@ -1749,26 +1239,26 @@ export default function QuickRMAActionModal({
                     disabled={isUpdatingType}
                     onClick={() => handleToggleRmaType('customer_inbound')}
                     className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                      (report.rma_type === 'customer_inbound' || !report.rma_type)
+                      !isSupplierStream
                         ? 'bg-blue-600 text-white shadow-xs'
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
                     <Package className="w-3.5 h-3.5 shrink-0" />
-                    <span>📥 Customer Return (Inbound)</span>
+                    <span>📥 Customer Hub</span>
                   </button>
                   <button
                     type="button"
                     disabled={isUpdatingType}
                     onClick={() => handleToggleRmaType('supplier_outbound')}
                     className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                      report.rma_type === 'supplier_outbound'
+                      isSupplierStream
                         ? 'bg-purple-600 text-white shadow-xs'
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
                     <Building2 className="w-3.5 h-3.5 shrink-0" />
-                    <span>📤 Supplier Claim (Outbound / RTV)</span>
+                    <span>📤 Supplier RTV</span>
                   </button>
                 </div>
               </div>
@@ -1783,24 +1273,41 @@ export default function QuickRMAActionModal({
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-700 pb-3">
                 <div className="space-y-0.5">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                    Scanned Return Authorization
+                    Return Authorization
                   </span>
-                  <div className="text-lg font-black font-mono text-slate-900 dark:text-white flex items-center gap-2">
+                  <div className="text-lg font-black font-mono text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
                     <span>{report.rma_number || rmaNumber}</span>
+                    {isTestRecord(report) && (
+                      <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase">
+                        🧪 Test Mode
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                {onViewReportQR && (
-                  <button
-                    type="button"
-                    onClick={() => onViewReportQR(report)}
-                    className="px-2.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
-                    title="Print Box QR Sticker"
-                  >
-                    <Printer className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Print QR Sticker</span>
-                  </button>
-                )}
+                <div className="flex items-center gap-1.5">
+                  {!isSkuAssigned && onAssignSku && (
+                    <button
+                      type="button"
+                      onClick={() => onAssignSku(report)}
+                      className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-2xs cursor-pointer"
+                    >
+                      <Tag className="w-3.5 h-3.5" />
+                      <span>Assign SKU</span>
+                    </button>
+                  )}
+                  {onViewReportQR && (
+                    <button
+                      type="button"
+                      onClick={() => onViewReportQR(report)}
+                      className="px-2.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                      title="Print Box QR Sticker"
+                    >
+                      <Printer className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Print QR Sticker</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Product Info Grid */}
@@ -1816,9 +1323,9 @@ export default function QuickRMAActionModal({
                       <span>{report.barcode || 'N/A'}</span>
                     )}
                   </div>
-                  {matchedProduct?.code && (
+                  {(matchedProduct?.code || report.code) && (
                     <div className="font-mono text-[11px] text-blue-600 dark:text-blue-400">
-                      SKU: {matchedProduct.code}
+                      SKU: {matchedProduct?.code || report.code}
                     </div>
                   )}
                 </div>
@@ -1827,6 +1334,9 @@ export default function QuickRMAActionModal({
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">Product Name</span>
                   <div className="font-bold text-slate-900 dark:text-white truncate" title={report.name || report.product_name}>
                     {matchedProduct?.name || report.name || report.product_name || `Barcode ${report.barcode}`}
+                  </div>
+                  <div className="font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                    Qty: <strong>{itemQty} {report.unit_name || 'pc'}</strong>
                   </div>
                 </div>
 
@@ -1839,85 +1349,16 @@ export default function QuickRMAActionModal({
 
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">Reported By</span>
-                  <div className="font-bold text-slate-800 dark:text-slate-200">
-                    {reporterName}
-                  </div>
+                  <div className="font-bold text-slate-800 dark:text-slate-200">{reporterName}</div>
                   {reporterContact && (
-                    <div className="font-mono text-[10px] text-slate-500">
-                      {reporterContact}
-                    </div>
+                    <div className="font-mono text-[10px] text-slate-500">{reporterContact}</div>
                   )}
                 </div>
               </div>
 
-              {/* CONTEXTUAL STREAM HIGHLIGHT: Customer Inbound vs Supplier Outbound */}
-              {report.rma_type === 'supplier_outbound' ? (
-                <div className="p-3 bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-xl space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between text-purple-900 dark:text-purple-200 font-black">
-                    <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide">
-                      <Building2 className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-                      <span>Supplier Outbound Return (RTV Recovery)</span>
-                    </span>
-                    <span className="text-[10px] bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-300 px-2 py-0.5 rounded-full font-bold">
-                      Vendor Chargeback
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
-                    <div>
-                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Master Supplier</span>
-                      <strong className="text-slate-900 dark:text-white truncate block">{report.supplier_name || 'Savemore'}</strong>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Warehouse Bin</span>
-                      <strong className="text-slate-900 dark:text-white font-mono">{report.warehouse_location || 'DOCK'}</strong>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Batch / Lot #</span>
-                      <strong className="text-slate-900 dark:text-white font-mono">{report.batch_lot_number || 'N/A'}</strong>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Total Debit Value</span>
-                      <strong className="text-emerald-600 dark:text-emerald-400 font-mono font-black">₱{totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="p-3 bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between text-blue-900 dark:text-blue-200 font-black">
-                    <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide">
-                      <Package className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                      <span>Customer Inbound Return (Credit Processing)</span>
-                    </span>
-                    <span className="text-[10px] bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 px-2 py-0.5 rounded-full font-bold">
-                      Customer Credit
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
-                    <div>
-                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Store / Branch</span>
-                      <strong className="text-slate-900 dark:text-white truncate block">{report.store_branch || 'Store/Branch Unassigned'}</strong>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Invoice / DR #</span>
-                      <strong className="text-slate-900 dark:text-white font-mono">{report.invoice_dr_number || report.dr_number || report.si_number || 'None'}</strong>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Customer AE</span>
-                      <strong className="text-slate-900 dark:text-white truncate block">{report.ae_name || 'Unassigned'}</strong>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Credit Memo</span>
-                      <strong className={existingMemo ? 'text-emerald-600 dark:text-emerald-400 font-mono' : 'text-amber-600 dark:text-amber-400 font-bold'}>
-                        {existingMemo ? `✓ ${existingMemo.credit_memo_number || 'Issued'}` : 'Pending Issuance'}
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Manifest Items List if Batch Manifest */}
+              {/* Multi-item Manifest List (Read-Only Summary) */}
               {Boolean(report?.is_parent || (Array.isArray(report.items) && report.items.length > 1)) && (
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2 text-xs">
+                <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2 text-xs">
                   <div className="flex items-center justify-between font-bold">
                     <span className="flex items-center gap-1.5 text-slate-800 dark:text-slate-200 uppercase tracking-wide text-[10px]">
                       <Package className="w-3.5 h-3.5 text-blue-600" />
@@ -1927,363 +1368,217 @@ export default function QuickRMAActionModal({
                       Total: {report.total_quantity || report.items.reduce((s, it) => s + (Number(it.quantity) || 1), 0)} Units
                     </span>
                   </div>
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
                     {report.items.map((it, idx) => (
-                      <div key={idx} className="p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-lg flex items-center justify-between gap-2">
+                      <div key={idx} className="p-2 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80 rounded-lg flex items-center justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <div className="font-extrabold text-slate-900 dark:text-white truncate">
-                            {it.name || it.productName}
-                          </div>
-                          <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400 truncate flex items-center gap-1.5 flex-wrap">
-                            <span>BC: {it.barcode}</span>
-                            <span>•</span>
-                            {(() => {
-                              const itBarcode = String(it.barcode || '').trim();
-                              const rawSku = String(it.code || it.sku || '').trim();
-                              const isSkuValid = rawSku && rawSku !== itBarcode && !rawSku.toLowerCase().includes('awaiting');
-                              return isSkuValid ? (
-                                <span className="text-emerald-600 dark:text-emerald-400 font-bold">SKU: {rawSku}</span>
-                              ) : (
-                                <span className="text-amber-600 dark:text-amber-400 font-bold">SKU: Awaiting SKU</span>
-                              );
-                            })()}
+                          <div className="font-extrabold text-slate-900 dark:text-white truncate">{it.name || it.productName}</div>
+                          <div className="font-mono text-[10px] text-slate-500 truncate">
+                            BC: {it.barcode} {(it.code || it.sku) ? `• SKU: ${it.code || it.sku}` : ''}
                           </div>
                         </div>
-                        <div className="text-right shrink-0">
-                          <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-black text-[11px]">
-                            {it.quantity} {it.unit_name || it.unit || 'pc'}
-                          </span>
-                          <div className="text-[10px] text-rose-600 dark:text-rose-400 font-bold truncate max-w-[120px]">
-                            {it.reason}
-                          </div>
-                        </div>
+                        <span className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono font-black text-[11px] shrink-0">
+                          {it.quantity} {it.unit_name || it.unit || 'pc'}
+                        </span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Proof Photos Thumbnail */}
-              {photoList.length > 0 && (
-                <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase text-slate-400">Proof Photo:</span>
+              {/* (d) Proof Photos + Google Drive Folder Link */}
+              {(photoList.length > 0 || report?.google_drive_folder_url) && (
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2">
+                  {photoList.length > 0 && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-bold uppercase text-slate-400">Proof Photos:</span>
+                      {photoList.map((url, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => onOpenLightbox && onOpenLightbox({
+                            images: photoList,
+                            initialIndex: idx,
+                            url,
+                            title: report.name || `Return ${report.rma_number}`,
+                            subtitle: `Photo ${idx + 1}/${photoList.length} • RMA #${report.rma_number}`
+                          })}
+                          className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-600 hover:scale-105 shadow-xs transition-transform cursor-zoom-in inline-block"
+                          title="Click to zoom proof photo"
+                        >
+                          <img src={url} alt={`Proof ${idx + 1}`} className="w-full h-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {report?.google_drive_folder_url && (
+                    <a
+                      href={report.google_drive_folder_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-xl text-xs font-bold transition-colors cursor-pointer ml-auto"
+                      title="Open organized Google Drive folder"
+                    >
+                      <Folder className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                      <span>Open RMA Drive Folder</span>
+                      <ExternalLink className="w-3 h-3 text-amber-500" />
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {/* (e) Edit Details & Documents (SI#, DR#, PO#, Supplier, Store Branch, Expiry Date, Batch/Lot#, + Super Admin Silent Restitution) */}
+              <div className="pt-2.5 border-t border-slate-200 dark:border-slate-700 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-2 py-0.5 rounded-lg text-[10px] font-black uppercase bg-violet-100 dark:bg-violet-950/60 text-violet-800 dark:text-violet-300 border border-violet-200 dark:border-violet-800 flex items-center gap-1">
+                      {aiMetadata?.document_type ? (
+                        <>
+                          <Sparkles className="w-3 h-3 text-violet-600 dark:text-violet-400" />
+                          <span>AI Verified {aiMetadata.document_type}</span>
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="w-3 h-3 text-violet-600 dark:text-violet-400" />
+                          <span>Details &amp; Commercial Documents</span>
+                        </>
+                      )}
+                    </span>
+                  </div>
+
                   <button
                     type="button"
-                    onClick={() => onOpenLightbox && onOpenLightbox({
-                      images: photoList,
-                      initialIndex: 0,
-                      url: photoList[0],
-                      title: report.name || `Return ${report.rma_number}`,
-                      subtitle: `RMA #${report.rma_number} • Reported by ${reporterName}`
-                    })}
-                    className="w-10 h-10 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-600 hover:scale-105 shadow-xs transition-transform cursor-zoom-in inline-block"
-                    title="Click to zoom proof photo"
+                    onClick={() => setIsEditingAiDetails(!isEditingAiDetails)}
+                    className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
                   >
-                    <img src={photoList[0]} alt="Proof" className="w-full h-full object-cover" />
+                    <Edit3 className="w-3 h-3" />
+                    <span>{isEditingAiDetails ? 'Cancel Edit' : 'Edit Details & Documents'}</span>
                   </button>
                 </div>
-              )}
 
-              {/* Direct Google Drive Folder Link */}
-              {report?.google_drive_folder_url && (
-                <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase text-slate-400">Drive Storage:</span>
-                  <a
-                    href={report.google_drive_folder_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                    title="Open organized Google Drive folder with Damaged Items & Paperwork subfolders"
-                  >
-                    <Folder className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                    <span>Open RMA Drive Folder</span>
-                    <ExternalLink className="w-3 h-3 text-amber-500" />
-                  </a>
-                </div>
-              )}
+                <div className="flex items-start gap-3 bg-violet-50/50 dark:bg-violet-950/20 p-2.5 rounded-2xl border border-violet-100 dark:border-violet-900/50">
+                  {paperworkList.length > 0 && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {paperworkList.map((photoUrl, pIdx) => (
+                        <button
+                          key={pIdx}
+                          type="button"
+                          onClick={() => onOpenLightbox && onOpenLightbox({
+                            images: paperworkList,
+                            initialIndex: pIdx,
+                            url: photoUrl,
+                            title: aiMetadata?.document_type || 'Paperwork Document',
+                            subtitle: `Paperwork ${pIdx + 1}/${paperworkList.length} • DR #${adminDrNumber || report.invoice_dr_number || 'N/A'}`
+                          })}
+                          className="w-12 h-12 rounded-xl overflow-hidden border border-violet-200 dark:border-violet-800 hover:scale-105 shadow-xs transition-transform cursor-zoom-in shrink-0 relative"
+                          title={`Click to view paperwork photo ${pIdx + 1}`}
+                        >
+                          <img src={photoUrl} alt={`Paperwork ${pIdx + 1}`} className="w-full h-full object-cover" />
+                          <span className="absolute bottom-0 right-0 px-1 text-[8px] bg-slate-900/80 text-white font-mono">P{pIdx + 1}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
-              {/* Driver Delivery Handover Proof & QR Mobile Action */}
-              <div className="pt-2.5 border-t border-slate-200 dark:border-slate-700 space-y-2">
-                {report.ai_document_metadata?.delivery_handover ? (
-                  <div className="p-3 bg-emerald-50/80 dark:bg-emerald-950/40 border-2 border-emerald-300 dark:border-emerald-800 rounded-2xl space-y-2">
-                    <div className="flex items-center justify-between flex-wrap gap-1">
-                      <div className="flex items-center gap-1.5 text-xs font-black text-emerald-900 dark:text-emerald-200">
-                        <Truck className="w-4 h-4 text-emerald-600" />
-                        <span>🚚 Verified Driver Delivery Handover</span>
-                      </div>
-                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-200">
-                        ✓ Handed Over at Dock
+                  <div className="flex-1 min-w-0 text-xs space-y-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-bold ${
+                        (adminSiNumber || report.si_number)
+                          ? 'bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'
+                      }`}>
+                        SI #: {adminSiNumber || report.si_number || 'N/A'}
                       </span>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-bold ${
+                        (adminDrNumber || report.dr_number)
+                          ? 'bg-violet-100 dark:bg-violet-950/70 text-violet-800 dark:text-violet-200 border border-violet-200 dark:border-violet-800'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'
+                      }`}>
+                        DR #: {adminDrNumber || report.dr_number || 'N/A'}
+                      </span>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-bold ${
+                        (adminPoNumber || report.po_number)
+                          ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'
+                      }`}>
+                        PO #: {adminPoNumber || report.po_number || 'N/A'}
+                      </span>
+                      {(adminDrNumber || report.dr_number || adminSiNumber || report.si_number || adminPoNumber || report.po_number) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const docNum = adminDrNumber || report.dr_number || adminSiNumber || report.si_number || adminPoNumber || report.po_number;
+                            copyTextSafe(docNum);
+                            setCopyDrSuccess(true);
+                            setTimeout(() => setCopyDrSuccess(false), 2000);
+                          }}
+                          className="px-2 py-0.5 text-[10px] font-bold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-slate-700 dark:text-slate-200 hover:border-blue-500 hover:text-blue-600 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                          title="Copy Document # for Credit Memo voucher"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>{copyDrSuccess ? 'Copied!' : 'Copy Doc#'}</span>
+                        </button>
+                      )}
                     </div>
 
-                    <div className="text-xs space-y-1 text-slate-700 dark:text-slate-300">
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 text-[11px]">Delivered By:</span>
-                        <strong className="text-slate-900 dark:text-white">
-                          {report.ai_document_metadata.delivery_handover.driver_name} ({report.ai_document_metadata.delivery_handover.driver_vehicle || 'Vehicle'})
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 text-[11px]">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-400 text-[10px] uppercase font-bold">Supplier:</span>
+                        <strong className={`truncate ${adminSupplierName || report.supplier_name ? 'text-slate-800 dark:text-slate-200' : 'text-amber-600 dark:text-amber-400'}`}>
+                          {adminSupplierName || report.supplier_name || 'Pending Assignment'}
                         </strong>
                       </div>
-                      {report.ai_document_metadata.delivery_handover.receiver_name && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-500 text-[11px]">Received By:</span>
-                          <strong className="text-slate-900 dark:text-white">
-                            {report.ai_document_metadata.delivery_handover.receiver_name}
-                          </strong>
-                        </div>
-                      )}
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 text-[11px]">Timestamp:</span>
-                        <span className="font-mono text-[11px] text-slate-800 dark:text-slate-200">
-                          {new Date(report.ai_document_metadata.delivery_handover.completed_at).toLocaleString()}
-                        </span>
-                      </div>
-                      {report.ai_document_metadata.delivery_handover.notes && (
-                        <div className="text-[11px] text-slate-600 dark:text-slate-400 italic pt-0.5">
-                          "{report.ai_document_metadata.delivery_handover.notes}"
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Driver Proof Photos Strip */}
-                    <div className="pt-2 border-t border-emerald-200 dark:border-emerald-800/80 grid grid-cols-2 gap-2">
-                      <div>
-                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                          Driver / Courier Photo:
-                        </span>
-                        {report.ai_document_metadata.delivery_handover.driver_photo_url && (
-                          <button
-                            type="button"
-                            onClick={() => onOpenLightbox && onOpenLightbox({
-                              images: [report.ai_document_metadata.delivery_handover.driver_photo_url],
-                              initialIndex: 0,
-                              url: report.ai_document_metadata.delivery_handover.driver_photo_url,
-                              title: 'Driver Delivery Proof Photo',
-                              subtitle: `Driver: ${report.ai_document_metadata.delivery_handover.driver_name}`
-                            })}
-                            className="w-full h-20 rounded-xl overflow-hidden border border-emerald-300 dark:border-emerald-700 hover:scale-102 transition-transform cursor-zoom-in block"
-                            title="Click to zoom driver photo"
-                          >
-                            <img
-                              src={report.ai_document_metadata.delivery_handover.driver_photo_url}
-                              alt="Driver"
-                              className="w-full h-full object-cover"
-                            />
-                          </button>
-                        )}
-                      </div>
-                      <div>
-                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                          Delivered Dock Photo:
-                        </span>
-                        {report.ai_document_metadata.delivery_handover.item_dock_photo_url && (
-                          <button
-                            type="button"
-                            onClick={() => onOpenLightbox && onOpenLightbox({
-                              images: [report.ai_document_metadata.delivery_handover.item_dock_photo_url],
-                              initialIndex: 0,
-                              url: report.ai_document_metadata.delivery_handover.item_dock_photo_url,
-                              title: 'Delivered Dock Proof Photo',
-                              subtitle: `Dock Item: ${report.name || report.rma_number}`
-                            })}
-                            className="w-full h-20 rounded-xl overflow-hidden border border-emerald-300 dark:border-emerald-700 hover:scale-102 transition-transform cursor-zoom-in block"
-                            title="Click to zoom delivered item photo"
-                          >
-                            <img
-                              src={report.ai_document_metadata.delivery_handover.item_dock_photo_url}
-                              alt="Delivered Dock"
-                              className="w-full h-full object-cover"
-                            />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-2xl flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 min-w-0">
-                      <Truck className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span className="truncate">Driver Handover: Pending delivery & photos</span>
-                    </div>
-                    {typeof onOpenDriverHandover === 'function' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onOpenDriverHandover(report.rma_number);
-                        }}
-                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold shrink-0 cursor-pointer flex items-center gap-1 shadow-2xs"
-                        title="Open Driver Delivery Handover Mobile Screen"
-                      >
-                        <Truck className="w-3.5 h-3.5" />
-                        <span>Driver QR Widget</span>
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Official Logistics Paperwork & Document Details */}
-              {(paperworkList.length > 0 || report.invoice_dr_number || report.si_number || report.dr_number || report.po_number || report.store_branch || report.supplier_name || aiMetadata || isEditingAiDetails) && (
-                <div className="pt-2.5 border-t border-slate-200 dark:border-slate-700 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <span className="px-2 py-0.5 rounded-lg text-[10px] font-black uppercase bg-violet-100 dark:bg-violet-950/60 text-violet-800 dark:text-violet-300 border border-violet-200 dark:border-violet-800 flex items-center gap-1">
-                        {aiMetadata ? (
-                          <>
-                            <Sparkles className="w-3 h-3 text-violet-600 dark:text-violet-400" />
-                            <span>AI Verified {aiMetadata?.document_type || 'Paperwork'}</span>
-                          </>
-                        ) : (
-                          <>
-                            <FileText className="w-3 h-3 text-violet-600 dark:text-violet-400" />
-                            <span>Commercial Logistics Paperwork</span>
-                          </>
-                        )}
-                      </span>
-                      {aiMetadata?.confidence && (
-                        <span className="text-[10px] font-mono font-bold text-slate-400">
-                          {Math.round(aiMetadata.confidence * 100)}%
-                        </span>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingAiDetails(!isEditingAiDetails)}
-                      className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                      <span>{isEditingAiDetails ? 'Cancel Edit' : 'Edit Details & Documents'}</span>
-                    </button>
-                  </div>
-
-                  <div className="flex items-start gap-3 bg-violet-50/50 dark:bg-violet-950/20 p-2.5 rounded-2xl border border-violet-100 dark:border-violet-900/50">
-                    {paperworkList.length > 0 && (
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {paperworkList.map((photoUrl, pIdx) => (
-                          <button
-                            key={pIdx}
-                            type="button"
-                            onClick={() => onOpenLightbox && onOpenLightbox({
-                              images: paperworkList,
-                              initialIndex: pIdx,
-                              url: photoUrl,
-                              title: aiMetadata?.document_type || 'Paperwork Document',
-                              subtitle: `Paperwork ${pIdx + 1}/${paperworkList.length} • DR #${adminDrNumber || report.invoice_dr_number || 'N/A'}`
-                            })}
-                            className="w-12 h-12 rounded-xl overflow-hidden border border-violet-200 dark:border-violet-800 hover:scale-105 shadow-xs transition-transform cursor-zoom-in shrink-0 relative"
-                            title={`Click to view paperwork photo ${pIdx + 1}`}
-                          >
-                            <img src={photoUrl} alt={`Paperwork ${pIdx + 1}`} className="w-full h-full object-cover" />
-                            <span className="absolute bottom-0 right-0 px-1 text-[8px] bg-slate-900/80 text-white font-mono">P{pIdx + 1}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="flex-1 min-w-0 text-xs space-y-1">
-                      {/* Commercial Document Badges (SI#, DR#, PO#) */}
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-slate-400 text-[10px] uppercase font-bold shrink-0">Documents:</span>
-                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-bold ${
-                          (adminSiNumber || report.si_number)
-                            ? 'bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'
-                        }`}>
-                          Sales Invoice (SI) #: {adminSiNumber || report.si_number || 'N/A'}
-                        </span>
-                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-bold ${
-                          (adminDrNumber || report.dr_number)
-                            ? 'bg-violet-100 dark:bg-violet-950/70 text-violet-800 dark:text-violet-200 border border-violet-200 dark:border-violet-800'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'
-                        }`}>
-                          Delivery Receipt (DR) #: {adminDrNumber || report.dr_number || 'N/A'}
-                        </span>
-                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-bold ${
-                          (adminPoNumber || report.po_number)
-                            ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'
-                        }`}>
-                          Purchase Order (PO) #: {adminPoNumber || report.po_number || 'N/A'}
-                        </span>
-                        {(adminDrNumber || report.dr_number || adminSiNumber || report.si_number || adminPoNumber || report.po_number) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const docNum = adminDrNumber || report.dr_number || adminSiNumber || report.si_number || adminPoNumber || report.po_number;
-                              copyTextSafe(docNum);
-                              setCopyDrSuccess(true);
-                              setTimeout(() => setCopyDrSuccess(false), 2000);
-                            }}
-                            className="px-2 py-0.5 text-[10px] font-bold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-slate-700 dark:text-slate-200 hover:border-blue-500 hover:text-blue-600 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs ml-auto sm:ml-0"
-                            title="Copy Document # for Credit Memo voucher"
-                          >
-                            <Copy className="w-3 h-3" />
-                            <span>{copyDrSuccess ? 'Copied!' : 'Copy Doc#'}</span>
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Vendor, Store Branch, Batch/Lot, Expiry Metadata */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 text-[11px]">
+                      {report.store_branch && report.store_branch !== 'Direct Return' && (
                         <div className="flex items-center gap-1.5">
-                          <span className="text-slate-400 text-[10px] uppercase font-bold">Supplier / Vendor:</span>
-                          <strong className={`truncate ${adminSupplierName || report.supplier_name ? 'text-slate-800 dark:text-slate-200' : 'text-amber-600 dark:text-amber-400'}`}>
-                            {adminSupplierName || report.supplier_name || 'Pending Assignment'}
-                          </strong>
+                          <span className="text-slate-400 text-[10px] uppercase font-bold">Store Branch:</span>
+                          <strong className="text-slate-800 dark:text-slate-200 truncate">{report.store_branch}</strong>
                         </div>
-                        {(adminStoreBranch || report.store_branch) && (
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-slate-400 text-[10px] uppercase font-bold">Store Branch:</span>
-                            <strong className="text-slate-800 dark:text-slate-200 truncate">{adminStoreBranch || report.store_branch}</strong>
-                          </div>
-                        )}
-                        {(adminBatchLot || report.batch_lot_number) && (
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-slate-400 text-[10px] uppercase font-bold">Batch / Lot #:</span>
-                            <strong className="font-mono text-amber-700 dark:text-amber-300 font-bold">{adminBatchLot || report.batch_lot_number}</strong>
-                          </div>
-                        )}
-                        {(adminExpiryDate || report.expiry_date) && (
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-slate-400 text-[10px] uppercase font-bold">Expiry Date:</span>
-                            <strong className="text-rose-600 dark:text-rose-400 font-bold">{adminExpiryDate || report.expiry_date}</strong>
-                          </div>
-                        )}
-                      </div>
+                      )}
+                      {report.batch_lot_number && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold">Batch / Lot #:</span>
+                          <strong className="font-mono text-amber-700 dark:text-amber-300 font-bold">{report.batch_lot_number}</strong>
+                        </div>
+                      )}
+                      {(adminExpiryDate || report.expiry_date) && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold">Expiry Date (YYYY-MM-DD):</span>
+                          <strong className="text-rose-600 dark:text-rose-400 font-bold">{formatDateYmd(adminExpiryDate || report.expiry_date) || adminExpiryDate || report.expiry_date}</strong>
+                        </div>
+                      )}
                     </div>
                   </div>
+                </div>
 
-                  {/* Manual Override Editor for Admin & Super Admin Restitution */}
-                  {isEditingAiDetails && (
-                    <div className="p-3.5 bg-white dark:bg-slate-800 border-2 border-blue-400 dark:border-blue-600 rounded-2xl space-y-3.5 animate-in fade-in shadow-md">
-                      <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-2">
-                        <div className="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                          <Edit3 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                          <span>{currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin' ? '🛠️ Super Admin Record Restitution & Document Editor' : 'Edit Commercial Documents & Paperwork Metadata'}</span>
-                        </div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300">
-                          {currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin' ? 'Super Admin Mode' : 'Admin'}
-                        </span>
+                {/* Manual Override Editor for Admin & Super Admin Silent Restitution */}
+                {isEditingAiDetails && (
+                  <div className="p-3.5 bg-white dark:bg-slate-800 border-2 border-blue-400 dark:border-blue-600 rounded-2xl space-y-3.5 animate-in fade-in shadow-md">
+                    <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-2">
+                      <div className="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                        <Edit3 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        <span>{isSuperAdmin ? '🛠️ Super Admin Record Restitution & Document Editor' : 'Edit Commercial Documents & Paperwork Metadata'}</span>
                       </div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300">
+                        {isSuperAdmin ? 'Super Admin Mode' : 'Admin'}
+                      </span>
+                    </div>
 
-                      {/* Silent Guarantee Banner for Super Admins */}
-                      {(currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin') && (
+                    {isSuperAdmin && (
+                      <>
                         <div className="p-3 bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 rounded-xl text-emerald-900 dark:text-emerald-200 text-xs space-y-1">
                           <div className="flex items-center gap-1.5 font-black text-[11px] text-emerald-800 dark:text-emerald-300">
                             <Shield className="w-3.5 h-3.5 text-emerald-600" />
                             <span>🔒 100% Silent Record Restitution Guarantee</span>
                           </div>
                           <p className="text-[10.5px] leading-relaxed text-emerald-800/90 dark:text-emerald-300/90">
-                            Saving edits or converting this record to Live Production is <strong>completely silent</strong>. The portal will <strong>never trigger email notifications</strong> to boss, coworkers, AE, or suppliers, allowing you to reconstruct accidentally deleted records invisibly.
+                            Saving edits or converting this record to Live Production is <strong>completely silent</strong> — zero email notifications triggered.
                           </p>
                         </div>
-                      )}
 
-                      {/* Environment Mode Switch: Test Sandbox vs Live Production */}
-                      {(currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin') && (
                         <div className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-1.5">
                           <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-400 block">
-                            Record Environment & Destination Hub
+                            Record Environment &amp; Destination Hub
                           </label>
                           <div className="grid grid-cols-2 gap-2">
                             <button
@@ -2309,16 +1604,8 @@ export default function QuickRMAActionModal({
                               <span>🟢 Live Production Hub</span>
                             </button>
                           </div>
-                          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
-                            {!adminIsTest 
-                              ? '✅ Promoted to Live: Visible in Customer RMA Hub or Supplier Hub. Test tags removed.' 
-                              : '🧪 Isolated: Kept in Test Mode Sandbox only.'}
-                          </p>
                         </div>
-                      )}
 
-                      {/* Super Admin RMA ID & Historical Ingest Date */}
-                      {(currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin') && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 bg-blue-50/60 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl">
                           <div>
                             <div className="flex items-center justify-between mb-0.5">
@@ -2332,7 +1619,6 @@ export default function QuickRMAActionModal({
                                   setAdminRmaNumber(nextId);
                                 }}
                                 className="text-[9px] font-bold text-blue-700 dark:text-blue-300 hover:underline flex items-center gap-0.5 cursor-pointer"
-                                title="Auto-generate next sequential RMA ID for current mode"
                               >
                                 ⚡ Generate {adminIsTest ? 'Test' : 'Live'} ID
                               </button>
@@ -2344,18 +1630,10 @@ export default function QuickRMAActionModal({
                               placeholder="e.g. RMA-2026-0099-6KKW"
                               className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl text-xs font-mono font-black text-blue-700 dark:text-blue-300 shadow-2xs"
                             />
-                            <div className="flex items-center justify-between mt-0.5">
-                              <span className="text-[9.5px] text-blue-700/80 dark:text-blue-400">Match the exact deleted RMA ID</span>
-                              {!adminIsTest && adminRmaNumber.includes('TEST') && (
-                                <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400">
-                                  ⚠️ Contains 'TEST'
-                                </span>
-                              )}
-                            </div>
                           </div>
                           <div>
                             <label className="text-[10px] font-black uppercase text-blue-900 dark:text-blue-300 block mb-0.5">
-                              Date Logged (Historical Ingest Timestamp)
+                              Date Logged (YYYY-MM-DD HH:mm) (Historical Ingest Timestamp)
                             </label>
                             <input
                               type="datetime-local"
@@ -2363,201 +1641,206 @@ export default function QuickRMAActionModal({
                               onChange={(e) => setAdminCreatedAt(e.target.value)}
                               className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 shadow-2xs"
                             />
-                            <span className="text-[9.5px] text-blue-700/80 dark:text-blue-400">Restores original intake date & time</span>
                           </div>
                         </div>
-                      )}
 
-                      {/* Super Admin Product & SKU Overrides */}
-                      {(currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin') && (
-                        <div className="space-y-2 p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
-                          <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                            Product & Catalog Specifications
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                            <div className="sm:col-span-2">
-                              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Item Name / Product Description</label>
-                              <input
-                                type="text"
-                                value={adminProductName}
-                                onChange={(e) => setAdminProductName(e.target.value)}
-                                className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Barcode</label>
-                              <input
-                                type="text"
-                                value={adminBarcode}
-                                onChange={(e) => setAdminBarcode(e.target.value)}
-                                className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
-                              />
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Assigned SKU / Item Code</label>
-                              <input
-                                type="text"
-                                value={adminSku}
-                                onChange={(e) => setAdminSku(e.target.value)}
-                                placeholder="e.g. P1479P"
-                                className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Quantity & Unit</label>
-                              <div className="flex gap-1">
-                                <input
-                                  type="number"
-                                  min="1"
-                                  value={adminQuantity}
-                                  onChange={(e) => setAdminQuantity(e.target.value)}
-                                  className="w-16 px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-center"
-                                />
-                                <input
-                                  type="text"
-                                  value={adminUnitName}
-                                  onChange={(e) => setAdminUnitName(e.target.value)}
-                                  placeholder="pc, case"
-                                  className="w-full px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
-                                />
-                              </div>
-                            </div>
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Net Purchase Unit Price (PHP)</label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={adminPrice}
-                                onChange={(e) => setAdminPrice(e.target.value)}
-                                className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                      </>
+                    )}
 
-                      {/* Commercial Documents: SI, DR, PO */}
-                      <div className="space-y-1">
-                        <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                          Commercial Invoices & Delivery Receipts
+                    {/* Product & Catalog Specifications (Auto-Suggest Searchable by Name or SKU) */}
+                    <div className="space-y-2 p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Product &amp; Catalog Specifications
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div className="sm:col-span-2">
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Item Name / Product Description</label>
+                          <ProductAutoSuggest
+                            mode="name"
+                            value={adminProductName}
+                            onChange={(val) => setAdminProductName(val)}
+                            onSelectProduct={handleAutoPopulateEditDetails}
+                            placeholder="Type product name to search catalog..."
+                            className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
+                          />
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                          <div>
-                            <label className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 block mb-0.5">Sales Invoice (SI) #</label>
-                            <input
-                              type="text"
-                              value={adminSiNumber}
-                              onChange={(e) => setAdminSiNumber(e.target.value)}
-                              placeholder="e.g. SI-2026-8819"
-                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-mono font-bold"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-violet-700 dark:text-violet-300 block mb-0.5">Delivery Receipt (DR) #</label>
-                            <input
-                              type="text"
-                              value={adminDrNumber}
-                              onChange={(e) => setAdminDrNumber(e.target.value)}
-                              placeholder="e.g. DR-44120"
-                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-violet-200 dark:border-violet-800 rounded-xl text-xs font-mono font-bold"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-amber-700 dark:text-amber-300 block mb-0.5">Purchase Order (PO) #</label>
-                            <input
-                              type="text"
-                              value={adminPoNumber}
-                              onChange={(e) => setAdminPoNumber(e.target.value)}
-                              placeholder="e.g. PO-99120"
-                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-mono font-bold"
-                            />
-                          </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Barcode</label>
+                          <input
+                            type="text"
+                            value={adminBarcode}
+                            readOnly={!isSuperAdmin}
+                            disabled={!isSuperAdmin}
+                            onChange={(e) => isSuperAdmin && setAdminBarcode(e.target.value)}
+                            className={`w-full px-2.5 py-1.5 border rounded-xl text-xs font-mono font-bold ${
+                              isSuperAdmin
+                                ? 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white'
+                                : 'bg-slate-100 dark:bg-slate-800/70 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 cursor-not-allowed'
+                            }`}
+                          />
                         </div>
                       </div>
-
-                      {/* Counterparty & Warehouse Metadata */}
-                      <div className="space-y-1">
-                        <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                          Supplier, Branch & Lot Information
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Assigned SKU / Item Code</label>
+                          <ProductAutoSuggest
+                            mode="code"
+                            value={adminSku}
+                            onChange={(val) => setAdminSku(val)}
+                            onSelectProduct={handleAutoPopulateEditDetails}
+                            placeholder="Type SKU / code..."
+                            className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
+                          />
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier / Master Vendor</label>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Quantity &amp; Unit</label>
+                          <div className="flex gap-1">
+                            <input
+                              type="number"
+                              min="1"
+                              value={adminQuantity}
+                              readOnly={!isSuperAdmin}
+                              disabled={!isSuperAdmin}
+                              onChange={(e) => isSuperAdmin && setAdminQuantity(e.target.value)}
+                              className={`w-16 px-2 py-1.5 border rounded-xl text-xs font-bold text-center ${
+                                isSuperAdmin
+                                  ? 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700'
+                                  : 'bg-slate-100 dark:bg-slate-800/70 border-slate-200 dark:border-slate-700 text-slate-500 cursor-not-allowed'
+                              }`}
+                            />
                             <input
                               type="text"
-                              list="admin-supplier-suggestions"
-                              value={adminSupplierName}
-                              onChange={(e) => setAdminSupplierName(e.target.value)}
-                              placeholder="e.g. Mondelez, Liwayway, URC..."
-                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
-                            />
-                            <datalist id="admin-supplier-suggestions">
-                              {knownSuppliers.map(s => (
-                                <option key={s} value={s} />
-                              ))}
-                            </datalist>
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Store / Branch Location</label>
-                            <input
-                              type="text"
-                              value={adminStoreBranch}
-                              onChange={(e) => setAdminStoreBranch(e.target.value)}
-                              placeholder="e.g. Savemore Market - Nagtahan"
-                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                              value={adminUnitName}
+                              onChange={(e) => setAdminUnitName(e.target.value)}
+                              placeholder="pc, case"
+                              className="w-full px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
                             />
                           </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Product Expiry Date</label>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Net Purchase Unit Price (PHP)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={adminPrice}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setAdminPrice(val);
+                              const num = parseFloat(val);
+                              if (!Number.isNaN(num)) {
+                                setAdminPriceWithVat(Number((num * 1.12).toFixed(2)));
+                              }
+                            }}
+                            className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Commercial Documents: SI, DR, PO */}
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Commercial Invoices &amp; Delivery Receipts
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 block mb-0.5">Sales Invoice (SI) #</label>
+                          <input
+                            type="text"
+                            value={adminSiNumber}
+                            onChange={(e) => setAdminSiNumber(e.target.value)}
+                            placeholder="e.g. SI-2026-8819"
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-mono font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-violet-700 dark:text-violet-300 block mb-0.5">Delivery Receipt (DR) #</label>
+                          <input
+                            type="text"
+                            value={adminDrNumber}
+                            onChange={(e) => setAdminDrNumber(e.target.value)}
+                            placeholder="e.g. DR-44120"
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-violet-200 dark:border-violet-800 rounded-xl text-xs font-mono font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-amber-700 dark:text-amber-300 block mb-0.5">Purchase Order (PO) #</label>
+                          <input
+                            type="text"
+                            value={adminPoNumber}
+                            onChange={(e) => setAdminPoNumber(e.target.value)}
+                            placeholder="e.g. PO-99120"
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-mono font-bold"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Supplier & Product Expiry Information */}
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Supplier &amp; Product Expiry Information
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Name</label>
+                          <input
+                            type="text"
+                            list="admin-supplier-suggestions"
+                            value={adminSupplierName}
+                            onChange={(e) => setAdminSupplierName(e.target.value)}
+                            placeholder="e.g. Suy Sing Commercial Corp, Mondelez, URC..."
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                          />
+                          <datalist id="admin-supplier-suggestions">
+                            {knownSuppliers.map(s => (
+                              <option key={s} value={s} />
+                            ))}
+                          </datalist>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Product Expiry Date (YYYY-MM-DD)</label>
+                          <div className="flex flex-wrap items-center gap-2">
                             <input
                               type="date"
                               value={adminExpiryDate}
                               onChange={(e) => setAdminExpiryDate(e.target.value)}
-                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+                              className="flex-1 min-w-[140px] px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
                             />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Batch / Lot #</label>
-                            <input
-                              type="text"
-                              value={adminBatchLot}
-                              onChange={(e) => setAdminBatchLot(e.target.value)}
-                              placeholder="e.g. LOT-B42"
-                              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold"
-                            />
+                            <span className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] font-mono font-bold text-slate-700 dark:text-slate-300 shrink-0">
+                              ISO (YYYY-MM-DD): {adminExpiryDate ? adminExpiryDate.slice(0, 10) : '—'}
+                            </span>
                           </div>
                         </div>
                       </div>
-
-                      {/* Action Buttons */}
-                      <div className="flex items-center gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
-                        <button
-                          type="button"
-                          disabled={isSavingAiDetails}
-                          onClick={handleSaveAiDetails}
-                          className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
-                        >
-                          {isSavingAiDetails && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                          <span>{isSavingAiDetails ? 'Saving Record...' : 'Save & Apply Restitution'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsEditingAiDetails(false)}
-                          className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl transition-colors cursor-pointer"
-                        >
-                          Cancel
-                        </button>
-                      </div>
                     </div>
-                  )}
-                </div>
-              )}
+
+                    {/* Save / Cancel */}
+                    <div className="flex items-center gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+                      <button
+                        type="button"
+                        disabled={isSavingAiDetails}
+                        onClick={handleSaveAiDetails}
+                        className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                      >
+                        {isSavingAiDetails && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                        <span>{isSavingAiDetails ? 'Saving Record...' : 'Save & Apply Restitution'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingAiDetails(false)}
+                        className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
-          {/* 4. Access Control Gate: Email OTP Verification for Admin / Super Admin */}
+          {/* 4. Access Control Gate */}
           {report && !verifiedAdmin && (
             <div className="p-4 sm:p-5 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-slate-800 dark:to-slate-800/90 border-2 border-amber-300 dark:border-amber-700 rounded-3xl shadow-sm space-y-3.5">
               <div className="flex items-start gap-3">
@@ -2572,7 +1855,7 @@ export default function QuickRMAActionModal({
                     </span>
                   </h4>
                   <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
-                    Only authorized Admin & Super Admin staff can operate Return Quick Actions. Enter your company email to receive a 6-digit OTP verification code.
+                    Only authorized Admin &amp; Super Admin staff can operate Return Quick Actions.
                   </p>
                 </div>
               </div>
@@ -2605,23 +1888,13 @@ export default function QuickRMAActionModal({
                       autoFocus
                     />
                   </div>
-
                   <button
                     type="submit"
                     disabled={isVerifying || countdown > 0}
-                    className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                    className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                   >
-                    {isVerifying ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>Sending Security OTP...</span>
-                      </>
-                    ) : (
-                      <>
-                        <ShieldCheck className="w-4 h-4" />
-                        <span>Send 6-Digit OTP to Email</span>
-                      </>
-                    )}
+                    {isVerifying ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                    <span>{isVerifying ? 'Sending Security OTP...' : 'Send 6-Digit OTP to Email'}</span>
                   </button>
                 </form>
               ) : (
@@ -2639,7 +1912,6 @@ export default function QuickRMAActionModal({
                       <span>Change</span>
                     </button>
                   </div>
-
                   <div className="relative">
                     <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                     <input
@@ -2648,31 +1920,20 @@ export default function QuickRMAActionModal({
                       value={otpInput}
                       onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
                       placeholder="Enter 6-Digit OTP (e.g. 123456)"
-                      className="w-full pl-10 pr-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-center font-mono tracking-widest text-sm font-black text-slate-900 dark:text-white placeholder:tracking-normal placeholder:font-normal placeholder:text-xs focus:outline-none focus:border-blue-600 transition-all"
+                      className="w-full pl-10 pr-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-center font-mono tracking-widest text-sm font-black text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 transition-all"
                       required
                       autoFocus
                     />
                   </div>
-
                   <div className="flex gap-2">
                     <button
                       type="submit"
                       disabled={isVerifying || otpInput.trim().length < 6}
-                      className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                      className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                     >
-                      {isVerifying ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                          <span>Verifying OTP...</span>
-                        </>
-                      ) : (
-                        <>
-                          <ShieldCheck className="w-4 h-4" />
-                          <span>Verify & Unlock</span>
-                        </>
-                      )}
+                      {isVerifying ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                      <span>{isVerifying ? 'Verifying OTP...' : 'Verify & Unlock'}</span>
                     </button>
-
                     <button
                       type="button"
                       disabled={countdown > 0 || isVerifying}
@@ -2687,7 +1948,7 @@ export default function QuickRMAActionModal({
             </div>
           )}
 
-          {/* 5. Authenticated Admin Actions Bar (Strictly requires verifiedAdmin AND loaded report) */}
+          {/* 5. Authenticated Admin Actions */}
           {report && verifiedAdmin && (
             <div className="space-y-3">
               {/* Verified Admin Strip */}
@@ -2709,1646 +1970,358 @@ export default function QuickRMAActionModal({
                 )}
               </div>
 
-              {isSupplierStream && (
-                <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 rounded-2xl flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <div>
-                    <div className="font-black text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
-                      <span>⚡ Simple Supplier RTV &amp; Driver Pickup Mode</span>
-                      {report?.status === 'picked_up' && (
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-black uppercase">
-                          🚚 Picked Up
+              {/* (b) Prominent current 4-Choice Outcome + Date/Time banner with Open 4-Choice / Pickup Window button */}
+              <div className="p-4 bg-gradient-to-br from-amber-50 to-orange-50/70 dark:from-amber-950/40 dark:to-slate-900 border-2 border-amber-300 dark:border-amber-700 rounded-2xl space-y-3 shadow-xs">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <div className="text-[10px] font-black uppercase tracking-wider text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Current 4-Choice Outcome &amp; Pickup Status</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`px-3 py-1 rounded-xl text-xs font-black border inline-flex items-center gap-1.5 shadow-2xs ${outcome.badgeColor}`}>
+                        <span>{outcome.label}</span>
+                      </span>
+                      {outcome.choiceKey === 'scrap' && (
+                        <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black border ${
+                          getItemNeedsReorder(report)
+                            ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-700'
+                            : 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                        }`}>
+                          {getItemNeedsReorder(report) ? 'Re-Order: YES' : 'Re-Order: NO'}
+                        </span>
+                      )}
+                      {outcome.claimNumber && (
+                        <span className="px-2 py-0.5 rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 font-mono text-[10px] font-black">
+                          Claim: {outcome.claimNumber}
                         </span>
                       )}
                     </div>
-                    <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80">
-                      Use the guided 4-choice menu or upload 5 driver pickup photos &amp; print the A4 2-copy form.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {report?.status === 'picked_up' && onOpenSupplierPickupForm && (
-                      <button
-                        type="button"
-                        onClick={() => onOpenSupplierPickupForm(report)}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-xs"
-                      >
-                        Print A4 Form
-                      </button>
-                    )}
-                    {onOpenSimpleSupplierWizard && (
-                      <button
-                        type="button"
-                        onClick={() => onOpenSimpleSupplierWizard(report)}
-                        className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black shadow-xs"
-                      >
-                        Open 4-Choice Wizard →
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* ENTERPRISE ACTION 1: PHYSICAL DISPOSITION & WAREHOUSE TRIAGE MODULE */}
-              <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-3">
-                <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300">
-                      <Layers className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
-                        <span>Warehouse Triage & Physical Disposition</span>
-                      </h5>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Assign condition grade, quarantine status, and physical rack/bin location.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {(() => {
-                      const isMultiItemManifest = Boolean(report?.is_parent || manifestItems.length > 1 || (Array.isArray(report?.items) && report.items.length > 1) || (typeof report?.name === 'string' && report.name.toLowerCase().startsWith('batch return manifest')));
-                      if (Number(report?.quantity) <= 1) return null;
-                      return (
-                        <button
-                          type="button"
-                          disabled={!isSkuAssigned || isMultiItemManifest}
-                          onClick={() => setIsSplitting(prev => !prev)}
-                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors ${
-                            !isSkuAssigned || isMultiItemManifest
-                              ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed opacity-60 shadow-none'
-                              : isSplitting
-                              ? 'bg-blue-700 text-white'
-                              : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 dark:bg-blue-950 dark:text-blue-300'
-                          }`}
-                          title={
-                            !isSkuAssigned
-                              ? "Cannot split: Please assign an official catalog SKU first."
-                              : isMultiItemManifest
-                              ? "Multi-item manifest: Triage each line item individually below."
-                              : "Split quantity into partial restock / scrap"
-                          }
-                        >
-                          <Scissors className="w-3.5 h-3.5" />
-                          <span>{isSplitting ? 'Close Split' : `Split Qty (${report?.quantity})`}</span>
-                        </button>
-                      );
-                    })()}
-
-                    {!isSupplierStream ? (
-                      <button
-                        type="button"
-                        onClick={() => setIsBufferSlipOpen(true)}
-                        className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
-                        title="Print Buffer Stock Replacement Slip"
-                      >
-                        <Truck className="w-3.5 h-3.5 text-indigo-200" />
-                        <span>Buffer Stock Replacement Slip</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const win = window.open('', '_blank');
-                          if (win) {
-                            win.document.write(`
-                              <html>
-                                <head>
-                                  <title>Vendor RTV Gate Pass - ${report?.rma_number}</title>
-                                  <style>
-                                    @page { size: A4 portrait; margin: 12mm; }
-                                    body { font-family: Arial, sans-serif; padding: 18px; color: #111; border: 1.5px solid #000; border-radius: 6px; box-sizing: border-box; }
-                                    h2 { margin: 0 0 6px 0; font-size: 18px; }
-                                    table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
-                                    th, td { border: 1px solid #000; padding: 8px; text-align: left; }
-                                    th { background: #f1f5f9; }
-                                    .header { border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; }
-                                  </style>
-                                </head>
-                                <body>
-                                  <div class="header">
-                                    <div>
-                                      <h2>PINGCON MARKETING - VENDOR RTV GATE PASS</h2>
-                                      <div>Outbound RTV Reference: <strong>${report?.rma_number}</strong></div>
-                                      <div>Vendor / Counterparty: <strong>${adminSupplierName || report?.supplier_name || report?.supplier || 'Master Vendor'}</strong></div>
-                                    </div>
-                                    <div style="text-align: right;">
-                                      <div>Date: <strong>${new Date().toLocaleDateString()}</strong></div>
-                                      <div>Bin Location: <strong>${warehouseLocation || report?.warehouse_location || 'DOCK'}</strong></div>
-                                    </div>
-                                  </div>
-                                  <p style="font-size: 12px;">Authorizes physical release of defective / RTV merchandise from warehouse dock to vendor representative.</p>
-                                  <table>
-                                    <tr><th>Item Description</th><th>Barcode / SKU</th><th>Qty & Unit</th><th>Disposition</th></tr>
-                                    <tr>
-                                      <td>${report?.name || 'Product'}</td>
-                                      <td>${report?.code || report?.sku || report?.barcode || 'N/A'}</td>
-                                      <td>${itemQty} ${report?.unit_name || 'pc'}</td>
-                                      <td>${disposition || 'Return to Vendor (RTV)'}</td>
-                                    </tr>
-                                  </table>
-                                  <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 12px;">
-                                    <div>Warehouse Guard / Released By: _______________________</div>
-                                    <div>Vendor Driver Signature & Plate #: _______________________</div>
-                                  </div>
-                                  <script>window.print();</script>
-                                </body>
-                              </html>
-                            `);
-                            win.document.close();
-                          }
-                        }}
-                        className="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
-                        title="Print Official Vendor RTV Gate Pass"
-                      >
-                        <Truck className="w-3.5 h-3.5 text-purple-200" />
-                        <span>Vendor RTV Gate Pass</span>
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => setIsThermalLabelOpen(true)}
-                      className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
-                      title="Print 4x6 inch thermal sticker label"
-                    >
-                      <Printer className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Print 4x6" Label</span>
-                    </button>
                   </div>
                 </div>
 
-                {/* Double-Compensation Safety Warning (Credit Memo already issued - Customer Inbound Only) */}
-                {!isSupplierStream && hasLinkedCreditMemo && (
-                  <div className="p-3 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-xl text-amber-900 dark:text-amber-200 text-xs font-semibold flex items-center gap-2.5 shadow-2xs">
-                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>⚠️ Note: A Finance Credit Memo was already issued for this return. Only dispatch buffer stock if physical replacement is also authorized.</span>
+                {pickupInfo && (pickupInfo.driver_name || pickupInfo.truck_plate || pickupInfo.supplier_email_to) && (
+                  <div className="p-2.5 rounded-xl bg-white/80 dark:bg-slate-900/70 border border-amber-200/80 dark:border-amber-800/60 text-[11px] text-slate-700 dark:text-slate-300 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {pickupInfo.supplier_name && (
+                      <div><span className="text-slate-400">Supplier:</span> <strong>{pickupInfo.supplier_name}</strong></div>
+                    )}
+                    {pickupInfo.driver_name && (
+                      <div><span className="text-slate-400">Driver:</span> <strong>{pickupInfo.driver_name}</strong> {pickupInfo.truck_plate ? `(${pickupInfo.truck_plate})` : ''}</div>
+                    )}
+                    {pickupInfo.supplier_email_to && (
+                      <div className="sm:col-span-2 truncate"><span className="text-slate-400">To:</span> <span className="font-mono">{pickupInfo.supplier_email_to}</span></div>
+                    )}
+                    {pickupInfo.supplier_email_cc && (
+                      <div className="sm:col-span-2 truncate"><span className="text-slate-400">CC:</span> <span className="font-mono">{pickupInfo.supplier_email_cc}</span></div>
+                    )}
                   </div>
                 )}
 
-                {/* Split Relationship Banners */}
-                {(() => {
-                  const isChild = isSplitChildTicket(report);
-                  const splitChildTicket = recentReportsList.find(
-                    r => isSplitChildTicket(r) && (
-                      r.parent_rma_id === report?.id ||
-                      String(r.parent_rma_id) === String(report?.id) ||
-                      (report?.rma_number && r.rma_number?.startsWith(report.rma_number + '-'))
-                    )
-                  );
+                <div className="flex flex-wrap items-center gap-2">
+                  {onOpenSimpleSupplierWizard && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenSimpleSupplierWizard(report)}
+                      className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Open 4-Choice / Pickup Window</span>
+                    </button>
+                  )}
 
-                  if (splitChildTicket && !isChild) {
-                    return (
-                      <div className="p-3 bg-blue-50 dark:bg-blue-950/70 border border-blue-300 dark:border-blue-800 rounded-xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
-                        <div className="flex items-center gap-2">
-                          <div className="p-1.5 bg-blue-600 text-white rounded-lg shrink-0">
-                            <Scissors className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <span className="font-extrabold text-blue-950 dark:text-blue-200">
-                              Partially Split Return (Part 1 of 2)
-                            </span>
-                            <p className="text-[11px] text-blue-700 dark:text-blue-300">
-                              This ticket holds <strong>{report.quantity} {report.unit_name || 'pc'}</strong> ({report.disposition || 'Restocked'}). Part 2 (<strong>{splitChildTicket.quantity} {splitChildTicket.unit_name || 'pc'}</strong>) is tracked under <strong>{splitChildTicket.rma_number}</strong> ({splitChildTicket.disposition}).
-                            </p>
-                          </div>
+                  {outcome.formType && onOpenSupplierPickupForm && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenSupplierPickupForm(report)}
+                      className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                    >
+                      <FileCheck2 className="w-3.5 h-3.5" />
+                      <span>📄 {outcome.formType === 'replacement' ? 'Replacement Form' : 'Debit Claim Form'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* (c) Split Qty Feature Intact */}
+              {(() => {
+                const isChild = isSplitChildTicket(report);
+                const splitChildTicket = recentReportsList.find(
+                  r => isSplitChildTicket(r) && (
+                    r.parent_rma_id === report?.id ||
+                    String(r.parent_rma_id) === String(report?.id) ||
+                    (report?.rma_number && r.rma_number?.startsWith(report.rma_number + '-'))
+                  )
+                );
+                const parentTicket = isChild
+                  ? recentReportsList.find(r => (
+                      (report?.parent_rma_id && (r.id === report.parent_rma_id || String(r.id) === String(report.parent_rma_id))) ||
+                      (report?.rma_number && r.rma_number === report.rma_number.replace(/-[B-Z]$/i, ''))
+                    ))
+                  : null;
+
+                const canSplit = Number(report?.quantity) > 1 && !isMultiItemManifest;
+                if (!canSplit && !splitChildTicket && !(isChild && parentTicket) && !splitSuccessMessage) {
+                  return null;
+                }
+
+                return (
+                  <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 rounded-xl bg-blue-100 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300">
+                          <Scissors className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h5 className="text-xs font-black text-slate-900 dark:text-white">Split Quantity</h5>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Split partial units into separate tickets (e.g. partial restock &amp; partial scrap/claim).
+                          </p>
+                        </div>
+                      </div>
+
+                      {canSplit && (
+                        <button
+                          type="button"
+                          disabled={!isSkuAssigned}
+                          onClick={() => setIsSplitting(prev => !prev)}
+                          className={`px-3 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors ${
+                            !isSkuAssigned
+                              ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed opacity-60'
+                              : isSplitting
+                                ? 'bg-blue-700 text-white cursor-pointer'
+                                : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 cursor-pointer'
+                          }`}
+                          title={!isSkuAssigned ? 'Assign an official catalog SKU first before splitting.' : 'Split quantity into two tickets'}
+                        >
+                          <Scissors className="w-3.5 h-3.5" />
+                          <span>{isSplitting ? 'Close Split' : `Split Qty (${report.quantity})`}</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {splitChildTicket && !isChild && (
+                      <div className="p-3 bg-blue-50 dark:bg-blue-950/70 border border-blue-300 dark:border-blue-800 rounded-xl flex items-center justify-between gap-3 text-xs">
+                        <div>
+                          <span className="font-extrabold text-blue-950 dark:text-blue-200">Partially Split Return (Part 1 of 2)</span>
+                          <p className="text-[11px] text-blue-700 dark:text-blue-300">
+                            This ticket holds <strong>{report.quantity} {report.unit_name || 'pc'}</strong>. Part 2 (<strong>{splitChildTicket.quantity} {splitChildTicket.unit_name || 'pc'}</strong>) is tracked under <strong>{splitChildTicket.rma_number}</strong>.
+                          </p>
                         </div>
                         <button
                           type="button"
-                          onClick={() => {
-                            setReport(splitChildTicket);
-                          }}
-                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-black shrink-0 flex items-center gap-1 shadow-2xs cursor-pointer"
+                          onClick={() => setReport(splitChildTicket)}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shrink-0 flex items-center gap-1 cursor-pointer"
                         >
                           <span>Open Part 2 ({splitChildTicket.rma_number})</span>
                           <ExternalLink className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                    );
-                  }
+                    )}
 
-                  const parentTicket = isChild
-                    ? recentReportsList.find(r => (
-                        (report?.parent_rma_id && (r.id === report.parent_rma_id || String(r.id) === String(report.parent_rma_id))) ||
-                        (report?.rma_number && r.rma_number === report.rma_number.replace(/-[B-Z]$/i, ''))
-                      ))
-                    : null;
-
-                  if (isChild && parentTicket) {
-                    return (
-                      <div className="p-3 bg-amber-50 dark:bg-amber-950/70 border border-amber-300 dark:border-amber-800 rounded-xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
-                        <div className="flex items-center gap-2">
-                          <div className="p-1.5 bg-amber-600 text-white rounded-lg shrink-0">
-                            <Scissors className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <span className="font-extrabold text-amber-950 dark:text-amber-200">
-                              Split Child Ticket (Part 2 of 2)
-                            </span>
-                            <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                              This ticket holds <strong>{report.quantity} {report.unit_name || 'pc'}</strong> ({report.disposition}) split from parent ticket <strong>{parentTicket.rma_number}</strong>.
-                            </p>
-                          </div>
+                    {isChild && parentTicket && (
+                      <div className="p-3 bg-amber-50 dark:bg-amber-950/70 border border-amber-300 dark:border-amber-800 rounded-xl flex items-center justify-between gap-3 text-xs">
+                        <div>
+                          <span className="font-extrabold text-amber-950 dark:text-amber-200">Split Child Ticket (Part 2 of 2)</span>
+                          <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                            Holds <strong>{report.quantity} {report.unit_name || 'pc'}</strong> split from <strong>{parentTicket.rma_number}</strong>.
+                          </p>
                         </div>
                         <button
                           type="button"
-                          onClick={() => {
-                            setReport(parentTicket);
-                          }}
-                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-xl text-xs font-black shrink-0 flex items-center gap-1 shadow-2xs cursor-pointer"
+                          onClick={() => setReport(parentTicket)}
+                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shrink-0 flex items-center gap-1 cursor-pointer"
                         >
                           <span>Open Parent ({parentTicket.rma_number})</span>
                           <ExternalLink className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                    );
-                  }
-                  return null;
-                })()}
+                    )}
 
-                {/* Buffer Replacement Dispatched Banner */}
-                {report?.status === 'buffer_replacement_dispatched' && (
-                  <div className="p-3 bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-300 dark:border-indigo-800 rounded-xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 bg-indigo-600 text-white rounded-lg shrink-0">
-                        <Truck className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <span className="font-extrabold text-indigo-950 dark:text-indigo-200">
-                          1-to-1 Buffer Stock Replacement Dispatched!
-                        </span>
-                        <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
-                          Emergency buffer goods dispatched to store. Customer was physically compensated; no Credit Memo refund is due.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setIsBufferSlipOpen(true)}
-                        className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-2xs cursor-pointer"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        <span>Reprint Slip</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleMarkStoreHandoverComplete}
-                        disabled={isClosingHandover}
-                        className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-black flex items-center gap-1 shadow-2xs cursor-pointer disabled:opacity-50"
-                        title="Confirm store accepted replacement and close ticket"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Store Received / Close</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {splitSuccessMessage && (
-                  <div className="p-3 bg-blue-50 dark:bg-blue-950/70 border border-blue-300 dark:border-blue-800 rounded-xl text-xs font-bold text-blue-900 dark:text-blue-100 flex items-center gap-2 animate-in fade-in">
-                    <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
-                    <span>{splitSuccessMessage}</span>
-                  </div>
-                )}
-
-                {/* INLINE PARTIAL TRIAGE & LINE ITEM SPLIT MODULE */}
-                {isSplitting && !Boolean(report?.is_parent || manifestItems.length > 1 || (Array.isArray(report?.items) && report.items.length > 1) || (typeof report?.name === 'string' && report.name.toLowerCase().startsWith('batch return manifest'))) && (
-                  <div className="p-3.5 bg-blue-50/80 dark:bg-blue-950/40 border-2 border-blue-300 dark:border-blue-800 rounded-2xl space-y-3.5 my-2 animate-in fade-in duration-200">
-                    <div className="flex items-center justify-between border-b border-blue-200 dark:border-blue-800/80 pb-2 flex-wrap gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="p-1.5 bg-blue-600 text-white rounded-lg">
-                          <Scissors className="w-3.5 h-3.5" />
-                        </div>
-                        <div>
-                          <h6 className="text-xs font-black text-blue-950 dark:text-blue-100 uppercase tracking-wider">
-                            Partial Triage &amp; Split Quantity
-                          </h6>
-                          <p className="text-[10px] text-blue-700 dark:text-blue-300">
-                            Total to split: <strong>{totalSplitQty} {report.unit_name || 'pcs'}</strong> of {report.name}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={handleSwapSplit}
-                          className="px-2.5 py-1 bg-blue-100 hover:bg-blue-200 active:bg-blue-300 dark:bg-blue-900/60 dark:hover:bg-blue-800 text-blue-800 dark:text-blue-200 text-xs font-extrabold rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                          title="Instantly swap Part 1 and Part 2 quantities"
-                        >
-                          <ArrowRightLeft className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                          <span>Swap Quantities</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsSplitting(false)}
-                          className="text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 rounded-lg cursor-pointer"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {/* PART 1 (Kept on current ticket) */}
-                      <div className="p-3 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900 rounded-xl space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-black uppercase text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950 px-2 py-0.5 rounded-full">
-                            Part 1 (Current: {report.rma_number})
-                          </span>
-                          <span className="text-xs font-black text-slate-900 dark:text-white">
-                            {splitPart1Qty !== '' ? splitPart1Qty : 0} {report.unit_name || 'pcs'}
-                          </span>
-                        </div>
-
-                        <div>
-                          <div className="flex items-center justify-between mb-0.5">
-                            <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block">Quantity to Keep on This Ticket *</label>
-                            <span className="text-[9px] font-bold text-slate-400">Max: {maxSplitVal}</span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => stepSplitPart1(-1)}
-                              disabled={Number(splitPart1Qty) <= 1}
-                              className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold flex items-center justify-center disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors shrink-0"
-                              title="Decrease quantity"
-                            >
-                              <Minus className="w-3.5 h-3.5" />
-                            </button>
-                            <input
-                              type="number"
-                              min="1"
-                              max={maxSplitVal}
-                              value={splitPart1Qty}
-                              onFocus={(e) => e.target.select()}
-                              onChange={(e) => handleSplitPart1Change(e.target.value)}
-                              onBlur={handleSplitPart1Blur}
-                              className="flex-1 px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-black text-center text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => stepSplitPart1(1)}
-                              disabled={Number(splitPart1Qty) >= maxSplitVal}
-                              className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold flex items-center justify-center disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors shrink-0"
-                              title="Increase quantity"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Disposition</label>
-                          <select
-                            value={splitPart1Disposition}
-                            onChange={(e) => setSplitPart1Disposition(e.target.value)}
-                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
-                          >
-                            <option value="2- Restock to Inventory">2- Restock to Inventory</option>
-                            <option value="1- Pending Triage">1- Pending Triage</option>
-                            <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
-                            <option value="4- Quarantine">4- Quarantine</option>
-                            <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Condition Grade</label>
-                          <select
-                            value={splitPart1Grade}
-                            onChange={(e) => setSplitPart1Grade(e.target.value)}
-                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
-                          >
-                            <option value="A - Like New / Resellable">A - Like New / Resellable</option>
-                            <option value="B - Damaged Packaging Only">B - Damaged Packaging Only</option>
-                            <option value="C - Defective / Parts Only">C - Defective / Parts Only</option>
-                            <option value="D - Total Loss / Scrap">D - Total Loss / Scrap</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <div className="flex items-center justify-between mb-0.5">
-                            <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block">Rack / Bin Location</label>
-                            <button
-                              type="button"
-                              onClick={() => setIsLocationsModalOpen(true)}
-                              className="text-[9px] text-blue-600 dark:text-blue-400 hover:underline font-bold cursor-pointer"
-                            >
-                              ⚙️ Manage
-                            </button>
-                          </div>
-                          <select
-                            value={splitPart1Location}
-                            onChange={(e) => setSplitPart1Location(e.target.value)}
-                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white font-mono"
-                          >
-                            <option value="">-- Select Location --</option>
-                            {availableLocations.map(loc => (
-                              <option key={loc} value={loc}>{loc}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                      {/* PART 2 (New split ticket) */}
-                      <div className="p-3 bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900 rounded-xl space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950 px-2 py-0.5 rounded-full">
-                            Part 2 (New Ticket: {report.rma_number}-B)
-                          </span>
-                          <span className="text-xs font-black text-amber-600 dark:text-amber-400">
-                            {derivedPart2Qty} {report.unit_name || 'pcs'}
-                          </span>
-                        </div>
-
-                        <div>
-                          <div className="flex items-center justify-between mb-0.5">
-                            <label className="text-[9.5px] font-extrabold uppercase text-amber-800 dark:text-amber-300 block">Quantity for New Ticket *</label>
-                            <span className="text-[9px] font-bold text-slate-400">Max: {maxSplitVal}</span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => stepSplitPart2(-1)}
-                              disabled={derivedPart2Qty <= 1}
-                              className="w-8 h-8 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-amber-800 dark:text-amber-300 font-bold flex items-center justify-center disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors shrink-0"
-                              title="Decrease Part 2 quantity"
-                            >
-                              <Minus className="w-3.5 h-3.5" />
-                            </button>
-                            <input
-                              type="number"
-                              min="1"
-                              max={maxSplitVal}
-                              value={derivedPart2Qty}
-                              onFocus={(e) => e.target.select()}
-                              onChange={(e) => handleSplitPart2Change(e.target.value)}
-                              className="flex-1 px-2.5 py-1.5 bg-amber-50/50 dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-black text-center text-amber-900 dark:text-amber-200 focus:outline-none focus:border-amber-500"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => stepSplitPart2(1)}
-                              disabled={derivedPart2Qty >= maxSplitVal}
-                              className="w-8 h-8 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-amber-800 dark:text-amber-300 font-bold flex items-center justify-center disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors shrink-0"
-                              title="Increase Part 2 quantity"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Disposition</label>
-                          <select
-                            value={splitPart2Disposition}
-                            onChange={(e) => setSplitPart2Disposition(e.target.value)}
-                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
-                          >
-                            <option value="5- Scrap / Dispose">5- Scrap / Dispose</option>
-                            <option value="3- Return to Vendor (RTV)">3- Return to Vendor (RTV)</option>
-                            <option value="4- Quarantine">4- Quarantine</option>
-                            <option value="2- Restock to Inventory">2- Restock to Inventory</option>
-                            <option value="1- Pending Triage">1- Pending Triage</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Condition Grade</label>
-                          <select
-                            value={splitPart2Grade}
-                            onChange={(e) => setSplitPart2Grade(e.target.value)}
-                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
-                          >
-                            <option value="D - Total Loss / Scrap">D - Total Loss / Scrap</option>
-                            <option value="C - Defective / Parts Only">C - Defective / Parts Only</option>
-                            <option value="B - Damaged Packaging Only">B - Damaged Packaging Only</option>
-                            <option value="A - Like New / Resellable">A - Like New / Resellable</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <div className="flex items-center justify-between mb-0.5">
-                            <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block">Location or Bin</label>
-                            <button
-                              type="button"
-                              onClick={() => setIsLocationsModalOpen(true)}
-                              className="text-[9px] text-blue-600 dark:text-blue-400 hover:underline font-bold cursor-pointer"
-                            >
-                              ⚙️ Manage
-                            </button>
-                          </div>
-                          <select
-                            value={splitPart2Location}
-                            onChange={(e) => setSplitPart2Location(e.target.value)}
-                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white font-mono"
-                          >
-                            <option value="">-- Select Location --</option>
-                            {availableLocations.map(loc => (
-                              <option key={loc} value={loc}>{loc}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Defect / Reason for Part 2</label>
-                          <input
-                            type="text"
-                            value={splitPart2Reason}
-                            onChange={(e) => setSplitPart2Reason(e.target.value)}
-                            placeholder="e.g. Damaged packaging"
-                            className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-end gap-2 pt-1 border-t border-blue-200 dark:border-blue-800/80">
-                      <button
-                        type="button"
-                        onClick={() => setIsSplitting(false)}
-                        className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleExecuteSplit}
-                        disabled={isExecutingSplit}
-                        className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
-                      >
-                        {isExecutingSplit ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Splitting Ticket...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Scissors className="w-3.5 h-3.5" />
-                            <span>Confirm & Execute Split</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {triageSavedSuccess && (
-                  <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 rounded-xl text-xs font-bold text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>Warehouse triage & location saved successfully!</span>
-                  </div>
-                )}
-
-                {triageSaveError && (
-                  <div className="p-2.5 bg-rose-50 dark:bg-rose-950/70 border border-rose-300 dark:border-rose-800 rounded-xl text-xs font-bold text-rose-800 dark:text-rose-200 flex items-center gap-2 animate-in fade-in">
-                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                    <span>Failed to save triage: {triageSaveError}</span>
-                  </div>
-                )}
-
-                {manifestItems.length > 1 ? (
-                  /* MULTI-ITEM MANIFEST LINE-ITEM LEVEL TRIAGE */
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between pb-1 border-b border-slate-200 dark:border-slate-800 flex-wrap gap-2">
-                      <div>
-                        <div className="font-black text-xs text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
-                          <Package className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                          <span>Multi-Item Manifest Line-Item Triage</span>
-                        </div>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          Assign condition grade, rack/bin location, and disposition for each line item individually.
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {(() => {
-                          const dynStage = resolveBatchManifestLifecycle({ ...report, items: manifestItems });
-                          return (
-                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border uppercase tracking-wider shadow-2xs ${dynStage.color}`} title="Dynamically computed Parent Manifest Lifecycle Status">
-                              Stage: {dynStage.label}
-                            </span>
-                          );
-                        })()}
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                          {manifestItems.length} Products
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Helpful Multi-Item Manifest Triage Note */}
-                    <div className="p-2.5 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/80 rounded-xl text-xs text-blue-900 dark:text-blue-200 flex items-center gap-2">
-                      <span className="text-sm shrink-0">💡</span>
-                      <span className="font-semibold text-[11px]">
-                        Multi-item manifest: Each product's disposition (Restock, Scrap, RTV, Quarantine) is triaged individually in the line items below.
-                      </span>
-                    </div>
-
-                    {manifestTriageSuccess && (
-                      <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 rounded-xl text-xs font-bold text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>Line-item manifest triage saved successfully for all {manifestItems.length} products!</span>
+                    {splitSuccessMessage && (
+                      <div className="p-3 bg-blue-50 dark:bg-blue-950/70 border border-blue-300 dark:border-blue-800 rounded-xl text-xs font-bold text-blue-900 dark:text-blue-100 flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+                        <span>{splitSuccessMessage}</span>
                       </div>
                     )}
 
-                    <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
-                      {manifestItems.map((it, idx) => (
-                        <div key={it.id || idx} className="p-3 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-2 shadow-2xs">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="font-black text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
-                                <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[9px] font-black flex items-center justify-center shrink-0">
-                                  {idx + 1}
-                                </span>
-                                <span className="truncate">{it.name}</span>
-                              </div>
-                              <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                                <span>Barcode: {it.barcode}</span>
-                                <span>•</span>
-                                {(() => {
-                                  const itBarcode = String(it.barcode || '').trim();
-                                  const rawSku = String(it.sku || it.code || '').trim();
-                                  const isSkuValid = rawSku && rawSku !== itBarcode && !rawSku.toLowerCase().includes('awaiting');
-                                  return isSkuValid ? (
-                                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">SKU: {rawSku}</span>
-                                  ) : (
-                                    <span className="text-amber-600 dark:text-amber-400 font-bold">SKU: Awaiting SKU</span>
-                                  );
-                                })()}
-                                <span>•</span>
-                                <span>Qty: <strong className="text-slate-800 dark:text-slate-200">{it.quantity} {it.unit_name || 'pc'}</strong></span>
-                              </div>
-                            </div>
-                            <span className="text-[10px] font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/60 px-2 py-0.5 rounded-md border border-rose-200 dark:border-rose-800 shrink-0">
-                              {it.reason || 'Damaged packaging'}
-                            </span>
+                    {isSplitting && canSplit && (
+                      <div className="p-3.5 bg-blue-50/80 dark:bg-blue-950/40 border-2 border-blue-300 dark:border-blue-800 rounded-2xl space-y-3.5">
+                        <div className="flex items-center justify-between border-b border-blue-200 dark:border-blue-800/80 pb-2 flex-wrap gap-2">
+                          <div className="text-xs font-black text-blue-950 dark:text-blue-100">
+                            Total to split: <strong>{totalSplitQty} {report.unit_name || 'pcs'}</strong>
                           </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                            {/* Condition Grade */}
-                            <div>
-                              <label className="text-[9.5px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-0.5">
-                                Condition Grade
-                              </label>
-                              <select
-                                value={it.condition_grade || 'B - Damaged Packaging Only'}
-                                onChange={(e) => updateManifestItemField(idx, 'condition_grade', e.target.value)}
-                                className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
-                              >
-                                <option value="A - Like New / Resellable">A - Resellable</option>
-                                <option value="B - Damaged Packaging Only">B - Damaged Packaging</option>
-                                <option value="C - Defective / Parts Only">C - Defective / Parts</option>
-                                <option value="D - Total Loss / Scrap">D - Scrap / Total Loss</option>
-                              </select>
-                            </div>
-
-                            {/* Rack / Bin Location */}
-                            <div>
-                              <div className="flex items-center justify-between mb-0.5">
-                                <label className="text-[9.5px] uppercase font-bold text-slate-500 dark:text-slate-400 block">
-                                  Bin / Rack Location
-                                </label>
-                                <button
-                                  type="button"
-                                  onClick={() => setIsLocationsModalOpen(true)}
-                                  className="text-[9px] text-blue-600 dark:text-blue-400 hover:underline font-bold cursor-pointer"
-                                >
-                                  ⚙️
-                                </button>
-                              </div>
-                              <select
-                                value={it.warehouse_location || ''}
-                                onChange={(e) => updateManifestItemField(idx, 'warehouse_location', e.target.value)}
-                                className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
-                              >
-                                <option value="">-- Select Location --</option>
-                                {availableLocations.map(loc => (
-                                  <option key={loc} value={loc}>{loc}</option>
-                                ))}
-                              </select>
-                            </div>
-
-                            {/* Disposition */}
-                            <div>
-                              <label className="text-[9.5px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-0.5">
-                                Disposition
-                              </label>
-                              <select
-                                value={it.disposition || (isSupplierStream ? '1 - Pending Vendor Pickup' : '1- Pending Triage')}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  updateManifestItemField(idx, 'disposition', val);
-                                  if (val.includes('Scrap') || val.includes('Dispose') || val.includes('Claim Rejected by Vendor')) {
-                                    updateManifestItemField(idx, 'warehouse_location', 'Disposal / Scrap Area');
-                                  } else if (val.includes('Quarantine') || val.includes('Hold') || val.includes('Dispute')) {
-                                    updateManifestItemField(idx, 'warehouse_location', 'Hold / Inspection Area');
-                                  } else if (val.includes('Return to Vendor') || val.includes('Pending Vendor Pickup') || val.includes('Vendor Credit')) {
-                                    updateManifestItemField(idx, 'warehouse_location', 'Supplier Return Area (RTV)');
-                                  } else if (val.includes('Rejected / Return to Customer')) {
-                                    updateManifestItemField(idx, 'warehouse_location', 'Customer Return Area');
-                                  } else if (val.includes('Restock') || val.includes('Replacement')) {
-                                    updateManifestItemField(idx, 'warehouse_location', 'Good Stock Area');
-                                  }
-                                }}
-                                className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
-                              >
-                                {!isSupplierStream ? (
-                                  <>
-                                    <option value="2- Restock to Inventory">🟢 1. Restock to Shelf</option>
-                                    <option value="3- Return to Vendor (RTV)">🟣 2. Move to Supplier RTV</option>
-                                    <option value="5- Scrap / Dispose">🔴 3. Scrap / Dispose</option>
-                                    <option value="6- Buffer Stock Exchange">🔵 4. Buffer Stock Swap</option>
-                                    <option value="4- Quarantine">🟡 5. On Hold / Quarantine</option>
-                                    <option value="8- Rejected / Return to Customer">⚫ 6. Reject & Return to Customer</option>
-                                    <option value="1- Pending Triage">1- Pending Triage</option>
-                                  </>
-                                ) : (
-                                  <>
-                                    <option value="1 - Pending Vendor Pickup">⏳ 1. Pending Vendor Pickup</option>
-                                    <option value="3 - Vendor Credit / AP Deduction Settled">💵 2. Vendor Credit Settled</option>
-                                    <option value="4 - Vendor Replacement Stock Received">🟢 3. Vendor Replacement Received</option>
-                                    <option value="5 - Claim Rejected by Vendor">🔴 4. Vendor Rejected Claim</option>
-                                    <option value="4- Quarantine">🟡 5. Under Vendor Dispute</option>
-                                    <option value="1- Pending Triage">1- Pending Triage</option>
-                                  </>
-                                )}
-                              </select>
-                              <div className="flex items-center justify-between mt-1 pt-1 border-t border-slate-200 dark:border-slate-700 text-[10px]">
-                                <span className="text-slate-500 font-bold">Replenishment:</span>
-                                <button
-                                  type="button"
-                                  onClick={() => updateManifestItemField(idx, 'needs_reorder', it.needs_reorder === false ? true : false)}
-                                  className={`px-2 py-0.5 rounded font-black cursor-pointer ${
-                                    it.needs_reorder !== false
-                                      ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
-                                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-slate-700'
-                                  }`}
-                                >
-                                  {it.needs_reorder !== false ? '🔄 Re-Order: YES' : '🚫 Re-Order: NO'}
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
-                      <span className="text-[10px] text-slate-400">
-                        Inspected by: <strong className="text-slate-700 dark:text-slate-300">{report?.inspected_by || verifiedAdmin?.name || 'Staff'}</strong>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleSaveManifestTriage}
-                        disabled={isSavingManifestTriage}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
-                      >
-                        {isSavingManifestTriage ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Saving Manifest...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Save Manifest Triage</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  /* STANDARD SINGLE-ITEM TRIAGE INTERFACE */
-                  !isSkuAssigned ? (
-                    <div className="p-4 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 rounded-2xl text-xs space-y-3">
-                      <div className="flex items-start gap-2.5 text-amber-900 dark:text-amber-200">
-                        <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                        <div className="space-y-1">
-                          <h5 className="font-bold text-xs uppercase tracking-wide">
-                            Assign SKU Required Before Triage
-                          </h5>
-                          <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
-                            Physical triage, condition grading, and warehouse disposition require an official catalog SKU / Item Code to be registered first.
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between pt-1 border-t border-amber-200 dark:border-amber-900/60">
-                        <span className="text-[10px] text-amber-700 dark:text-amber-400 font-mono">
-                          Barcode: {report?.barcode || 'N/A'}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => onAssignSku && onAssignSku(report)}
-                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                        >
-                          <Tag className="w-3.5 h-3.5" />
-                          <span>+ Assign Official SKU</span>
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="space-y-3 text-xs">
-                        {/* Top Row: Condition Grade & Automated Lifecycle Stage */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          {/* Condition Grade */}
-                          <div>
-                            <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                              Condition Grade
-                            </label>
-                            <select
-                              value={conditionGrade}
-                              onChange={(e) => setConditionGrade(e.target.value)}
-                              className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-600 shadow-2xs"
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={handleSwapSplit}
+                              className="px-2.5 py-1 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 text-xs font-extrabold rounded-lg flex items-center gap-1 cursor-pointer"
                             >
-                              <option value="A - Like New / Resellable">A - Like New / Resellable</option>
-                              <option value="B - Damaged Packaging Only">B - Damaged Packaging Only</option>
-                              <option value="C - Defective / Parts Only">C - Defective / Parts Only</option>
-                              <option value="D - Total Loss / Scrap">D - Total Loss / Scrap</option>
-                            </select>
-                          </div>
-
-                          {/* Automated RMA Lifecycle Status (Zero Manual Select) */}
-                          <div>
-                            <div className="flex items-center justify-between mb-1">
-                              <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">
-                                Automated Lifecycle Stage
-                              </label>
-                              {Boolean(report?.ai_document_metadata?.workflow_resolution || report?.status === 'resolved' || report?.status === 'closed') && (
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    try {
-                                      const res = await catalogService.resetReportToPending(report.id, report.rma_number, verifiedAdmin?.name || 'Staff');
-                                      setReport(res);
-                                      setRmaStatus('under_inspection');
-                                      if (onRefresh) onRefresh();
-                                    } catch (e) {
-                                      alert('Could not reset: ' + e.message);
-                                    }
-                                  }}
-                                  className="text-[10px] font-bold text-amber-700 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
-                                  title="Re-open item and reset to pending for testing coworker actions"
-                                >
-                                  <RotateCcw className="w-3 h-3" />
-                                  <span>↩️ Reset to Pending</span>
-                                </button>
-                              )}
-                            </div>
-                            <div className="w-full px-2.5 py-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-700 dark:text-slate-300 text-xs flex items-center gap-1.5 shadow-2xs">
-                              <span className={`w-2 h-2 rounded-full shrink-0 ${isOnHold ? 'bg-amber-500 animate-ping' : 'bg-blue-500 animate-pulse'}`} />
-                              <span className="capitalize">
-                                {isOnHold ? '4- Quarantine (Hold)' : computeAutomaticLifecycleStatus(disposition, hasLinkedCreditMemo, rmaStatus, report).replace(/_/g, ' ')}
-                              </span>
-                            </div>
+                              <ArrowRightLeft className="w-3.5 h-3.5" />
+                              <span>Swap Quantities</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setIsSplitting(false)}
+                              className="text-xs font-bold text-slate-500 hover:text-slate-800 px-2 py-1 rounded-lg cursor-pointer"
+                            >
+                              Cancel
+                            </button>
                           </div>
                         </div>
 
-                        {/* Stream-Specific Operational Action Trigger Cards */}
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <label className="text-[10px] uppercase font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5 tracking-wide">
-                              <Layers className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                              <span>{isSupplierStream ? 'Supplier RTV Physical Actions (5 Cards)' : 'Customer RMA Physical Actions (6 Cards)'}</span>
-                            </label>
-                            {isOnHold && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDisposition(isSupplierStream ? '1 - Pending Vendor Pickup' : '2- Restock to Inventory');
-                                  setRmaStatus('under_inspection');
-                                  setHoldReason('');
-                                }}
-                                className="px-2.5 py-0.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
-                                title="Release quarantine hold to select a new operational triage action"
-                              >
-                                <Unlock className="w-3 h-3" />
-                                <span>🔓 Release Hold</span>
-                              </button>
-                            )}
-                          </div>
-
-                          {!isSupplierStream ? (
-                            /* Customer Hub: 6 Action Cards */
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                              {/* Card 1: 🟢 Restock to Shelf */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDisposition('2- Restock to Inventory');
-                                  setRmaStatus('under_inspection');
-                                  setNeedsReorder(false);
-                                  setWarehouseLocation('Good Stock Area');
-                                }}
-                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                  disposition === '2- Restock to Inventory' || disposition?.toLowerCase().includes('restock')
-                                    ? 'border-emerald-500 bg-emerald-50/90 dark:bg-emerald-950/60 ring-2 ring-emerald-500/50 shadow-sm'
-                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-emerald-300 hover:bg-emerald-50/30'
-                                }`}
-                              >
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                                  <span className="font-extrabold text-xs text-emerald-800 dark:text-emerald-300">
-                                    1. Restock to Shelf
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Return good units to active stock. Ready to Restock queue.
-                                </p>
-                              </button>
-
-                              {/* Card 2: 🟣 Move to Supplier RTV */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDisposition('3- Return to Vendor (RTV)');
-                                  setRmaStatus('vendor_claimed');
-                                  setWarehouseLocation('Supplier Return Area (RTV)');
-                                  setNeedsReorder(true);
-                                }}
-                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                  disposition === '3- Return to Vendor (RTV)' || disposition?.toLowerCase().includes('return to vendor')
-                                    ? 'border-purple-500 bg-purple-50/90 dark:bg-purple-950/60 ring-2 ring-purple-500/50 shadow-sm'
-                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-purple-300 hover:bg-purple-50/30'
-                                }`}
-                              >
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="w-2.5 h-2.5 rounded-full bg-purple-500 shrink-0" />
-                                  <span className="font-extrabold text-xs text-purple-800 dark:text-purple-300">
-                                    2. Move to Supplier RTV
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Transfer to Supplier Hub. Bin Supplier Return Area (RTV) for debit recovery.
-                                </p>
-                              </button>
-
-                              {/* Card 3: 🔴 Scrap / Dispose */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDisposition('5- Scrap / Dispose');
-                                  setWarehouseLocation('Disposal / Scrap Area');
-                                  setRmaStatus('under_inspection');
-                                  setNeedsReorder(true);
-                                }}
-                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                  disposition === '5- Scrap / Dispose' || (disposition?.toLowerCase().includes('scrap') && !disposition?.toLowerCase().includes('claim rejected'))
-                                    ? 'border-rose-500 bg-rose-50/90 dark:bg-rose-950/60 ring-2 ring-rose-500/50 shadow-sm'
-                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-rose-300 hover:bg-rose-50/30'
-                                }`}
-                              >
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
-                                  <span className="font-extrabold text-xs text-rose-800 dark:text-rose-300">
-                                    3. Scrap / Dispose
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Total loss in Disposal Area. Flags purchasing replenishment.
-                                </p>
-                              </button>
-
-                              {/* Card 4: 🔵 Buffer Stock Swap (1:1) */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDisposition('6- Buffer Stock Exchange');
-                                  setWarehouseLocation('Good Stock Area');
-                                  setRmaStatus('under_inspection');
-                                  setNeedsReorder(true);
-                                  setIsBufferSlipOpen(true);
-                                }}
-                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                  disposition === '6- Buffer Stock Exchange' || disposition?.toLowerCase().includes('buffer')
-                                    ? 'border-blue-500 bg-blue-50/90 dark:bg-blue-950/60 ring-2 ring-blue-500/50 shadow-sm'
-                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-blue-300 hover:bg-blue-50/30'
-                                }`}
-                              >
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
-                                  <span className="font-extrabold text-xs text-blue-800 dark:text-blue-300">
-                                    4. Buffer Stock Swap
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Dispatch 1:1 buffer replacement slip to customer.
-                                </p>
-                              </button>
-
-                              {/* Card 5: 🟡 On Hold / Quarantine */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDisposition('4- Quarantine');
-                                  setWarehouseLocation('Hold / Inspection Area');
-                                  setRmaStatus('under_inspection');
-                                }}
-                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                  disposition === '4- Quarantine' || disposition?.toLowerCase().includes('quarantine') || disposition?.toLowerCase().includes('hold')
-                                    ? 'border-amber-500 bg-amber-50/90 dark:bg-amber-950/60 ring-2 ring-amber-500/50 shadow-sm'
-                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-amber-300 hover:bg-amber-50/30'
-                                }`}
-                              >
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
-                                  <span className="font-extrabold text-xs text-amber-800 dark:text-amber-300">
-                                    5. On Hold / Quarantine
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Freeze claims in Hold / Inspection Area. Requires reason note.
-                                </p>
-                              </button>
-
-                              {/* Card 6: ⚫ Reject & Return to Customer */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDisposition('8- Rejected / Return to Customer');
-                                  setWarehouseLocation('Customer Return Area');
-                                  setRmaStatus('rejected');
-                                  setNeedsReorder(false);
-                                }}
-                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                  disposition === '8- Rejected / Return to Customer' || disposition?.toLowerCase().includes('rejected')
-                                    ? 'border-slate-600 bg-slate-100 dark:bg-slate-800 ring-2 ring-slate-500/50 shadow-sm'
-                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-slate-400 hover:bg-slate-50'
-                                }`}
-                              >
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="w-2.5 h-2.5 rounded-full bg-slate-800 dark:bg-slate-200 shrink-0" />
-                                  <span className="font-extrabold text-xs text-slate-900 dark:text-white">
-                                    6. Reject & Return
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Defect out-of-policy. Blocks Credit Memo & prints gate pass.
-                                </p>
-                              </button>
-                            </div>
-                          ) : (
-                            /* Supplier Hub: 5 Action Cards */
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                              {/* Card 1: ⏳ Pending Vendor Pickup */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDisposition('1 - Pending Vendor Pickup');
-                                  setWarehouseLocation('Supplier Return Area (RTV)');
-                                  setRmaStatus('under_inspection');
-                                  setNeedsReorder(true);
-                                }}
-                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                  disposition === '1 - Pending Vendor Pickup' || disposition?.toLowerCase().includes('pending vendor pickup')
-                                    ? 'border-amber-500 bg-amber-50/90 dark:bg-amber-950/60 ring-2 ring-amber-500/50 shadow-sm'
-                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-amber-300 hover:bg-amber-50/30'
-                                }`}
-                              >
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
-                                  <span className="font-extrabold text-xs text-amber-800 dark:text-amber-300">
-                                    1. Pending Vendor Pickup
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Staged in Supplier Return Area (RTV) awaiting vendor driver retrieval.
-                                </p>
-                              </button>
-
-                              {/* Card 2: 💵 Vendor Credit Settled */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDisposition('3 - Vendor Credit / AP Deduction Settled');
-                                  setWarehouseLocation('Supplier Return Area (RTV)');
-                                  setRmaStatus('vendor_claimed');
-                                  setNeedsReorder(true);
-                                }}
-                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                  disposition === '3 - Vendor Credit / AP Deduction Settled' || disposition?.toLowerCase().includes('deduction settled')
-                                    ? 'border-emerald-500 bg-emerald-50/90 dark:bg-emerald-950/60 ring-2 ring-emerald-500/50 shadow-sm'
-                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-emerald-300 hover:bg-emerald-50/30'
-                                }`}
-                              >
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                                  <span className="font-extrabold text-xs text-emerald-800 dark:text-emerald-300">
-                                    2. Vendor Credit Settled
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Vendor credit note / AP deduction finalized.
-                                </p>
-                              </button>
-
-                              {/* Card 3: 🟢 Replacement Stock Received */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDisposition('4 - Vendor Replacement Stock Received');
-                                  setWarehouseLocation('Good Stock Area');
-                                  setRmaStatus('under_inspection');
-                                  setNeedsReorder(false);
-                                }}
-                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                  disposition === '4 - Vendor Replacement Stock Received' || disposition?.toLowerCase().includes('replacement stock received')
-                                    ? 'border-teal-500 bg-teal-50/90 dark:bg-teal-950/60 ring-2 ring-teal-500/50 shadow-sm'
-                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-teal-300 hover:bg-teal-50/30'
-                                }`}
-                              >
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="w-2.5 h-2.5 rounded-full bg-teal-500 shrink-0" />
-                                  <span className="font-extrabold text-xs text-teal-800 dark:text-teal-300">
-                                    3. Replacement Received
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Free vendor stock arrived. Routes to Good Stock Area (Restock).
-                                </p>
-                              </button>
-
-                              {/* Card 4: 🔴 Vendor Rejected Claim */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDisposition('5 - Claim Rejected by Vendor');
-                                  setWarehouseLocation('Disposal / Scrap Area');
-                                  setRmaStatus('under_inspection');
-                                  setNeedsReorder(true);
-                                }}
-                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                  disposition === '5 - Claim Rejected by Vendor' || disposition?.toLowerCase().includes('claim rejected by vendor')
-                                    ? 'border-rose-500 bg-rose-50/90 dark:bg-rose-950/60 ring-2 ring-rose-500/50 shadow-sm'
-                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-rose-300 hover:bg-rose-50/30'
-                                }`}
-                              >
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
-                                  <span className="font-extrabold text-xs text-rose-800 dark:text-rose-300">
-                                    4. Vendor Rejected Claim
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Vendor refused credit. Convert to Disposal / Scrap Area. Blocks Debit Claim.
-                                </p>
-                              </button>
-
-                              {/* Card 5: 🟡 Under Vendor Dispute */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDisposition('4- Quarantine');
-                                  setWarehouseLocation('Hold / Inspection Area');
-                                  setRmaStatus('under_inspection');
-                                }}
-                                className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                                  disposition === '4- Quarantine' || disposition?.toLowerCase().includes('quarantine') || disposition?.toLowerCase().includes('hold')
-                                    ? 'border-amber-500 bg-amber-50/90 dark:bg-amber-950/60 ring-2 ring-amber-500/50 shadow-sm'
-                                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-amber-300 hover:bg-amber-50/30'
-                                }`}
-                              >
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
-                                  <span className="font-extrabold text-xs text-amber-800 dark:text-amber-300">
-                                    5. Under Vendor Dispute
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 line-clamp-2 leading-tight">
-                                  Hold in Hold / Inspection Area. Dispute in progress. Blocks Debit Claim.
-                                </p>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Purchasing Replenishment Switch (Explicit YES / NO) */}
-                        {(() => {
-                          const disp = String(disposition || '').toLowerCase();
-                          const showSwitch = !isRejected && !isOnHold && (
-                            disp.includes('scrap') ||
-                            disp.includes('dispose') ||
-                            disp.includes('return to vendor') ||
-                            disp.includes('rtv') ||
-                            disp.includes('buffer') ||
-                            disp.includes('pending vendor pickup') ||
-                            disp.includes('deduction settled') ||
-                            disp.includes('claim rejected by vendor')
-                          ) && !disp.includes('restock') && !disp.includes('replacement stock received');
-
-                          if (!showSwitch) return null;
-
-                          return (
-                            <div className="p-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-300 dark:border-slate-700 rounded-xl space-y-2 animate-in fade-in">
-                              <div className="flex items-center justify-between">
-                                <label className="text-[10px] uppercase font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                                  <span>🔄 Purchasing Replenishment Switch</span>
-                                </label>
-                                <span className={`text-[9.5px] font-black px-2 py-0.5 rounded-md ${
-                                  needsReorder 
-                                    ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
-                                    : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                                }`}>
-                                  {needsReorder ? 'PO Placement Flagged' : 'Write-Off / No Re-Order'}
-                                </span>
-                              </div>
-                              <p className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-tight">
-                                Should our purchasing coworkers place a replacement Purchase Order to replenish this lost inventory?
-                              </p>
-                              <div className="grid grid-cols-2 gap-2 pt-0.5">
-                                <button
-                                  type="button"
-                                  onClick={() => setNeedsReorder(true)}
-                                  className={`py-2 px-3 rounded-lg text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                                    needsReorder
-                                      ? 'bg-amber-500 text-white shadow-xs ring-2 ring-amber-400/40'
-                                      : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
-                                  }`}
-                                >
-                                  <span>🔄 YES — Flag for Supplier Re-Order</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setNeedsReorder(false)}
-                                  className={`py-2 px-3 rounded-lg text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                                    !needsReorder
-                                      ? 'bg-slate-700 dark:bg-slate-600 text-white shadow-xs ring-2 ring-slate-500/40'
-                                      : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
-                                  }`}
-                                >
-                                  <span>🚫 NO — Do Not Re-Order</span>
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* Customer Rejection Reason Input & Gate Pass */}
-                        {isCustomerRejected && (
-                          <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-700 rounded-xl space-y-2 animate-in fade-in">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {/* PART 1 */}
+                          <div className="p-3 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900 rounded-xl space-y-2">
                             <div className="flex items-center justify-between">
-                              <label className="text-[10px] uppercase font-bold text-rose-900 dark:text-rose-300 flex items-center gap-1">
-                                <AlertTriangle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-                                <span>Customer Rejection Reason * (Required)</span>
-                              </label>
-                              <span className="text-[9.5px] font-bold text-rose-800 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/60 px-2 py-0.5 rounded-md">
-                                Credit Blocked
+                              <span className="text-[10px] font-black uppercase text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950 px-2 py-0.5 rounded-full">
+                                Part 1 ({report.rma_number})
+                              </span>
+                              <span className="text-xs font-black text-slate-900 dark:text-white">
+                                {splitPart1Qty !== '' ? splitPart1Qty : 0} {report.unit_name || 'pcs'}
                               </span>
                             </div>
-                            <textarea
-                              rows={2}
-                              value={rejectionReason}
-                              onChange={(e) => setRejectionReason(e.target.value)}
-                              placeholder="e.g. Customer physical damage / Broken seal / Return requested past 15-day return policy..."
-                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-rose-300 dark:border-rose-700 rounded-lg text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-rose-600"
-                            />
-                            <div className="flex items-center justify-between pt-1">
-                              <span className="text-[10px] text-rose-700 dark:text-rose-400 italic">
-                                Staged at OUTBOUND-RETURN-TO-STORE. Blocked from credit memo and coworker queues.
-                              </span>
+                            <div className="flex items-center gap-1.5">
                               <button
                                 type="button"
-                                onClick={printRejectedGatePass}
-                                className="px-2.5 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all shadow-2xs shrink-0"
-                                title="Print Official Rejected Return Gate Pass for driver dispatch back to store"
+                                onClick={() => stepSplitPart1(-1)}
+                                disabled={Number(splitPart1Qty) <= 1}
+                                className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 font-bold flex items-center justify-center disabled:opacity-40 cursor-pointer"
                               >
-                                <Printer className="w-3 h-3" />
-                                <span>🖨️ Print Rejected Return Gate Pass</span>
+                                <Minus className="w-3.5 h-3.5" />
                               </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Target Rack / Bin Location (For Restock or Replacement Received) */}
-                        {(String(disposition || '').toLowerCase().includes('restock') || String(disposition || '').toLowerCase().includes('replacement stock received')) && (
-                          <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 rounded-xl space-y-1.5 animate-in fade-in">
-                            <div className="flex items-center justify-between">
-                              <label className="text-[10px] uppercase font-bold text-emerald-900 dark:text-emerald-300 block">
-                                Target Rack / Bin Location *
-                              </label>
+                              <input
+                                type="number"
+                                min="1"
+                                max={maxSplitVal}
+                                value={splitPart1Qty}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => handleSplitPart1Change(e.target.value)}
+                                onBlur={handleSplitPart1Blur}
+                                className="flex-1 px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-black text-center"
+                              />
                               <button
                                 type="button"
-                                onClick={() => setIsLocationsModalOpen(true)}
-                                className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-bold cursor-pointer"
+                                onClick={() => stepSplitPart1(1)}
+                                disabled={Number(splitPart1Qty) >= maxSplitVal}
+                                className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 font-bold flex items-center justify-center disabled:opacity-40 cursor-pointer"
                               >
-                                ⚙️ Manage Locations
+                                <Plus className="w-3.5 h-3.5" />
                               </button>
                             </div>
-                            <div className="relative">
-                              <MapPin className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 absolute left-2.5 top-2.5 pointer-events-none" />
+                            <div>
+                              <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">4-Choice Outcome</label>
                               <select
-                                value={warehouseLocation}
-                                onChange={(e) => setWarehouseLocation(e.target.value)}
-                                className="w-full pl-8 pr-2.5 py-2 bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700 rounded-xl font-mono text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-600 cursor-pointer"
+                                value={splitPart1Choice}
+                                onChange={(e) => setSplitPart1Choice(e.target.value)}
+                                className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold"
                               >
-                                <option value="">-- Select Warehouse Location --</option>
-                                {availableLocations.map(loc => (
-                                  <option key={loc} value={loc}>{loc}</option>
-                                ))}
+                                <option value="restock_good">Put Back on Good Shelf (Restock)</option>
+                                <option value="scrap">Throw Away / Dispose (Scrap)</option>
+                                <option value={isSupplierStream ? 'supplier_credit' : 'customer_credit'}>
+                                  {isSupplierStream ? 'Return to supplier for Debit Claim' : 'Accepted for Debit / Credit'}
+                                </option>
+                                <option value={isSupplierStream ? 'supplier_exchange' : 'customer_exchange'}>
+                                  {isSupplierStream ? 'Return to supplier for Replacement' : 'Replaced with Good Stock'}
+                                </option>
+                                <option value="pending">Pending Decision</option>
                               </select>
                             </div>
-                            <span className="text-[10px] text-emerald-700 dark:text-emerald-400">
-                              Specify the exact rack or shelf location where restocked units are placed for warehouse staff.
-                            </span>
                           </div>
-                        )}
 
-                        {/* Scrap Staging Notification */}
-                        {(String(disposition || '').toLowerCase().includes('scrap') || String(disposition || '').toLowerCase().includes('dispose') || String(disposition || '').toLowerCase().includes('claim rejected by vendor')) && (
-                          <div className="p-3 bg-rose-50/60 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 rounded-xl space-y-1 animate-in fade-in">
+                          {/* PART 2 */}
+                          <div className="p-3 bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900 rounded-xl space-y-2">
                             <div className="flex items-center justify-between">
-                              <span className="text-[10px] uppercase font-extrabold text-rose-900 dark:text-rose-300">
-                                Staging Location: {normalizeWarehouseLocation(warehouseLocation || 'Disposal / Scrap Area', report)}
+                              <span className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950 px-2 py-0.5 rounded-full">
+                                Part 2 ({report.rma_number}-B)
                               </span>
-                              <span className="text-[9.5px] font-bold text-rose-700 dark:text-rose-400 bg-rose-100 dark:bg-rose-900/60 px-2 py-0.5 rounded-md">
-                                {needsReorder ? 'Auto-Queued for PO' : 'Scrapped (No Re-Order)'}
+                              <span className="text-xs font-black text-amber-600 dark:text-amber-400">
+                                {derivedPart2Qty} {report.unit_name || 'pcs'}
                               </span>
                             </div>
-                            <p className="text-[10.5px] text-rose-800 dark:text-rose-300">
-                              Physical goods staged in <strong>{normalizeWarehouseLocation(warehouseLocation || 'Disposal / Scrap Area', report)}</strong> for disposal.
-                              {needsReorder
-                                ? ' Purchasing coworkers can view and place supplier replacement PO via ?queue=reorder.'
-                                : ' Marked as write-off without re-order (?queue=scrap_no_reorder).'}
-                            </p>
-                          </div>
-                        )}
-
-                        {/* Hold / Quarantine Reason Input */}
-                        {isOnHold && (
-                          <div className="p-3 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 rounded-xl space-y-2 animate-in fade-in">
-                            <div className="flex items-center justify-between">
-                              <label className="text-[10px] uppercase font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1">
-                                <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                                <span>Hold / Investigation Reason * (Required)</span>
-                              </label>
-                              <span className="text-[9.5px] font-bold text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/60 px-2 py-0.5 rounded-md">
-                                Claims Locked
-                              </span>
-                            </div>
-                            <textarea
-                              rows={2}
-                              value={holdReason}
-                              onChange={(e) => setHoldReason(e.target.value)}
-                              placeholder="State why this return is placed on Hold (e.g. Awaiting vendor replacement authorization, investigating serial mismatch)..."
-                              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-amber-600"
-                            />
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] text-amber-800 dark:text-amber-300 italic">
-                                ⚠️ Issuing Credit Memos and Debit Claims is blocked until this hold is released.
-                              </span>
+                            <div className="flex items-center gap-1.5">
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setDisposition(isSupplierStream ? '1 - Pending Vendor Pickup' : '2- Restock to Inventory');
-                                  setRmaStatus('under_inspection');
-                                  setHoldReason('');
-                                }}
-                                className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-md text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all shadow-2xs shrink-0"
+                                onClick={() => stepSplitPart2(-1)}
+                                disabled={derivedPart2Qty <= 1}
+                                className="w-8 h-8 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-slate-800 font-bold flex items-center justify-center disabled:opacity-40 cursor-pointer"
                               >
-                                <Unlock className="w-3 h-3" />
-                                <span>Release Hold</span>
+                                <Minus className="w-3.5 h-3.5" />
+                              </button>
+                              <input
+                                type="number"
+                                min="1"
+                                max={maxSplitVal}
+                                value={derivedPart2Qty}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => handleSplitPart2Change(e.target.value)}
+                                className="flex-1 px-2.5 py-1.5 bg-amber-50/50 dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-black text-center"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => stepSplitPart2(1)}
+                                disabled={derivedPart2Qty >= maxSplitVal}
+                                className="w-8 h-8 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-slate-800 font-bold flex items-center justify-center disabled:opacity-40 cursor-pointer"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
                               </button>
                             </div>
-                          </div>
-                        )}
-
-                        {/* Outbound RTV Staging Notice */}
-                        {(String(disposition || '').toLowerCase().includes('return to vendor') || String(disposition || '').toLowerCase().includes('rtv') || String(disposition || '').toLowerCase().includes('pending vendor pickup')) && (
-                          <div className="p-3 bg-purple-50 dark:bg-purple-950/60 border border-purple-300 dark:border-purple-800 rounded-xl text-xs font-semibold text-purple-900 dark:text-purple-200 flex items-start gap-2 animate-in fade-in">
-                            <Truck className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0 mt-0.5" />
-                            <div className="space-y-0.5">
-                              <div>📦 Outbound RTV: Goods are scheduled for return to master vendor.</div>
-                              <div className="text-[10px] text-purple-700 dark:text-purple-300 font-normal">
-                                Accessible in Supplier Hub for batch vendor consolidation and Debit Claim generation (<code>?queue=rtv_debit</code>).
-                              </div>
+                            <div>
+                              <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">4-Choice Outcome</label>
+                              <select
+                                value={splitPart2Choice}
+                                onChange={(e) => setSplitPart2Choice(e.target.value)}
+                                className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold"
+                              >
+                                <option value="scrap">Throw Away / Dispose (Scrap)</option>
+                                <option value="restock_good">Put Back on Good Shelf (Restock)</option>
+                                <option value={isSupplierStream ? 'supplier_credit' : 'customer_credit'}>
+                                  {isSupplierStream ? 'Return to supplier for Debit Claim' : 'Accepted for Debit / Credit'}
+                                </option>
+                                <option value={isSupplierStream ? 'supplier_exchange' : 'customer_exchange'}>
+                                  {isSupplierStream ? 'Return to supplier for Replacement' : 'Replaced with Good Stock'}
+                                </option>
+                                <option value="pending">Pending Decision</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[9.5px] font-extrabold uppercase text-slate-500 block mb-0.5">Reason for Part 2</label>
+                              <input
+                                type="text"
+                                value={splitPart2Reason}
+                                onChange={(e) => setSplitPart2Reason(e.target.value)}
+                                placeholder="e.g. Damaged packaging"
+                                className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold"
+                              />
                             </div>
                           </div>
-                        )}
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 pt-1 border-t border-blue-200 dark:border-blue-800/80">
+                          <button
+                            type="button"
+                            onClick={() => setIsSplitting(false)}
+                            className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleExecuteSplit}
+                            disabled={isExecutingSplit}
+                            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                          >
+                            {isExecutingSplit ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Scissors className="w-3.5 h-3.5" />}
+                            <span>{isExecutingSplit ? 'Splitting Ticket...' : 'Confirm & Execute Split'}</span>
+                          </button>
+                        </div>
                       </div>
-
-                    <div className="flex items-center justify-between pt-1">
-                      <span className="text-[10px] text-slate-400">
-                        Inspected by: <strong className="text-slate-700 dark:text-slate-300">{report?.inspected_by || verifiedAdmin?.name || 'Staff'}</strong>
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={handleSaveTriage}
-                        disabled={isSavingTriage}
-                        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
-                      >
-                        {isSavingTriage ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Saving...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Save Physical Triage</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </>
-                  )
-                )}
-              </div>
-
-              {/* ENTERPRISE ACTION 2: STRICT DOCUMENT RULES MATRIX (Customer Credit Memo vs Supplier Debit Claim Note) */}
-              {isSupplierStream ? (
-                <div className="p-4 bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/60 rounded-2xl shadow-xs space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <div className="p-2 rounded-xl bg-purple-100 text-purple-700 dark:bg-purple-950/70 dark:text-purple-300">
-                        <Truck className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h5 className="text-xs font-black text-slate-900 dark:text-white">
-                          Supplier Debit Claim Note
-                        </h5>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          Total Vendor Claim: ₱{totalClaimValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({itemQty} unit{itemQty > 1 ? 's' : ''})
-                        </p>
-                      </div>
-                    </div>
-
-                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0 bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
-                      Outbound RTV Claim
-                    </span>
+                    )}
                   </div>
+                );
+              })()}
 
-                  <div className="p-3 bg-white/80 dark:bg-slate-900/80 rounded-xl border border-purple-100 dark:border-purple-900/40 text-xs space-y-1.5">
-                    <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
-                      <span>Vendor / Master Supplier:</span>
-                      <strong className="text-slate-900 dark:text-white font-mono">{adminSupplierName || report?.supplier_name || report?.supplier || report?.vendor || 'Master Supplier'}</strong>
-                    </div>
-                    <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
-                      <span>RTV Outbound Reference:</span>
-                      <strong className="text-purple-600 dark:text-purple-400 font-mono">{report?.rma_number}</strong>
-                    </div>
-                    <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
-                      <span>Triage Disposition:</span>
-                      <span className="font-bold text-slate-800 dark:text-slate-200">{disposition || 'Pending Vendor Pickup'}</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-0.5">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          const claims = await supplierClaimService.getClaims();
-                          const reportIsTest = isTestRecord(report);
-                          const claimNumber = supplierClaimService.generateRtvId(claims || [], reportIsTest);
-                          const supplierName = (adminSupplierName || report?.supplier_name || report?.supplier || 'Master Supplier').trim();
-                          const generatedBy = verifiedAdmin?.name || currentUser?.name || 'Warehouse Staff';
-                          const newClaim = {
-                            claimNumber,
-                            claim_number: claimNumber,
-                            supplierName,
-                            supplier_name: supplierName,
-                            createdAt: new Date().toISOString(),
-                            created_at: new Date().toISOString(),
-                            generatedBy,
-                            generated_by: generatedBy,
-                            items: [{ ...report, supplier_name: supplierName, quantity: itemQty, price: Number(report?.price_with_vat || report?.price || 0) }],
-                            totalQuantity: itemQty,
-                            totalClaimAmount: totalClaimValue,
-                            notes: reportIsTest ? '[TEST_MODE] Sandbox RTV Claim' : '',
-                            isTest: reportIsTest
-                          };
-                          await supplierClaimService.saveClaim(newClaim);
-                          if (onRefresh) onRefresh(report);
-                          alert(`Supplier Debit Claim Note (${claimNumber}) generated and saved for ${supplierName}!`);
-                        } catch (e) {
-                          console.warn('Debit claim creation notice:', e);
-                        }
-                      }}
-                      disabled={isOnHold || isRejected || isVendorRejectedClaim}
-                      title={isOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : (isVendorRejectedClaim ? "Vendor rejected claim. Debit Claims cannot be issued." : (isRejected ? "Claim is Rejected." : undefined))}
-                      className={`py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors shadow-xs ${
-                        (isOnHold || isRejected || isVendorRejectedClaim)
-                          ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
-                          : 'bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white cursor-pointer'
-                      }`}
-                    >
-                      {isOnHold ? <Lock className="w-3.5 h-3.5 text-amber-500" /> : <Receipt className="w-3.5 h-3.5" />}
-                      <span>{isOnHold ? 'Hold: Debit Claim Locked' : '+ Debit Claim'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const win = window.open('', '_blank');
-                        if (win) {
-                          win.document.write(`
-                            <html>
-                              <head>
-                                <title>Supplier Debit Claim - ${report?.rma_number}</title>
-                                <style>
-                                  @page { size: A4 portrait; margin: 12mm; }
-                                  body { font-family: Arial, sans-serif; padding: 20px; color: #111; border: 1.5px solid #000; border-radius: 6px; box-sizing: border-box; }
-                                  h2 { margin: 0 0 8px 0; }
-                                  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }
-                                  th, td { border: 1px solid #000; padding: 8px; text-align: left; }
-                                  th { background: #f1f5f9; }
-                                  .header { border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 16px; }
-                                </style>
-                              </head>
-                              <body>
-                                <div class="header">
-                                  <h2>PINGCON MARKETING - SUPPLIER DEBIT CLAIM VOUCHER</h2>
-                                  <div>RTV Reference: <strong>${report?.rma_number}</strong></div>
-                                  <div>Supplier: <strong>${adminSupplierName || report?.supplier_name || report?.supplier || 'Master Vendor'}</strong></div>
-                                  <div>Date: <strong>${new Date().toLocaleDateString()}</strong></div>
-                                </div>
-                                <p>This document authorizes Accounts Payable deduction / supplier debit for return to vendor claim.</p>
-                                <table>
-                                  <tr><th>Item</th><th>Barcode / SKU</th><th>Qty</th><th>Unit Price</th><th>Total Deduction</th></tr>
-                                  <tr>
-                                    <td>${report?.name || 'Product'}</td>
-                                    <td>${report?.code || report?.sku || report?.barcode || 'N/A'}</td>
-                                    <td>${itemQty}</td>
-                                    <td>₱${Number(report?.price_with_vat || report?.price || 0).toFixed(2)}</td>
-                                    <td><strong>₱${totalClaimValue.toFixed(2)}</strong></td>
-                                  </tr>
-                                </table>
-                                <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 12px;">
-                                  <div>Authorized by: _______________________</div>
-                                  <div>Vendor Received by: _______________________</div>
-                                </div>
-                                <script>window.print();</script>
-                              </body>
-                            </html>
-                          `);
-                          win.document.close();
-                        }
-                      }}
-                      className="py-2.5 px-3 bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 dark:hover:bg-purple-900/70 text-purple-900 dark:text-purple-200 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <Printer className="w-3.5 h-3.5 text-purple-700 dark:text-purple-300" />
-                      <span>Print Debit Voucher</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const win = window.open('', '_blank');
-                        if (win) {
-                          win.document.write(`
-                            <html>
-                              <head>
-                                <title>Vendor RTV Gate Pass - ${report?.rma_number}</title>
-                                <style>
-                                  @page { size: A4 portrait; margin: 12mm; }
-                                  body { font-family: Arial, sans-serif; padding: 18px; color: #111; border: 1.5px solid #000; border-radius: 6px; box-sizing: border-box; }
-                                  h2 { margin: 0 0 6px 0; font-size: 18px; }
-                                  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
-                                  th, td { border: 1px solid #000; padding: 8px; text-align: left; }
-                                  th { background: #f1f5f9; }
-                                  .header { border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; }
-                                </style>
-                              </head>
-                              <body>
-                                <div class="header">
-                                  <div>
-                                    <h2>PINGCON MARKETING - VENDOR RTV GATE PASS</h2>
-                                    <div>Outbound RTV Reference: <strong>${report?.rma_number}</strong></div>
-                                    <div>Vendor / Counterparty: <strong>${adminSupplierName || report?.supplier_name || report?.supplier || 'Master Vendor'}</strong></div>
-                                  </div>
-                                  <div style="text-align: right;">
-                                    <div>Date: <strong>${new Date().toLocaleDateString()}</strong></div>
-                                    <div>Bin Location: <strong>${warehouseLocation || report?.warehouse_location || 'DOCK'}</strong></div>
-                                  </div>
-                                </div>
-                                <p style="font-size: 12px;">Authorizes physical release of defective / RTV merchandise from warehouse dock to vendor representative.</p>
-                                <table>
-                                  <tr><th>Item Description</th><th>Barcode / SKU</th><th>Qty & Unit</th><th>Disposition</th></tr>
-                                  <tr>
-                                    <td>${report?.name || 'Product'}</td>
-                                    <td>${report?.code || report?.sku || report?.barcode || 'N/A'}</td>
-                                    <td>${itemQty} ${report?.unit_name || 'pc'}</td>
-                                    <td>${disposition || 'Return to Vendor (RTV)'}</td>
-                                  </tr>
-                                </table>
-                                <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 12px;">
-                                  <div>Warehouse Guard / Released By: _______________________</div>
-                                  <div>Vendor Driver Signature & Plate #: _______________________</div>
-                                </div>
-                                <script>window.print();</script>
-                              </body>
-                            </html>
-                          `);
-                          win.document.close();
-                        }
-                      }}
-                      className="py-2.5 px-3 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <Truck className="w-3.5 h-3.5 text-purple-300" />
-                      <span>Vendor RTV Gate Pass</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
+              {/* (f) Customer Credit Memo section (Customer Hub only) */}
+              {!isSupplierStream && (
                 <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-xs space-y-2.5">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2">
@@ -4378,10 +2351,9 @@ export default function QuickRMAActionModal({
                     </span>
                   </div>
 
-                  {/* Financial Safety Rule Notice (> ₱10,000) */}
                   {isHighValueClaim && !existingMemo && (
                     <div className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
-                      isSuperAdmin 
+                      isSuperAdmin
                         ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
                         : 'bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200'
                     }`}>
@@ -4392,9 +2364,9 @@ export default function QuickRMAActionModal({
                       )}
                       <div className="space-y-0.5">
                         <div className="font-black">
-                          {isSuperAdmin 
-                            ? `👑 Super Admin Approved (> ₱10,000 Claim)`
-                            : `🔒 Financial Safety Lock (Claim > ₱10,000)`}
+                          {isSuperAdmin
+                            ? '👑 Super Admin Approved (> ₱10,000 Claim)'
+                            : '🔒 Financial Safety Lock (Claim > ₱10,000)'}
                         </div>
                         <p className="text-[11px] opacity-90">
                           {isSuperAdmin
@@ -4406,108 +2378,64 @@ export default function QuickRMAActionModal({
                   )}
 
                   {isMultiItemManifest ? (
-                    <div className="p-3 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 rounded-xl flex items-center gap-2.5 text-xs text-blue-900 dark:text-blue-200 shadow-2xs">
+                    <div className="p-3 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 rounded-xl flex items-center gap-2.5 text-xs text-blue-900 dark:text-blue-200">
                       <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                       <span className="font-semibold text-[11px]">
-                        ℹ️ Multi-Item Manifest: Finance Credit Memos are issued individually per line item in the Customer RMA Hub drawer table.
+                        ℹ️ Multi-Item Manifest: Finance Credit Memos are issued individually per line item in the Customer Hub drawer table.
                       </span>
                     </div>
                   ) : !existingMemo ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
-                      <button
-                        type="button"
-                        disabled={!canIssueCreditMemo || isOnHold || isRejected}
-                        title={isOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : (isRejected ? "Claim is Rejected. Credit Memos cannot be issued." : (!canIssueCreditMemo ? "Locked: Super Admin Approval Required" : undefined))}
-                        onClick={() => {
-                          if (isOnHold) {
-                            alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
-                            return;
-                          }
-                          if (canIssueCreditMemo && onOpenCreditMemo && report) {
-                            onOpenCreditMemo(report);
-                          }
-                        }}
-                        className={`py-2.5 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all ${
-                          isOnHold
-                            ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
-                            : canIssueCreditMemo
-                            ? 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white cursor-pointer'
-                            : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
-                        }`}
-                      >
-                        {isOnHold ? (
-                          <>
-                            <Lock className="w-4 h-4 text-amber-500" />
-                            <span>Locked: On Hold / Quarantine</span>
-                          </>
-                        ) : canIssueCreditMemo ? (
-                          <>
-                            <Receipt className="w-4 h-4" />
-                            <span>+ Issue Credit Memo</span>
-                          </>
-                        ) : (
-                          <>
-                            <Lock className="w-4 h-4 text-amber-500" />
-                            <span>Locked: Super Admin Approval Required</span>
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={isOnHold}
-                        title={isOnHold ? "Item is on Hold / Quarantine. Resolve hold before issuing financial claims." : undefined}
-                        onClick={() => {
-                          if (isOnHold) {
-                            alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
-                            return;
-                          }
-                          setIsBufferSlipOpen(true);
-                        }}
-                        className={`py-2.5 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-sm transition-colors ${
-                          isOnHold
-                            ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
-                            : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'
-                        }`}
-                      >
-                        <Truck className="w-4 h-4 text-indigo-200" />
-                        <span>Buffer Stock Replacement Slip</span>
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      disabled={!canIssueCreditMemo}
+                      title={!canIssueCreditMemo ? 'Locked: Super Admin Approval Required' : undefined}
+                      onClick={() => {
+                        if (canIssueCreditMemo && onOpenCreditMemo && report) {
+                          onOpenCreditMemo(report);
+                        }
+                      }}
+                      className={`w-full py-2.5 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all ${
+                        canIssueCreditMemo
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                          : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
+                      }`}
+                    >
+                      {canIssueCreditMemo ? (
+                        <>
+                          <Receipt className="w-4 h-4" />
+                          <span>+ Issue Credit Memo</span>
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="w-4 h-4 text-amber-500" />
+                          <span>Locked: Super Admin Approval Required</span>
+                        </>
+                      )}
+                    </button>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                    <div className="grid grid-cols-2 gap-2 pt-1">
                       <button
                         type="button"
                         onClick={() => onViewCreditMemoVoucher && onViewCreditMemoVoucher(existingMemo)}
-                        className="py-2 px-3 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        className="py-2 px-3 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                       >
                         <Printer className="w-3.5 h-3.5" />
                         <span>CM Voucher</span>
                       </button>
-
                       <button
                         type="button"
                         onClick={() => onOpenCreditMemo && onOpenCreditMemo(report, existingMemo)}
-                        className="py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        className="py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                         <span>Edit CM</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setIsBufferSlipOpen(true)}
-                        className="py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <Truck className="w-3.5 h-3.5 text-indigo-200" />
-                        <span>Buffer Stock Replacement Slip</span>
                       </button>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* ENTERPRISE AUDIT TRAIL & LIFECYCLE TIMELINE */}
+              {/* (g) RMA Audit Trail */}
               <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
                 <RMATimelineAudit report={report} creditMemosList={creditMemosList} />
               </div>
@@ -4529,46 +2457,7 @@ export default function QuickRMAActionModal({
             Done / Close
           </button>
         </div>
-
       </div>
-
-      {/* 4x6" Thermal Box Label Modal */}
-      {isThermalLabelOpen && report && (
-        <ThermalBoxLabelModal
-          isOpen={isThermalLabelOpen}
-          onClose={() => setIsThermalLabelOpen(false)}
-          report={report}
-          currentUser={verifiedAdmin || currentUser}
-        />
-      )}
-
-      {/* Buffer Stock Replacement Dispatch Slip Modal */}
-      {isBufferSlipOpen && report && (
-        <BufferExchangeSlipModal
-          isOpen={isBufferSlipOpen}
-          onClose={() => setIsBufferSlipOpen(false)}
-          report={report}
-          hasCreditMemo={hasLinkedCreditMemo}
-          onDispatched={(updatedReport) => {
-            setReport(updatedReport);
-            setRmaStatus('buffer_replacement_dispatched');
-            setDisposition('6- Buffer Stock Exchange');
-            if (onRefresh) {
-              onRefresh(updatedReport);
-            }
-          }}
-        />
-      )}
-
-      {/* Admin Warehouse Locations Manager Modal */}
-      <WarehouseLocationsModal
-        isOpen={isLocationsModalOpen}
-        onClose={() => {
-          setIsLocationsModalOpen(false);
-          setAvailableLocations(getWarehouseLocations());
-        }}
-        onLocationsUpdated={(newLocs) => setAvailableLocations(newLocs)}
-      />
     </div>
   );
 }

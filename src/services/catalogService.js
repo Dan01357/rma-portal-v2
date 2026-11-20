@@ -508,6 +508,70 @@ export const catalogService = {
    */
   _productLookupCache: new Map(),
 
+  _isPlaceholderSupplier(val) {
+    const s = String(val || '').trim().toLowerCase();
+    return !s || s === 'pending assignment' || s === 'pending' || s === 'unassigned' || s === 'warehouse' || s === 'n/a';
+  },
+
+  _pickRealSupplier(...candidates) {
+    for (const cand of candidates) {
+      const s = String(cand || '').trim();
+      if (s && !this._isPlaceholderSupplier(s)) {
+        return s;
+      }
+    }
+    return 'Pending Assignment';
+  },
+
+  _normalizeCatalogProduct(raw, sourceLabel, fallbackBarcode = null, options = {}) {
+    if (!raw) return null;
+    const isMock = options.isMock === true;
+    const barcodeVal = String(raw.barcode || fallbackBarcode || '').trim();
+    const rawSku = String(raw.code || raw.sku || '').trim();
+    const cleanSku = (rawSku && rawSku !== barcodeVal && rawSku !== fallbackBarcode) ? rawSku : null;
+    const rawBrand = raw.brandName || raw.brand_name || raw.brand || '';
+    const pcsMatch = String(rawBrand).match(/\[Pcs\/Cs:(\d+)\]/);
+    const cleanBrand = String(rawBrand).replace(/\s*\[Pcs\/Cs:\d+\]/g, '').trim() || null;
+    const rawPcs = raw.pieces_per_case ?? raw.piecesPerCase ?? (pcsMatch ? parseInt(pcsMatch[1], 10) : null);
+    const numPcs = Number(rawPcs);
+    const parsedPcs = Number.isFinite(numPcs) && numPcs > 0 ? numPcs : null;
+    const supplierVal = String(
+      raw.supplierName || raw.supplier_name || raw.supplier || options.defaultSupplier || 'Pending Assignment'
+    ).trim() || 'Pending Assignment';
+    const unitVal = String(raw.unitName || raw.unit_name || 'pc').trim() || 'pc';
+    const netPrice = isMock ? Number(raw.unit_price || 0) : Number(raw.price || raw.unit_price || 0);
+    const priceWithVatVal = isMock
+      ? Number(raw.unit_price || 0) * 1.12
+      : Number(raw.priceWithVat || raw.price_with_vat || raw.price || 0);
+
+    return {
+      id: raw.id,
+      barcode: barcodeVal || cleanSku || null,
+      code: cleanSku,
+      sku: cleanSku,
+      name: raw.name || '',
+      price: netPrice,
+      price_with_vat: priceWithVatVal,
+      priceWithVat: priceWithVatVal,
+      supplier_name: supplierVal,
+      supplierName: supplierVal,
+      supplier: supplierVal,
+      brand_name: cleanBrand,
+      brandName: cleanBrand,
+      unit_name: unitVal,
+      unitName: unitVal,
+      pieces_per_case: parsedPcs,
+      piecesPerCase: parsedPcs,
+      hasSerialNumbers: Boolean(raw.hasSerialNumbers || raw.has_serial_numbers || raw.requires_serial),
+      imageUrl: raw.imageUrl || raw.image_url || null,
+      ae_name: raw.ae_name || null,
+      ae_email: raw.ae_email || null,
+      company: options.company !== undefined ? options.company : (raw.company || null),
+      isVerified: options.forceVerified ? true : (raw.isVerified !== false && raw.is_verified !== false),
+      source: sourceLabel
+    };
+  },
+
   async findProduct(barcodeOrQuery) {
     const clean = String(barcodeOrQuery || '').trim();
     if (!clean) return null;
@@ -527,30 +591,10 @@ export const catalogService = {
         const json = await res.json();
         if (json.success && json.found && json.product) {
           const p = json.product;
-          const rawBrand = p.brandName || p.brand_name || '';
-          const pcsMatch = rawBrand.match(/\[Pcs\/Cs:(\d+)\]/);
-          const cleanBrand = rawBrand.replace(/\s*\[Pcs\/Cs:\d+\]/g, '').trim() || null;
-          const parsedPcs = p.pieces_per_case || p.piecesPerCase || (pcsMatch ? parseInt(pcsMatch[1], 10) : null);
-          const matchedProd = {
-            id: p.id,
-            barcode: p.barcode || clean,
-            code: (p.code && p.code !== (p.barcode || clean)) ? p.code : (p.sku && p.sku !== (p.barcode || clean) ? p.sku : null),
-            name: p.name,
-            price: Number(p.price || 0),
-            priceWithVat: Number(p.priceWithVat || p.price_with_vat || p.price || 0),
-            supplierName: p.supplierName || p.supplier_name || 'Pending Assignment',
-            brandName: cleanBrand,
-            unitName: p.unitName || p.unit_name || 'pc',
-            pieces_per_case: parsedPcs,
-            piecesPerCase: parsedPcs,
-            hasSerialNumbers: Boolean(p.hasSerialNumbers || p.has_serial_numbers),
-            imageUrl: p.imageUrl || p.image_url || null,
-            ae_name: p.ae_name || null,
-            ae_email: p.ae_email || null,
-            company: p.company || null,
-            isVerified: p.isVerified !== false && p.is_verified !== false,
-            source: json.source === 'database' ? 'Supabase Database (Yours)' : (json.source === 'erply_api' ? 'ERPLY POS/ERP Catalog (Live API)' : 'Wholesale Master Catalog')
-          };
+          const sourceLabel = json.source === 'database'
+            ? 'Supabase Database (Yours)'
+            : (json.source === 'erply_api' ? 'ERPLY POS/ERP Catalog (Live API)' : 'Wholesale Master Catalog');
+          const matchedProd = this._normalizeCatalogProduct(p, sourceLabel, clean);
           if (this._productLookupCache) {
             this._productLookupCache.set(clean, matchedProd);
             if (matchedProd.barcode) this._productLookupCache.set(String(matchedProd.barcode).trim(), matchedProd);
@@ -566,47 +610,30 @@ export const catalogService = {
     try {
       const liveProduct = await purchaseOrdersApi.findProductByBarcode(clean);
       if (liveProduct) {
+        const normalizedLive = this._normalizeCatalogProduct(liveProduct, 'ERPLY POS/ERP Catalog (Live API)', clean, { forceVerified: true });
         // Cache into Supabase products table asynchronously so subsequent searches are instant
         try {
-          const liveSku = (liveProduct.code && liveProduct.code !== clean) ? liveProduct.code : (liveProduct.sku && liveProduct.sku !== clean ? liveProduct.sku : null);
           supabase.from('products').upsert([{
-            barcode: liveProduct.barcode || clean,
-            code: liveSku,
-            name: liveProduct.name,
-            supplier_name: liveProduct.supplier || liveProduct.supplier_name || 'Pending Assignment',
-            price: Number(liveProduct.price || liveProduct.unit_price || 0),
-            price_with_vat: Number(liveProduct.price_with_vat || liveProduct.priceWithVat || 0),
-            brand_name: liveProduct.brand || liveProduct.brand_name || null,
-            unit_name: liveProduct.unit_name || 'pc',
+            barcode: normalizedLive.barcode || clean,
+            code: normalizedLive.code,
+            name: normalizedLive.name,
+            supplier_name: normalizedLive.supplier_name,
+            price: normalizedLive.price,
+            price_with_vat: normalizedLive.price_with_vat,
+            brand_name: normalizedLive.brand_name,
+            unit_name: normalizedLive.unit_name,
             is_verified: true,
             updated_at: new Date().toISOString()
           }], { onConflict: 'barcode' }).then(() => {}).catch(() => {});
         } catch (cErr) {}
 
-        return {
-          id: liveProduct.id,
-          barcode: liveProduct.barcode || clean,
-          code: (liveProduct.code && liveProduct.code !== clean) ? liveProduct.code : (liveProduct.sku && liveProduct.sku !== clean ? liveProduct.sku : null),
-          name: liveProduct.name,
-          price: Number(liveProduct.price || liveProduct.unit_price || 0),
-          priceWithVat: Number(liveProduct.price_with_vat || liveProduct.priceWithVat || 0),
-          supplierName: liveProduct.supplier || liveProduct.supplier_name || 'Pending Assignment',
-          brandName: liveProduct.brand || liveProduct.brand_name || null,
-          unitName: liveProduct.unit_name || 'pc',
-          hasSerialNumbers: Boolean(liveProduct.requires_serial || liveProduct.has_serial_numbers),
-          imageUrl: liveProduct.image_url || null,
-          ae_name: liveProduct.ae_name || null,
-          ae_email: liveProduct.ae_email || null,
-          company: liveProduct.company || null,
-          isVerified: true,
-          source: 'ERPLY POS/ERP Catalog (Live API)'
-        };
+        return normalizedLive;
       }
     } catch (poErr) {
       console.warn('purchaseOrdersApi lookup fallback notice:', poErr?.message || poErr);
     }
 
-    // 2. Direct Supabase Fallback (if serverless API endpoint was offline or in local client dev)
+    // 3. Direct Supabase Fallback (if serverless API endpoint was offline or in local client dev)
     try {
       let supaItem = null;
       const { data: byBarcode, error: errBarcode } = await supabase
@@ -636,36 +663,13 @@ export const catalogService = {
       }
 
       if (supaItem) {
-        const rawBrand = supaItem.brand_name || '';
-        const pcsMatch = rawBrand.match(/\[Pcs\/Cs:(\d+)\]/);
-        const cleanBrand = rawBrand.replace(/\s*\[Pcs\/Cs:\d+\]/g, '').trim() || null;
-        const parsedPcs = supaItem.pieces_per_case || (pcsMatch ? parseInt(pcsMatch[1], 10) : null);
-        return {
-          id: supaItem.id,
-          barcode: supaItem.barcode,
-          code: (supaItem.code && supaItem.code !== supaItem.barcode) ? supaItem.code : (supaItem.sku && supaItem.sku !== supaItem.barcode ? supaItem.sku : null),
-          name: supaItem.name,
-          price: Number(supaItem.price || 0),
-          priceWithVat: Number(supaItem.price_with_vat || supaItem.price || 0),
-          supplierName: supaItem.supplier_name || 'Pending Assignment',
-          brandName: cleanBrand,
-          unitName: supaItem.unit_name || 'pc',
-          pieces_per_case: parsedPcs,
-          piecesPerCase: parsedPcs,
-          hasSerialNumbers: supaItem.has_serial_numbers || false,
-          imageUrl: supaItem.image_url || null,
-          ae_name: supaItem.ae_name || null,
-          ae_email: supaItem.ae_email || null,
-          company: supaItem.company || null,
-          isVerified: supaItem.is_verified !== false,
-          source: 'Supabase Database (Yours)'
-        };
+        return this._normalizeCatalogProduct(supaItem, 'Supabase Database (Yours)', clean);
       }
     } catch (e) {
       console.warn('Supabase lookup exception:', e.message);
     }
 
-    // 3. Wholesale Verified Catalog Fallback (Group 1 & 2 Products)
+    // 4. Wholesale Verified Catalog Fallback (Group 1 & 2 Products)
     const mockItem = INITIAL_PRODUCTS.find(p => 
       p.barcode === clean || 
       (p.sku && p.sku.toLowerCase() === clean.toLowerCase())
@@ -675,25 +679,12 @@ export const catalogService = {
         (mockItem.brand && mockItem.brand.toLowerCase().includes('bonita')) ||
         (mockItem.group && mockItem.group.toLowerCase().includes('pingcon'))
       );
-      return {
-        id: mockItem.id,
-        barcode: mockItem.barcode,
-        code: (mockItem.sku && mockItem.sku !== mockItem.barcode) ? mockItem.sku : null,
-        sku: (mockItem.sku && mockItem.sku !== mockItem.barcode) ? mockItem.sku : null,
-        name: mockItem.name,
-        price: Number(mockItem.unit_price || 0),
-        priceWithVat: Number(mockItem.unit_price || 0) * 1.12,
-        supplierName: mockItem.supplier || 'Savemore',
-        brandName: mockItem.brand || null,
-        unitName: 'pc',
-        hasSerialNumbers: mockItem.requires_serial || false,
-        imageUrl: mockItem.image_url || null,
-        ae_name: null,
-        ae_email: null,
+      return this._normalizeCatalogProduct(mockItem, 'Wholesale Verified Catalog', clean, {
+        isMock: true,
+        defaultSupplier: 'Savemore',
         company: isBonitaOrPingcon ? 'Pingcon / Bonita' : 'A2Z2GO / Keysys',
-        isVerified: true,
-        source: 'Wholesale Verified Catalog'
-      };
+        forceVerified: true
+      });
     }
 
     return null;
@@ -703,8 +694,9 @@ export const catalogService = {
    * COMPREHENSIVE MULTI-PRODUCT SEARCH:
    * Searches BOTH:
    * 1. Secure Serverless Proxy Search (/api/v1/products/lookup?search=...)
-   * 2. Supabase 'products' table (Priority 2 Fallback)
-   * 3. Enterprise Wholesale Catalog (Priority 3 Fallback)
+   * 2. purchaseOrdersApi.searchProducts fallback if server proxy returns empty
+   * 3. Supabase 'products' table fallback
+   * 4. Enterprise Wholesale Catalog fallback
    * Returns ALL matching products up to limit.
    */
   async searchAllProducts(query, limit = 50) {
@@ -714,6 +706,7 @@ export const catalogService = {
     const results = [];
     const seenKeys = new Set();
     const cleanLower = clean.toLowerCase();
+    let proxyCount = 0;
 
     // 1. Secure Serverless Multi-Catalog Search (/api/v1/products/lookup?search=...)
     try {
@@ -721,31 +714,12 @@ export const catalogService = {
       if (res && res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.products)) {
+          proxyCount = json.products.length;
           for (const item of json.products) {
             const key = String(item.barcode || item.code || item.id).trim().toLowerCase();
             if (!seenKeys.has(key)) {
               seenKeys.add(key);
-              const rawBrand = item.brandName || item.brand_name || '';
-              const pcsMatch = rawBrand.match(/\[Pcs\/Cs:(\d+)\]/);
-              const cleanBrand = rawBrand.replace(/\s*\[Pcs\/Cs:\d+\]/g, '').trim() || null;
-              const parsedPcs = item.pieces_per_case || item.piecesPerCase || (pcsMatch ? parseInt(pcsMatch[1], 10) : null);
-              results.push({
-                id: item.id,
-                barcode: item.barcode,
-                code: (item.code && item.code !== item.barcode) ? item.code : (item.sku && item.sku !== item.barcode ? item.sku : null),
-                name: item.name,
-                price: Number(item.price || 0),
-                priceWithVat: Number(item.priceWithVat || item.price_with_vat || item.price || 0),
-                supplierName: item.supplierName || item.supplier_name || 'Pending Assignment',
-                brandName: cleanBrand,
-                unitName: item.unitName || item.unit_name || 'pc',
-                pieces_per_case: parsedPcs,
-                piecesPerCase: parsedPcs,
-                hasSerialNumbers: Boolean(item.hasSerialNumbers || item.has_serial_numbers),
-                imageUrl: item.imageUrl || item.image_url || null,
-                isVerified: item.isVerified !== false && item.is_verified !== false,
-                source: item.source || 'Server Catalog API'
-              });
+              results.push(this._normalizeCatalogProduct(item, item.source || 'Server Catalog API'));
             }
           }
         }
@@ -754,7 +728,25 @@ export const catalogService = {
       console.warn('Server search proxy notice:', apiErr.message);
     }
 
-    // 2. Client-side Supabase products table fallback
+    // 2. Client-side purchaseOrdersApi fallback when server proxy returns empty or is unavailable
+    if (proxyCount === 0) {
+      try {
+        const erplyItems = await purchaseOrdersApi.searchProducts(clean, limit);
+        if (Array.isArray(erplyItems)) {
+          for (const item of erplyItems) {
+            const key = String(item.barcode || item.code || item.id).trim().toLowerCase();
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              results.push(this._normalizeCatalogProduct(item, item.source || 'erply_api', null, { forceVerified: true }));
+            }
+          }
+        }
+      } catch (poErr) {
+        console.warn('purchaseOrdersApi search fallback notice:', poErr?.message || poErr);
+      }
+    }
+
+    // 3. Client-side Supabase products table fallback
     try {
       const { data: supaItems, error } = await supabase
         .from('products')
@@ -769,27 +761,7 @@ export const catalogService = {
           const key = String(item.barcode || item.code || item.id).trim().toLowerCase();
           if (!seenKeys.has(key)) {
             seenKeys.add(key);
-            const rawBrand = item.brand_name || '';
-            const pcsMatch = rawBrand.match(/\[Pcs\/Cs:(\d+)\]/);
-            const cleanBrand = rawBrand.replace(/\s*\[Pcs\/Cs:\d+\]/g, '').trim() || null;
-            const parsedPcs = item.pieces_per_case || (pcsMatch ? parseInt(pcsMatch[1], 10) : null);
-            results.push({
-              id: item.id,
-              barcode: item.barcode,
-              code: (item.code && item.code !== item.barcode) ? item.code : (item.sku && item.sku !== item.barcode ? item.sku : null),
-              name: item.name,
-              price: Number(item.price || 0),
-              priceWithVat: Number(item.price_with_vat || item.price || 0),
-              supplierName: item.supplier_name || 'Pending Assignment',
-              brandName: cleanBrand,
-              unitName: item.unit_name || 'pc',
-              pieces_per_case: parsedPcs,
-              piecesPerCase: parsedPcs,
-              hasSerialNumbers: item.has_serial_numbers || false,
-              imageUrl: item.image_url || null,
-              isVerified: item.is_verified !== false,
-              source: 'Supabase Database (Custom)'
-            });
+            results.push(this._normalizeCatalogProduct(item, 'Supabase Database (Custom)'));
           }
         }
       }
@@ -797,29 +769,18 @@ export const catalogService = {
       console.warn('Supabase product search warning:', e);
     }
 
-    // 3. Wholesale Verified Catalog Fallback (INITIAL_PRODUCTS)
+    // 4. Wholesale Verified Catalog Fallback (INITIAL_PRODUCTS)
     for (const mock of INITIAL_PRODUCTS) {
       const matchText = `${mock.name} ${mock.brand || ''} ${mock.category || ''} ${mock.sku || ''} ${mock.barcode || ''}`.toLowerCase();
       if (matchText.includes(cleanLower)) {
         const key = String(mock.barcode || mock.sku || mock.id).trim().toLowerCase();
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
-          results.push({
-            id: mock.id,
-            barcode: mock.barcode,
-            code: (mock.sku && mock.sku !== mock.barcode) ? mock.sku : null,
-            sku: (mock.sku && mock.sku !== mock.barcode) ? mock.sku : null,
-            name: mock.name,
-            price: Number(mock.unit_price || 0),
-            priceWithVat: Number(mock.unit_price || 0) * 1.12,
-            supplierName: mock.supplier || 'Savemore',
-            brandName: mock.brand || null,
-            unitName: 'pc',
-            hasSerialNumbers: mock.requires_serial || false,
-            imageUrl: mock.image_url || null,
-            isVerified: true,
-            source: 'Wholesale Verified Catalog'
-          });
+          results.push(this._normalizeCatalogProduct(mock, 'Wholesale Verified Catalog', null, {
+            isMock: true,
+            defaultSupplier: 'Savemore',
+            forceVerified: true
+          }));
         }
       }
     }
@@ -1392,7 +1353,15 @@ export const catalogService = {
       code: isBatch ? null : (isKnown ? ((resolvedProduct.code && resolvedProduct.code !== finalBarcode) ? resolvedProduct.code : (resolvedProduct.sku && resolvedProduct.sku !== finalBarcode ? resolvedProduct.sku : null)) : (hasItems && items[0]?.code ? items[0].code : null)),
       name: effectiveName,
       quantity: calculatedTotalQuantity,
-      supplier_name: (supplier_name || supplier) ? String(supplier_name || supplier).trim() : (isKnown ? (resolvedProduct.supplier_name || resolvedProduct.supplierName || 'Pending Assignment') : (hasItems && items[0]?.supplier_name ? items[0].supplier_name : 'Pending Assignment')),
+      supplier_name: this._pickRealSupplier(
+        supplier_name,
+        supplier,
+        resolvedProduct?.supplier_name,
+        resolvedProduct?.supplierName,
+        resolvedProduct?.supplier,
+        hasItems ? items[0]?.supplier_name : null,
+        hasItems ? items[0]?.supplierName : null
+      ),
       price: hasItems 
         ? items.reduce((acc, it) => acc + ((Number(it.price) || 0) * (Number(it.quantity) || 1)), 0)
         : (isKnown ? Number(resolvedProduct.price || 0) : 0),
@@ -1523,7 +1492,7 @@ export const catalogService = {
           unit_name: it.unit_name || it.unit || 'pc',
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
-          supplier_name: it.supplier_name || 'Pending Assignment',
+          supplier_name: this._pickRealSupplier(it.supplier_name, it.supplierName, it.supplier, reportRow.supplier_name),
           reason: it.reason || 'Damaged Box / Crushed Packaging',
           explanation: it.explanation || null,
           expiry_date: it.expiry_date || null,
@@ -1545,7 +1514,7 @@ export const catalogService = {
           name: it.name || it.productName || `Item (${it.barcode})`,
           quantity: Number(it.quantity) || 1,
           unit_name: it.unit_name || it.unit || 'pc',
-          supplier_name: it.supplier_name || 'Pending Assignment',
+          supplier_name: this._pickRealSupplier(it.supplier_name, it.supplierName, it.supplier, reportRow.supplier_name),
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
           status: reportRow.status,
@@ -2964,13 +2933,19 @@ export const catalogService = {
       ...(payload.metadataPatch || {}),
       ...(recordIsTest ? { is_test: true, test_mode: true } : {})
     };
+    if (payload.clearWorkflowResolution) {
+      delete updatedMeta.workflow_resolution;
+      delete updatedMeta.resolved_at;
+      delete updatedMeta.resolved_by;
+    }
 
     const nowIso = new Date().toISOString();
+    let baseNotes = String(existing?.notes || '').replace(/\s*\[REORDER:[^\]]*\]/gi, '').trim();
     const preservedNotes = recordIsTest
-      ? (String(existing?.notes || '').includes('[TEST_MODE]')
-          ? existing.notes
-          : `${existing?.notes ? `${existing.notes} ` : ''}[TEST_MODE] Sandbox Return`)
-      : existing?.notes;
+      ? (baseNotes.includes('[TEST_MODE]')
+          ? baseNotes
+          : `${baseNotes ? `${baseNotes} ` : ''}[TEST_MODE] Sandbox Return`)
+      : baseNotes;
 
     const updates = {
       disposition: payload.disposition ?? existing?.disposition,
@@ -2984,6 +2959,12 @@ export const catalogService = {
 
     if (payload.supplier_name && String(payload.supplier_name).trim()) {
       updates.supplier_name = String(payload.supplier_name).trim();
+      if (updatedMeta.supplier_pickup && typeof updatedMeta.supplier_pickup === 'object') {
+        updatedMeta.supplier_pickup = {
+          ...updatedMeta.supplier_pickup,
+          supplier_name: updates.supplier_name
+        };
+      }
     }
     if (payload.google_drive_folder_url) {
       updates.google_drive_folder_url = payload.google_drive_folder_url;

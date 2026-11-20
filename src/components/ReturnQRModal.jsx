@@ -11,14 +11,16 @@ import {
   formatQuantityWithPackSize,
   formatManifestBreakdown,
   buildPortalQrPayload,
-  isTestRecord
+  isTestRecord,
+  formatDateYmd,
+  formatDateTimeYmdHm
 } from '../utils/rmaHelpers';
 
 const STICKER_PRESETS = [
   { id: 'small', label: 'Small (Tuna Can)', sub: '58 × 52 mm', widthMm: 58, heightMm: 52 },
   { id: 'medium', label: 'Medium (Inner Box)', sub: '90 × 105 mm', widthMm: 90, heightMm: 105 },
   { id: 'large', label: 'Large (Carton)', sub: '115 × 148 mm', widthMm: 115, heightMm: 148 },
-  { id: 'xlarge', label: 'Extra Large (A5)', sub: '148 × 200 mm', widthMm: 148, heightMm: 200 }
+  { id: 'xlarge', label: 'Extra Large (Half Letter)', sub: '140 × 195 mm', widthMm: 140, heightMm: 195 }
 ];
 
 const MM_TO_SCREEN_PX = 3.55;
@@ -117,17 +119,7 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
   const expiryDate = report.expiry_date || report.ai_document_metadata?.expiry_date || (manifestItems[0]?.expiry_date) || '';
   const isTest = isTestRecord(report);
 
-  const createdDateObj = new Date(report.created_at || Date.now());
-  const dateFormatted = createdDateObj.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
-  });
-  const timeFormatted = createdDateObj.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-  const dateTimeFormatted = `${dateFormatted} • ${timeFormatted}`;
+  const dateTimeFormatted = formatDateTimeYmdHm(report.created_at || Date.now());
 
   // Private non-URL payload: external phone cameras & Google Lens cannot open it!
   const qrPayload = buildPortalQrPayload(rmaNumber, isTest);
@@ -159,20 +151,25 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
       printIsolatedElement({
         elementId: 'rma-qr-box-sticker',
         documentTitle: `RMA-Sticker-${rmaNumber}-${sizeMm.widthMm}x${sizeMm.heightMm}mm`,
-        pageSize: 'auto',
-        pageMargin: '6mm',
+        pageSize: 'letter portrait',
+        pageMargin: '0.25in',
         customStyles: `
           @media print {
+            #rma-qr-box-sticker, #rma-qr-box-sticker * {
+              color: #000000 !important;
+              box-shadow: none !important;
+            }
             #rma-qr-box-sticker {
               width: ${sizeMm.widthMm}mm !important;
               min-height: ${sizeMm.heightMm}mm !important;
               max-width: ${sizeMm.widthMm}mm !important;
-              border: 1.8px solid #0f172a !important;
+              border: 1.8px solid #000000 !important;
               border-radius: 6px !important;
               padding: ${isCompact ? '2.5mm' : '4mm'} !important;
               box-shadow: none !important;
               margin: 0 auto !important;
               background: #ffffff !important;
+              color: #000000 !important;
               box-sizing: border-box !important;
             }
           }
@@ -374,24 +371,24 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
                 width: `${screenWidthPx}px`,
                 minHeight: `${screenMinHeightPx}px`
               }}
-              className={`bg-white border-2 border-slate-900 rounded-xl shadow-md text-slate-900 flex flex-col justify-between transition-[box-shadow] ${
+              className={`bg-white border-2 border-black rounded-xl text-black flex flex-col justify-between transition-[box-shadow] ${
                 isCompact ? 'p-2.5 gap-1.5' : isSpacious ? 'p-6 gap-4' : 'p-4 gap-2.5'
               }`}
             >
-              {/* Sticker Header Bar */}
+              {/* Sticker Header Bar (Plain B&W outline — zero colored/dark fill) */}
               <div
-                className={`flex items-center justify-between rounded-lg text-white ${
-                  isTest ? 'bg-amber-800' : 'bg-slate-900'
-                } ${isCompact ? 'px-2 py-1' : 'px-3 py-1.5'}`}
+                className={`flex items-center justify-between rounded-lg bg-white text-black border-[1.5px] border-black ${
+                  isCompact ? 'px-2 py-1' : 'px-3 py-1.5'
+                }`}
               >
                 <span className={`font-black uppercase tracking-wider truncate ${isCompact ? 'text-[8px]' : isSpacious ? 'text-xs' : 'text-[10px]'}`}>
                   {isTest
-                    ? '🧪 TEST SANDBOX LABEL'
+                    ? 'TEST SANDBOX LABEL'
                     : streamType === 'supplier_outbound'
                       ? 'PINGCON • SUPPLIER RTV'
                       : 'PINGCON • CUSTOMER RMA'}
                 </span>
-                <span className={`font-mono font-bold opacity-85 shrink-0 ml-2 ${isCompact ? 'text-[8px]' : 'text-[10px]'}`}>
+                <span className={`font-mono font-bold text-black shrink-0 ml-2 ${isCompact ? 'text-[8px]' : 'text-[10px]'}`}>
                   {sizeMm.widthMm}×{sizeMm.heightMm}mm
                 </span>
               </div>
@@ -399,19 +396,19 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
               {/* RMA ID + Supplier + QR Row */}
               <div className={`flex items-start justify-between ${isCompact ? 'gap-2' : 'gap-3'}`}>
                 <div className="min-w-0 flex-1 space-y-1">
-                  <div className={`font-bold uppercase tracking-wider text-slate-500 ${isCompact ? 'text-[7px]' : 'text-[9px]'}`}>
+                  <div className={`font-bold uppercase tracking-wider text-black ${isCompact ? 'text-[7px]' : 'text-[9px]'}`}>
                     RMA Reference ID
                   </div>
-                  <div className={`font-mono font-black text-slate-900 tracking-tight break-all leading-none ${
+                  <div className={`font-mono font-black text-black tracking-tight break-all leading-none ${
                     isCompact ? 'text-xs' : isSpacious ? 'text-2xl' : 'text-lg'
                   }`}>
                     {rmaNumber}
                   </div>
                   <div className="pt-0.5">
-                    <div className={`font-bold uppercase text-slate-500 ${isCompact ? 'text-[7px]' : 'text-[9px]'}`}>
+                    <div className={`font-bold uppercase text-black ${isCompact ? 'text-[7px]' : 'text-[9px]'}`}>
                       {streamType === 'supplier_outbound' ? 'Supplier' : 'Branch / Hub'}
                     </div>
-                    <div className={`font-bold text-slate-900 leading-tight break-words ${
+                    <div className={`font-bold text-black leading-tight break-words ${
                       isCompact ? 'text-[9px]' : isSpacious ? 'text-base' : 'text-xs'
                     }`}>
                       {streamType === 'supplier_outbound'
@@ -420,16 +417,16 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
                     </div>
                   </div>
                   {expiryDate && (
-                    <div className={`inline-block font-mono font-bold text-amber-800 bg-amber-50 border border-amber-300 rounded px-1.5 py-0.5 ${
+                    <div className={`inline-block font-mono font-bold text-black bg-white border border-black rounded px-1.5 py-0.5 ${
                       isCompact ? 'text-[8px]' : 'text-[10px]'
                     }`}>
-                      EXP: {expiryDate}
+                      Expiry Date (YYYY-MM-DD): {formatDateYmd(expiryDate) || expiryDate}
                     </div>
                   )}
                 </div>
 
                 <div className="shrink-0 flex flex-col items-center">
-                  <div className={`bg-white border-2 border-slate-900 rounded-lg ${isCompact ? 'p-1' : 'p-1.5'}`}>
+                  <div className={`bg-white border-2 border-black rounded-lg ${isCompact ? 'p-1' : 'p-1.5'}`}>
                     <QRCodeSVG
                       id="rma-qr-code-svg"
                       value={qrPayload}
@@ -438,7 +435,7 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
                       includeMargin={false}
                     />
                   </div>
-                  <div className={`mt-1 px-1.5 py-0.5 rounded bg-slate-900 text-white font-mono font-bold tracking-wider uppercase ${
+                  <div className={`mt-1 px-1.5 py-0.5 rounded bg-white text-black border border-black font-mono font-bold tracking-wider uppercase ${
                     isCompact ? 'text-[6.5px]' : 'text-[8px]'
                   }`}>
                     PORTAL SCAN
@@ -447,13 +444,13 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
               </div>
 
               {/* Product & Defect Block */}
-              <div className={`border-t border-b border-slate-200 ${isCompact ? 'py-1 space-y-0.5' : 'py-2 space-y-1'}`}>
-                <div className={`font-bold text-slate-900 leading-snug break-words ${
+              <div className={`border-t border-b border-black ${isCompact ? 'py-1 space-y-0.5' : 'py-2 space-y-1'}`}>
+                <div className={`font-bold text-black leading-snug break-words ${
                   isCompact ? 'text-[9px]' : isSpacious ? 'text-sm' : 'text-xs'
                 }`}>
                   {isManifest ? `Batch Manifest (${totalItems} SKUs): ${itemName}` : itemName}
                 </div>
-                <div className={`font-mono text-slate-600 flex flex-wrap gap-x-2 gap-y-0.5 ${
+                <div className={`font-mono text-black flex flex-wrap gap-x-2 gap-y-0.5 ${
                   isCompact ? 'text-[8px]' : isSpacious ? 'text-xs' : 'text-[10px]'
                 }`}>
                   {!isManifest && <span>SKU/BC: {sku || barcode}</span>}
@@ -466,7 +463,7 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
                     </strong>
                   </span>
                 </div>
-                <div className={`font-semibold text-rose-700 leading-tight break-words ${
+                <div className={`font-semibold text-black leading-tight break-words ${
                   isCompact ? 'text-[8px]' : isSpacious ? 'text-xs' : 'text-[10px]'
                 }`}>
                   Defect / Reason: {reason}
@@ -475,21 +472,21 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
 
               {/* Reporter Metadata + Physical Signature Box */}
               <div className={`space-y-1.5 ${isCompact ? 'text-[8px]' : 'text-[10px]'}`}>
-                <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-slate-700">
+                <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-black">
                   <span className="font-semibold">
-                    By: <strong className="text-slate-900">{reporter}</strong> ({reporterContact})
+                    By: <strong className="text-black">{reporter}</strong> ({reporterContact})
                   </span>
-                  <span className="font-mono text-slate-500">{dateTimeFormatted}</span>
+                  <span className="font-mono text-black">{dateTimeFormatted}</span>
                 </div>
 
                 {/* Signable handwritten line for physical attachment */}
-                <div className={`border border-slate-400 rounded-md bg-slate-50 ${isCompact ? 'p-1.5' : 'p-2.5'}`}>
-                  <div className={`font-bold uppercase tracking-wider text-slate-500 ${isCompact ? 'text-[6.5px]' : 'text-[8px]'}`}>
-                    Staff Signature (Sign after printing & attach to item)
+                <div className={`border border-black rounded-md bg-white ${isCompact ? 'p-1.5' : 'p-2.5'}`}>
+                  <div className={`font-bold uppercase tracking-wider text-black ${isCompact ? 'text-[6.5px]' : 'text-[8px]'}`}>
+                    Staff Signature (Sign after printing &amp; attach to item)
                   </div>
                   <div className={`flex items-end gap-2 ${isCompact ? 'mt-3' : isSpacious ? 'mt-7' : 'mt-5'}`}>
-                    <div className="flex-1 border-b border-slate-800" />
-                    <span className={`font-bold text-slate-500 shrink-0 ${isCompact ? 'text-[6.5px]' : 'text-[8px]'}`}>
+                    <div className="flex-1 border-b border-black" />
+                    <span className={`font-bold text-black shrink-0 ${isCompact ? 'text-[6.5px]' : 'text-[8px]'}`}>
                       Date: ______
                     </span>
                   </div>

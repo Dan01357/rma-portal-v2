@@ -1,23 +1,23 @@
 import React from 'react';
 import { 
-  CheckCircle2, 
   Clock, 
   Tag, 
   Receipt, 
-  MapPin, 
-  ShieldCheck, 
-  AlertTriangle,
   User,
   Truck,
   Box,
   Layers
 } from 'lucide-react';
+import { formatFourChoiceOutcome, formatDateTimeYmdHm } from '../utils/rmaHelpers';
 
 export default function RMATimelineAudit({ 
   report, 
   creditMemosList = [] 
 }) {
   if (!report) return null;
+
+  const outcome = formatFourChoiceOutcome(report);
+  const pickup = report.ai_document_metadata?.supplier_pickup || {};
 
   // Find linked credit memo if any
   const linkedCM = creditMemosList.find(cm => 
@@ -48,22 +48,24 @@ export default function RMATimelineAudit({
       actor: report.inspected_by || 'Admin / Quick Process',
       icon: Tag,
       color: 'bg-indigo-500 text-white',
-      details: `Matched to catalog • Supplier: ${report.supplier_name || 'Savemore'} • Unit Price: ₱${Number(report.price || 0).toFixed(2)}`,
+      details: `Matched to catalog • Supplier: ${report.supplier_name || 'Pending Assignment'} • Unit Price: ₱${Number(report.price || 0).toFixed(2)}`,
       badge: 'STAGE 2: CATALOG'
     });
   }
 
-  // Milestone 3: Warehouse Triage & Inspection
-  if (report.condition_grade || report.disposition || report.warehouse_location) {
+  // Milestone 3: 4-Choice Outcome & Driver Pickup
+  if (outcome.hasDecision) {
     events.push({
-      id: 'triage',
-      title: `Physical Triage: ${report.disposition || 'Triaged'}`,
-      timestamp: report.inspected_at || report.updated_at || report.created_at,
-      actor: report.inspected_by || 'Warehouse Supervisor',
-      icon: Layers,
-      color: 'bg-amber-500 text-white',
-      details: `Condition: ${report.condition_grade || 'Graded'} • Bin: ${report.warehouse_location || 'Pending Assignment'}`,
-      badge: 'STAGE 3: TRIAGE'
+      id: 'four_choice',
+      title: outcome.label,
+      timestamp: outcome.timestamp || report.inspected_at || report.updated_at || report.created_at,
+      actor: pickup.processed_by || report.ai_document_metadata?.simple_rtv_updated_by || report.inspected_by || 'Warehouse Staff',
+      icon: outcome.isPickedUp ? Truck : Layers,
+      color: outcome.isPickedUp ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white',
+      details: outcome.isPickedUp
+        ? `Driver: ${pickup.driver_name || 'N/A'} • Plate: ${pickup.truck_plate || 'N/A'}${outcome.claimNumber ? ` • Claim: ${outcome.claimNumber}` : ''}`
+        : `Supplier: ${pickup.supplier_name || report.supplier_name || 'Pending Assignment'}`,
+      badge: 'STAGE 3: 4-CHOICE OUTCOME'
     });
   }
 
@@ -97,13 +99,7 @@ export default function RMATimelineAudit({
         {events.map((evt, idx) => {
           const IconComp = evt.icon;
           const formattedDate = evt.timestamp 
-            ? new Date(evt.timestamp).toLocaleString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-              })
+            ? `${formatDateTimeYmdHm(evt.timestamp)} (YYYY-MM-DD HH:mm)`
             : 'Recent';
 
           return (

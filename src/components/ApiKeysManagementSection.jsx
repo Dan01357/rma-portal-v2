@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { copyTextSafe } from '../utils/clipboard';
+import { formatDateYmd, formatDateTimeYmdHm } from '../utils/rmaHelpers';
 
 const TARGET_SYSTEMS = [
   { id: 'primary', name: 'Primary System (Mine)', role: 'Internal Central System', badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' },
@@ -302,7 +303,7 @@ export default function ApiKeysManagementSection() {
                   </div>
                   <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
                     <Clock className="w-3 h-3" />
-                    Last used: {activeKey.last_used_at ? new Date(activeKey.last_used_at).toLocaleDateString() : 'Never'}
+                    Last used (YYYY-MM-DD): {activeKey.last_used_at ? formatDateYmd(activeKey.last_used_at) : 'Never'}
                   </div>
                 </div>
               ) : (
@@ -351,7 +352,7 @@ export default function ApiKeysManagementSection() {
                   <th className="p-3">Client System</th>
                   <th className="p-3">Masked Key</th>
                   <th className="p-3">Rate Limit</th>
-                  <th className="p-3">Last Used</th>
+                    <th className="p-3">Last Used (YYYY-MM-DD HH:mm)</th>
                   <th className="p-3">Status</th>
                   <th className="p-3 text-right">Actions</th>
                 </tr>
@@ -368,8 +369,8 @@ export default function ApiKeysManagementSection() {
                     <td className="p-3 text-slate-600 dark:text-slate-400">
                       {k.rate_limit || 60} req/min
                     </td>
-                    <td className="p-3 text-slate-500 dark:text-slate-400">
-                      {k.last_used_at ? new Date(k.last_used_at).toLocaleString() : 'Never'}
+                    <td className="p-3 text-slate-500 dark:text-slate-400 font-mono">
+                      {k.last_used_at ? formatDateTimeYmdHm(k.last_used_at) : 'Never'}
                     </td>
                     <td className="p-3">
                       {k.is_active ? (

@@ -2,7 +2,7 @@
  * QR Code & Box Sticker Download Utility
  * Client-side high-resolution PNG & SVG generation for mobile and desktop devices.
  */
-import { formatQuantityWithPackSize, formatManifestBreakdown } from './rmaHelpers';
+import { formatQuantityWithPackSize, formatManifestBreakdown, formatDateYmd, formatDateTimeYmdHm } from './rmaHelpers';
 
 /**
  * Convert an SVG element to an HTMLImageElement
@@ -166,16 +166,22 @@ export async function downloadQrCodePng({
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width, height);
 
-    // 2. Subtle outer border with rounded corners
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 12;
+    // 2. Crisp black outer border
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 10;
     ctx.strokeRect(30, 30, width - 60, height - 60);
 
-    // 3. Header badge
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(30, 30, width - 60, 90);
-
+    // 3. Header outline strip (Plain B&W — zero dark fill)
     ctx.fillStyle = '#ffffff';
+    ctx.fillRect(30, 30, width - 60, 90);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(30, 120);
+    ctx.lineTo(width - 30, 120);
+    ctx.stroke();
+
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 32px "Inter", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('WHOLESALE RMA RETURN AUTHORIZATION', width / 2, 90);
@@ -185,23 +191,23 @@ export async function downloadQrCodePng({
     const qrX = (width - qrSize) / 2;
     const qrY = 160;
 
-    // White backing box for QR with subtle border
+    // White backing box for QR with crisp black border
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(qrX - 20, qrY - 20, qrSize + 40, qrSize + 40);
-    ctx.strokeStyle = '#e2e8f0';
+    ctx.strokeStyle = '#000000';
     ctx.lineWidth = 4;
     ctx.strokeRect(qrX - 20, qrY - 20, qrSize + 40, qrSize + 40);
 
     ctx.drawImage(img, qrX, qrY, qrSize, qrSize);
 
     // 5. Instruction below QR
-    ctx.fillStyle = '#475569';
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 24px "JetBrains Mono", Consolas, monospace';
     ctx.textAlign = 'center';
     ctx.fillText('▲ SCAN QR CODE FOR INSTANT WAREHOUSE INTAKE ▲', width / 2, 1000);
 
     // 6. RMA Ticket Number (Big Monospace)
-    ctx.fillStyle = '#0f172a';
+    ctx.fillStyle = '#000000';
     let rmaFontSize = 64;
     ctx.font = `900 ${rmaFontSize}px "JetBrains Mono", Consolas, monospace`;
     while (ctx.measureText(rmaNumber).width > 1050 && rmaFontSize > 34) {
@@ -213,18 +219,18 @@ export async function downloadQrCodePng({
     // 7. Product & Barcode Subtitle (Wrapped cleanly across up to 2 lines)
     let nextY = 1150;
     if (productName || barcode) {
-      ctx.fillStyle = '#1e293b';
+      ctx.fillStyle = '#000000';
       ctx.font = 'bold 36px "Inter", system-ui, sans-serif';
       nextY = drawWrappedTextCentered(ctx, productName || 'Returned Merchandise', width / 2, nextY, 1040, 44, 2);
 
       if (barcode) {
-        ctx.fillStyle = '#64748b';
+        ctx.fillStyle = '#000000';
         ctx.font = 'bold 28px "JetBrains Mono", Consolas, monospace';
         ctx.fillText(`Barcode: ${barcode}`, width / 2, nextY + 10);
         nextY += 45;
       }
       if (reporter || reporterContact || dateFormatted) {
-        ctx.fillStyle = '#475569';
+        ctx.fillStyle = '#000000';
         ctx.font = 'bold 24px "Inter", sans-serif';
         const repInfo = reporter ? (reporterContact && reporterContact !== 'N/A' ? `${reporter} (${reporterContact})` : reporter) : '';
         const metaLine = [repInfo, dateFormatted].filter(Boolean).join('  •  ');
@@ -235,23 +241,23 @@ export async function downloadQrCodePng({
       }
 
       // Reporter Signature Line
-      ctx.strokeStyle = '#334155';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(width / 2 - 240, nextY + 30);
       ctx.lineTo(width / 2 + 240, nextY + 30);
       ctx.stroke();
 
-      ctx.fillStyle = '#64748b';
+      ctx.fillStyle = '#000000';
       ctx.font = 'bold 20px "Inter", sans-serif';
       ctx.fillText(`Reporter Signature: ${reporter || 'Staff'}`, width / 2, nextY + 60);
     }
 
     // 8. Footer timestamp / system notice
-    ctx.fillStyle = '#94a3b8';
+    ctx.fillStyle = '#000000';
     ctx.font = '500 22px "Inter", system-ui, sans-serif';
-    const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-    ctx.fillText(`RMA Portal Verification • Generated ${dateStr}`, width / 2, 1365);
+    const dateStr = formatDateYmd(new Date());
+    ctx.fillText(`RMA Portal Verification • Generated ${dateStr} (YYYY-MM-DD)`, width / 2, 1365);
 
     // Convert to PNG and download
     const finalFilename = filename || `${rmaNumber}-QR.png`;
@@ -322,31 +328,34 @@ export async function generateBoxStickerCanvas({
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width, height);
 
-    // 2. Outer Heavyweight Border
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 14;
+    // 2. Outer Heavyweight Border (Plain B&W)
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 12;
     ctx.strokeRect(40, 40, width - 80, height - 80);
 
     // 3. Top Header: Wholesale Operations & Dock Intake badge
-    ctx.fillStyle = '#64748b';
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 24px "Inter", sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText('WHOLESALE RMA OPERATIONS', 80, 110);
 
-    ctx.fillStyle = '#0f172a';
+    ctx.fillStyle = '#000000';
     ctx.font = '900 38px "Inter", sans-serif';
     ctx.fillText('RETURN VERIFICATION LABEL', 80, 160);
 
-    // Dock intake pill on top right
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(width - 320, 95, 240, 65);
+    // Dock intake outline pill on top right (Plain B&W)
     ctx.fillStyle = '#ffffff';
+    ctx.fillRect(width - 320, 95, 240, 65);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(width - 320, 95, 240, 65);
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 26px "JetBrains Mono", Consolas, monospace';
     ctx.textAlign = 'center';
     ctx.fillText('DOCK INTAKE', width - 200, 140);
 
     // Header divider line
-    ctx.strokeStyle = '#0f172a';
+    ctx.strokeStyle = '#000000';
     ctx.lineWidth = 6;
     ctx.beginPath();
     ctx.moveTo(80, 195);
@@ -354,47 +363,47 @@ export async function generateBoxStickerCanvas({
     ctx.stroke();
 
     // 4. Middle Right: High-contrast QR Code with framed border
-    // Sized at 380px (qrX = 740), leaving a generous 630px left column for RMA number & supplier
     const qrSize = 380;
     const qrX = width - 80 - qrSize; // 740
     const qrY = 225;
 
-    ctx.strokeStyle = '#0f172a';
+    ctx.strokeStyle = '#000000';
     ctx.lineWidth = 6;
     ctx.strokeRect(qrX, qrY, qrSize, qrSize);
     ctx.drawImage(img, qrX + 15, qrY + 15, qrSize - 30, qrSize - 30);
 
-    // Strip below QR: "SCAN FOR RMA DETAILS"
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(qrX, qrY + qrSize, qrSize, 42);
+    // Outline strip below QR: "SCAN FOR RMA DETAILS"
     ctx.fillStyle = '#ffffff';
+    ctx.fillRect(qrX, qrY + qrSize, qrSize, 42);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(qrX, qrY + qrSize, qrSize, 42);
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 22px "JetBrains Mono", Consolas, monospace';
     ctx.textAlign = 'center';
     ctx.fillText('SCAN FOR RMA DETAILS', qrX + qrSize / 2, qrY + qrSize + 29);
 
     // 5. Middle Left Column: RMA Number, Supplier, and Status
     ctx.textAlign = 'left';
-    ctx.fillStyle = '#64748b';
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 24px "Inter", sans-serif';
     ctx.fillText('RETURN AUTHORIZATION #', 80, 260);
 
-    // Dynamic Font Sizing for RMA Number to strictly prevent overlapping the QR code!
-    // Maximum left column width before reaching QR frame is 620px (from x=80 to x=700)
     let rmaFontSize = 54;
     ctx.font = `900 ${rmaFontSize}px "JetBrains Mono", Consolas, monospace`;
     while (ctx.measureText(rmaNumber).width > 610 && rmaFontSize > 26) {
       rmaFontSize -= 2;
       ctx.font = `900 ${rmaFontSize}px "JetBrains Mono", Consolas, monospace`;
     }
-    ctx.fillStyle = '#0f172a';
+    ctx.fillStyle = '#000000';
     ctx.fillText(rmaNumber, 80, 335);
 
-    // 6. Section 2: Returned Item Details Container Box (Taller & beautifully spaced)
+    // 6. Section 2: Returned Item Details Container Box (Plain white + solid black outline)
     const boxY = 670;
     const boxH = 760;
-    ctx.fillStyle = '#f8fafc';
+    ctx.fillStyle = '#ffffff';
     ctx.fillRect(80, boxY, width - 160, boxH);
-    ctx.strokeStyle = '#cbd5e1';
+    ctx.strokeStyle = '#000000';
     ctx.lineWidth = 4;
     ctx.strokeRect(80, boxY, width - 160, boxH);
 
@@ -402,17 +411,17 @@ export async function generateBoxStickerCanvas({
 
     if (isManifest) {
       // Header for Batch Manifest
-      ctx.fillStyle = '#64748b';
+      ctx.fillStyle = '#000000';
       ctx.font = 'bold 24px "Inter", sans-serif';
       ctx.fillText('BATCH RETURN MANIFEST DETAILS', 120, boxY + 50);
 
       if (resolvedStore) {
-        ctx.fillStyle = '#1e3a8a';
+        ctx.fillStyle = '#000000';
         ctx.font = 'bold 22px "Inter", sans-serif';
         ctx.fillText(`STORE / BRANCH: ${resolvedStore.toUpperCase()}`, 540, boxY + 50);
       }
 
-      ctx.fillStyle = '#0f172a';
+      ctx.fillStyle = '#000000';
       ctx.font = '900 32px "Inter", sans-serif';
       const manifestSummaryText = Array.isArray(items) && items.length > 0
         ? formatManifestBreakdown(items, true)
@@ -420,7 +429,7 @@ export async function generateBoxStickerCanvas({
       ctx.fillText(manifestSummaryText, 120, boxY + 100);
 
       // Divider 1
-      ctx.strokeStyle = '#cbd5e1';
+      ctx.strokeStyle = '#000000';
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(120, boxY + 125);
@@ -428,7 +437,7 @@ export async function generateBoxStickerCanvas({
       ctx.stroke();
 
       // Line items breakdown
-      ctx.fillStyle = '#475569';
+      ctx.fillStyle = '#000000';
       ctx.font = 'bold 20px "Inter", sans-serif';
       ctx.fillText('SUMMARY OF INCLUDED ITEMS IN THIS BOX:', 120, boxY + 160);
 
@@ -443,12 +452,12 @@ export async function generateBoxStickerCanvas({
         const itCode = it.code || it.sku || it.barcode || '';
         const itReason = it.reason || 'Defective';
 
-        ctx.fillStyle = '#0f172a';
+        ctx.fillStyle = '#000000';
         ctx.font = 'bold 24px "Inter", sans-serif';
         const lineText = `• [${itQty}] ${itName}`;
         ctx.fillText(lineText.length > 55 ? lineText.slice(0, 52) + '...' : lineText, 120, itemY);
 
-        ctx.fillStyle = '#64748b';
+        ctx.fillStyle = '#000000';
         ctx.font = 'bold 19px "JetBrains Mono", Consolas, monospace';
         const subText = `${itCode ? `BC/SKU: ${itCode} • ` : ''}Reason: ${itReason}`;
         ctx.fillText(subText.length > 65 ? subText.slice(0, 62) + '...' : subText, 145, itemY + 28);
@@ -457,14 +466,14 @@ export async function generateBoxStickerCanvas({
       });
 
       if (manifestList.length > maxDisplay) {
-        ctx.fillStyle = '#2563eb';
+        ctx.fillStyle = '#000000';
         ctx.font = 'bold 20px "Inter", sans-serif';
         ctx.fillText(`+ ${manifestList.length - maxDisplay} more line item(s) listed on digital manifest`, 145, itemY + 10);
         itemY += 35;
       }
 
       div2Y = Math.max(itemY + 15, boxY + 410);
-      ctx.strokeStyle = '#e2e8f0';
+      ctx.strokeStyle = '#000000';
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(120, div2Y);
@@ -473,24 +482,24 @@ export async function generateBoxStickerCanvas({
 
     } else {
       // Single Item Layout
-      ctx.fillStyle = '#64748b';
+      ctx.fillStyle = '#000000';
       ctx.font = 'bold 24px "Inter", sans-serif';
       ctx.fillText('RETURNED ITEM DETAILS', 120, boxY + 55);
 
       if (resolvedStore) {
-        ctx.fillStyle = '#1e3a8a';
+        ctx.fillStyle = '#000000';
         ctx.font = 'bold 22px "Inter", sans-serif';
         ctx.fillText(`STORE: ${resolvedStore.toUpperCase()}`, 640, boxY + 55);
       }
 
-      // Item name: Wrapped across up to 2 lines at 38px font (960px width) - NO TRUNCATION!
-      ctx.fillStyle = '#0f172a';
+      // Item name
+      ctx.fillStyle = '#000000';
       ctx.font = '900 38px "Inter", sans-serif';
       const prodNextY = drawWrappedText(ctx, itemName || 'Returned Merchandise', 120, boxY + 115, 960, 48, 2);
 
-      // Barcode and SKU line (dynamically placed below wrapped item name)
+      // Barcode and SKU line
       const codeY = Math.max(prodNextY + 10, boxY + 185);
-      ctx.fillStyle = '#334155';
+      ctx.fillStyle = '#000000';
       ctx.font = 'bold 30px "JetBrains Mono", Consolas, monospace';
       let codeStr = `Barcode: ${barcode || 'N/A'}`;
       if (sku) codeStr += `   •   SKU: ${sku}`;
@@ -498,7 +507,7 @@ export async function generateBoxStickerCanvas({
 
       // Horizontal Divider 1
       const div1Y = codeY + 35;
-      ctx.strokeStyle = '#e2e8f0';
+      ctx.strokeStyle = '#000000';
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(120, div1Y);
@@ -507,24 +516,23 @@ export async function generateBoxStickerCanvas({
 
       // 2-Column Specs: Quantity & Defect / Return Reason
       const row1HeaderY = div1Y + 45;
-      ctx.fillStyle = '#64748b';
+      ctx.fillStyle = '#000000';
       ctx.font = 'bold 24px "Inter", sans-serif';
       ctx.fillText('QUANTITY', 120, row1HeaderY);
       ctx.fillText('DEFECT / RETURN REASON', 520, row1HeaderY);
 
       const row1ValY = row1HeaderY + 50;
-      ctx.fillStyle = '#0f172a';
+      ctx.fillStyle = '#000000';
       ctx.font = '900 48px "JetBrains Mono", Consolas, monospace';
       ctx.fillText(`${quantity} ${unit || 'pc'}`, 120, row1ValY);
 
-      // Defect / Return Reason: Wrapped cleanly across up to 2 lines (560px width) - NO TRUNCATION!
-      ctx.fillStyle = '#b91c1c';
+      ctx.fillStyle = '#000000';
       ctx.font = 'bold 32px "Inter", sans-serif';
       const reasonNextY = drawWrappedText(ctx, reason || 'Defective / Return', 520, row1ValY - 10, 560, 42, 2);
 
       // Horizontal Divider 2
       div2Y = Math.max(row1ValY + 50, reasonNextY + 25);
-      ctx.strokeStyle = '#e2e8f0';
+      ctx.strokeStyle = '#000000';
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(120, div2Y);
@@ -534,51 +542,51 @@ export async function generateBoxStickerCanvas({
 
     // 2-Column Specs: Reported By & Date Recorded
     const row2HeaderY = div2Y + 45;
-    ctx.fillStyle = '#64748b';
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 24px "Inter", sans-serif';
     ctx.fillText('REPORTED BY & CONTACT', 120, row2HeaderY);
     ctx.fillText('DATE & TIME RECORDED', 520, row2HeaderY);
 
     const row2ValY = row2HeaderY + 45;
-    ctx.fillStyle = '#0f172a';
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 30px "Inter", sans-serif';
     const repInfo = reporterContact && reporterContact !== 'N/A'
       ? `${reporter || 'Warehouse Staff'} (${reporterContact})`
       : (reporter || 'Warehouse Staff');
     drawWrappedText(ctx, repInfo, 120, row2ValY, 380, 36, 2);
 
-    ctx.fillStyle = '#334155';
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 26px "JetBrains Mono", Consolas, monospace';
-    ctx.fillText(dateFormatted || new Date().toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }), 520, row2ValY);
+    ctx.fillText(dateFormatted || formatDateTimeYmdHm(new Date()), 520, row2ValY);
 
-    // Reporter Signature Block for Physical Verification
+    // Reporter Signature Block
     const sigBlockY = Math.max(row2ValY + 70, 1315);
-    ctx.strokeStyle = '#cbd5e1';
+    ctx.strokeStyle = '#000000';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(120, sigBlockY);
     ctx.lineTo(width - 120, sigBlockY);
     ctx.stroke();
 
-    ctx.fillStyle = '#475569';
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 22px "Inter", sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText('REPORTER SIGNATURE / HANDOVER ACKNOWLEDGEMENT:', 120, sigBlockY + 32);
 
     // Signature line
-    ctx.strokeStyle = '#0f172a';
+    ctx.strokeStyle = '#000000';
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(120, sigBlockY + 95);
     ctx.lineTo(600, sigBlockY + 95);
     ctx.stroke();
 
-    ctx.fillStyle = '#64748b';
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 20px "Inter", sans-serif';
     ctx.fillText(`Sign Above (${reporter || 'Staff'})`, 120, sigBlockY + 125);
 
     // Date line
-    ctx.strokeStyle = '#0f172a';
+    ctx.strokeStyle = '#000000';
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(680, sigBlockY + 95);
@@ -589,7 +597,7 @@ export async function generateBoxStickerCanvas({
 
     // 7. Dashed Tear Line and Footer
     const cutLineY = 1495;
-    ctx.strokeStyle = '#94a3b8';
+    ctx.strokeStyle = '#000000';
     ctx.setLineDash([14, 10]);
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -598,7 +606,7 @@ export async function generateBoxStickerCanvas({
     ctx.stroke();
     ctx.setLineDash([]); // Reset line dash
 
-    ctx.fillStyle = '#64748b';
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 24px "Inter", sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('ATTACH SECURELY TO OUTER BOX OR RETURNED MERCHANDISE', width / 2, 1560);
@@ -668,38 +676,41 @@ export async function generatePortalPosterCanvas({
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width, height);
 
-    // 2. Outer Border
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 14;
+    // 2. Outer Border (Plain B&W)
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 10;
     ctx.strokeRect(30, 30, width - 60, height - 60);
 
-    // 3. Header Hero Banner (Navy Gradient)
-    const grad = ctx.createLinearGradient(30, 30, width - 30, 240);
-    grad.addColorStop(0, '#1e3a8a');
-    grad.addColorStop(1, '#0f172a');
-    ctx.fillStyle = grad;
+    // 3. Header Outline Box (Zero dark/gradient fills)
+    ctx.fillStyle = '#ffffff';
     ctx.fillRect(30, 30, width - 60, 210);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(30, 240);
+    ctx.lineTo(width - 30, 240);
+    ctx.stroke();
 
-    ctx.fillStyle = '#60a5fa';
+    ctx.fillStyle = '#000000';
     ctx.font = '900 24px "Inter", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('WHOLESALE RMA INTAKE & VERIFICATION', width / 2, 85);
 
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#000000';
     ctx.font = '900 44px "Inter", system-ui, sans-serif';
     ctx.fillText('SCAN TO REPORT RETURNED PRODUCT', width / 2, 145);
 
-    ctx.fillStyle = '#94a3b8';
+    ctx.fillStyle = '#000000';
     ctx.font = '500 22px "Inter", system-ui, sans-serif';
     ctx.fillText('Warehouse Dock Intake • Store Repackers • Customer Defect Reporting', width / 2, 195);
 
-    // 4. Center QR Code Frame
+    // 4. Center QR Code Frame (Plain B&W outline)
     const qrFrameX = 260;
     const qrFrameY = 280;
     const qrFrameSize = 680;
-    ctx.fillStyle = '#f8fafc';
+    ctx.fillStyle = '#ffffff';
     ctx.fillRect(qrFrameX, qrFrameY, qrFrameSize, qrFrameSize);
-    ctx.strokeStyle = '#2563eb';
+    ctx.strokeStyle = '#000000';
     ctx.lineWidth = 6;
     ctx.strokeRect(qrFrameX, qrFrameY, qrFrameSize, qrFrameSize);
 
@@ -708,19 +719,22 @@ export async function generatePortalPosterCanvas({
     const qrOffset = (qrFrameSize - qrSize) / 2;
     ctx.drawImage(img, qrFrameX + qrOffset, qrFrameY + qrOffset, qrSize, qrSize);
 
-    // 5. Portal URL Pill
-    ctx.fillStyle = '#2563eb';
+    // 5. Portal URL Outline Pill (Plain B&W)
+    ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.roundRect((width - 640) / 2, 990, 640, 60, 16);
     ctx.fill();
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 4;
+    ctx.stroke();
 
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 24px "Inter", monospace, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(portalUrl.replace(/^https?:\/\//, ''), width / 2, 1030);
 
     // 6. Step-by-Step Instructions Container
-    ctx.fillStyle = '#0f172a';
+    ctx.fillStyle = '#000000';
     ctx.font = '900 32px "Inter", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('HOW TO FILE A RETURN REPORT', width / 2, 1110);
@@ -735,39 +749,42 @@ export async function generatePortalPosterCanvas({
     steps.forEach((step, idx) => {
       const stepY = 1170 + idx * 115;
 
-      // Step pill background
-      ctx.fillStyle = '#f1f5f9';
+      // Step pill outline (Plain B&W — zero shaded background)
+      ctx.fillStyle = '#ffffff';
       ctx.beginPath();
       ctx.roundRect(80, stepY, width - 160, 95, 18);
       ctx.fill();
-      ctx.strokeStyle = '#cbd5e1';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
       ctx.stroke();
 
-      // Number badge
-      ctx.fillStyle = '#2563eb';
+      // Number outline badge
+      ctx.fillStyle = '#ffffff';
       ctx.beginPath();
       ctx.arc(135, stepY + 47, 30, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
+      ctx.stroke();
 
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = '#000000';
       ctx.font = '900 28px "Inter", sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(step.num, 135, stepY + 57);
 
       // Text
       ctx.textAlign = 'left';
-      ctx.fillStyle = '#0f172a';
+      ctx.fillStyle = '#000000';
       ctx.font = 'bold 26px "Inter", sans-serif';
       ctx.fillText(step.title, 190, stepY + 40);
 
-      ctx.fillStyle = '#475569';
+      ctx.fillStyle = '#000000';
       ctx.font = '500 20px "Inter", sans-serif';
       ctx.fillText(step.desc, 190, stepY + 75);
     });
 
     // 7. Footer note
-    ctx.fillStyle = '#94a3b8';
+    ctx.fillStyle = '#000000';
     ctx.font = 'bold 20px "Inter", sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('No login required to submit return tickets • Authorized Wholesale System', width / 2, 1690);
@@ -845,7 +862,7 @@ export async function printHighResCanvas(canvas, documentTitle = 'Print Document
         <title>${documentTitle}</title>
         <style>
           @page {
-            size: A4 portrait;
+            size: letter portrait;
             margin: 0;
           }
           *, *::before, *::after {
@@ -869,8 +886,8 @@ export async function printHighResCanvas(canvas, documentTitle = 'Print Document
           img {
             display: block !important;
             margin: auto !important;
-            max-width: 180mm !important;
-            max-height: 255mm !important;
+            max-width: 7.7in !important;
+            max-height: 10.2in !important;
             width: auto !important;
             height: auto !important;
             object-fit: contain !important;

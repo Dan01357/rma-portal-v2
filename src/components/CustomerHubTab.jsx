@@ -6,7 +6,6 @@ import {
   ArrowUpDown,
   ChevronDown,
   ChevronRight,
-  ClipboardCheck,
   Download,
   FileSpreadsheet,
   FileText,
@@ -16,13 +15,11 @@ import {
   Lock,
   MapPin,
   Package,
-  Printer,
   QrCode,
   Receipt,
   RotateCcw,
   Search,
   Trash2,
-  Truck,
   Unlock,
   X
 } from 'lucide-react';
@@ -31,10 +28,12 @@ import { exportCustomerInboundRMAsToXlsx } from '../utils/exportCsv';
 import {
   DEFECT_REASONS,
   cleanExplanationText,
+  formatFourChoiceOutcome,
   formatLifecycleStage,
   formatManifestBreakdown,
   formatQuantityWithPackSize,
   getDocumentNumbers,
+  getItemNeedsReorder,
   getRealPhotos,
   getReportManifestItems,
   hasAssignedSku,
@@ -47,7 +46,8 @@ import {
   isSplitParentTicket,
   isUnlabeledBarcode,
   normalizeWarehouseLocation,
-  resolveBatchManifestLifecycle
+  resolveBatchManifestLifecycle,
+  formatDateYmd
 } from '../utils/rmaHelpers';
 
 export default function CustomerHubTab({
@@ -62,10 +62,11 @@ export default function CustomerHubTab({
   onOpenReportsModal,
   onOpenMatrixExport,
   onInspectTriage,
+  onOpenSimpleWizard,
+  onOpenPickupForm,
   onViewQR,
   onViewPhoto,
   onViewExplanation,
-  onPrintLabel,
   onEditProductFromReport,
   onOpenCreditMemo,
   onViewCreditMemoVoucher,
@@ -187,22 +188,6 @@ export default function CustomerHubTab({
     const disp = String(item.disposition || '').toLowerCase();
     const st = String(item.status || '').toLowerCase();
     return disp.includes('restock') && !['restocked', 'closed', 'resolved', 'scrapped', 'disposed'].includes(st);
-  }, [reportsList]);
-
-  const isItemReadyForSupplierReorder = React.useCallback((item, allReports = reportsList) => {
-    if (!item) return false;
-    const isManifestRow = !item.is_unpacked_manifest_item && isBatchManifest(item, allReports);
-    if (isManifestRow) {
-      const children = getReportManifestItems(item, allReports);
-      return children.some(c => {
-        const d = String(c?.disposition || '').toLowerCase();
-        const st = String(c?.status || '').toLowerCase();
-        return (d.includes('scrap') || d.includes('dispose') || d.includes('reorder')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(st);
-      });
-    }
-    const disp = String(item.disposition || '').toLowerCase();
-    const st = String(item.status || '').toLowerCase();
-    return (disp.includes('scrap') || disp.includes('dispose') || disp.includes('reorder')) && !['scrapped', 'disposed', 'closed', 'resolved', 'restocked'].includes(st);
   }, [reportsList]);
 
   const isItemOnHold = React.useCallback((item, allReports = reportsList) => {
@@ -530,12 +515,12 @@ export default function CustomerHubTab({
 
           <button
             type="button"
-            onClick={() => onOpenMatrixExport && onOpenMatrixExport('customer_inbound')}
+            onClick={() => onOpenMatrixExport && onOpenMatrixExport('overall')}
             className="w-full sm:w-auto justify-center px-3 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs cursor-pointer"
-            title="Download Customer Hub Daily Pieces Matrix (.xlsx) matching template"
+            title="Download Overall RMA Matrix (.xlsx) combining Customer Hub & Supplier RTV"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className="truncate">{isTestMode ? 'Sandbox Customer Matrix (.xlsx)' : 'Customer Matrix (.xlsx)'}</span>
+            <span className="truncate">{isTestMode ? 'Sandbox Overall Matrix (.xlsx)' : 'Overall RMA Matrix (.xlsx)'}</span>
           </button>
 
           <button
@@ -632,14 +617,13 @@ export default function CustomerHubTab({
           <option value="credit_memo_issued">5- Credit Memo Issued</option>
           <option value="restocked">6- Restocked</option>
           <option value="scrapped">7- Scrapped / Disposed</option>
-          <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
           <option value="rejected">8- Rejected / Invalid Claim</option>
         </select>
 
         {/* Date Range Picker: Neatly split in 2 columns */}
         <div className="grid grid-cols-2 gap-1.5 w-full min-w-0 col-span-1 sm:col-span-2 md:col-span-1 lg:col-span-1">
-          <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1.5 rounded-xl text-xs min-w-0 box-border">
-            <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">From</span>
+          <div className="flex flex-col gap-0.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1 rounded-xl text-xs min-w-0 box-border">
+            <span className="text-[9px] font-bold text-slate-400 uppercase truncate">From (YYYY-MM-DD)</span>
             <input
               type="date"
               value={reportsDateFrom}
@@ -648,11 +632,16 @@ export default function CustomerHubTab({
                 setReportsCurrentPage(1);
               }}
               className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
-              title="Filter records from date"
+              title="Filter records from date (YYYY-MM-DD)"
             />
+            {reportsDateFrom && (
+              <span className="text-[9px] font-mono font-bold text-emerald-700 dark:text-emerald-300 truncate">
+                ISO (YYYY-MM-DD): {reportsDateFrom}
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1.5 rounded-xl text-xs min-w-0 box-border">
-            <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">To</span>
+          <div className="flex flex-col gap-0.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 px-2 py-1 rounded-xl text-xs min-w-0 box-border">
+            <span className="text-[9px] font-bold text-slate-400 uppercase truncate">To (YYYY-MM-DD)</span>
             <input
               type="date"
               value={reportsDateTo}
@@ -661,8 +650,13 @@ export default function CustomerHubTab({
                 setReportsCurrentPage(1);
               }}
               className="bg-transparent text-slate-900 dark:text-white font-mono text-[11px] focus:outline-none cursor-pointer w-full min-w-0"
-              title="Filter records to date"
+              title="Filter records to date (YYYY-MM-DD)"
             />
+            {reportsDateTo && (
+              <span className="text-[9px] font-mono font-bold text-emerald-700 dark:text-emerald-300 truncate">
+                ISO (YYYY-MM-DD): {reportsDateTo}
+              </span>
+            )}
           </div>
         </div>
 
@@ -875,7 +869,7 @@ export default function CustomerHubTab({
                   title="Click to sort by Date"
                 >
                   <div className="flex items-center justify-end">
-                    <span>Date & GPS</span>
+                    <span>Date (YYYY-MM-DD) &amp; GPS</span>
                     {reportsSortField === 'created_at' ? (
                       reportsSortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />
                     ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400 shrink-0 ml-1" />}
@@ -900,6 +894,7 @@ export default function CustomerHubTab({
                 const manifestChildren = isManifest ? getReportManifestItems(item, reportsList) : [];
                 const manifestKey = item.id || item.rma_number;
                 const isManifestExpanded = expandedManifestIds.has(manifestKey);
+                const outcome = formatFourChoiceOutcome(item);
 
                 return (
                   <React.Fragment key={manifestKey}>
@@ -950,14 +945,8 @@ export default function CustomerHubTab({
                           >
                             <QrCode className="w-3.5 h-3.5" />
                           </button>
-                          {item.ai_document_metadata?.delivery_handover && (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 inline-flex items-center gap-1 shadow-2xs">
-                              <Truck className="w-2.5 h-2.5" />
-                              <span>Delivered ({item.ai_document_metadata.delivery_handover.driver_name || 'Driver'})</span>
-                            </span>
-                          )}
                         </div>
-                        {/* Split, Buffer, and Manifest Quick Badges */}
+                        {/* Split and Manifest Quick Badges */}
                         <div className="flex items-center gap-1 flex-wrap mt-0.5">
                           {isManifest && (
                             <button
@@ -985,12 +974,6 @@ export default function CustomerHubTab({
                               <span>✂️ Part 1</span>
                             </span>
                           ) : null}
-
-                          {(item.status === 'buffer_replacement_dispatched' || (item.disposition && item.disposition.includes('Buffer'))) && (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800 inline-flex items-center gap-0.5 shadow-2xs" title="1-to-1 Buffer Stock Replacement Dispatched">
-                              <span>🚚 Buffer</span>
-                            </span>
-                          )}
                         </div>
                       </td>
 
@@ -1075,7 +1058,7 @@ export default function CustomerHubTab({
                             )}
                             {item.expiry_date && (
                               <span className="text-[10px] font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-1.5 py-0.2 rounded border border-rose-200/80 dark:border-rose-800">
-                                Exp: {item.expiry_date}
+                                Expiry Date (YYYY-MM-DD): {formatDateYmd(item.expiry_date) || item.expiry_date}
                               </span>
                             )}
                           </div>
@@ -1137,12 +1120,17 @@ export default function CustomerHubTab({
 
                       {/* 7. Customer Branch & Reporter */}
                       <td className="py-3 px-3.5">
-                        <div className="font-bold text-slate-900 dark:text-slate-200 text-[11px] flex items-center gap-1" title={item.store_branch || 'Direct Return'}>
-                          <span className="text-blue-600 dark:text-blue-400">📍</span>
-                          <span className="truncate max-w-[130px] font-extrabold text-blue-900 dark:text-blue-300">
-                            {item.store_branch || 'Direct Return'}
-                          </span>
-                        </div>
+                        {(() => {
+                          const displayBranch = (item.store_branch && item.store_branch !== 'Direct Return') ? item.store_branch : 'N/A';
+                          return (
+                            <div className="font-bold text-slate-900 dark:text-slate-200 text-[11px] flex items-center gap-1" title={displayBranch}>
+                              <span className="text-blue-600 dark:text-blue-400">📍</span>
+                              <span className="truncate max-w-[130px] font-extrabold text-blue-900 dark:text-blue-300">
+                                {displayBranch}
+                              </span>
+                            </div>
+                          );
+                        })()}
                         <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5 truncate max-w-[130px]">
                           {item.reporter_name || item.reported_by || 'Staff'}
                           {item.reporter_contact ? ` • ${item.reporter_contact}` : ''}
@@ -1219,20 +1207,22 @@ export default function CustomerHubTab({
                           >
                             <span>📦 Multi-Item Status (See Drawer)</span>
                           </button>
-                        ) : (() => {
-                          const disp = item.disposition || 'Pending Triage';
-                          let color = 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
-                          if (disp === 'Restock to Inventory') color = 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800';
-                          else if (disp === 'Return to Vendor (RTV)') color = 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/70 dark:text-purple-300 dark:border-purple-800';
-                          else if (disp === 'Quarantine') color = 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800';
-                          else if (disp === 'Scrap / Dispose') color = 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800';
-                          else if (disp.includes('Buffer')) color = 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/70 dark:text-indigo-300 dark:border-indigo-800';
-                          return (
-                            <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${color}`}>
-                              {disp}
+                        ) : (
+                          <div className="space-y-1 inline-flex flex-col items-center">
+                            <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
+                              {outcome.label}
                             </span>
-                          );
-                        })()}
+                            {outcome.choiceKey === 'scrap' && (
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border inline-block ${
+                                getItemNeedsReorder(item)
+                                  ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800'
+                                  : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                              }`}>
+                                {getItemNeedsReorder(item) ? '🛒 Re-Order: YES' : '❌ No Re-Order'}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
 
                       {/* 11. Warehouse Rack/Bin Location */}
@@ -1248,7 +1238,7 @@ export default function CustomerHubTab({
 
                       {/* 9. Date & GPS */}
                       <td className="py-3 px-3.5 text-right font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                        <div>{new Date(item.created_at).toLocaleDateString()}</div>
+                        <div>{item.created_at ? formatDateYmd(item.created_at) : ''}</div>
                         {item.gps_latitude && item.gps_longitude ? (
                           <a
                             href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}
@@ -1264,28 +1254,45 @@ export default function CustomerHubTab({
                         )}
                       </td>
 
-                      {/* 10. Actions: Assign SKU / Save Product, Credit Memo, Thermal Print & Delete */}
+                      {/* 10. Actions: 4-Choice / Pickup, Form, Split Qty / Details, Assign SKU, Credit Memo & Delete */}
                       <td className="py-2.5 px-3.5 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          {/* Print 4x6 Thermal Box Label */}
-                          <button
-                            type="button"
-                            onClick={() => onPrintLabel && onPrintLabel(item)}
-                            className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                            title="Print 4x6 inch Thermal Box Label"
-                          >
-                            <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
-                          </button>
+                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                          {/* 4-Choice Outcome & Pickup Verification */}
+                          {onOpenSimpleWizard && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenSimpleWizard(item)}
+                              className={`px-2 py-1 rounded-lg text-[10px] font-black transition-colors cursor-pointer whitespace-nowrap border ${
+                                outcome.hasDecision
+                                  ? 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-700'
+                                  : 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-2xs'
+                              }`}
+                              title={outcome.hasDecision ? 'Edit saved 4-Choice decision, claim details, or driver pickup photos' : 'Open 4-Choice / Driver Pickup Verification Wizard'}
+                            >
+                              {outcome.hasDecision ? '✏️ Edit Claim / 4-Choice' : '⚡ 4-Choice / Pickup'}
+                            </button>
+                          )}
 
-                          {/* Inspect & Triage Physical Return */}
+                          {/* View / Re-print Debit Claim or Replacement Form when generated */}
+                          {onOpenPickupForm && outcome.formType && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenPickupForm(item)}
+                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap shadow-2xs"
+                              title={outcome.formType === 'replacement' ? 'View / Re-print Replacement Form' : 'View / Re-print Debit Claim Form'}
+                            >
+                              <span>{outcome.formType === 'replacement' ? '📄 Replacement Form' : '📄 Debit Claim Form'}</span>
+                            </button>
+                          )}
+
+                          {/* Split Qty / Details */}
                           <button
                             type="button"
                             onClick={() => onInspectTriage(item)}
-                            className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                            title={`Inspect, triage condition grade, and assign rack/bin location for ${item.rma_number}`}
+                            className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                            title={!isManifest && Number(item.quantity) > 1 ? `Split Qty or edit details for ${item.rma_number}` : `View details, documents, or audit trail for ${item.rma_number}`}
                           >
-                            <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                            <span>Inspect / Triage</span>
+                            <span>{!isManifest && Number(item.quantity) > 1 ? '✂️ Split Qty' : '📋 Details'}</span>
                           </button>
 
                           {/* 1-Click Coworker WMS Restock Action */}
@@ -1302,7 +1309,7 @@ export default function CustomerHubTab({
                           )}
 
                           {/* 1-Click Coworker Supplier Re-Order Action */}
-                          {isItemReadyForSupplierReorder(item, reportsList) && (
+                          {isItemReorderNeeded(item, reportsList) && (
                             <button
                               type="button"
                               disabled={updatingQueueId === (item.id || item.rma_number)}
@@ -1311,6 +1318,19 @@ export default function CustomerHubTab({
                               title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
                             >
                               <span>✓ PO Placed</span>
+                            </button>
+                          )}
+
+                          {/* 1-Click Coworker Scrapped - No Re-Order Action */}
+                          {isItemScrappedNoReorder(item, reportsList) && (
+                            <button
+                              type="button"
+                              disabled={updatingQueueId === (item.id || item.rma_number)}
+                              onClick={() => onConfirmCoworkerAction(item, 'scrapped')}
+                              className="px-2.5 py-1 bg-slate-700 hover:bg-slate-800 text-white border border-slate-600 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap disabled:opacity-50"
+                              title="1-click confirm that this total loss is written off without re-ordering"
+                            >
+                              <span>✓ Written Off</span>
                             </button>
                           )}
 
@@ -1332,9 +1352,9 @@ export default function CustomerHubTab({
                           {isItemOnHold(item, reportsList) && (
                             <button
                               type="button"
-                              onClick={() => onInspectTriage(item)}
+                              onClick={() => (onOpenSimpleWizard ? onOpenSimpleWizard(item) : onInspectTriage(item))}
                               className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
-                              title="Release hold and re-triage to Restock, RTV, or Scrap"
+                              title="Release hold via 4-Choice window"
                             >
                               <Unlock className="w-3 h-3" />
                               <span>🔓 Release Hold</span>
@@ -1395,17 +1415,6 @@ export default function CustomerHubTab({
                                   <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                                   <span>CM Voucher</span>
                                 </button>
-                              );
-                            }
-                            if (item.status === 'buffer_replacement_dispatched' || (item.disposition && item.disposition.includes('Buffer'))) {
-                              return (
-                                <span
-                                  className="px-2 py-1 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 shadow-2xs whitespace-nowrap"
-                                  title="This return was resolved via 1-to-1 Buffer Stock Replacement. No Credit Memo refund is due."
-                                >
-                                  <Truck className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
-                                  <span>Buffer Swapped</span>
-                                </span>
                               );
                             }
                             const isReportOnHold = isItemOnHold(item, reportsList);
@@ -1641,11 +1650,16 @@ export default function CustomerHubTab({
                                                   {childReason}
                                                 </span>
                                               </div>
-                                              <div className="truncate" title={childDisposition}>
-                                                <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-medium text-[10px] inline-block truncate max-w-[160px]">
-                                                  {childDisposition}
-                                                </span>
-                                              </div>
+                                              {(() => {
+                                                const childOutcome = formatFourChoiceOutcome(child);
+                                                return (
+                                                  <div className="truncate" title={childOutcome.label}>
+                                                    <span className={`px-1.5 py-0.5 rounded border font-semibold text-[10px] inline-block truncate max-w-[160px] ${childOutcome.badgeColor}`}>
+                                                      {childOutcome.label}
+                                                    </span>
+                                                  </div>
+                                                );
+                                              })()}
                                               {(() => {
                                                 const childNote = String(child.explanation || child.notes || '').trim();
                                                 if (!childNote) return null;
@@ -1877,6 +1891,7 @@ export default function CustomerHubTab({
             const manifestChildren = isManifest ? getReportManifestItems(item, reportsList) : [];
             const manifestKey = item.id || item.rma_number;
             const isManifestExpanded = expandedManifestIds.has(manifestKey);
+            const outcome = formatFourChoiceOutcome(item);
 
             return (
               <div
@@ -1947,14 +1962,11 @@ export default function CustomerHubTab({
                             );
                           })()}
                         </>
-                      ) : (() => {
-                        const stageInfo = formatLifecycleStage(item.status, item);
-                        return (
-                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider border inline-flex items-center gap-0.5 shadow-2xs ${stageInfo.color}`}>
-                            {stageInfo.label}
-                          </span>
-                        );
-                      })()}
+                      ) : (
+                        <span className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border inline-flex items-center gap-0.5 shadow-2xs ${outcome.badgeColor}`}>
+                          {outcome.label}
+                        </span>
+                      )}
                       {isSplitChildTicket(item) ? (
                         <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-0.5 shadow-2xs" title="Split Child Ticket (Part 2)">
                           <span>✂️ Part 2</span>
@@ -1991,26 +2003,43 @@ export default function CustomerHubTab({
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {/* Print 4x6 Thermal Box Label */}
-                    <button
-                      type="button"
-                      onClick={() => onPrintLabel && onPrintLabel(item)}
-                      className="p-1 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                      title="Print 4x6 inch Thermal Box Label"
-                    >
-                      <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
-                    </button>
+                  <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                    {/* 4-Choice Outcome & Pickup Verification */}
+                    {onOpenSimpleWizard && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenSimpleWizard(item)}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap border ${
+                          outcome.hasDecision
+                            ? 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-700'
+                            : 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-2xs'
+                        }`}
+                        title={outcome.hasDecision ? 'Edit saved 4-Choice decision, claim details, or driver pickup photos' : 'Open 4-Choice / Driver Pickup Verification Wizard'}
+                      >
+                        {outcome.hasDecision ? '✏️ Edit Claim / 4-Choice' : '⚡ 4-Choice / Pickup'}
+                      </button>
+                    )}
 
-                    {/* Inspect & Triage Physical Return */}
+                    {/* View / Re-print Form when generated */}
+                    {onOpenPickupForm && outcome.formType && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenPickupForm(item)}
+                        className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap shadow-2xs"
+                        title={outcome.formType === 'replacement' ? 'View / Re-print Replacement Form' : 'View / Re-print Debit Claim Form'}
+                      >
+                        {outcome.formType === 'replacement' ? '📄 Replacement Form' : '📄 Debit Claim Form'}
+                      </button>
+                    )}
+
+                    {/* Split Qty / Details */}
                     <button
                       type="button"
                       onClick={() => onInspectTriage(item)}
-                      className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                      title={`Inspect condition and set warehouse disposition for ${item.rma_number}`}
+                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                      title={!isManifest && Number(item.quantity) > 1 ? `Split Qty or edit details for ${item.rma_number}` : `View details, documents, or audit trail for ${item.rma_number}`}
                     >
-                      <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                      <span>Triage</span>
+                      <span>{!isManifest && Number(item.quantity) > 1 ? '✂️ Split Qty' : '📋 Details'}</span>
                     </button>
 
                     {/* 1-Click Coworker WMS Restock Action */}
@@ -2027,7 +2056,7 @@ export default function CustomerHubTab({
                     )}
 
                     {/* 1-Click Coworker Supplier Re-Order Action */}
-                    {isItemReadyForSupplierReorder(item, reportsList) && (
+                    {isItemReorderNeeded(item, reportsList) && (
                       <button
                         type="button"
                         disabled={updatingQueueId === (item.id || item.rma_number)}
@@ -2036,6 +2065,19 @@ export default function CustomerHubTab({
                         title="1-click confirm that a replacement order has been placed with supplier (updates status to 7- Scrapped / Disposed)"
                       >
                         <span>✓ PO Placed</span>
+                      </button>
+                    )}
+
+                    {/* 1-Click Coworker Scrapped - No Re-Order Action */}
+                    {isItemScrappedNoReorder(item, reportsList) && (
+                      <button
+                        type="button"
+                        disabled={updatingQueueId === (item.id || item.rma_number)}
+                        onClick={() => onConfirmCoworkerAction(item, 'scrapped')}
+                        className="px-2 py-0.5 bg-slate-700 hover:bg-slate-800 text-white border border-slate-600 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                        title="1-click confirm that this total loss is written off without re-ordering"
+                      >
+                        <span>✓ Written Off</span>
                       </button>
                     )}
 
@@ -2057,9 +2099,9 @@ export default function CustomerHubTab({
                     {isItemOnHold(item, reportsList) && (
                       <button
                         type="button"
-                        onClick={() => onInspectTriage(item)}
+                        onClick={() => (onOpenSimpleWizard ? onOpenSimpleWizard(item) : onInspectTriage(item))}
                         className="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-white border border-amber-600 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                        title="Release hold and re-triage to Restock, RTV, or Scrap"
+                        title="Release hold via 4-Choice window"
                       >
                         <Unlock className="w-3 h-3" />
                         <span>🔓 Release Hold</span>
@@ -2246,7 +2288,7 @@ export default function CustomerHubTab({
                     )}
                     {item.expiry_date && (
                       <span className="px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-medium">
-                        Exp: {item.expiry_date}
+                        Expiry Date (YYYY-MM-DD): {formatDateYmd(item.expiry_date) || item.expiry_date}
                       </span>
                     )}
                   </div>
@@ -2365,7 +2407,7 @@ export default function CustomerHubTab({
                               <div className="flex items-center gap-1 text-[10px]">
                                 <span className="text-rose-600 dark:text-rose-400 font-medium">{childReason}</span>
                                 <span className="text-slate-400">•</span>
-                                <span className="text-blue-600 dark:text-blue-400 font-semibold">{childDisposition}</span>
+                                <span className="text-blue-600 dark:text-blue-400 font-semibold">{formatFourChoiceOutcome(child).label}</span>
                               </div>
                               <div className="flex items-center gap-1.5">
                                 {canEditProducts && (

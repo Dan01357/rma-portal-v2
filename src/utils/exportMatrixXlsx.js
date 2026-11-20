@@ -1,16 +1,21 @@
 /**
- * Genuine OOXML (.xlsx) Matrix Exporter matching Pingcon's Daily Ordered/Returned Products template.
- * Zero external dependencies: builds valid Stored ZIP + OOXML workbook with:
- *   - Title Row 1, Italic Metadata Row 2, Alternating Navy/Blue Week Banners Row 3 + Green TOTAL Banner
- *   - Navy Header Row 4: SKU | Description | YYYY-MM-DD... | Week total (pcs) | Total pcs returned
- *   - Real Excel =SUM(...) formulas with cached values, green non-zero highlights (#DCFCE7)
- *   - Collapsible daily date column outlines (outlineLevel="1") & Freeze Panes at C5
- *   - Strict Customer Hub vs Supplier RTV stream separation and Live vs Test Mode isolation
+ * Genuine OOXML (.xlsx) Overall RMA Matrix Exporter.
+ * Mirrors Pingcon's Quantity_Balance_Report template with frozen A..E columns & rows 1..5:
+ *   - Row 1 Title, Row 2 Yellow Metadata Strip, Rows 3-4 Section & Alternating Week Banners
+ *   - Row 5 Columns A..E: Serial No. | Category (blank) | Supplier Name | SKU (blank if unassigned) | Description
+ *   - Collapsible Daily YYYY-MM-DD columns (outlineLevel="1") + Week total (pcs) =SUM(...) + Total pcs returned =SUM(...)
+ *   - Return Bad Stock (pcs) & Return Good Stock (pcs) under Danilo RMA / RMA banners
+ *   - 17 RMA Item Details & Workflow Status columns (No Basket/PO/Buffer columns)
+ *   - Combines Customer Hub + Supplier RTV in Overall mode while preserving strict Live vs Test isolation
  */
 
 import {
   computeItemPiecesAndValue,
+  formatDateTimeYmdHm,
+  formatDateYmd,
+  formatFourChoiceOutcome,
   getCleanSku,
+  getItemNeedsReorder,
   getReportManifestItems,
   isBatchManifest,
   isManifestSubItem,
@@ -19,43 +24,50 @@ import {
 } from './rmaHelpers.js';
 import { buildStoredZip, colToLetter, escapeXml } from './exportXlsx.js';
 
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const isPlaceholderSupplier = (val) => {
+  const s = String(val || '').trim().toLowerCase();
+  return !s || s === 'pending assignment' || s === 'pending' || s === 'unassigned' || s === 'warehouse' || s === 'n/a';
+};
+
 /** Format an ISO timestamp or YYYY-MM-DD string into Asia/Manila YYYY-MM-DD */
 export function toManilaDateKey(dateInput) {
-  if (!dateInput) return '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(String(dateInput).trim())) {
-    return String(dateInput).trim();
-  }
-  const d = new Date(dateInput);
-  if (Number.isNaN(d.getTime())) return '';
-  try {
-    return new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Manila',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    }).format(d);
-  } catch {
-    return d.toISOString().slice(0, 10);
-  }
+  return formatDateYmd(dateInput);
 }
 
+/** Unambiguous YYYY-MM-DD HH:mm (Asia/Manila) timestamp display */
 export function formatManilaTimestampDisplay(date = new Date()) {
+  return `${formatDateTimeYmdHm(date)} (Asia/Manila)`;
+}
+
+/** Format HHMM in Asia/Manila timezone for spreadsheet filename suffix */
+export function formatManilaHhmm(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return '0000';
   try {
-    return new Intl.DateTimeFormat('en-US', {
+    const parts = new Intl.DateTimeFormat('en-GB', {
       timeZone: 'Asia/Manila',
-      month: 'long',
-      day: '2-digit',
-      year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      hour12: true
-    }).format(date).replace(' at ', ' ');
+      hour12: false
+    }).formatToParts(d);
+    const map = {};
+    parts.forEach((p) => {
+      if (p.type !== 'literal') map[p.type] = p.value;
+    });
+    const hh = map.hour === '24' ? '00' : (map.hour || '00');
+    const mm = map.minute || '00';
+    return `${hh}${mm}`;
   } catch {
-    return date.toISOString();
+    return `${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
   }
 }
 
 function enumerateDateRange(startYmd, endYmd) {
+  if (!startYmd || !endYmd || !/^\d{4}-\d{2}-\d{2}$/.test(startYmd) || !/^\d{4}-\d{2}-\d{2}$/.test(endYmd)) {
+    return [];
+  }
   const [sy, sm, sd] = startYmd.split('-').map(Number);
   const [ey, em, ed] = endYmd.split('-').map(Number);
   const start = new Date(Date.UTC(sy, sm - 1, sd));
@@ -65,7 +77,6 @@ function enumerateDateRange(startYmd, endYmd) {
   }
   const dates = [];
   const cur = new Date(start.getTime());
-  // Hard cap at 370 days to prevent runaway browser memory on typos
   let guard = 0;
   while (cur <= end && guard < 370) {
     dates.push(cur.toISOString().slice(0, 10));
@@ -75,8 +86,6 @@ function enumerateDateRange(startYmd, endYmd) {
   return dates;
 }
 
-const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 function formatShortMonDay(utcDate) {
   const mon = SHORT_MONTHS[utcDate.getUTCMonth()];
   const day = String(utcDate.getUTCDate()).padStart(2, '0');
@@ -84,8 +93,7 @@ function formatShortMonDay(utcDate) {
 }
 
 /**
- * Group consecutive YYYY-MM-DD dates into Monday..Sunday week buckets
- * matching banners like "Sep 28 - Oct 04", "Oct 05 - Oct 11", "Nov 09 - Nov 15".
+ * Group consecutive YYYY-MM-DD dates into Monday..Sunday week buckets.
  */
 function buildWeekBlocks(dateStrings) {
   const blocks = [];
@@ -94,7 +102,7 @@ function buildWeekBlocks(dateStrings) {
   dateStrings.forEach((ymd) => {
     const [y, m, d] = ymd.split('-').map(Number);
     const utc = new Date(Date.UTC(y, m - 1, d));
-    const dow = utc.getUTCDay(); // 0 = Sun, 1 = Mon, ... 6 = Sat
+    const dow = utc.getUTCDay();
     const mondayOffset = dow === 0 ? -6 : 1 - dow;
     const monday = new Date(utc.getTime());
     monday.setUTCDate(monday.getUTCDate() + mondayOffset);
@@ -117,12 +125,14 @@ function buildWeekBlocks(dateStrings) {
 }
 
 /**
- * Prepare matrix dataset cleanly respecting stream & mode separation without mutating inputs.
+ * Prepare Overall RMA Matrix dataset combining Customer Hub + Supplier RTV (or single hub when filtered),
+ * strictly isolating Live Production vs Test Mode Sandbox records.
  */
 export function buildRmaMatrixDataset({
   reports = [],
   catalogProducts = [],
-  stream = 'supplier_outbound', // 'supplier_outbound' | 'customer_inbound'
+  creditMemos = [],
+  stream = 'overall', // 'overall' | 'supplier_outbound' | 'customer_inbound'
   isTestMode = false,
   startDate = '',
   endDate = '',
@@ -132,7 +142,7 @@ export function buildRmaMatrixDataset({
   let safeStart = startDate;
   if (!safeStart) {
     const d = new Date(`${safeEnd}T00:00:00Z`);
-    d.setUTCDate(d.getUTCDate() - 29);
+    d.setUTCDate(d.getUTCDate() - 13);
     safeStart = d.toISOString().slice(0, 10);
   }
 
@@ -140,40 +150,38 @@ export function buildRmaMatrixDataset({
   const weekBlocks = buildWeekBlocks(allDates);
   const dateSet = new Set(allDates);
 
-  // Strict Live vs Test & Stream filtering
+  const normalizedStream = (stream === 'supplier_outbound' || stream === 'customer_inbound')
+    ? stream
+    : 'overall';
+
+  const creditMemoByRma = new Map();
+  (Array.isArray(creditMemos) ? creditMemos : []).forEach((cm) => {
+    if (!cm) return;
+    if (Boolean(isTestMode) !== isTestRecord(cm)) return;
+    if (cm.rma_number && cm.credit_memo_number) {
+      creditMemoByRma.set(String(cm.rma_number).trim(), String(cm.credit_memo_number).trim());
+    }
+    if (cm.report_id && cm.credit_memo_number) {
+      creditMemoByRma.set(`id:${cm.report_id}`, String(cm.credit_memo_number).trim());
+    }
+  });
+
+  // Strict Live vs Test filtering (+ optional stream filter when not 'overall')
   const filteredTopReports = (Array.isArray(reports) ? reports : []).filter((r) => {
     if (!r || isTrashedRecord(r)) return false;
     const recordIsTest = isTestRecord(r);
     if (Boolean(isTestMode) !== recordIsTest) return false;
-    const rStream = r.rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
-    if (rStream !== stream) return false;
+    if (normalizedStream !== 'overall') {
+      const rStream = r.rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
+      if (rStream !== normalizedStream) return false;
+    }
     if (isManifestSubItem(r, reports)) return false;
     return true;
   });
 
-  // Aggregate pieces by SKU/key + date
-  const skuMap = new Map();
-
-  const ensureSkuEntry = (rawKey, skuLabel, descLabel) => {
-    const mapKey = String(rawKey || descLabel || 'UNKNOWN').trim().toUpperCase();
-    if (!skuMap.has(mapKey)) {
-      skuMap.set(mapKey, {
-        sku: skuLabel || mapKey,
-        description: descLabel || skuLabel || 'Unnamed Product',
-        dailyPcs: Object.create(null),
-        totalInPeriod: 0
-      });
-    }
-    return skuMap.get(mapKey);
-  };
-
-  if (includeZeroCatalogSkus && Array.isArray(catalogProducts)) {
-    catalogProducts.forEach((p) => {
-      const sku = getCleanSku(p.code || p.sku, p.barcode) || String(p.barcode || '').trim();
-      const desc = p.name || `Barcode ${p.barcode || sku}`;
-      if (sku) ensureSkuEntry(sku, sku, desc);
-    });
-  }
+  const rows = [];
+  const seenSkuKeys = new Set();
+  const distinctSkuSet = new Set();
 
   filteredTopReports.forEach((report) => {
     const reportDate = toManilaDateKey(report.created_at || report.updated_at);
@@ -184,53 +192,215 @@ export function buildRmaMatrixDataset({
       : [report];
     const effectiveLines = lines.length > 0 ? lines : [report];
 
+    const rStream = report.rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
+    const hubLabel = rStream === 'supplier_outbound' ? 'Supplier RTV' : 'Customer Hub';
+    const rmaNumber = report.rma_number || report.rmaNumber || String(report.id || '');
+    const meta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
+      ? report.ai_document_metadata
+      : {};
+    const pickup = (meta.supplier_pickup && typeof meta.supplier_pickup === 'object')
+      ? meta.supplier_pickup
+      : {};
+    const dateReported = formatDateTimeYmdHm(report.created_at || report.updated_at);
+    const linkedMemo =
+      creditMemoByRma.get(String(rmaNumber).trim()) ||
+      creditMemoByRma.get(`id:${report.id}`) ||
+      report.credit_memo_no ||
+      report.credit_memo_number ||
+      '';
+
     effectiveLines.forEach((line) => {
+      const { totalPieces, lineTotal } = computeItemPiecesAndValue(line, catalogProducts);
+      if (totalPieces <= 0) return;
+
       const bc = String(line.barcode || report.barcode || '').trim();
+      const candidateCode = String(line.code || line.sku || report.code || report.sku || '').trim();
       const matchedCatalog = Array.isArray(catalogProducts)
         ? catalogProducts.find((p) => (
-            (bc && String(p.barcode || '').trim() === bc) ||
-            (line.code && String(p.code || '').trim() === String(line.code).trim())
+            (bc && p.barcode && String(p.barcode).trim() === bc) ||
+            (candidateCode && (String(p.code || '').trim() === candidateCode || String(p.sku || '').trim() === candidateCode))
           ))
         : null;
 
-      const cleanSku =
-        getCleanSku(line.code || line.sku || matchedCatalog?.code || matchedCatalog?.sku, bc) ||
-        bc ||
-        'UNASSIGNED';
+      // Strictly "" if SKU is unassigned or matches barcode/placeholder
+      const cleanSku = getCleanSku(
+        line.code || line.sku || report.code || report.sku || matchedCatalog?.code || matchedCatalog?.sku,
+        bc
+      );
+
+      // Resolve real synced supplier, strictly blank "" if placeholder or none
+      const supplierName = [
+        line.supplier_name,
+        line.supplierName,
+        pickup.supplier_name,
+        report.supplier_name,
+        report.supplierName,
+        report.supplier,
+        matchedCatalog?.supplier_name,
+        matchedCatalog?.supplierName
+      ].find((cand) => !isPlaceholderSupplier(cand)) || '';
 
       const desc =
         line.name ||
         line.product_name ||
         line.productName ||
+        report.name ||
         matchedCatalog?.name ||
         (bc ? `Barcode ${bc}` : 'Returned Item');
 
-      const { totalPieces } = computeItemPiecesAndValue(line, catalogProducts);
-      if (totalPieces <= 0) return;
-
-      const entry = ensureSkuEntry(cleanSku, cleanSku, desc);
-      if (!entry.description || entry.description.startsWith('Barcode ')) {
-        entry.description = desc;
+      if (cleanSku) {
+        seenSkuKeys.add(cleanSku.toUpperCase());
+        distinctSkuSet.add(cleanSku.toUpperCase());
+      } else if (bc) {
+        seenSkuKeys.add(bc.toUpperCase());
+        distinctSkuSet.add(bc.toUpperCase());
       }
-      entry.dailyPcs[reportDate] = (entry.dailyPcs[reportDate] || 0) + totalPieces;
-      entry.totalInPeriod += totalPieces;
+
+      // Per-line outcome resolution (supports split/child metadata cleanly with parent fallback)
+      const lineWithParentMeta = {
+        ...report,
+        ...line,
+        ai_document_metadata: {
+          ...meta,
+          ...((line.ai_document_metadata && typeof line.ai_document_metadata === 'object') ? line.ai_document_metadata : {})
+        }
+      };
+      const outcome = formatFourChoiceOutcome(lineWithParentMeta);
+      const lineMeta = lineWithParentMeta.ai_document_metadata || {};
+      const workflowRes = String(lineMeta.workflow_resolution || '').toLowerCase().trim();
+      const dispLower = String(lineMeta.simple_rtv_disposition || pickup.disposition || line.disposition || report.disposition || '').toLowerCase().trim();
+      const statusLower = String(line.status || report.status || '').toLowerCase().trim();
+
+      const isRestocked =
+        outcome.choiceKey === 'restock' ||
+        workflowRes === 'restocked' ||
+        statusLower === 'restocked';
+      const isScrapped =
+        outcome.choiceKey === 'scrap' ||
+        workflowRes === 'reordered' ||
+        workflowRes === 'scrapped_no_reorder' ||
+        statusLower === 'scrapped' ||
+        statusLower === 'disposed';
+      const isReplaced =
+        outcome.choiceKey === 'replacement' ||
+        dispLower === 'supplier_exchange' ||
+        dispLower === 'customer_exchange';
+      const isReordered =
+        workflowRes === 'reordered' ||
+        getItemNeedsReorder(lineWithParentMeta) ||
+        String(report.notes || '').includes('[REORDER: YES]');
+      const isPickedUp = outcome.isPickedUp;
+
+      const goodStockPcs = isRestocked ? totalPieces : 0;
+      const badStockPcs = isRestocked ? 0 : totalPieces;
+
+      const rawExp = line.expiry_date || line.ai_document_metadata?.expiry_date || report.expiry_date || meta.expiry_date || '';
+      const expiryDate = formatDateYmd(rawExp);
+      const pickupDateTime = isPickedUp && pickup.picked_up_at ? formatDateTimeYmdHm(pickup.picked_up_at) : '';
+      const driverName = String(pickup.driver_name || '').trim();
+      const truckPlate = String(pickup.truck_plate || '').trim();
+      const driverAndPlate = [driverName, truckPlate ? `(${truckPlate})` : ''].filter(Boolean).join(' ');
+      const claimOrMemoNo = outcome.claimNumber || pickup.claim_number || linkedMemo || '';
+
+      rows.push({
+        serialNo: 0,
+        category: '', // Always blank as required
+        supplierName: supplierName ? String(supplierName).trim() : '',
+        sku: cleanSku,
+        description: desc,
+        dailyPcs: { [reportDate]: totalPieces },
+        totalInPeriod: totalPieces,
+        badStockPcs,
+        goodStockPcs,
+        hubLabel,
+        rmaId: rmaNumber,
+        barcode: bc,
+        dateReported,
+        expiryDate,
+        storeBranch: report.store_branch || '',
+        reason: line.reason || report.reason || '',
+        workflowOutcome: outcome.hasDecision ? outcome.label : 'Pending Decision',
+        reordered: isReordered ? 'Yes' : 'No',
+        restocked: isRestocked ? 'Yes' : 'No',
+        scrapped: isScrapped ? 'Yes' : 'No',
+        replaced: isReplaced ? 'Yes' : 'No',
+        pickedUp: isPickedUp ? 'Yes' : 'No',
+        pickupDateTime,
+        driverAndPlate,
+        claimOrMemoNo,
+        totalValue: Number(lineTotal.toFixed(2)),
+        _sortTs: new Date(report.created_at || report.updated_at || 0).getTime() || 0
+      });
     });
   });
 
-  const rows = Array.from(skuMap.values())
-    .filter((entry) => includeZeroCatalogSkus || entry.totalInPeriod > 0)
-    .sort((a, b) => a.sku.localeCompare(b.sku, undefined, { numeric: true }));
+  // Sort chronological ascending (oldest -> newest) so Excel table reads naturally
+  rows.sort((a, b) => a._sortTs - b._sortTs || a.rmaId.localeCompare(b.rmaId));
+
+  if (includeZeroCatalogSkus && Array.isArray(catalogProducts)) {
+    catalogProducts.forEach((p) => {
+      const bc = String(p.barcode || '').trim();
+      const cleanSku = getCleanSku(p.code || p.sku, bc);
+      const key = (cleanSku || bc).toUpperCase();
+      if (!key || seenSkuKeys.has(key)) return;
+      seenSkuKeys.add(key);
+      if (cleanSku) distinctSkuSet.add(cleanSku.toUpperCase());
+
+      const supplierName = [p.supplier_name, p.supplierName].find((c) => !isPlaceholderSupplier(c)) || '';
+      rows.push({
+        serialNo: 0,
+        category: '',
+        supplierName: supplierName ? String(supplierName).trim() : '',
+        sku: cleanSku,
+        description: p.name || (bc ? `Barcode ${bc}` : 'Catalog Product'),
+        dailyPcs: Object.create(null),
+        totalInPeriod: 0,
+        badStockPcs: 0,
+        goodStockPcs: 0,
+        hubLabel: '',
+        rmaId: '',
+        barcode: bc,
+        dateReported: '',
+        expiryDate: '',
+        storeBranch: '',
+        reason: '',
+        workflowOutcome: '',
+        reordered: '',
+        restocked: '',
+        scrapped: '',
+        replaced: '',
+        pickedUp: '',
+        pickupDateTime: '',
+        driverAndPlate: '',
+        claimOrMemoNo: '',
+        totalValue: 0,
+        _sortTs: Number.MAX_SAFE_INTEGER
+      });
+    });
+  }
+
+  rows.forEach((r, idx) => {
+    r.serialNo = idx + 1;
+  });
 
   const grandTotalPcs = rows.reduce((sum, r) => sum + r.totalInPeriod, 0);
+  const totalBadStockPcs = rows.reduce((sum, r) => sum + r.badStockPcs, 0);
+  const totalGoodStockPcs = rows.reduce((sum, r) => sum + r.goodStockPcs, 0);
+  const grandTotalValue = Number(rows.reduce((sum, r) => sum + r.totalValue, 0).toFixed(2));
 
   return {
+    stream: normalizedStream,
     startDate: safeStart,
     endDate: safeEnd,
     allDates,
     weekBlocks,
     rows,
-    monitoredSkuCount: rows.length,
-    grandTotalPcs
+    lineCount: rows.length,
+    monitoredSkuCount: distinctSkuSet.size || rows.length,
+    grandTotalPcs,
+    totalBadStockPcs,
+    totalGoodStockPcs,
+    grandTotalValue
   };
 }
 
@@ -240,8 +410,9 @@ export function buildRmaMatrixDataset({
 function buildStylesXml() {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <numFmts count="1">
+  <numFmts count="2">
     <numFmt numFmtId="164" formatCode="#,##0"/>
+    <numFmt numFmtId="165" formatCode="#,##0.00"/>
   </numFmts>
   <fonts count="7">
     <font><sz val="10"/><color rgb="FF0F172A"/><name val="Arial"/></font>
@@ -252,7 +423,7 @@ function buildStylesXml() {
     <font><b/><sz val="10"/><color rgb="FF14532D"/><name val="Arial"/></font>
     <font><b/><sz val="10"/><color rgb="FF1E3A5F"/><name val="Arial"/></font>
   </fonts>
-  <fills count="8">
+  <fills count="10">
     <fill><patternFill patternType="none"/></fill>
     <fill><patternFill patternType="gray125"/></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFFEF9C3"/></patternFill></fill>
@@ -261,6 +432,8 @@ function buildStylesXml() {
     <fill><patternFill patternType="solid"><fgColor rgb="FF14532D"/></patternFill></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFDCFCE7"/></patternFill></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFE2E8F0"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF312E81"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF334155"/></patternFill></fill>
   </fills>
   <borders count="3">
     <border><left/><right/><top/><bottom/><diagonal/></border>
@@ -282,13 +455,13 @@ function buildStylesXml() {
   <cellStyleXfs count="1">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
   </cellStyleXfs>
-  <cellXfs count="15">
+  <cellXfs count="22">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>
     <xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center"/></xf>
-    <xf numFmtId="0" fontId="3" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="3" fillId="4" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="3" fillId="5" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
     <xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
     <xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
@@ -298,6 +471,13 @@ function buildStylesXml() {
     <xf numFmtId="164" fontId="5" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
     <xf numFmtId="164" fontId="6" fillId="7" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
     <xf numFmtId="0" fontId="6" fillId="7" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="8" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="9" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="165" fontId="4" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+    <xf numFmtId="165" fontId="6" fillId="7" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
   </cellXfs>
 </styleSheet>`;
 }
@@ -315,13 +495,14 @@ function formulaNumCell(ref, styleIdx, formula, cachedVal) {
 }
 
 /**
- * Generates the raw Uint8Array bytes of the genuine .xlsx file.
- * Exported directly so automated Node QA tests can verify ZIP + XML + formulas + totals.
+ * Generates the raw Uint8Array bytes of the Overall RMA Matrix .xlsx file.
+ * Exported directly so automated verification can inspect ZIP + XML + formulas + totals.
  */
 export function buildRmaMatrixXlsxBytes({
   reports = [],
   catalogProducts = [],
-  stream = 'supplier_outbound', // 'supplier_outbound' | 'customer_inbound'
+  creditMemos = [],
+  stream = 'overall',
   isTestMode = false,
   startDate = '',
   endDate = '',
@@ -330,6 +511,7 @@ export function buildRmaMatrixXlsxBytes({
   const dataset = buildRmaMatrixDataset({
     reports,
     catalogProducts,
+    creditMemos,
     stream,
     isTestMode,
     startDate,
@@ -337,17 +519,28 @@ export function buildRmaMatrixXlsxBytes({
     includeZeroCatalogSkus
   });
 
-  const { startDate: sDate, endDate: eDate, weekBlocks, rows, monitoredSkuCount, grandTotalPcs } = dataset;
+  const {
+    stream: activeStream,
+    startDate: sDate,
+    endDate: eDate,
+    weekBlocks,
+    rows,
+    lineCount,
+    monitoredSkuCount,
+    grandTotalPcs,
+    grandTotalValue
+  } = dataset;
 
-  // Map physical columns:
-  // Col 0: SKU, Col 1: Description
-  // Then for each weekBlock: dates (outlineLevel=1), followed by Week total (pcs)
-  // Final col: Total pcs returned
+  // Frozen Columns A..E (indices 0..4)
   const columns = [
-    { kind: 'sku', header: 'SKU', width: 16 },
-    { kind: 'desc', header: 'Description', width: 42 }
+    { kind: 'serial', header: 'Serial No.', width: 11, align: 'center' },
+    { kind: 'category', header: 'Category', width: 14, align: 'left' },
+    { kind: 'supplier', header: 'Supplier Name', width: 28, align: 'left' },
+    { kind: 'sku', header: 'SKU', width: 16, align: 'left' },
+    { kind: 'desc', header: 'Description', width: 40, align: 'left' }
   ];
 
+  const firstDailySectionCol = columns.length; // Col F (idx 5)
   const weekMeta = [];
   const weekTotalCols = [];
 
@@ -358,7 +551,13 @@ export function buildRmaMatrixXlsxBytes({
     });
     const lastDateCol = columns.length - 1;
     const weekTotalCol = columns.length;
-    columns.push({ kind: 'weekTotal', header: 'Week total (pcs)', width: 16, startDateCol: startCol, endDateCol: lastDateCol });
+    columns.push({
+      kind: 'weekTotal',
+      header: 'Week total (pcs)',
+      width: 16,
+      startDateCol: startCol,
+      endDateCol: lastDateCol
+    });
     weekTotalCols.push(weekTotalCol);
     weekMeta.push({
       label: wb.label,
@@ -368,19 +567,49 @@ export function buildRmaMatrixXlsxBytes({
     });
   });
 
+  const lastDailySectionCol = columns.length - 1;
   const grandTotalCol = columns.length;
-  columns.push({ kind: 'grandTotal', header: 'Total pcs returned', width: 20 });
+  columns.push({ kind: 'grandTotal', header: 'Total pcs returned', width: 19 });
+
+  const badStockCol = columns.length;
+  columns.push({ kind: 'badStock', header: 'Return Bad Stock (pcs)', width: 21 });
+  const goodStockCol = columns.length;
+  columns.push({ kind: 'goodStock', header: 'Return Good Stock (pcs)', width: 21 });
+
+  const detailStartCol = columns.length;
+  const detailCols = [
+    { kind: 'detail', field: 'hubLabel', header: 'Source / Hub', width: 16, align: 'center' },
+    { kind: 'detail', field: 'rmaId', header: 'RMA ID', width: 22, align: 'left' },
+    { kind: 'detail', field: 'barcode', header: 'Barcode', width: 18, align: 'left' },
+    { kind: 'detail', field: 'dateReported', header: 'Date Reported (YYYY-MM-DD HH:mm)', width: 24, align: 'left' },
+    { kind: 'detail', field: 'expiryDate', header: 'Expiry Date (YYYY-MM-DD)', width: 21, align: 'center' },
+    { kind: 'detail', field: 'storeBranch', header: 'Store / Branch', width: 24, align: 'left' },
+    { kind: 'detail', field: 'reason', header: 'Defect / Return Reason', width: 28, align: 'left' },
+    { kind: 'detail', field: 'workflowOutcome', header: 'Workflow Outcome', width: 32, align: 'left' },
+    { kind: 'detail', field: 'reordered', header: 'Re-Ordered?', width: 13, align: 'center' },
+    { kind: 'detail', field: 'restocked', header: 'Restocked?', width: 13, align: 'center' },
+    { kind: 'detail', field: 'scrapped', header: 'Scrapped?', width: 13, align: 'center' },
+    { kind: 'detail', field: 'replaced', header: 'Replaced?', width: 13, align: 'center' },
+    { kind: 'detail', field: 'pickedUp', header: 'Picked Up by Driver?', width: 19, align: 'center' },
+    { kind: 'detail', field: 'pickupDateTime', header: 'Driver Pickup Date & Time (YYYY-MM-DD HH:mm)', width: 28, align: 'left' },
+    { kind: 'detail', field: 'driverAndPlate', header: 'Driver Name & Truck Plate #', width: 28, align: 'left' },
+    { kind: 'detail', field: 'claimOrMemoNo', header: 'Debit Claim / Credit Memo #', width: 24, align: 'left' },
+    { kind: 'totalValue', field: 'totalValue', header: 'Total Value (PHP)', width: 18, align: 'right' }
+  ];
+  columns.push(...detailCols);
 
   const lastColIdx = columns.length - 1;
   const lastColLetter = colToLetter(lastColIdx);
   const grandTotalLetter = colToLetter(grandTotalCol);
 
-  const streamTitle = stream === 'supplier_outbound'
+  const scopeLabel = activeStream === 'supplier_outbound'
     ? 'SUPPLIER RTV'
-    : 'CUSTOMER RMA HUB';
+    : activeStream === 'customer_inbound'
+      ? 'CUSTOMER HUB'
+      : 'OVERALL RMA (CUSTOMER HUB + SUPPLIER RTV)';
   const modePrefix = isTestMode ? 'TEST MODE SANDBOX — ' : '';
-  const row1Title = `${modePrefix}${streamTitle} — DAILY RETURNED PRODUCTS REPORT`;
-  const row2Meta = `Generated: ${formatManilaTimestampDisplay()} (Asia/Manila) | Period: ${sDate} to ${eDate} | Monitored SKUs: ${monitoredSkuCount} | Total Returned: ${grandTotalPcs.toLocaleString()} pcs`;
+  const row1Title = `${modePrefix}${scopeLabel} MATRIX REPORT`;
+  const row2Meta = `Generated: ${formatManilaTimestampDisplay()} | Period (YYYY-MM-DD): ${sDate} to ${eDate} | Line Items: ${lineCount} | SKUs: ${monitoredSkuCount} | Total Returned: ${grandTotalPcs.toLocaleString()} pcs | Total Value: PHP ${grandTotalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const sheetRows = [];
   const merges = [];
@@ -388,7 +617,7 @@ export function buildRmaMatrixXlsxBytes({
   // Row 1: Title
   sheetRows.push(`<row r="1" ht="24" customHeight="1">${inlineStrCell('A1', 1, row1Title)}</row>`);
 
-  // Row 2: Subtitle strip across A..lastCol so yellow highlight fills neatly
+  // Row 2: Yellow Metadata Strip A2..lastCol2
   const r2Cells = [inlineStrCell('A2', 2, row2Meta)];
   for (let c = 1; c <= lastColIdx; c++) {
     r2Cells.push(`<c r="${colToLetter(c)}2" s="2"/>`);
@@ -396,39 +625,98 @@ export function buildRmaMatrixXlsxBytes({
   sheetRows.push(`<row r="2" ht="18" customHeight="1">${r2Cells.join('')}</row>`);
   if (lastColIdx > 0) merges.push(`A2:${lastColLetter}2`);
 
-  // Row 3: Week Banners + Green TOTAL banner
+  // Row 3 & Row 4: Banners
+  const r3Map = new Map();
+  const r4Map = new Map();
+
+  // Frozen A..E banner (A3:E4)
+  r3Map.set(0, inlineStrCell('A3', 3, 'FROZEN PRODUCT MASTER (A..E)'));
+  for (let c = 1; c <= 4; c++) r3Map.set(c, `<c r="${colToLetter(c)}3" s="3"/>`);
+  for (let c = 0; c <= 4; c++) r4Map.set(c, `<c r="${colToLetter(c)}4" s="3"/>`);
+  merges.push('A3:E4');
+
+  // Daily section banner row 3 + Alternating Navy/Sky Blue week blocks row 4
+  if (lastDailySectionCol >= firstDailySectionCol) {
+    r3Map.set(firstDailySectionCol, inlineStrCell(`${colToLetter(firstDailySectionCol)}3`, 16, 'DAILY RETURNED PIECES (YYYY-MM-DD)'));
+    for (let c = firstDailySectionCol + 1; c <= lastDailySectionCol; c++) {
+      r3Map.set(c, `<c r="${colToLetter(c)}3" s="16"/>`);
+    }
+    if (lastDailySectionCol > firstDailySectionCol) {
+      merges.push(`${colToLetter(firstDailySectionCol)}3:${colToLetter(lastDailySectionCol)}3`);
+    }
+
+    weekMeta.forEach((wm) => {
+      const sRef = `${colToLetter(wm.startCol)}4`;
+      const eRef = `${colToLetter(wm.endCol)}4`;
+      r4Map.set(wm.startCol, inlineStrCell(sRef, wm.bannerStyle, wm.label));
+      for (let c = wm.startCol + 1; c <= wm.endCol; c++) {
+        r4Map.set(c, `<c r="${colToLetter(c)}4" s="${wm.bannerStyle}"/>`);
+      }
+      if (wm.endCol > wm.startCol) {
+        merges.push(`${sRef}:${eRef}`);
+      }
+    });
+  }
+
+  // Green TOTAL banner across row 3-4 above Total pcs returned
+  r3Map.set(grandTotalCol, inlineStrCell(`${grandTotalLetter}3`, 5, 'TOTAL'));
+  r4Map.set(grandTotalCol, `<c r="${grandTotalLetter}4" s="5"/>`);
+  merges.push(`${grandTotalLetter}3:${grandTotalLetter}4`);
+
+  // Danilo RMA / RMA banner above Return Bad Stock (pcs) & Return Good Stock (pcs)
+  r3Map.set(badStockCol, inlineStrCell(`${colToLetter(badStockCol)}3`, 15, 'Danilo RMA'));
+  r3Map.set(goodStockCol, `<c r="${colToLetter(goodStockCol)}3" s="15"/>`);
+  merges.push(`${colToLetter(badStockCol)}3:${colToLetter(goodStockCol)}3`);
+  r4Map.set(badStockCol, inlineStrCell(`${colToLetter(badStockCol)}4`, 4, 'RMA'));
+  r4Map.set(goodStockCol, `<c r="${colToLetter(goodStockCol)}4" s="4"/>`);
+  merges.push(`${colToLetter(badStockCol)}4:${colToLetter(goodStockCol)}4`);
+
+  // Right-side 17 columns banner row 3-4: RMA ITEM DETAILS & WORKFLOW STATUS
+  r3Map.set(detailStartCol, inlineStrCell(`${colToLetter(detailStartCol)}3`, 16, 'RMA ITEM DETAILS & WORKFLOW STATUS'));
+  for (let c = detailStartCol + 1; c <= lastColIdx; c++) {
+    r3Map.set(c, `<c r="${colToLetter(c)}3" s="16"/>`);
+  }
+  for (let c = detailStartCol; c <= lastColIdx; c++) {
+    r4Map.set(c, `<c r="${colToLetter(c)}4" s="16"/>`);
+  }
+  if (lastColIdx > detailStartCol) {
+    merges.push(`${colToLetter(detailStartCol)}3:${lastColLetter}4`);
+  }
+
   const r3Cells = [];
-  weekMeta.forEach((wm) => {
-    const startRef = `${colToLetter(wm.startCol)}3`;
-    const endRef = `${colToLetter(wm.endCol)}3`;
-    r3Cells.push(inlineStrCell(startRef, wm.bannerStyle, wm.label));
-    for (let c = wm.startCol + 1; c <= wm.endCol; c++) {
-      r3Cells.push(`<c r="${colToLetter(c)}3" s="${wm.bannerStyle}"/>`);
-    }
-    if (wm.endCol > wm.startCol) {
-      merges.push(`${startRef}:${endRef}`);
-    }
-  });
-  r3Cells.push(inlineStrCell(`${grandTotalLetter}3`, 5, 'TOTAL'));
+  const r4Cells = [];
+  for (let c = 0; c <= lastColIdx; c++) {
+    r3Cells.push(r3Map.get(c) || `<c r="${colToLetter(c)}3" s="3"/>`);
+    r4Cells.push(r4Map.get(c) || `<c r="${colToLetter(c)}4" s="3"/>`);
+  }
   sheetRows.push(`<row r="3" ht="20" customHeight="1">${r3Cells.join('')}</row>`);
+  sheetRows.push(`<row r="4" ht="20" customHeight="1">${r4Cells.join('')}</row>`);
 
-  // Row 4: Column Headers
-  const r4Cells = columns.map((col, cIdx) => {
-    const style = (col.kind === 'sku' || col.kind === 'desc') ? 6 : 7;
-    return inlineStrCell(`${colToLetter(cIdx)}4`, style, col.header);
+  // Row 5: Column Headers
+  const r5Cells = columns.map((col, cIdx) => {
+    const style = (col.kind === 'date' || col.kind === 'weekTotal' || col.kind === 'grandTotal' || col.kind === 'badStock' || col.kind === 'goodStock' || col.kind === 'totalValue')
+      ? 21
+      : (col.align === 'center' ? 21 : 6);
+    return inlineStrCell(`${colToLetter(cIdx)}5`, style, col.header);
   });
-  sheetRows.push(`<row r="4" ht="22" customHeight="1">${r4Cells.join('')}</row>`);
+  sheetRows.push(`<row r="5" ht="26" customHeight="1">${r5Cells.join('')}</row>`);
 
-  // Data Rows starting at Row 5
-  const firstDataRow = 5;
+  // Data Rows starting at Row 6
+  const firstDataRow = 6;
   rows.forEach((entry, rIdx) => {
     const rowNum = firstDataRow + rIdx;
     const cells = [];
 
     columns.forEach((col, cIdx) => {
       const ref = `${colToLetter(cIdx)}${rowNum}`;
-      if (col.kind === 'sku') {
-        cells.push(inlineStrCell(ref, 8, entry.sku));
+      if (col.kind === 'serial') {
+        cells.push(numCell(ref, 17, entry.serialNo));
+      } else if (col.kind === 'category') {
+        cells.push(inlineStrCell(ref, 8, '')); // Strictly blank
+      } else if (col.kind === 'supplier') {
+        cells.push(inlineStrCell(ref, 8, entry.supplierName));
+      } else if (col.kind === 'sku') {
+        cells.push(inlineStrCell(ref, 8, entry.sku)); // Strictly "" when unassigned
       } else if (col.kind === 'desc') {
         cells.push(inlineStrCell(ref, 8, entry.description));
       } else if (col.kind === 'date') {
@@ -447,20 +735,34 @@ export function buildRmaMatrixXlsxBytes({
         const refs = weekTotalCols.map((wtIdx) => `${colToLetter(wtIdx)}${rowNum}`);
         const formula = refs.length > 0 ? `SUM(${refs.join(',')})` : '0';
         cells.push(formulaNumCell(ref, 12, formula, entry.totalInPeriod));
+      } else if (col.kind === 'badStock') {
+        cells.push(numCell(ref, entry.badStockPcs > 0 ? 10 : 9, entry.badStockPcs));
+      } else if (col.kind === 'goodStock') {
+        cells.push(numCell(ref, entry.goodStockPcs > 0 ? 10 : 9, entry.goodStockPcs));
+      } else if (col.kind === 'totalValue') {
+        cells.push(numCell(ref, 19, entry.totalValue));
+      } else if (col.kind === 'detail') {
+        const styleIdx = col.align === 'center' ? 18 : 8;
+        cells.push(inlineStrCell(ref, styleIdx, entry[col.field] ?? ''));
       }
     });
 
-    sheetRows.push(`<row r="${rowNum}" ht="18" customHeight="1">${cells.join('')}</row>`);
+    sheetRows.push(`<row r="${rowNum}" ht="19" customHeight="1">${cells.join('')}</row>`);
   });
 
-  // Grand Totals Footer Row
+  // Grand Totals Footer Row with Excel =SUM(...) formulas
   const footerRowNum = firstDataRow + rows.length;
   const lastDataRow = Math.max(firstDataRow, footerRowNum - 1);
   const footerCells = columns.map((col, cIdx) => {
     const L = colToLetter(cIdx);
     const ref = `${L}${footerRowNum}`;
-    if (col.kind === 'sku') return inlineStrCell(ref, 14, 'TOTAL');
-    if (col.kind === 'desc') return inlineStrCell(ref, 14, `${monitoredSkuCount} Returned SKUs (${sDate} to ${eDate})`);
+    if (col.kind === 'serial') return inlineStrCell(ref, 14, 'TOTAL');
+    if (col.kind === 'desc') {
+      return inlineStrCell(ref, 14, `${lineCount} Line Item(s) • ${monitoredSkuCount} SKU(s) (${sDate} to ${eDate})`);
+    }
+    if (col.kind === 'category' || col.kind === 'supplier' || col.kind === 'sku' || col.kind === 'detail') {
+      return `<c r="${ref}" s="14"/>`;
+    }
 
     let cachedColSum = 0;
     if (col.kind === 'date') {
@@ -473,12 +775,18 @@ export function buildRmaMatrixXlsxBytes({
       );
     } else if (col.kind === 'grandTotal') {
       cachedColSum = grandTotalPcs;
+    } else if (col.kind === 'badStock') {
+      cachedColSum = dataset.totalBadStockPcs;
+    } else if (col.kind === 'goodStock') {
+      cachedColSum = dataset.totalGoodStockPcs;
+    } else if (col.kind === 'totalValue') {
+      cachedColSum = grandTotalValue;
     }
 
     const formula = rows.length > 0 ? `SUM(${L}${firstDataRow}:${L}${lastDataRow})` : '0';
-    return formulaNumCell(ref, 13, formula, cachedColSum);
+    return formulaNumCell(ref, col.kind === 'totalValue' ? 20 : 13, formula, cachedColSum);
   });
-  sheetRows.push(`<row r="${footerRowNum}" ht="21" customHeight="1">${footerCells.join('')}</row>`);
+  sheetRows.push(`<row r="${footerRowNum}" ht="22" customHeight="1">${footerCells.join('')}</row>`);
 
   const colsXml = `<cols>${columns.map((col, idx) => {
     const n = idx + 1;
@@ -490,14 +798,15 @@ export function buildRmaMatrixXlsxBytes({
     ? `<mergeCells count="${merges.length}">${merges.map((m) => `<mergeCell ref="${m}"/>`).join('')}</mergeCells>`
     : '';
 
+  // frozenRows=5, frozenColumns=5 (A..E + rows 1..5 frozen -> topLeftCell="F6")
   const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetViews>
     <sheetView tabSelected="1" workbookViewId="0">
-      <pane xSplit="2" ySplit="4" topLeftCell="C5" activePane="bottomRight" state="frozen"/>
+      <pane xSplit="5" ySplit="5" topLeftCell="F6" activePane="bottomRight" state="frozen"/>
     </sheetView>
   </sheetViews>
-  <sheetFormatPr defaultRowHeight="18" outlineLevelCol="1"/>
+  <sheetFormatPr defaultRowHeight="19" outlineLevelCol="1"/>
   ${colsXml}
   <sheetData>
     ${sheetRows.join('\n    ')}
@@ -505,9 +814,11 @@ export function buildRmaMatrixXlsxBytes({
   ${mergeXml}
 </worksheet>`;
 
-  const sheetTabName = stream === 'supplier_outbound'
-    ? (isTestMode ? 'Test Supplier RTV Matrix' : 'Daily Returned - RTV')
-    : (isTestMode ? 'Test Customer RMA Matrix' : 'Daily Returned - Customer');
+  const sheetTabName = activeStream === 'supplier_outbound'
+    ? (isTestMode ? 'Test Supplier RTV Matrix' : 'Supplier RTV Matrix')
+    : activeStream === 'customer_inbound'
+      ? (isTestMode ? 'Test Customer Hub Matrix' : 'Customer Hub Matrix')
+      : (isTestMode ? 'Test Overall RMA Matrix' : 'Overall RMA Matrix');
 
   const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -520,9 +831,9 @@ export function buildRmaMatrixXlsxBytes({
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-package.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-package.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-package.spreadsheetml.styles+xml"/>
 </Types>`;
 
   const rootRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -549,7 +860,7 @@ export function buildRmaMatrixXlsxBytes({
 }
 
 /**
- * Generates and downloads the real .xlsx file in the browser.
+ * Generates and downloads the real Overall RMA Matrix .xlsx file in the browser.
  */
 export function downloadRmaMatrixXlsx(options) {
   const { bytes, dataset } = buildRmaMatrixXlsxBytes(options);
@@ -558,10 +869,13 @@ export function downloadRmaMatrixXlsx(options) {
   });
 
   const prefix = options.isTestMode ? 'TEST_' : '';
-  const streamTag = options.stream === 'supplier_outbound'
-    ? 'Supplier_RTV_Daily_Returned'
-    : 'Customer_Hub_Daily_Returned';
-  const filename = `${prefix}${streamTag}_Pieces_${dataset.startDate}_to_${dataset.endDate}.xlsx`;
+  const hhmm = formatManilaHhmm(new Date());
+  const streamTag = dataset.stream === 'supplier_outbound'
+    ? 'Supplier_RTV_Matrix_Report'
+    : dataset.stream === 'customer_inbound'
+      ? 'Customer_Hub_Matrix_Report'
+      : 'Overall_RMA_Matrix_Report';
+  const filename = `${prefix}${streamTag}_${dataset.startDate}_to_${dataset.endDate} ${hhmm}.xlsx`;
 
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

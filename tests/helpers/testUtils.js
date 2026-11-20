@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { expect } from '@playwright/test';
 
 // Valid 1x1 transparent PNG bytes for file upload & sticker verification
@@ -10,10 +12,30 @@ export const PNG_BUFFER = Buffer.from(
 export const VERIFIED_BARCODE = '4805358373037';
 export const VERIFIED_SKU = 'SS1319P';
 
+export function readSupabasePublicEnv() {
+  let supaUrl = process.env.VITE_SUPABASE_URL || '';
+  let anonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+  if (!supaUrl || !anonKey) {
+    for (const fileName of ['.env.local', '.env']) {
+      try {
+        const envRaw = fs.readFileSync(path.join(process.cwd(), fileName), 'utf-8');
+        for (const line of envRaw.split(/\r?\n/)) {
+          const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
+          if (!m) continue;
+          const val = m[2].trim().replace(/^["']|["']$/g, '');
+          if (m[1] === 'VITE_SUPABASE_URL' && !supaUrl) supaUrl = val;
+          if (m[1] === 'VITE_SUPABASE_ANON_KEY' && !anonKey) anonKey = val;
+        }
+      } catch {}
+    }
+  }
+  return { supaUrl, anonKey };
+}
+
 /**
  * Installs global print / popup stubs on the Playwright BrowserContext so
  * `window.print()`, isolated iframe `contentWindow.print()`, and blank print popups
- * (`window.open('', '_blank')`) increment `window.__pwPrintCount` instead of blocking Chromium.
+ * (`window.open('', '_blank')`) increment `window.__pwPrintCount` and record HTML in `window.__pwPrintHtmls`.
  */
 export async function installPrintStubs(context) {
   await context.addInitScript(() => {
@@ -29,6 +51,7 @@ export async function installPrintStubs(context) {
 
       window.__pwPrintCount = 0;
       window.__pwOpenedHtmls = [];
+      window.__pwPrintHtmls = [];
 
       window.print = () => {
         window.__pwPrintCount += 1;
@@ -40,20 +63,29 @@ export async function installPrintStubs(context) {
         try {
           if (child && child.tagName === 'IFRAME' && child.contentWindow) {
             const cw = child.contentWindow;
+            let iframeHtml = '';
             cw.print = () => {
               window.__pwPrintCount += 1;
+              if (iframeHtml) window.__pwPrintHtmls.push(iframeHtml);
             };
             const doc = cw.document;
             if (doc && typeof doc.open === 'function') {
               const origOpen = doc.open.bind(doc);
+              const origWrite = doc.write.bind(doc);
               doc.open = function (...args) {
+                iframeHtml = '';
                 const r = origOpen(...args);
                 try {
                   cw.print = () => {
                     window.__pwPrintCount += 1;
+                    if (iframeHtml) window.__pwPrintHtmls.push(iframeHtml);
                   };
                 } catch {}
                 return r;
+              };
+              doc.write = function (chunk) {
+                iframeHtml += String(chunk || '');
+                return origWrite(chunk);
               };
             }
           }
@@ -70,6 +102,7 @@ export async function installPrintStubs(context) {
             focus() {},
             print() {
               window.__pwPrintCount += 1;
+              if (writtenHtml) window.__pwPrintHtmls.push(writtenHtml);
             },
             close() {
               this.closed = true;
@@ -83,6 +116,7 @@ export async function installPrintStubs(context) {
               },
               close() {
                 window.__pwOpenedHtmls.push(writtenHtml);
+                window.__pwPrintHtmls.push(writtenHtml);
                 if (writtenHtml.includes('window.print')) {
                   window.__pwPrintCount += 1;
                 }
@@ -97,10 +131,38 @@ export async function installPrintStubs(context) {
 }
 
 /**
- * Attaches strict pageerror, console (error + React warnings + #310), and HTTP >=400 response guards.
- * Call `guard.assertClean(stageName)` after key interactions and in `afterEach`.
+ * Intercepts outbound /api/send-email POST requests (letting ?action=test-connection pass through)
+ * so real Gmail inboxes are never spammed during automated tests while capturing every payload.
  */
-export function attachStrictGuards(page) {
+export async function interceptAndCaptureEmails(page) {
+  const capturedEmails = [];
+  await page.route('**/api/send-email**', async (route) => {
+    const req = route.request();
+    const url = req.url();
+    if (url.includes('action=test-connection')) {
+      return route.continue();
+    }
+    if (req.method() === 'POST') {
+      try {
+        capturedEmails.push(req.postDataJSON());
+      } catch {}
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, mocked: true })
+      });
+    }
+    return route.continue();
+  });
+  return capturedEmails;
+}
+
+/**
+ * Attaches strict pageerror, console (error + React warnings + #310), and HTTP >=400 response guards.
+ * Optionally accepts `allowHttp` (array of `(res) => boolean`) and `allowConsole` (array of RegExp)
+ * ONLY for intentional negative security/validation test assertions.
+ */
+export function attachStrictGuards(page, { allowHttp = [], allowConsole = [] } = {}) {
   const errors = [];
 
   const onPageError = (err) => {
@@ -110,6 +172,8 @@ export function attachStrictGuards(page) {
   const onConsole = (msg) => {
     const type = msg.type();
     const text = msg.text() || '';
+    if (allowConsole.some((re) => re.test(text))) return;
+
     const isReactWarn =
       /Warning:|Minified React error|#310|Cannot update a component|Rendered more hooks|Rendered fewer hooks|Invalid hook call|Each child in a list/i.test(
         text
@@ -124,6 +188,7 @@ export function attachStrictGuards(page) {
   const onResponse = (res) => {
     const status = res.status();
     if (status >= 400) {
+      if (allowHttp.some((pred) => pred(res))) return;
       errors.push(`[HTTP ${status}] ${res.request().method()} ${res.url()}`);
     }
   };
@@ -156,30 +221,6 @@ export async function gotoAdmin(page) {
   await page.goto('/admin', { waitUntil: 'commit', timeout: 30_000 });
   await expect(page.getByText('Pingcon RMA Operations')).toBeVisible({ timeout: 30_000 });
   await page.waitForLoadState('networkidle').catch(() => {});
-}
-
-/**
- * Ensures Test Mode is set explicitly to true or false via localStorage before/during public portal checks,
- * or clicks the visible toggle button in header / settings.
- */
-export async function ensureAdminTestMode(page, enabled) {
-  const currentState = await page.evaluate(() => {
-    return localStorage.getItem('rma_portal_test_mode') === 'true';
-  });
-  if (currentState !== enabled) {
-    // Open Settings & SMTP tab to toggle Super Admin Test Mode via UI button
-    await page.getByRole('button', { name: /Settings & SMTP/i }).click();
-    const toggleBtn = page.getByRole('button', {
-      name: enabled ? /Test Mode: OFF/i : /Test Mode: ON/i
-    });
-    await expect(toggleBtn).toBeVisible();
-    await toggleBtn.click();
-    await expect(
-      page.getByRole('button', {
-        name: enabled ? /Test Mode: ON/i : /Test Mode: OFF/i
-      })
-    ).toBeVisible();
-  }
 }
 
 /**

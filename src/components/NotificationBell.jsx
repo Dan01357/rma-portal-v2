@@ -14,6 +14,8 @@ import {
   KeyRound
 } from 'lucide-react';
 
+import { formatDateYmd } from '../utils/rmaHelpers';
+
 export default function NotificationBell({ 
   notifications = [], 
   onMarkAsRead, 
@@ -65,7 +67,7 @@ export default function NotificationBell({
     if (diffHour < 24) return `${diffHour}h ago`;
     const diffDay = Math.floor(diffHour / 24);
     if (diffDay < 7) return `${diffDay}d ago`;
-    return past.toLocaleDateString();
+    return formatDateYmd(past);
   };
 
   const getIcon = (type) => {

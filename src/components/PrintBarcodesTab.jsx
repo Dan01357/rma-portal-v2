@@ -31,7 +31,7 @@ export default function PrintBarcodesTab({ catalog = [] }) {
           </div>
           <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight mt-1 flex items-center gap-2">
             <Barcode className="w-6 h-6 text-brand-600 dark:text-brand-400" />
-            Print SKU Barcodes (A4 Sheet & Box Stickers)
+            Print SKU Barcodes (Letter Sheet &amp; Box Stickers)
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Printable sheet of Pingcon, Bonita & Keysys SKU barcodes for unlabelled wholesale boxes and repackers.
@@ -57,7 +57,7 @@ export default function PrintBarcodesTab({ catalog = [] }) {
             className="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs rounded-xl shadow-md shadow-brand-600/20 flex items-center space-x-2 transition-all active:scale-95"
           >
             <Printer className="w-4 h-4" />
-            <span>Print A4 Label Sheet</span>
+            <span>Print Letter Label Sheet</span>
           </button>
         </div>
       </div>

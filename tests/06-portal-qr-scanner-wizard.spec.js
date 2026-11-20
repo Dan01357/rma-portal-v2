@@ -1,26 +1,12 @@
 import { test, expect } from '@playwright/test';
-import fs from 'fs';
-import path from 'path';
 import {
   PNG_BUFFER,
   VERIFIED_BARCODE,
   attachStrictGuards,
-  installPrintStubs
+  installPrintStubs,
+  interceptAndCaptureEmails,
+  readSupabasePublicEnv
 } from './helpers/testUtils.js';
-
-function readSupabasePublicEnv() {
-  let supaUrl = process.env.VITE_SUPABASE_URL || '';
-  let anonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
-  for (const filename of ['.env.local', '.env']) {
-    if (supaUrl && anonKey) break;
-    const envPath = path.resolve(process.cwd(), filename);
-    if (!fs.existsSync(envPath)) continue;
-    const raw = fs.readFileSync(envPath, 'utf8');
-    if (!supaUrl) supaUrl = (raw.match(/^VITE_SUPABASE_URL=(.+)$/m)?.[1] || '').trim().replace(/^["']|["']$/g, '');
-    if (!anonKey) anonKey = (raw.match(/^VITE_SUPABASE_ANON_KEY=(.+)$/m)?.[1] || '').trim().replace(/^["']|["']$/g, '');
-  }
-  return { supaUrl, anonKey };
-}
 
 async function setPublicPortalTestMode(page, enabled) {
   const toggleBtn = page.locator('button[title="Toggle Test / Sandbox Mode"]');
@@ -105,6 +91,7 @@ test.describe('Suite 06: Public Portal QR Scanner -> 4-Option Wizard (Live & Tes
     test.setTimeout(120_000);
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
+    const capturedEmails = await interceptAndCaptureEmails(page);
 
     let liveRmaNumber = null;
     let testRmaNumber = null;
@@ -133,14 +120,14 @@ test.describe('Suite 06: Public Portal QR Scanner -> 4-Option Wizard (Live & Tes
       // Scan the newly generated Live Mode RMA QR via ScannerModal
       await scanQrThroughPortalScanner(page, `PINGCON-RMA:LIVE:${liveRmaNumber}`);
 
-      // Assert 4-option wizard opens with all 4 options visible
+      // Assert 4-option Customer Hub wizard opens with all 4 adapted options visible
       await expect(page.getByText('What do you want to do with this item?')).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByRole('button', { name: /Return to supplier for Debit Claim/i })).toBeVisible();
-      await expect(page.getByRole('button', { name: /Return to supplier for Replacement \/ Exchange/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Driver Picked Up \/ Accepted for Debit \/ Credit/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Driver Picked Up \/ Replaced with Good Stock/i })).toBeVisible();
       await expect(page.getByRole('button', { name: /Throw Away \/ Dispose \(Scrap\)/i })).toBeVisible();
       await expect(page.getByRole('button', { name: /Put Back on Good Shelf \(Restock\)/i })).toBeVisible();
 
-      // Option 4 (Restock) persists cleanly in Live Mode without needing supplier name or 400 status error
+      // Option 4 (Restock) persists cleanly in Live Mode and dispatches [RMA Restocked] email
       await page.getByRole('button', { name: /Put Back on Good Shelf \(Restock\)/i }).click();
       const liveRestockPatch = page.waitForResponse(
         (res) => res.url().includes('/rest/v1/rma_reports') && res.request().method() === 'PATCH',
@@ -148,26 +135,27 @@ test.describe('Suite 06: Public Portal QR Scanner -> 4-Option Wizard (Live & Tes
       );
       await page.getByRole('button', { name: /Confirm & Save: Put Back on Good Shelf \(Restock\)/i }).click();
       expect((await liveRestockPatch).status()).toBeLessThan(400);
-      await expect(page.getByText('Supplier RTV Decision Saved!')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText('Customer RMA Decision Saved!')).toBeVisible({ timeout: 15_000 });
+      await expect.poll(() => capturedEmails.some((e) => String(e?.subject || '').includes('[RMA Restocked]')), { timeout: 10_000 }).toBe(true);
 
-      // Option 1 (Debit Claim - Wait Only) + Driver Pickup step verification in Live Mode
+      // Option 1 (Customer Debit / Credit - Wait Only) + Driver Pickup step verification in Live Mode
       await page.getByRole('button', { name: /Change Decision/i }).click();
       await page
         .locator('input[placeholder*="Supplier Company Name" i]')
         .fill('Playwright Live Vendor Corp');
-      await page.getByRole('button', { name: /Return to supplier for Debit Claim/i }).click();
+      await page.getByRole('button', { name: /Driver Picked Up \/ Accepted for Debit \/ Credit/i }).click();
       const liveCreditPatch = page.waitForResponse(
         (res) => res.url().includes('/rest/v1/rma_reports') && res.request().method() === 'PATCH',
         { timeout: 20_000 }
       );
       await page.getByRole('button', { name: /Save Choice Only \(Waiting for Driver\)/i }).click();
       expect((await liveCreditPatch).status()).toBeLessThan(400);
-      await expect(page.getByText('Supplier RTV Decision Saved!')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText('Customer RMA Decision Saved!')).toBeVisible({ timeout: 15_000 });
 
-      // Verify Driver Pickup step (5-photo flow) opens cleanly from Option 1
+      // Verify Driver Pickup step (5-photo flow) opens cleanly from Option 1 with Letter label
       await page.getByRole('button', { name: /Change Decision/i }).click();
-      await page.getByRole('button', { name: /Return to supplier for Debit Claim/i }).click();
-      await page.getByRole('button', { name: /Driver Is Here — Upload Photos & Print A4/i }).click();
+      await page.getByRole('button', { name: /Driver Picked Up \/ Accepted for Debit \/ Credit/i }).click();
+      await page.getByRole('button', { name: /Driver Is Here — Upload Photos & Print Letter/i }).click();
       await expect(page.getByText(/Driver Pickup Verification \(0\/5 Photos\)/i)).toBeVisible();
       await page.getByRole('button', { name: /^Back$/i }).click();
 
@@ -192,15 +180,15 @@ test.describe('Suite 06: Public Portal QR Scanner -> 4-Option Wizard (Live & Tes
       // Scan the Test Mode RMA QR via ScannerModal
       await scanQrThroughPortalScanner(page, `PINGCON-RMA:TEST:${testRmaNumber}`);
 
-      // Assert 4-option wizard opens with Test Mode badge & all 4 options visible
+      // Assert 4-option Customer Hub wizard opens with Test Mode badge & all 4 options visible
       await expect(page.getByText('What do you want to do with this item?')).toBeVisible({ timeout: 15_000 });
       await expect(page.getByText('🧪 Test Mode').first()).toBeVisible();
-      await expect(page.getByRole('button', { name: /Return to supplier for Debit Claim/i })).toBeVisible();
-      await expect(page.getByRole('button', { name: /Return to supplier for Replacement \/ Exchange/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Driver Picked Up \/ Accepted for Debit \/ Credit/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Driver Picked Up \/ Replaced with Good Stock/i })).toBeVisible();
       await expect(page.getByRole('button', { name: /Throw Away \/ Dispose \(Scrap\)/i })).toBeVisible();
       await expect(page.getByRole('button', { name: /Put Back on Good Shelf \(Restock\)/i })).toBeVisible();
 
-      // Option 3 (Scrap) persists cleanly in Test Mode
+      // Option 3 (Scrap) persists cleanly in Test Mode & dispatches Test [RMA Scrapped] email
       await page.getByRole('button', { name: /Throw Away \/ Dispose \(Scrap\)/i }).click();
       const testScrapPatch = page.waitForResponse(
         (res) => res.url().includes('/rest/v1/rma_reports') && res.request().method() === 'PATCH',
@@ -208,24 +196,25 @@ test.describe('Suite 06: Public Portal QR Scanner -> 4-Option Wizard (Live & Tes
       );
       await page.getByRole('button', { name: /Confirm & Save: Throw Away \/ Dispose \(Scrap\)/i }).click();
       expect((await testScrapPatch).status()).toBeLessThan(400);
-      await expect(page.getByText('Supplier RTV Decision Saved!')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText('Customer RMA Decision Saved!')).toBeVisible({ timeout: 15_000 });
+      await expect.poll(() => capturedEmails.some((e) => e?.isTestMode && String(e?.subject || '').includes('Test - [RMA Scrapped]')), { timeout: 10_000 }).toBe(true);
 
-      // Option 2 (Replacement / Exchange - Wait Only) persists cleanly in Test Mode
+      // Option 2 (Customer Replacement / Exchange - Wait Only) persists cleanly in Test Mode
       await page.getByRole('button', { name: /Change Decision/i }).click();
       await page
         .locator('input[placeholder*="Supplier Company Name" i]')
         .fill('Playwright Sandbox Vendor Corp');
-      await page.getByRole('button', { name: /Return to supplier for Replacement \/ Exchange/i }).click();
+      await page.getByRole('button', { name: /Driver Picked Up \/ Replaced with Good Stock/i }).click();
       const testExchangePatch = page.waitForResponse(
         (res) => res.url().includes('/rest/v1/rma_reports') && res.request().method() === 'PATCH',
         { timeout: 20_000 }
       );
       await page.getByRole('button', { name: /Save Choice Only \(Waiting for Driver\)/i }).click();
       expect((await testExchangePatch).status()).toBeLessThan(400);
-      await expect(page.getByText('Supplier RTV Decision Saved!')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText('Customer RMA Decision Saved!')).toBeVisible({ timeout: 15_000 });
 
       await page.getByRole('button', { name: /^Done$/i }).click();
-      await expect(page.getByText('Supplier RTV Decision Saved!')).toBeHidden();
+      await expect(page.getByText('Customer RMA Decision Saved!')).toBeHidden();
 
       // Verify legacy ?rma= QR payload also opens 4-option wizard in Test Mode
       await scanQrThroughPortalScanner(page, `https://rma-portal-v2.vercel.app/?rma=${testRmaNumber}`);
@@ -249,7 +238,7 @@ test.describe('Suite 06: Public Portal QR Scanner -> 4-Option Wizard (Live & Tes
       );
       expect(persistedTestRow).toBeTruthy();
       expect(persistedTestRow.rma_number).toMatch(/^RMA-TEST-/);
-      expect(persistedTestRow.disposition).toBe('supplier_exchange');
+      expect(persistedTestRow.disposition).toBe('customer_exchange');
       expect(persistedTestRow.ai_document_metadata?.is_test).toBe(true);
       expect(String(persistedTestRow.notes || '')).toContain('[TEST_MODE]');
 

@@ -1,10 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Building2, 
-  Receipt, 
   CheckCircle2, 
-  AlertTriangle, 
-  Printer, 
   Download, 
   Search, 
   RotateCcw, 
@@ -16,20 +13,17 @@ import {
   ArrowDown,
   ArrowUpDown,
   Package,
-  ClipboardCheck,
   ChevronDown,
-  Lock,
   Unlock,
   FileSpreadsheet,
-  FileCheck2,
   QrCode
 } from 'lucide-react';
 import { exportSupplierOutboundClaimsToXlsx } from '../utils/exportCsv';
 import { catalogService } from '../services/catalogService';
+import { notificationService } from '../services/notificationService';
 import TablePagination from './TablePagination';
 import ImageLightboxModal from './ImageLightboxModal';
 import { supplierClaimService } from '../services/supplierClaimService';
-import { printIsolatedElement } from '../utils/printIsolatedElement';
 import { 
   isBatchManifest, 
   getReportManifestItems, 
@@ -40,16 +34,16 @@ import {
   getRealPhotos,
   normalizeWarehouseLocation,
   isUnlabeledBarcode,
-  isTestRecord
-} from '../utils/rmaHelpers';
-import {
+  isTestRecord,
   getItemNeedsReorder,
   isItemReadyToRestock,
   isItemReorderNeeded,
   isItemScrappedNoReorder,
   isItemOnHold,
   isItemRejected,
-  cleanExplanationText
+  cleanExplanationText,
+  formatFourChoiceOutcome,
+  formatDateYmd
 } from '../utils/rmaHelpers';
 
 export default function SupplierClaimsTab({
@@ -66,7 +60,6 @@ export default function SupplierClaimsTab({
   onAssignSku,
   onEditProductFromReport,
   onOpenQuickAction,
-  onPrintLabel,
   onViewQR,
   onViewExplanation,
   onOpenSimpleWizard,
@@ -98,6 +91,27 @@ export default function SupplierClaimsTab({
         warehouseLocation: cleanStatus === 'scrapped' ? 'SCRAP-BIN' : (item.warehouse_location || null),
         actorName
       });
+      try {
+        await notificationService.sendRmaLifecycleNotification({
+          eventType: cleanStatus === 'scrapped' ? 'scrapped' : 'restocked',
+          report: {
+            ...item,
+            status: 'resolved',
+            ai_document_metadata: {
+              ...((item.ai_document_metadata && typeof item.ai_document_metadata === 'object') ? item.ai_document_metadata : {}),
+              workflow_resolution: cleanStatus === 'scrapped' ? 'reordered' : 'restocked',
+              resolved_at: new Date().toISOString(),
+              resolved_by: actorName
+            }
+          },
+          allReports: reportsList,
+          catalogProducts: savedProductsList,
+          actorName,
+          isTestMode: isTestRecord(item) || isTestMode
+        });
+      } catch (mailErr) {
+        console.warn('Non-blocking error sending coworker action email in SupplierHub:', mailErr);
+      }
       if (onRefresh) onRefresh();
     } catch (err) {
       console.error('Failed to confirm coworker queue action in SupplierHub:', err);
@@ -109,13 +123,10 @@ export default function SupplierClaimsTab({
   const [sortDirection, setSortDirection] = useState('desc');
   const [selectedRmaIds, setSelectedRmaIds] = useState(new Set());
   const [expandedManifestIds, setExpandedManifestIds] = useState(new Set());
-  const [activeClaimBatch, setActiveClaimBatch] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [localLightboxPhoto, setLocalLightboxPhoto] = useState(null);
   const [savedClaims, setSavedClaims] = useState([]);
-  const [isSavingClaim, setIsSavingClaim] = useState(false);
-  const [financialWarningTarget, setFinancialWarningTarget] = useState(null);
 
   const toggleManifestExpand = (id) => {
     setExpandedManifestIds(prev => {
@@ -261,8 +272,8 @@ export default function SupplierClaimsTab({
       if (isManifest && manifestChildren.length > 0) {
         manifestChildren.forEach((child, cIdx) => {
           const cDisp = String(child.disposition || '').toLowerCase();
-          // Exclude child items explicitly triaged to non-RTV outcomes
-          if (cDisp.includes('restock') || cDisp.includes('scrap') || cDisp.includes('quarantine') || cDisp.includes('buffer')) {
+          // Exclude non-supplier child items explicitly triaged to non-RTV outcomes
+          if (!isExplicitSupplierOutbound && child.rma_type !== 'supplier_outbound' && (cDisp.includes('restock') || cDisp.includes('scrap') || cDisp.includes('quarantine') || cDisp.includes('buffer'))) {
             return;
           }
           // If the parent manifest wasn't explicitly supplier_outbound or RTV, require the child itself to be RTV
@@ -404,12 +415,22 @@ export default function SupplierClaimsTab({
         res.supplier.toLowerCase() === selectedSupplier.toLowerCase() ||
         (r.supplier_name && r.supplier_name.toLowerCase() === selectedSupplier.toLowerCase());
 
-      const rDisp = String(r.disposition || '1 - Pending Vendor Pickup').toLowerCase();
-      const rStatus = String(r.status || '').toLowerCase();
-      const cleanFilter = dispositionFilter.toLowerCase().replace(/^\d+\s*-\s*/, '').trim();
-      const matchesDisposition = dispositionFilter === 'All' || 
-        rDisp === dispositionFilter.toLowerCase() ||
-        rDisp.replace(/^\d+\s*-\s*/, '').trim() === cleanFilter;
+      const outcome = formatFourChoiceOutcome(r);
+      const rDisp = String(r.disposition || '').toLowerCase();
+      const matchesDisposition = (() => {
+        if (dispositionFilter === 'All') return true;
+        if (dispositionFilter === 'pending_decision') return outcome.choiceKey === 'pending';
+        if (dispositionFilter === 'waiting_debit') return outcome.choiceKey === 'debit' && !outcome.isPickedUp;
+        if (dispositionFilter === 'picked_up_debit') return outcome.choiceKey === 'debit' && outcome.isPickedUp;
+        if (dispositionFilter === 'waiting_replacement') return outcome.choiceKey === 'replacement' && !outcome.isPickedUp;
+        if (dispositionFilter === 'picked_up_replacement') return outcome.choiceKey === 'replacement' && outcome.isPickedUp;
+        if (dispositionFilter === 'scrap') return outcome.choiceKey === 'scrap';
+        if (dispositionFilter === 'restock_good') return outcome.choiceKey === 'restock';
+        const cleanFilter = dispositionFilter.toLowerCase().replace(/^\d+\s*-\s*/, '').trim();
+        return rDisp === dispositionFilter.toLowerCase() ||
+          rDisp.replace(/^\d+\s*-\s*/, '').trim() === cleanFilter ||
+          outcome.label.toLowerCase().includes(cleanFilter);
+      })();
 
       // Unified Coworker Workstation Queue Filter (Controlled by top dark navy bar)
       const activeQueue = coworkerQueueFilter || 'all';
@@ -510,13 +531,6 @@ export default function SupplierClaimsTab({
     }, 0);
   }, [selectedItems, savedProductsList]);
 
-  const totalQuantity = useMemo(() => {
-    return selectedItems.reduce((sum, r) => {
-      const res = resolveReportProduct(r);
-      return sum + res.qty;
-    }, 0);
-  }, [selectedItems, savedProductsList]);
-
   const handleToggleSelect = (id) => {
     setSelectedRmaIds(prev => {
       const next = new Set(prev);
@@ -538,13 +552,6 @@ export default function SupplierClaimsTab({
 
   const handleClearSelection = () => {
     setSelectedRmaIds(new Set());
-  };
-
-  // Helper to extract user clean name (roles removed)
-  const getCleanUserName = (user) => {
-    const raw = user?.name || 'Warehouse Staff';
-    const clean = raw.replace(/\s*\([^)]*\)/g, '').trim();
-    return clean || 'Warehouse Staff';
   };
 
   // Helper to safely extract photo URLs (ignoring fake Unsplash stock photos)
@@ -625,254 +632,6 @@ export default function SupplierClaimsTab({
   };
 
   /**
-   * INDIVIDUAL ACTION: GENERATE DEBIT CLAIM FOR SINGLE ITEM
-   */
-  const handleGenerateSingleClaim = async (item) => {
-    if (!item) return;
-    const res = resolveReportProduct(item);
-
-    // Financial Validation & Safety Guard: Cannot issue claim for ₱0.00 or unassigned vendor
-    if (res.price <= 0 || res.supplier === 'Pending Assignment' || res.supplier === 'Unassigned') {
-      setFinancialWarningTarget({
-        item,
-        message: "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Please click 'Assign SKU' first to set the official item price and master supplier."
-      });
-      return;
-    }
-
-    const supplierName = res.supplier.trim();
-    const cleanGeneratedBy = getCleanUserName(currentUser);
-    const claimNumber = supplierClaimService.generateRtvId(savedClaims, isTestMode);
-    const qty = res.qty;
-    const price = res.price;
-
-    const enrichedItem = {
-      ...item,
-      name: res.name,
-      code: res.code || item.code,
-      sku: res.code || item.sku,
-      supplier_name: res.supplier,
-      price: res.price,
-      price_with_vat: res.price
-    };
-
-    const newClaim = {
-      claimNumber,
-      claim_number: claimNumber,
-      supplierName,
-      supplier_name: supplierName,
-      createdAt: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      generatedBy: cleanGeneratedBy,
-      generated_by: cleanGeneratedBy,
-      items: [enrichedItem],
-      totalQuantity: qty,
-      totalClaimAmount: qty * price,
-      notes: isTestMode ? '[TEST_MODE] Sandbox RTV Claim' : '',
-      isTest: Boolean(isTestMode)
-    };
-
-    setIsSavingClaim(true);
-    try {
-      await supplierClaimService.saveClaim(newClaim);
-      setSavedClaims(prev => [newClaim, ...prev.filter(c => (c.claim_number || c.claimNumber) !== claimNumber)]);
-      if (onRefresh) onRefresh();
-    } catch (err) {
-      console.warn('Error saving single claim to database:', err);
-    } finally {
-      setIsSavingClaim(false);
-    }
-
-    setActiveClaimBatch(newClaim);
-  };
-
-  /**
-   * BATCH ACTION: GENERATE DEBIT CLAIM FOR MULTIPLE ITEMS FROM SAME SUPPLIER
-   */
-  const handleGenerateBatchClaim = async () => {
-    if (selectedItems.length === 0) {
-      alert('Please select at least 1 RMA item to bundle into a supplier claim.');
-      return;
-    }
-
-    // Exclude rows with Restock to Inventory or Scrap / Dispose from batch RTV Debit Claim voucher generation
-    const nonRtvItems = selectedItems.filter(i => {
-      const d = String(i.disposition || '').toLowerCase();
-      return d.includes('restock') || d.includes('scrap') || d.includes('dispose') || d.includes('replacement');
-    });
-    if (nonRtvItems.length > 0) {
-      alert(`Cannot bundle items with disposition 'Restock to Inventory' or 'Scrap / Dispose' into an RTV Debit Claim voucher.\n\nPlease uncheck restocked or scrapped items before issuing a debit claim.`);
-      return;
-    }
-
-    // Financial Validation & Safety Guard: Cannot issue claim for ₱0.00 or unassigned vendor
-    const invalidItem = selectedItems.find(i => {
-      const res = resolveReportProduct(i);
-      return res.price <= 0 || res.supplier === 'Pending Assignment' || res.supplier === 'Unassigned';
-    });
-
-    if (invalidItem || totalClaimAmount <= 0) {
-      setFinancialWarningTarget({
-        item: invalidItem || selectedItems[0],
-        message: "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Please click 'Assign SKU' first to set the official item price and master supplier."
-      });
-      return;
-    }
-
-    // Enforce that all bundled items belong strictly to the SAME supplier
-    const suppliersInBatch = [...new Set(selectedItems.map(i => resolveReportProduct(i).supplier.trim()))];
-    if (suppliersInBatch.length > 1) {
-      alert(`You have selected items across ${suppliersInBatch.length} different suppliers (${suppliersInBatch.join(', ')}).\n\nAn official Supplier Debit Claim (RTV) voucher must be issued to a SINGLE vendor.\n\nPlease select items from the same supplier, or filter by "${suppliersInBatch[0]}" to generate a consolidated claim.`);
-      return;
-    }
-
-    const supplierName = suppliersInBatch[0] || (selectedSupplier !== 'All' ? selectedSupplier : 'Savemore');
-    const cleanGeneratedBy = getCleanUserName(currentUser);
-    const claimNumber = supplierClaimService.generateRtvId(savedClaims, isTestMode);
-
-    const enrichedItems = selectedItems.map(i => {
-      const res = resolveReportProduct(i);
-      return {
-        ...i,
-        name: res.name,
-        code: res.code || i.code,
-        sku: res.code || i.sku,
-        supplier_name: res.supplier,
-        price: res.price,
-        price_with_vat: res.price
-      };
-    });
-
-    const newClaim = {
-      claimNumber,
-      claim_number: claimNumber,
-      supplierName,
-      supplier_name: supplierName,
-      createdAt: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      generatedBy: cleanGeneratedBy,
-      generated_by: cleanGeneratedBy,
-      items: enrichedItems,
-      totalQuantity,
-      totalClaimAmount,
-      notes: isTestMode ? '[TEST_MODE] Sandbox RTV Claim' : '',
-      isTest: Boolean(isTestMode)
-    };
-
-    setIsSavingClaim(true);
-    try {
-      await supplierClaimService.saveClaim(newClaim);
-      setSavedClaims(prev => [newClaim, ...prev.filter(c => (c.claim_number || c.claimNumber) !== claimNumber)]);
-      if (onRefresh) onRefresh();
-    } catch (err) {
-      console.warn('Error saving batch claim to database:', err);
-    } finally {
-      setIsSavingClaim(false);
-    }
-
-    setActiveClaimBatch(newClaim);
-  };
-
-  /**
-   * BATCH ACTION: PRINT VOUCHERS FOR SELECTED ITEMS
-   */
-  const handlePrintSelectedVouchers = () => {
-    if (selectedItems.length === 0) return;
-
-    // Financial Validation & Safety Guard
-    const invalidItem = selectedItems.find(i => {
-      const res = resolveReportProduct(i);
-      return res.price <= 0 || res.supplier === 'Pending Assignment' || res.supplier === 'Unassigned';
-    });
-
-    if (invalidItem || totalClaimAmount <= 0) {
-      setFinancialWarningTarget({
-        item: invalidItem || selectedItems[0],
-        message: "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Please click 'Assign SKU' first to set the official item price and master supplier."
-      });
-      return;
-    }
-
-    const suppliersInBatch = [...new Set(selectedItems.map(i => resolveReportProduct(i).supplier.trim()))];
-    if (suppliersInBatch.length > 1) {
-      alert(`You have selected items across ${suppliersInBatch.length} different suppliers (${suppliersInBatch.join(', ')}).\n\nTo print a consolidated RTV voucher, please select items from a single supplier.`);
-      return;
-    }
-
-    const supplierName = suppliersInBatch[0];
-    const cleanGeneratedBy = getCleanUserName(currentUser);
-    
-    // Look up if a claim was already created for these items, or create temporary print preview
-    let existingClaim = savedClaims.find(c => 
-      c.supplier_name === supplierName && Array.isArray(c.items) && selectedItems.some(si => c.items.some(ci => ci.rma_number === si.rma_number))
-    );
-
-    if (!existingClaim) {
-      const claimNumber = supplierClaimService.generateRtvId(savedClaims, isTestMode);
-      const enrichedItems = selectedItems.map(i => {
-        const res = resolveReportProduct(i);
-        return {
-          ...i,
-          name: res.name,
-          code: res.code || i.code,
-          sku: res.code || i.sku,
-          supplier_name: res.supplier,
-          price: res.price,
-          price_with_vat: res.price
-        };
-      });
-
-      existingClaim = {
-        claimNumber,
-        claim_number: claimNumber,
-        supplierName,
-        createdAt: new Date().toISOString(),
-        generatedBy: cleanGeneratedBy,
-        items: enrichedItems,
-        totalQuantity,
-        totalClaimAmount,
-        notes: isTestMode ? '[TEST_MODE] Sandbox RTV Claim' : '',
-        isTest: Boolean(isTestMode)
-      };
-    }
-
-    setActiveClaimBatch(existingClaim);
-    setTimeout(() => {
-      printIsolatedElement({
-        elementId: 'rtv-voucher-mount',
-        documentTitle: `Supplier_Debit_Claim_${existingClaim.claimNumber || existingClaim.claim_number || 'Voucher'}`,
-        pageSize: 'portrait',
-        pageMargin: '0.4in',
-        customStyles: `
-          @page {
-            size: A4 portrait;
-            margin: 10mm;
-          }
-          #rtv-voucher-mount {
-            width: 100% !important;
-            max-width: 190mm !important;
-            margin: 0 auto !important;
-            padding: 16px !important;
-            border: 1.5px solid #000000 !important;
-            border-radius: 6px !important;
-            box-sizing: border-box !important;
-            box-shadow: none !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-          }
-          #rtv-voucher-mount input {
-            border: none !important;
-            outline: none !important;
-            background: transparent !important;
-          }
-        `
-      });
-    }, 250);
-  };
-
-  /**
    * BATCH ACTION: DELETE SELECTED REPORTS
    */
   const handleBulkDelete = () => {
@@ -880,41 +639,6 @@ export default function SupplierClaimsTab({
     if (onRequestBulkDeleteReports) {
       onRequestBulkDeleteReports(selectedItems);
     }
-  };
-
-  const handlePrintClaimVoucher = () => {
-    if (!activeClaimBatch) return;
-    printIsolatedElement({
-      elementId: 'rtv-voucher-mount',
-      documentTitle: `Supplier_Debit_Claim_${activeClaimBatch.claimNumber || activeClaimBatch.claim_number || 'Voucher'}`,
-      pageSize: 'portrait',
-      pageMargin: '0.4in',
-      customStyles: `
-        @page {
-          size: A4 portrait;
-          margin: 10mm;
-        }
-        #rtv-voucher-mount {
-          width: 100% !important;
-          max-width: 190mm !important;
-          margin: 0 auto !important;
-          padding: 16px !important;
-          border: 1.5px solid #000000 !important;
-          border-radius: 6px !important;
-          box-sizing: border-box !important;
-          box-shadow: none !important;
-          background: #ffffff !important;
-          color: #000000 !important;
-          page-break-inside: avoid !important;
-          break-inside: avoid !important;
-        }
-        #rtv-voucher-mount input {
-          border: none !important;
-          outline: none !important;
-          background: transparent !important;
-        }
-      `
-    });
   };
 
   const hasActiveFilters = selectedSupplier !== 'All' || dispositionFilter !== 'All' || Boolean(searchTerm);
@@ -979,10 +703,10 @@ export default function SupplierClaimsTab({
               </select>
             </div>
 
-            {/* Disposition Filter Dropdown */}
+            {/* 4-Choice Status Filter Dropdown */}
             <div className="flex items-center gap-1.5 w-full md:w-auto min-w-0">
               <label className="text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0">
-                Triage:
+                Status:
               </label>
               <select
                 value={dispositionFilter}
@@ -991,14 +715,16 @@ export default function SupplierClaimsTab({
                   setSelectedRmaIds(new Set());
                 }}
                 className="w-full md:w-auto px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-600 cursor-pointer shadow-2xs truncate box-border"
-                title="Filter by Triage Disposition"
+                title="Filter by 4-Choice Outcome"
               >
-                <option value="All">All Dispositions</option>
-                <option value="1 - Pending Vendor Pickup">1 - Pending Vendor Pickup</option>
-                <option value="2 - In Transit to Vendor">2 - In Transit to Vendor</option>
-                <option value="3 - Vendor Credit / AP Deduction Settled">3 - Vendor Credit / AP Deduction Settled</option>
-                <option value="4 - Vendor Replacement Stock Received">4 - Vendor Replacement Stock Received</option>
-                <option value="5 - Claim Rejected by Vendor">5 - Claim Rejected by Vendor</option>
+                <option value="All">All 4-Choice Statuses</option>
+                <option value="pending_decision">Pending Decision</option>
+                <option value="waiting_debit">Waiting Driver (Debit Claim)</option>
+                <option value="picked_up_debit">Picked Up for Debit Claim</option>
+                <option value="waiting_replacement">Waiting Driver (Replacement)</option>
+                <option value="picked_up_replacement">Picked Up for Replacement</option>
+                <option value="scrap">Scrapped / Disposed</option>
+                <option value="restock_good">Restocked to Good Shelf</option>
               </select>
             </div>
 
@@ -1060,51 +786,7 @@ export default function SupplierClaimsTab({
                   {selectedRmaIds.size} selected • ₱{totalClaimAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </span>
 
-                {/* 1. Batch Debit Claim Voucher */}
-                {(() => {
-                  const hasHoldInBatch = selectedItems.some(it =>
-                    String(it.disposition || '').toLowerCase().includes('quarantine') ||
-                    String(it.disposition || '').toLowerCase().includes('hold') ||
-                    String(it.status || '').toLowerCase() === 'quarantine'
-                  );
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (hasHoldInBatch) {
-                          alert("Selected items contain items on Hold / Quarantine. Resolve hold before issuing financial claims.");
-                          return;
-                        }
-                        handleGenerateBatchClaim();
-                      }}
-                      disabled={isSavingClaim || hasHoldInBatch}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs ${
-                        hasHoldInBatch
-                          ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
-                          : totalClaimAmount <= 0
-                          ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-dashed border-amber-400 opacity-90 cursor-pointer'
-                          : 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-500/20 cursor-pointer'
-                      }`}
-                      title={hasHoldInBatch ? "Selected items contain items on Hold / Quarantine. Resolve hold before issuing financial claims." : (totalClaimAmount <= 0 ? "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor" : "Generate consolidated supplier debit claim voucher")}
-                    >
-                      {hasHoldInBatch ? <Lock className="w-3.5 h-3.5 text-amber-500" /> : <Receipt className="w-3.5 h-3.5" />}
-                      <span>{hasHoldInBatch ? 'Hold Locked' : '+ Debit Claim'}</span>
-                    </button>
-                  );
-                })()}
-
-                {/* 2. Print Vouchers for Selected Items */}
-                <button
-                  type="button"
-                  onClick={handlePrintSelectedVouchers}
-                  className="px-3 py-1 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-                  title="Print RTV claim vouchers for selected items"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Print Vouchers</span>
-                </button>
-
-                {/* 2. Archive Selected */}
+                {/* Archive Selected */}
                 {effectiveBulkArchiveReports && (
                   <button
                     type="button"
@@ -1144,12 +826,12 @@ export default function SupplierClaimsTab({
             {onOpenMatrixExport && (
               <button
                 type="button"
-                onClick={() => onOpenMatrixExport()}
+                onClick={() => onOpenMatrixExport('overall')}
                 className="text-xs text-emerald-700 dark:text-emerald-300 hover:text-emerald-900 dark:hover:text-emerald-100 flex items-center gap-1.5 font-black cursor-pointer bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 px-3 py-1.5 rounded-xl shadow-2xs hover:shadow-xs transition-all"
-                title="Download daily piece-based Excel Matrix (.xlsx) matching template for Supplier RTV"
+                title="Download Overall RMA Matrix (.xlsx) combining Customer Hub & Supplier RTV"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                <span>Supplier RTV Matrix (.xlsx)</span>
+                <span>{isTestMode ? 'Sandbox Overall Matrix (.xlsx)' : 'Overall RMA Matrix (.xlsx)'}</span>
               </button>
             )}
 
@@ -1219,7 +901,7 @@ export default function SupplierClaimsTab({
                     className="p-3 cursor-pointer hover:text-amber-600 transition-colors group"
                   >
                     <div className="flex items-center gap-1">
-                      <span>RMA Identifier</span>
+                      <span>RMA Identifier / Date (YYYY-MM-DD)</span>
                       {sortField === 'rma_number' || sortField === 'created_at' ? (
                         sortDirection === 'asc' ? <ArrowUp className="w-3 h-3 text-amber-600" /> : <ArrowDown className="w-3 h-3 text-amber-600" />
                       ) : <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
@@ -1323,12 +1005,11 @@ export default function SupplierClaimsTab({
                   const res = resolveReportProduct(r);
                   const photos = getPhotos(r);
                   const existingClaim = getClaimForReport(r);
+                  const outcome = formatFourChoiceOutcome(r);
                   const isManifest = !r.is_unpacked_manifest_item && isBatchManifest(r, reportsList);
                   const manifestChildren = isManifest ? getReportManifestItems(r, reportsList) : [];
                   const manifestKey = r.id || r.rma_number;
                   const isManifestExpanded = expandedManifestIds.has(manifestKey);
-                  const hasSku = isManifest || hasAssignedSku(r, savedProductsList);
-                  const isClaimable = hasSku && res.price > 0 && res.supplier && res.supplier !== 'Pending Assignment' && res.supplier !== 'Unassigned';
 
                   return (
                     <React.Fragment key={manifestKey}>
@@ -1393,7 +1074,7 @@ export default function SupplierClaimsTab({
                             {r.rma_number}
                           </div>
                           <div className="text-[10px] text-slate-400 flex items-center gap-1.5 flex-wrap">
-                            <span>{r.created_at ? new Date(r.created_at).toLocaleDateString() : ''}</span>
+                            <span>{r.created_at ? formatDateYmd(r.created_at) : ''}</span>
                             {r.gps_latitude && r.gps_longitude && (
                               <a
                                 href={`https://www.google.com/maps?q=${r.gps_latitude},${r.gps_longitude}`}
@@ -1459,11 +1140,11 @@ export default function SupplierClaimsTab({
                               </button>
                             </div>
                           )}
-                          {existingClaim && (
+                          {(outcome.claimNumber || existingClaim) && (
                             <div className="mt-1">
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 inline-flex items-center gap-0.5 shadow-2xs" title={`Official RTV Voucher Active: ${existingClaim.claimNumber || existingClaim.claim_number}`}>
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 inline-flex items-center gap-0.5 shadow-2xs" title={`Claim Reference: ${outcome.claimNumber || existingClaim?.claimNumber || existingClaim?.claim_number}`}>
                                 <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
-                                <span>RTV Voucher Active</span>
+                                <span>{outcome.claimNumber || existingClaim?.claimNumber || existingClaim?.claim_number}</span>
                               </span>
                             </div>
                           )}
@@ -1534,16 +1215,23 @@ export default function SupplierClaimsTab({
                           </div>
                         </td>
 
-                        {/* Triage Disposition & Truncated Reporter Explanation */}
-                        <td className="p-3 max-w-[190px]">
+                        {/* 4-Choice Outcome & Date/Time + Reporter Explanation */}
+                        <td className="p-3 max-w-[240px]">
                           <div className="space-y-1">
-                            <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${
-                              r.disposition === 'Return to Vendor (RTV)' || (r.disposition && r.disposition.includes('Vendor'))
-                                ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800'
-                                : 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                            }`}>
-                              {r.disposition || '1 - Pending Vendor Pickup'}
+                            <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
+                              {outcome.label}
                             </span>
+                            {outcome.choiceKey === 'scrap' && (
+                              <div className="text-[10px] font-bold">
+                                <span className={`px-1.5 py-0.5 rounded border inline-block ${
+                                  getItemNeedsReorder(r)
+                                    ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800'
+                                    : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                                }`}>
+                                  {getItemNeedsReorder(r) ? '🛒 Re-Order: YES' : '❌ No Re-Order'}
+                                </span>
+                              </div>
+                            )}
                             {r.reason && (
                               <div className="text-[10px] text-rose-600 dark:text-rose-400 font-semibold truncate max-w-[175px]" title={r.reason}>
                                 {r.reason}
@@ -1614,71 +1302,51 @@ export default function SupplierClaimsTab({
                           </span>
                         </td>
 
-                        {/* Actions Column: Thermal Label, Inspect/Triage, Assign SKU, Debit Claim & Delete */}
+                        {/* Actions Column: 4-Choice / Pickup, Form, Split Qty / Details, Assign SKU, Coworker Queue, Archive, Delete */}
                         <td className="p-2.5 text-center" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                            
-                            {/* 1. Print 4x6 Thermal Box Label */}
-                            {onPrintLabel && (
-                              <button
-                                type="button"
-                                onClick={() => onPrintLabel(r)}
-                                className="p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                                title="Print 4x6 inch Thermal Box Label"
-                              >
-                                <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
-                              </button>
-                            )}
 
-                            {/* 1b. Simple 4-Choice Supplier RTV & Pickup Verification Wizard */}
+                            {/* 1. Simple 4-Choice Supplier RTV & Pickup Verification Wizard */}
                             {onOpenSimpleWizard && (
                               <button
                                 type="button"
                                 onClick={() => onOpenSimpleWizard(r)}
-                                className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-700 rounded-lg text-[10px] font-black transition-colors cursor-pointer whitespace-nowrap"
-                                title="Open plain-English 4-Choice Supplier RTV & Driver Pickup Wizard"
+                                className={`px-2 py-1 rounded-lg text-[10px] font-black transition-colors cursor-pointer whitespace-nowrap border ${
+                                  outcome.hasDecision
+                                    ? 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-700'
+                                    : 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-2xs'
+                                }`}
+                                title={outcome.hasDecision ? 'Edit saved 4-Choice decision, claim details, or driver pickup photos' : 'Open 4-Choice / Driver Pickup Verification Wizard'}
                               >
-                                ⚡ 4-Choice / Pickup
+                                {outcome.hasDecision ? '✏️ Edit Claim / 4-Choice' : '⚡ 4-Choice / Pickup'}
                               </button>
                             )}
 
-                            {/* 1c. View / Print Dual-Copy A4 Pickup Form when Picked Up */}
-                            {onOpenPickupForm && (r.status === 'picked_up' || r.ai_document_metadata?.supplier_pickup?.picked_up_at) && (
+                            {/* 2. View / Print Debit Claim or Replacement Form when generated */}
+                            {onOpenPickupForm && (outcome.formType || r.status === 'picked_up' || r.ai_document_metadata?.supplier_pickup?.picked_up_at) && (
                               <button
                                 type="button"
                                 onClick={() => onOpenPickupForm(r)}
                                 className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap shadow-2xs"
-                                title="View / Re-print Dual-Copy A4 Pickup Validation Form"
+                                title={outcome.formType === 'replacement' ? 'View / Re-print Dual-Copy Replacement Form' : 'View / Re-print Dual-Copy Debit Claim Form'}
                               >
-                                <FileCheck2 className="w-3 h-3" />
-                                <span>A4 Form</span>
+                                <span>{outcome.formType === 'replacement' ? '📄 Replacement Form' : '📄 Debit Claim Form'}</span>
                               </button>
                             )}
 
-                            {/* 2. Inspect / Triage Physical Return (Safeguarded by Assign SKU) */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!isManifest && !hasAssignedSku(r, savedProductsList)) {
-                                  setFinancialWarningTarget({
-                                    item: r,
-                                    title: "Assign SKU Required First",
-                                    message: "This item does not have an official catalog SKU assigned yet. Please assign an SKU first before conducting warehouse inspection and physical triage."
-                                  });
-                                  return;
-                                }
-                                if (onOpenQuickAction) {
-                                  onOpenQuickAction(r.rma_number);
-                                }
-                              }}
-                              className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                              title={`Inspect, triage condition grade, and assign rack/bin location for ${r.rma_number}`}
-                            >
-                              <ClipboardCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                              <span>Inspect / Triage</span>
-                            </button>
+                            {/* 3. Split Qty / Details (Opens streamlined QuickRMAActionModal) */}
+                            {onOpenQuickAction && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenQuickAction(r.rma_number)}
+                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
+                                title={!isManifest && Number(res.qty) > 1 ? `Split Qty or edit details for ${r.rma_number}` : `View details, documents, or audit trail for ${r.rma_number}`}
+                              >
+                                <span>{!isManifest && Number(res.qty) > 1 ? '✂️ Split Qty' : '📋 Details'}</span>
+                              </button>
+                            )}
 
-                            {/* 3. Assign SKU (for single items if unassigned) */}
+                            {/* 4. Assign SKU (for single items if unassigned) */}
                             {!isManifest && res.isUnassigned && (onAssignSku || onEditProductFromReport) && (
                               <button
                                 type="button"
@@ -1776,169 +1444,6 @@ export default function SupplierClaimsTab({
                                 <span>↩️ Reset to Pending</span>
                               </button>
                             )}
-
-                            {/* 4. Stream-Specific Coworker Actions (Restock vs Scrap vs RTV Debit Claim) */}
-                            {(() => {
-                              // 1. If RTV Debit Voucher already active, show voucher button
-                              if (existingClaim) {
-                                return (
-                                  <button
-                                    type="button"
-                                    onClick={() => setActiveClaimBatch(existingClaim)}
-                                    className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                    title={`View Official RTV Debit Claim Voucher: ${existingClaim.claimNumber || existingClaim.claim_number}`}
-                                  >
-                                    <Receipt className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                    <span>RTV Voucher Active</span>
-                                  </button>
-                                );
-                              }
-
-                              // 2. If item is on hold
-                              const isRowOnHold = isItemOnHold(r);
-                              const isRowRejected = isItemRejected(r);
-                              const isVendorRefused = String(r.disposition || '').toLowerCase().includes('claim rejected by vendor');
-
-                              if (isRowOnHold) {
-                                return (
-                                  <button
-                                    type="button"
-                                    disabled={true}
-                                    onClick={() => {
-                                      alert("Item is on Hold / Quarantine. Resolve hold before issuing financial claims.");
-                                    }}
-                                    className="px-2.5 py-1 bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-not-allowed opacity-70"
-                                    title="Item is on Hold / Quarantine. Resolve hold before issuing financial claims."
-                                  >
-                                    <Lock className="w-3 h-3 text-amber-500" />
-                                    <span>Hold: Debit Claim Locked</span>
-                                  </button>
-                                );
-                              }
-
-                              // 3. If rejected
-                              if (isRowRejected || isVendorRefused) {
-                                return (
-                                  <button
-                                    type="button"
-                                    disabled={true}
-                                    className="px-2.5 py-1 bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-not-allowed opacity-70"
-                                    title={isVendorRefused ? "Vendor refused claim. Debit claims cannot be issued." : "Claim is Rejected."}
-                                  >
-                                    <Lock className="w-3 h-3 text-rose-500" />
-                                    <span>{isVendorRefused ? 'Vendor Rejected Claim' : 'Claim Rejected'}</span>
-                                  </button>
-                                );
-                              }
-
-                              // 4. If Restock item (e.g. Free replacement goods arrived or routed to restock)
-                              const isRestockItem = isItemReadyToRestock(r) ||
-                                String(r.disposition || '').toLowerCase().includes('restock') ||
-                                String(r.disposition || '').toLowerCase().includes('replacement stock received');
-
-                              if (isRestockItem) {
-                                return (
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className="px-2 py-0.5 rounded-md bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300 font-extrabold text-[10px] border border-teal-200 dark:border-teal-800">
-                                      📦 Restock to Shelf
-                                    </span>
-                                    {Boolean(r.ai_document_metadata?.workflow_resolution === 'restocked' || r.status === 'resolved' || r.status === 'closed') ? (
-                                      <span className="px-2 py-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-bold">
-                                        ✓ Restocked
-                                      </span>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        disabled={updatingQueueId === (r.id || r.rma_number)}
-                                        onClick={() => handleConfirmCoworkerAction(r, 'restocked')}
-                                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
-                                        title="Confirm physical inventory added into WMS/ERP and route to Restocked"
-                                      >
-                                        <CheckCircle2 className="w-3 h-3" />
-                                        <span>[ ✓ Confirm Restocked in WMS ]</span>
-                                      </button>
-                                    )}
-                                  </div>
-                                );
-                              }
-
-                              // 5. If explicitly Scrap / Dispose item
-                              const isScrapItem = (
-                                String(r.disposition || '').toLowerCase().includes('scrap') ||
-                                String(r.disposition || '').toLowerCase().includes('dispose') ||
-                                r.disposition === '5- Scrap / Dispose' ||
-                                String(r.disposition || '').toLowerCase().includes('scrap-bin')
-                              );
-
-                              if (isScrapItem) {
-                                const isReorder = getItemNeedsReorder(r);
-                                return (
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    {Boolean(r.ai_document_metadata?.workflow_resolution === 'reordered' || r.ai_document_metadata?.workflow_resolution === 'scrapped_no_reorder' || r.status === 'resolved' || r.status === 'closed') ? (
-                                      <span className="px-2 py-1 bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border border-rose-300 dark:border-rose-700 rounded-lg text-[10px] font-bold">
-                                        {r.ai_document_metadata?.workflow_resolution === 'reordered' ? '✓ PO Placed' : '✓ Written Off'}
-                                      </span>
-                                    ) : isReorder ? (
-                                      <button
-                                        type="button"
-                                        disabled={updatingQueueId === (r.id || r.rma_number)}
-                                        onClick={() => handleConfirmCoworkerAction(r, 'reordered')}
-                                        className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
-                                        title="Confirm replacement PO issued to vendor and acknowledge replenishment"
-                                      >
-                                        <CheckCircle2 className="w-3 h-3" />
-                                        <span>[ ✓ Confirm Re-Ordered (PO Placed) ]</span>
-                                      </button>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        disabled={updatingQueueId === (r.id || r.rma_number)}
-                                        onClick={() => handleConfirmCoworkerAction(r, 'scrapped_no_reorder')}
-                                        className="px-2.5 py-1 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs whitespace-nowrap"
-                                        title="Confirm item written off without replacement PO"
-                                      >
-                                        <CheckCircle2 className="w-3 h-3" />
-                                        <span>[ ✓ Confirm Written Off ]</span>
-                                      </button>
-                                    )}
-                                  </div>
-                                );
-                              }
-
-                              // 6. Default: Standard Return to Vendor (RTV) Claim Action
-                              if (!isClaimable) {
-                                return (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setFinancialWarningTarget({
-                                        item: r,
-                                        title: "Assign SKU & Price Required",
-                                        message: "Cannot issue RTV Debit Claim for ₱0.00 or unassigned SKU/vendor. Please click 'Assign SKU' first to set the official item price and master supplier."
-                                      });
-                                    }}
-                                    className="px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-medium flex items-center gap-1 transition-all cursor-pointer shadow-2xs hover:border-amber-400 hover:text-amber-600"
-                                    title="Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Click 'Assign SKU' first."
-                                  >
-                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-                                    <span>+ Debit Claim (₱0.00 / Unassigned)</span>
-                                  </button>
-                                );
-                              }
-
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => handleGenerateSingleClaim(r)}
-                                  disabled={isSavingClaim}
-                                  className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                                  title={`Generate RTV Debit Claim Voucher for ${r.rma_number}`}
-                                >
-                                  <Receipt className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                                  <span>+ Debit Claim</span>
-                                </button>
-                              );
-                            })()}
 
                             {/* 5. Archive Report */}
                             {effectiveArchiveReport && (
@@ -2082,9 +1587,14 @@ export default function SupplierClaimsTab({
                                             ₱{childTotal.toFixed(2)}
                                           </td>
                                           <td className="py-2 px-3">
-                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800">
-                                              {childDisp}
-                                            </span>
+                                            {(() => {
+                                              const childOutcome = formatFourChoiceOutcome(child);
+                                              return (
+                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border inline-block ${childOutcome.badgeColor}`}>
+                                                  {childOutcome.label}
+                                                </span>
+                                              );
+                                            })()}
                                           </td>
                                           <td className="py-2 px-2 text-center">
                                             <div className="flex items-center justify-center gap-1">
@@ -2098,15 +1608,6 @@ export default function SupplierClaimsTab({
                                                   Assign SKU
                                                 </button>
                                               )}
-                                              <button
-                                                type="button"
-                                                onClick={() => handleGenerateSingleClaim(childReportItem)}
-                                                disabled={!isChildSkuValid || childPrice <= 0 || isSavingClaim}
-                                                className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 rounded text-[10px] font-bold border border-amber-300 dark:border-amber-700 cursor-pointer disabled:opacity-40"
-                                                title="Generate individual debit claim"
-                                              >
-                                                + Claim
-                                              </button>
                                             </div>
                                           </td>
                                         </tr>
@@ -2153,202 +1654,6 @@ export default function SupplierClaimsTab({
           subtitle={localLightboxPhoto?.subtitle}
           onClose={() => setLocalLightboxPhoto(null)}
         />
-      )}
-
-      {/* FORMAL RTV DEBIT CLAIM VOUCHER MODAL */}
-      {activeClaimBatch && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 max-w-3xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[95vh] animate-in zoom-in-95">
-            
-            {/* Header */}
-            <div className="p-4 sm:px-6 bg-slate-50 dark:bg-slate-850 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2">
-                <Receipt className="w-5 h-5 text-amber-600" />
-                <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                  Supplier Debit Claim Voucher (RTV)
-                </h3>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                  Synced to Database
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveClaimBatch(null)}
-                className="text-slate-400 hover:text-slate-700 dark:hover:text-white text-xs font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Printable Voucher Mount */}
-            <div id="rtv-voucher-mount" className="p-6 overflow-y-auto space-y-6 text-xs bg-white text-black font-sans">
-              
-              {/* Header Grid */}
-              <div className="border-b-2 border-black pb-4 flex items-start justify-between">
-                <div>
-                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-600">
-                    WHOLESALE REVERSE LOGISTICS & RECOVERY
-                  </div>
-                  <h2 className="text-xl font-black text-black">
-                    SUPPLIER DEBIT CLAIM VOUCHER
-                  </h2>
-                  <div className="text-xs text-slate-600 mt-1">
-                    Vendor / Counterparty: <strong>{activeClaimBatch.supplierName || activeClaimBatch.supplier_name}</strong>
-                  </div>
-                </div>
-
-                <div className="text-right">
-                  <div className="font-mono text-sm font-black text-black bg-slate-100 px-2 py-1 border border-black inline-block">
-                    {activeClaimBatch.claimNumber || activeClaimBatch.claim_number}
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-1">
-                    Date: {new Date(activeClaimBatch.createdAt || activeClaimBatch.created_at).toLocaleDateString()}
-                  </div>
-                </div>
-              </div>
-
-              {/* Summary Stats */}
-              <div className="grid grid-cols-3 gap-3 p-3 bg-slate-50 border border-black rounded-lg">
-                <div>
-                  <div className="text-[9px] font-black uppercase text-slate-500">TOTAL BUNDLED ITEMS</div>
-                  <div className="text-base font-black text-black">{activeClaimBatch.items?.length || 1} Lines</div>
-                </div>
-                <div>
-                  <div className="text-[9px] font-black uppercase text-slate-500">TOTAL RETURNED UNITS</div>
-                  <div className="text-base font-black text-black">{activeClaimBatch.totalQuantity || activeClaimBatch.total_quantity} Units</div>
-                </div>
-                <div>
-                  <div className="text-[9px] font-black uppercase text-slate-500">TOTAL CLAIM AMOUNT</div>
-                  <div className="text-base font-black text-amber-600 font-mono">
-                    ₱{Number(activeClaimBatch.totalClaimAmount || activeClaimBatch.total_claim_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </div>
-                </div>
-              </div>
-
-              {/* Items Table */}
-              <div className="border border-black rounded-lg overflow-hidden">
-                <table className="w-full text-left text-[11px]">
-                  <thead className="bg-slate-100 border-b border-black font-bold uppercase text-[10px]">
-                    <tr>
-                      <th className="p-2">RMA #</th>
-                      <th className="p-2">Barcode / SKU</th>
-                      <th className="p-2">Description</th>
-                      <th className="p-2 text-center">Qty</th>
-                      <th className="p-2 text-right">Price</th>
-                      <th className="p-2 text-right">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {(activeClaimBatch.items || []).map((item, idx) => {
-                      const qty = Number(item.quantity) || 1;
-                      const price = Number(item.price_with_vat || item.price || 0);
-                      return (
-                        <tr key={idx}>
-                          <td className="p-2 font-mono font-bold">{item.rma_number}</td>
-                          <td className="p-2 font-mono">{item.code || item.sku || item.barcode}</td>
-                          <td className="p-2 font-semibold">{item.name}</td>
-                          <td className="p-2 text-center font-mono">{qty} {item.unit_name || 'pc'}</td>
-                          <td className="p-2 text-right font-mono">₱{price.toFixed(2)}</td>
-                          <td className="p-2 text-right font-mono font-bold">₱{(qty * price).toFixed(2)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Signatures */}
-              <div className="grid grid-cols-2 gap-8 pt-8 border-t border-black text-center text-[10px]">
-                <div>
-                  <div className="border-b border-black pb-8"></div>
-                  <div className="font-bold pt-1 uppercase">Prepared By (Logistics / Warehouse)</div>
-                  <input
-                    type="text"
-                    value={activeClaimBatch.generatedBy || activeClaimBatch.generated_by || ''}
-                    onChange={(e) => setActiveClaimBatch(prev => ({ ...prev, generatedBy: e.target.value, generated_by: e.target.value }))}
-                    className="text-center font-semibold text-slate-800 dark:text-slate-100 print:text-black w-full bg-transparent border-none focus:outline-none focus:ring-1 focus:ring-brand-500 rounded text-[11px] px-1"
-                    title="Click to edit name if needed"
-                  />
-                </div>
-                <div>
-                  <div className="border-b border-black pb-8"></div>
-                  <div className="font-bold pt-1 uppercase">Supplier Acknowledgement / Driver Signature</div>
-                  <div className="text-slate-500 print:text-black">Signature Over Printed Name & Date</div>
-                </div>
-              </div>
-
-            </div>
-
-            {/* Footer Actions */}
-            <div className="p-4 sm:px-6 bg-slate-50 dark:bg-slate-850 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
-              <button
-                type="button"
-                onClick={() => setActiveClaimBatch(null)}
-                className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 dark:text-slate-400"
-              >
-                Close
-              </button>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handlePrintClaimVoucher}
-                  className="px-4 py-2 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Print Voucher</span>
-                </button>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* FINANCIAL VALIDATION & SAFETY GUARD MODAL */}
-      {financialWarningTarget && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-amber-500/30 max-w-md w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95">
-            <div className="flex items-start gap-3.5">
-              <div className="w-11 h-11 rounded-2xl bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 shadow-inner">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <div className="space-y-1.5 min-w-0">
-                <h4 className="text-sm font-black text-slate-900 dark:text-white">
-                  Financial Validation & Safety Guard
-                </h4>
-                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                  {financialWarningTarget.message || "Cannot issue RTV Debit Claim for ₱0.00 or unassigned vendor. Please click 'Assign SKU' first to set the official item price and master supplier."}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setFinancialWarningTarget(null)}
-                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
-              >
-                Dismiss
-              </button>
-              {financialWarningTarget.item && (onAssignSku || onEditProductFromReport) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const target = financialWarningTarget.item;
-                    setFinancialWarningTarget(null);
-                    if (onAssignSku) onAssignSku(target);
-                    else if (onEditProductFromReport) onEditProductFromReport(target);
-                  }}
-                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm shadow-blue-500/20 cursor-pointer"
-                >
-                  <Package className="w-3.5 h-3.5" />
-                  <span>Assign SKU Now</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
       )}
 
     </div>

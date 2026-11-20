@@ -73,12 +73,14 @@ export const normalizeProduct = (item) => {
     brand_name: item.brandName || '',
     supplier: item.supplierName || 'Savemore',
     supplier_name: item.supplierName || 'Savemore',
+    supplierName: item.supplierName || 'Savemore',
     unit_price: netPrice,
     price: netPrice,
     price_with_vat: priceWithVat,
     priceWithVat: priceWithVat,
     case_pack: item.unitName ? `Per ${item.unitName}` : '1 pc',
     unit_name: item.unitName || 'pc',
+    unitName: item.unitName || 'pc',
     image_url: item.imageUrl || item.image_url || null, // Strictly real images only, no fake/stock photos
     group: inferGroup(item.name || '', item.brandName || ''),
     requires_serial: Boolean(item.hasSerialNumbers),
@@ -348,38 +350,64 @@ export const purchaseOrdersApi = {
     const capitalized = trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
     const uppercase = trimmed.toUpperCase();
     const lowercase = trimmed.toLowerCase();
-    const variations = Array.from(new Set([capitalized, trimmed, uppercase, lowercase]));
+    const variations = Array.from(new Set([trimmed, capitalized, uppercase, lowercase]));
+    const cols = 'id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers';
+    const queryUrls = variations.map(
+      (term) => `${BASE_URL}/data/erply_products?search=${encodeURIComponent(term)}&per_page=${limit}&columns=${cols}`
+    );
+    if (!/\s/.test(trimmed)) {
+      const codeVariations = Array.from(new Set([trimmed, uppercase, lowercase]));
+      codeVariations.forEach((codeTerm) => {
+        queryUrls.push(`${BASE_URL}/data/erply_products?code=${encodeURIComponent(codeTerm)}&per_page=${limit}&columns=${cols}`);
+      });
+    }
 
-    for (const term of variations) {
-      try {
-        const url = `${BASE_URL}/data/erply_products?search=${encodeURIComponent(term)}&per_page=${limit}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
-        const res = await fetch(url, {
-          headers: {
-            'X-API-Key': key,
-            'Accept': 'application/json'
+    const merged = [];
+    const seen = new Set();
+    let sawUnauthorized = false;
+
+    const batches = await Promise.all(
+      queryUrls.map(async (url) => {
+        if (isApiUnauthorized) return [];
+        try {
+          const res = await fetch(url, {
+            headers: {
+              'X-API-Key': key,
+              'Accept': 'application/json'
+            }
+          });
+          if (res.status === 401) {
+            sawUnauthorized = true;
+            return [];
           }
-        });
-
-        if (res.status === 401) {
-          markUnauthorized();
-          break; // Stop immediately to avoid 401 spam
-        }
-
-        if (res.ok) {
-          const json = await res.json();
-          if (json.data && Array.isArray(json.data) && json.data.length > 0) {
-            const items = json.data.map(normalizeProduct);
-            items.totalRecords = json.pagination?.total_records || items.length;
-            items.totalPages = json.pagination?.total_pages || 1;
-            return items;
+          if (res.ok) {
+            const json = await res.json();
+            return Array.isArray(json?.data) ? json.data : [];
           }
+        } catch {}
+        return [];
+      })
+    );
+
+    if (sawUnauthorized) {
+      markUnauthorized();
+      return [];
+    }
+
+    for (const batch of batches) {
+      for (const rawItem of batch) {
+        const norm = normalizeProduct(rawItem);
+        const k = String(norm?.barcode || norm?.code || norm?.id || '').trim().toLowerCase();
+        if (norm && !seen.has(k)) {
+          seen.add(k);
+          merged.push(norm);
         }
-      } catch (err) {
-        // Quiet catch
       }
     }
 
-    return [];
+    merged.totalRecords = merged.length;
+    merged.totalPages = 1;
+    return merged.slice(0, limit);
   },
 
   /**

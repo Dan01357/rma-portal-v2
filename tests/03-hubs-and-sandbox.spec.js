@@ -5,6 +5,7 @@ import {
   VERIFIED_BARCODE,
   attachStrictGuards,
   installPrintStubs,
+  interceptAndCaptureEmails,
   isoDateDaysOffset,
   gotoAdmin
 } from './helpers/testUtils.js';
@@ -100,6 +101,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
     await context.grantPermissions(['camera', 'clipboard-read', 'clipboard-write']).catch(() => {});
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
+    await interceptAndCaptureEmails(page);
 
     let seededCustomerRma = null;
     let seededSupplierRma = null;
@@ -144,15 +146,21 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Ligh
         .click();
       await expect(page.getByText(/Logged RMA Return Reports/i)).toBeHidden();
 
-      // 4. Customer Matrix (.xlsx) (RMAMatrixExportModal)
-      await page.getByRole('button', { name: /Customer Matrix \(\.xlsx\)/i }).click();
+      // 4. Overall RMA Matrix (.xlsx) (RMAMatrixExportModal)
+      await page.getByRole('button', { name: /Overall RMA Matrix \(\.xlsx\)/i }).click();
       await page.getByRole('button', { name: /Last 14 Days/i }).click();
       const [liveCustMatrix] = await Promise.all([
         page.waitForEvent('download'),
         page.getByRole('button', { name: /Download Excel Matrix \(\.xlsx\)/i }).click()
       ]);
       assertValidXlsxFile(liveCustMatrix, await liveCustMatrix.path());
+      expect(liveCustMatrix.suggestedFilename()).toMatch(/^Overall_RMA_Matrix_Report_\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2} \d{4}\.xlsx$/);
       await page.getByRole('button', { name: 'Close', exact: true }).click();
+
+      // Verify removed deprecated widgets are absent in Customer Hub
+      await expect(page.locator('button[title*="Thermal Box Label" i]')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /Driver QR Widget/i })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /Buffer Stock Replacement/i })).toHaveCount(0);
 
       // 5. Export Inbound (.xlsx) (downloads .xlsx when populated, or shows empty-state alert when Live Customer Hub has 0 rows)
       const hasLiveCustomerRows = (await page.locator('tbody tr').count()) > 0;

@@ -28,7 +28,7 @@ import {
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import { exportRMAReportsToXlsx } from '../utils/exportCsv';
-import { formatLifecycleStage, getRealPhotos, normalizeWarehouseLocation } from '../utils/rmaHelpers';
+import { formatFourChoiceOutcome, formatLifecycleStage, getRealPhotos, normalizeWarehouseLocation, formatDateYmd, formatDateTimeYmdHm } from '../utils/rmaHelpers';
 
 export default function RMAReportsModal({ 
   isOpen, 
@@ -417,7 +417,6 @@ export default function RMAReportsModal({
                 <option value="credit_memo_issued">Credit Memo Issued</option>
                 <option value="restocked">Restocked</option>
                 <option value="scrapped">Scrapped / Disposed</option>
-                <option value="buffer_replacement_dispatched">🚚 Buffer Replacement Dispatched</option>
                 <option value="rejected">Rejected / Invalid Claim</option>
               </select>
 
@@ -562,7 +561,7 @@ export default function RMAReportsModal({
                       className="py-3 px-3.5 text-right font-bold cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/80 group"
                     >
                       <div className="flex items-center justify-end">
-                        <span>Date & GPS</span>
+                        <span>Date (YYYY-MM-DD) &amp; GPS</span>
                         {renderSortIndicator('created_at')}
                       </div>
                     </th>
@@ -703,18 +702,13 @@ export default function RMAReportsModal({
                           })()}
                         </td>
 
-                        {/* 10. Disposition (Full text without truncation) */}
+                        {/* 10. 4-Choice Outcome (Human-Readable + Date/Time) */}
                         <td className="py-3 px-3.5 text-center whitespace-nowrap">
                           {(() => {
-                            const disp = item.disposition || 'Pending Triage';
-                            let color = 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
-                            if (disp === 'Restock to Inventory') color = 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800';
-                            else if (disp === 'Return to Vendor (RTV)') color = 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/70 dark:text-purple-300 dark:border-purple-800';
-                            else if (disp === 'Quarantine') color = 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800';
-                            else if (disp === 'Scrap / Dispose') color = 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800';
+                            const outcome = formatFourChoiceOutcome(item);
                             return (
-                              <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${color}`}>
-                                {disp}
+                              <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
+                                {outcome.label}
                               </span>
                             );
                           })()}
@@ -733,7 +727,7 @@ export default function RMAReportsModal({
 
                         {/* 9. Date & GPS */}
                         <td className="py-3 px-3.5 text-right font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                          <div>{new Date(item.created_at).toLocaleDateString()}</div>
+                          <div>{item.created_at ? formatDateYmd(item.created_at) : ''}</div>
                           {item.gps_latitude && item.gps_longitude ? (
                             <a
                               href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}
@@ -1016,7 +1010,7 @@ export default function RMAReportsModal({
                       </div>
 
                       <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                        <span>{new Date(item.created_at).toLocaleString()}</span>
+                        <span className="font-mono">{item.created_at ? `${formatDateTimeYmdHm(item.created_at)} (YYYY-MM-DD HH:mm)` : ''}</span>
                         {item.gps_latitude && item.gps_longitude ? (
                           <a
                             href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}

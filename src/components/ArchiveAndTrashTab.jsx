@@ -18,7 +18,8 @@ import {
   isTestRecord, 
   getTrashDaysRemaining, 
   formatQuantityWithPackSize,
-  normalizeWarehouseLocation
+  normalizeWarehouseLocation,
+  formatDateYmd
 } from '../utils/rmaHelpers';
 import TablePagination from './TablePagination';
 
@@ -328,7 +329,7 @@ export default function ArchiveAndTrashTab({
                             </span>
                           </div>
                           <div className="text-[10px] text-slate-400 mt-0.5">
-                            By {meta.trashed_by || 'Staff'} on {meta.trashed_at ? new Date(meta.trashed_at).toLocaleDateString() : 'N/A'}
+                            By {meta.trashed_by || 'Staff'} on {meta.trashed_at ? `${formatDateYmd(meta.trashed_at)} (YYYY-MM-DD)` : 'N/A'}
                           </div>
                         </td>
                       ) : (
@@ -337,7 +338,7 @@ export default function ArchiveAndTrashTab({
                             Archived Vault
                           </div>
                           <div className="text-[10px] text-slate-400 mt-0.5">
-                            By {meta.archived_by || 'Staff'} on {meta.archived_at ? new Date(meta.archived_at).toLocaleDateString() : 'N/A'}
+                            By {meta.archived_by || 'Staff'} on {meta.archived_at ? `${formatDateYmd(meta.archived_at)} (YYYY-MM-DD)` : 'N/A'}
                           </div>
                         </td>
                       )}

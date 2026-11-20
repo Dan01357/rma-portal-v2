@@ -125,7 +125,8 @@ export const supplierClaimService = {
     totalQuantity = 0,
     totalClaimAmount = 0,
     notes = '',
-    isTest = null
+    isTest = null,
+    preserveReportFields = false
   }) {
     const effectiveIsTest = Boolean(
       isTest === true ||
@@ -230,16 +231,21 @@ export const supplierClaimService = {
         const row = currentRows && currentRows[0];
         if (row) {
           const currentAudit = Array.isArray(row.audit_trail) ? row.audit_trail : [];
-          const updatedAudit = [
-            ...currentAudit,
-            {
-              action: 'RTV_CLAIM_GENERATED',
-              rtv_number: cleanClaimNumber,
-              supplier_name: cleanSupplier,
-              generated_by: cleanGeneratedBy,
-              timestamp: nowIso
-            }
-          ];
+          const hasExistingAudit = currentAudit.some(
+            (a) => a?.action === 'RTV_CLAIM_GENERATED' && a?.rtv_number === cleanClaimNumber
+          );
+          const updatedAudit = hasExistingAudit
+            ? currentAudit
+            : [
+                ...currentAudit,
+                {
+                  action: 'RTV_CLAIM_GENERATED',
+                  rtv_number: cleanClaimNumber,
+                  supplier_name: cleanSupplier,
+                  generated_by: cleanGeneratedBy,
+                  timestamp: nowIso
+                }
+              ];
 
           const existingNotes = row.notes || '';
           const tag = `[RTV: ${cleanClaimNumber}]`;
@@ -247,14 +253,18 @@ export const supplierClaimService = {
             ? existingNotes 
             : (existingNotes ? `${existingNotes}\n${tag}` : tag);
 
+          const reportUpdate = {
+            audit_trail: updatedAudit,
+            notes: updatedNotes
+          };
+          if (!preserveReportFields) {
+            reportUpdate.status = 'vendor_claimed';
+            reportUpdate.disposition = 'Return to Vendor (RTV)';
+          }
+
           await supabase
             .from('rma_reports')
-            .update({
-              status: 'vendor_claimed',
-              disposition: 'Return to Vendor (RTV)',
-              audit_trail: updatedAudit,
-              notes: updatedNotes
-            })
+            .update(reportUpdate)
             .eq('id', row.id);
         }
       }

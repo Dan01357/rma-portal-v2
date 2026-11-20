@@ -4,7 +4,7 @@
  * widthMm x heightMm physical dimensions (Small Tuna Can up to Extra Large Carton).
  */
 
-import { formatQuantityWithPackSize, formatManifestBreakdown } from './rmaHelpers';
+import { formatQuantityWithPackSize, formatManifestBreakdown, formatDateYmd } from './rmaHelpers';
 
 function loadSvgAsImage(svgElementOrId) {
   const svgEl = typeof svgElementOrId === 'string'
@@ -126,9 +126,9 @@ export async function downloadCustomSizedStickerPng({
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, W, H);
 
-    // Outer solid border
+    // Outer solid border (Pure B&W)
     const borderInset = Math.max(10, Math.round(16 * s));
-    ctx.strokeStyle = '#0f172a';
+    ctx.strokeStyle = '#000000';
     ctx.lineWidth = Math.max(4, Math.round(6 * s));
     ctx.strokeRect(borderInset, borderInset, W - borderInset * 2, H - borderInset * 2);
 
@@ -136,12 +136,15 @@ export async function downloadCustomSizedStickerPng({
     const innerX = borderInset + Math.round(pad * 0.7);
     const innerW = W - (borderInset + Math.round(pad * 0.7)) * 2;
 
-    // Header bar
+    // Header bar (Plain B&W outline — zero colored/dark fills)
     const headerH = Math.max(48, Math.round(82 * s));
-    ctx.fillStyle = isTestMode ? '#78350f' : '#0f172a';
-    ctx.fillRect(innerX, y, innerW, headerH);
-
     ctx.fillStyle = '#ffffff';
+    ctx.fillRect(innerX, y, innerW, headerH);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = Math.max(3, Math.round(4 * s));
+    ctx.strokeRect(innerX, y, innerW, headerH);
+
+    ctx.fillStyle = '#000000';
     const titleSize = Math.max(16, Math.round(28 * s));
     ctx.font = `900 ${titleSize}px Inter, system-ui, sans-serif`;
     ctx.textAlign = 'left';
@@ -164,17 +167,20 @@ export async function downloadCustomSizedStickerPng({
     const qrX = innerX + innerW - qrBoxSize;
     const leftW = innerW - qrBoxSize - Math.round(18 * s);
 
-    // QR border + image + footer bar
-    ctx.strokeStyle = '#0f172a';
+    // QR border + image + outline caption strip
+    ctx.strokeStyle = '#000000';
     ctx.lineWidth = Math.max(3, Math.round(4 * s));
     ctx.strokeRect(qrX, y, qrBoxSize, qrBoxSize);
     const qrPad = Math.max(8, Math.round(12 * s));
     ctx.drawImage(img, qrX + qrPad, y + qrPad, qrBoxSize - qrPad * 2, qrBoxSize - qrPad * 2);
 
     const qrCapH = Math.max(24, Math.round(34 * s));
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(qrX, y + qrBoxSize, qrBoxSize, qrCapH);
     ctx.fillStyle = '#ffffff';
+    ctx.fillRect(qrX, y + qrBoxSize, qrBoxSize, qrCapH);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = Math.max(2, Math.round(3 * s));
+    ctx.strokeRect(qrX, y + qrBoxSize, qrBoxSize, qrCapH);
+    ctx.fillStyle = '#000000';
     ctx.font = `bold ${Math.max(11, Math.round(16 * s))}px Consolas, monospace`;
     ctx.textAlign = 'center';
     ctx.fillText('IN-APP PORTAL ONLY', qrX + qrBoxSize / 2, y + qrBoxSize + qrCapH / 2);
@@ -183,12 +189,12 @@ export async function downloadCustomSizedStickerPng({
     let ly = y + Math.round(10 * s);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillStyle = '#64748b';
+    ctx.fillStyle = '#000000';
     ctx.font = `bold ${Math.max(12, Math.round(18 * s))}px Inter, sans-serif`;
     ctx.fillText('RMA REFERENCE ID', innerX, ly);
     ly += Math.max(18, Math.round(24 * s));
 
-    ctx.fillStyle = '#0f172a';
+    ctx.fillStyle = '#000000';
     let rmaFontSize = Math.max(20, Math.round(36 * s));
     ctx.font = `900 ${rmaFontSize}px Consolas, monospace`;
     while (ctx.measureText(rmaNumber).width > leftW && rmaFontSize > 16) {
@@ -202,12 +208,12 @@ export async function downloadCustomSizedStickerPng({
     const entityVal = streamType === 'supplier_outbound'
       ? (supplier || 'Pending Assignment')
       : (storeBranch || supplier || 'Warehouse');
-    ctx.fillStyle = '#64748b';
+    ctx.fillStyle = '#000000';
     ctx.font = `bold ${Math.max(11, Math.round(16 * s))}px Inter, sans-serif`;
     ctx.fillText(entityLabel, innerX, ly);
     ly += Math.max(15, Math.round(20 * s));
 
-    ctx.fillStyle = '#0f172a';
+    ctx.fillStyle = '#000000';
     ctx.font = `bold ${Math.max(15, Math.round(24 * s))}px Inter, sans-serif`;
     const entityLines = wrapLines(ctx, entityVal, leftW, 2);
     entityLines.forEach((line) => {
@@ -217,16 +223,16 @@ export async function downloadCustomSizedStickerPng({
 
     if (expiryDate) {
       ly += Math.round(4 * s);
-      ctx.fillStyle = '#b45309';
+      ctx.fillStyle = '#000000';
       ctx.font = `bold ${Math.max(13, Math.round(20 * s))}px Consolas, monospace`;
-      ctx.fillText(`EXP: ${expiryDate}`, innerX, ly);
+      ctx.fillText(`EXP (YYYY-MM-DD): ${formatDateYmd(expiryDate) || expiryDate}`, innerX, ly);
       ly += Math.max(18, Math.round(26 * s));
     }
 
     y = Math.max(y + qrBoxSize + qrCapH + Math.round(16 * s), ly + Math.round(12 * s));
 
     // Divider
-    ctx.strokeStyle = '#cbd5e1';
+    ctx.strokeStyle = '#000000';
     ctx.lineWidth = Math.max(2, Math.round(3 * s));
     ctx.beginPath();
     ctx.moveTo(innerX, y);
@@ -240,12 +246,12 @@ export async function downloadCustomSizedStickerPng({
       ? `BATCH MANIFEST (${totalItems || items.length} SKUs): ${items.slice(0, 3).map((i) => i.name || i.barcode).join(', ')}${items.length > 3 ? '...' : ''}`
       : itemName;
 
-    ctx.fillStyle = '#64748b';
+    ctx.fillStyle = '#000000';
     ctx.font = `bold ${Math.max(11, Math.round(16 * s))}px Inter, sans-serif`;
     ctx.fillText('PRODUCT / RETURN CONTENTS', innerX, y);
     y += Math.max(16, Math.round(22 * s));
 
-    ctx.fillStyle = '#0f172a';
+    ctx.fillStyle = '#000000';
     ctx.font = `bold ${Math.max(15, Math.round(24 * s))}px Inter, sans-serif`;
     const itemLines = wrapLines(ctx, itemDisplay, innerW, 2);
     itemLines.forEach((line) => {
@@ -260,7 +266,7 @@ export async function downloadCustomSizedStickerPng({
       ? `Qty: ${qtyText} • ${formatManifestBreakdown(items, quantity, unit, true)}`
       : `Barcode: ${barcode}${sku ? ` | SKU: ${sku}` : ''} | Qty: ${qtyText}`;
 
-    ctx.fillStyle = '#334155';
+    ctx.fillStyle = '#000000';
     ctx.font = `bold ${Math.max(12, Math.round(19 * s))}px Consolas, monospace`;
     wrapLines(ctx, metaLine, innerW, 2).forEach((line) => {
       ctx.fillText(line, innerX, y);
@@ -268,7 +274,7 @@ export async function downloadCustomSizedStickerPng({
     });
 
     y += Math.round(6 * s);
-    ctx.fillStyle = '#dc2626';
+    ctx.fillStyle = '#000000';
     ctx.font = `bold ${Math.max(13, Math.round(20 * s))}px Inter, sans-serif`;
     wrapLines(ctx, `Reason: ${reason || 'Damaged / Return'}`, innerW, 2).forEach((line) => {
       ctx.fillText(line, innerX, y);
@@ -281,31 +287,31 @@ export async function downloadCustomSizedStickerPng({
 
     // Reporter metadata strip right above signature box
     const repY = Math.max(y + Math.round(6 * s), sigY - Math.max(44, Math.round(68 * s)));
-    ctx.strokeStyle = '#cbd5e1';
+    ctx.strokeStyle = '#000000';
     ctx.beginPath();
     ctx.moveTo(innerX, repY);
     ctx.lineTo(innerX + innerW, repY);
     ctx.stroke();
 
-    ctx.fillStyle = '#0f172a';
+    ctx.fillStyle = '#000000';
     ctx.font = `bold ${Math.max(12, Math.round(19 * s))}px Inter, sans-serif`;
     ctx.fillText(`Reported by: ${reporter || 'Staff'} (${reporterContact || 'N/A'})`, innerX, repY + Math.round(10 * s));
-    ctx.fillStyle = '#475569';
+    ctx.fillStyle = '#000000';
     ctx.font = `600 ${Math.max(11, Math.round(17 * s))}px Consolas, monospace`;
     ctx.fillText(`Date & Time: ${dateTimeFormatted}`, innerX, repY + Math.round(34 * s));
 
-    // Signature Box
-    ctx.fillStyle = '#f8fafc';
+    // Signature Box (Plain B&W outline)
+    ctx.fillStyle = '#ffffff';
     ctx.fillRect(innerX, sigY, innerW, sigBoxH);
-    ctx.strokeStyle = '#94a3b8';
-    ctx.lineWidth = Math.max(2, Math.round(2.5 * s));
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = Math.max(2, Math.round(3 * s));
     ctx.strokeRect(innerX, sigY, innerW, sigBoxH);
 
-    ctx.fillStyle = '#475569';
+    ctx.fillStyle = '#000000';
     ctx.font = `bold ${Math.max(11, Math.round(16 * s))}px Inter, sans-serif`;
     ctx.fillText('REPORTER SIGNATURE (SIGN AFTER PRINTING)', innerX + Math.round(14 * s), sigY + Math.round(10 * s));
 
-    ctx.strokeStyle = '#0f172a';
+    ctx.strokeStyle = '#000000';
     ctx.lineWidth = Math.max(2, Math.round(3 * s));
     ctx.beginPath();
     ctx.moveTo(innerX + Math.round(16 * s), sigY + sigBoxH - Math.round(22 * s));
@@ -314,7 +320,7 @@ export async function downloadCustomSizedStickerPng({
     ctx.lineTo(innerX + innerW - Math.round(16 * s), sigY + sigBoxH - Math.round(22 * s));
     ctx.stroke();
 
-    ctx.fillStyle = '#64748b';
+    ctx.fillStyle = '#000000';
     ctx.font = `bold ${Math.max(10, Math.round(14 * s))}px Inter, sans-serif`;
     ctx.fillText('Date Signed', innerX + Math.round(innerW * 0.72), sigY + sigBoxH - Math.round(16 * s));
 

@@ -8,9 +8,10 @@
 export function printIsolatedElement({
   elementId,
   documentTitle = 'Print Document',
-  pageSize = 'portrait', // 'portrait' | '4in 6in' | '3in 3in' | '2in 2in' | 'A4 portrait'
+  pageSize = 'letter portrait', // 'letter portrait' | '4in 6in' | '3in 3in' | '2in 2in'
   pageMargin = '0.2in',
   scale = 1.0,
+  allowMultiPage = false,
   customStyles = ''
 }) {
   if (typeof document === 'undefined') return;
@@ -103,54 +104,59 @@ export function printIsolatedElement({
             overflow: visible !important;
           }
           body {
-            display: flex !important;
+            display: ${allowMultiPage ? 'block' : 'flex'} !important;
+            ${allowMultiPage ? '' : `
             flex-direction: column !important;
             align-items: center !important;
             justify-content: flex-start !important;
             page-break-before: avoid !important;
             page-break-after: avoid !important;
             page-break-inside: avoid !important;
-            break-inside: avoid !important;
+            break-inside: avoid !important;`}
           }
           .isolated-print-sheet {
             width: 100% !important;
             height: auto !important;
-            display: flex !important;
+            display: ${allowMultiPage ? 'block' : 'flex'} !important;
+            ${allowMultiPage ? '' : `
             flex-direction: column !important;
             align-items: center !important;
-            justify-content: flex-start !important;
+            justify-content: flex-start !important;`}
             margin: 0 auto !important;
             padding: ${pageMargin} !important;
             box-sizing: border-box !important;
-            text-align: center !important;
+            text-align: ${allowMultiPage ? 'left' : 'center'} !important;
+            ${allowMultiPage ? '' : `
             page-break-inside: avoid !important;
             break-inside: avoid !important;
             page-break-after: avoid !important;
-            break-after: avoid !important;
+            break-after: avoid !important;`}
           }
           .isolated-print-card {
             margin: 0 auto !important;
-            display: flex !important;
+            display: ${allowMultiPage ? 'block' : 'flex'} !important;
+            ${allowMultiPage ? '' : `
             flex-direction: column !important;
             align-items: center !important;
             justify-content: flex-start !important;
-            box-shadow: none !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
             page-break-after: avoid !important;
-            break-after: avoid !important;
+            break-after: avoid !important;`}
+            box-shadow: none !important;
             max-width: 100% !important;
             box-sizing: border-box !important;
             transform-origin: top center !important;
             ${scale !== 1.0 ? `zoom: ${scale};` : ''}
           }
           @media print {
+            ${allowMultiPage ? '' : `
             body, .isolated-print-sheet, .isolated-print-card, #thermal-label-mount, #rtv-voucher-mount {
               page-break-after: avoid !important;
               break-after: avoid !important;
               page-break-inside: avoid !important;
               break-inside: avoid !important;
-            }
+            }`}
           }
           ${customStyles}
         </style>

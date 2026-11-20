@@ -12,7 +12,7 @@ import {
   ChevronDown,
   Hash
 } from 'lucide-react';
-import { formatPeso, getEmailRoutingPayload } from '../utils/rmaHelpers';
+import { formatPeso, getEmailRoutingPayload, formatDateYmd } from '../utils/rmaHelpers';
 import { downloadTableXlsx } from '../utils/exportXlsx';
 
 export default function TicketsVaultTab({ 
@@ -84,7 +84,7 @@ export default function TicketsVaultTab({
 
     const rows = filteredTickets.map(t => [
       t.id || '',
-      t.created_at ? new Date(t.created_at).toLocaleDateString() : '',
+      t.created_at ? formatDateYmd(t.created_at) : '',
       t.customer_name || '',
       t.store_branch || '',
       t.product_name || '',
@@ -209,7 +209,7 @@ export default function TicketsVaultTab({
                         {ticket.status}
                       </span>
                       <span className="text-xs text-slate-400 font-mono">
-                        {new Date(ticket.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        {ticket.created_at ? `${formatDateYmd(ticket.created_at)} (YYYY-MM-DD)` : ''}
                       </span>
                     </div>
 

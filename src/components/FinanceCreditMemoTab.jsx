@@ -12,7 +12,7 @@ import {
   Calendar,
   UserCheck
 } from 'lucide-react';
-import { formatPeso } from '../utils/rmaHelpers';
+import { formatPeso, formatDateYmd } from '../utils/rmaHelpers';
 
 export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
   const [selectedTicketId, setSelectedTicketId] = useState(null);
@@ -323,8 +323,8 @@ export default function FinanceCreditMemoTab({ tickets = [], onUpdateTicket }) {
 
               <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1 text-[11px] text-slate-600 dark:text-slate-300 font-mono">
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Date:</span>
-                  <span>{new Date().toLocaleDateString()}</span>
+                  <span className="text-slate-400">Date (YYYY-MM-DD):</span>
+                  <span>{formatDateYmd(new Date())}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">General Ledger:</span>

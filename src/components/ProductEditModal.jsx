@@ -91,7 +91,9 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         const initialCode = (!isSameAsBarcode && !isPlaceholder) ? rawCode : '';
         setCode(initialCode);
 
-        setSupplierName(product.supplier_name || product.supplierName || 'Savemore');
+        const rawInitSup = String(product.supplier_name || product.supplierName || product.supplier || '').trim();
+        const isPlaceholderSup = /^(pending assignment|unassigned|warehouse|n\/a)$/i.test(rawInitSup);
+        setSupplierName(isPlaceholderSup ? '' : rawInitSup);
         setPrice(product.price !== undefined ? String(product.price) : '0');
         setPriceWithVat(product.price_with_vat !== undefined ? String(product.price_with_vat) : String(product.priceWithVat || '0'));
         setUnitName(product.unit_name || product.unitName || 'pc');

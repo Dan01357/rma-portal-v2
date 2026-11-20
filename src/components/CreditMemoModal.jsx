@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { creditMemoService } from '../services/creditMemoService';
 import { authService } from '../services/authService';
-import { hasAssignedSku, isTestRecord } from '../utils/rmaHelpers';
+import { hasAssignedSku, isTestRecord, formatDateYmd } from '../utils/rmaHelpers';
 
 export default function CreditMemoModal({
   isOpen,
@@ -596,9 +596,16 @@ export default function CreditMemoModal({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Pull Out Date *
-                </label>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Pull Out Date (YYYY-MM-DD) *
+                  </label>
+                  {pullOutDate && (
+                    <span className="text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                      ISO (YYYY-MM-DD): {formatDateYmd(pullOutDate) || pullOutDate}
+                    </span>
+                  )}
+                </div>
                 <input
                   type="date"
                   required

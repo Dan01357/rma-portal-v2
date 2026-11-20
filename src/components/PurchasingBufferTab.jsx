@@ -17,7 +17,7 @@ import {
   Search,
   ExternalLink
 } from 'lucide-react';
-import { formatPeso } from '../utils/rmaHelpers';
+import { formatPeso, formatDateYmd } from '../utils/rmaHelpers';
 import { rmaApi } from '../supabaseClient';
 
 export default function PurchasingBufferTab({ tickets = [], onUpdateTicket }) {
@@ -81,7 +81,7 @@ export default function PurchasingBufferTab({ tickets = [], onUpdateTicket }) {
   const handleBufferDispatch = async (ticket) => {
     await onUpdateTicket(ticket.id, {
       status: 'Buffer Replacement',
-      notes: `Buffer units dispatched from Warehouse Inventory Buffer stock on ${new Date().toLocaleDateString()}.`
+      notes: `Buffer units dispatched from Warehouse Inventory Buffer stock on ${formatDateYmd(new Date())} (YYYY-MM-DD).`
     });
     setCreatedPoNotice(`Inventory buffer stock allocated for Ticket ${ticket.id} (${ticket.quantity} units)!`);
     setTimeout(() => setCreatedPoNotice(null), 5000);
