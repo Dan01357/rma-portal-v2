@@ -19,7 +19,9 @@ import {
   Shield,
   KeyRound,
   ExternalLink,
-  MapPin
+  MapPin,
+  FileSpreadsheet,
+  Send
 } from 'lucide-react';
 import { rmaApi, supabase } from '../supabaseClient';
 import { applyEmailTestMode, getWarehouseLocations } from '../utils/rmaHelpers';
@@ -49,6 +51,14 @@ export default function SettingsTab({
     diagnostic: '',
     passLength: null,
     hadSpaces: false
+  });
+
+  const [dailyMatrixStatus, setDailyMatrixStatus] = useState({
+    loading: false,
+    done: false,
+    success: false,
+    message: '',
+    detail: ''
   });
 
   // Super Admin Configurable RMA Email Recipients State
@@ -180,6 +190,38 @@ export default function SettingsTab({
       passLength: res.passLength || null,
       hadSpaces: Boolean(res.hadSpaces)
     });
+  };
+
+  const handleSendDailyMatrixNow = async () => {
+    setDailyMatrixStatus({
+      loading: true,
+      done: false,
+      success: false,
+      message: 'Generating & emailing Overall RMA Matrix (.xlsx)...',
+      detail: ''
+    });
+    const res = await notificationService.sendDailyMatrixEmailNow({
+      isTestMode: Boolean(isTestMode),
+      force: true
+    });
+    if (res?.success) {
+      const ccTxt = Array.isArray(res.cc) && res.cc.length > 0 ? ` (CC: ${res.cc.join(', ')})` : '';
+      setDailyMatrixStatus({
+        loading: false,
+        done: true,
+        success: true,
+        message: `Daily Matrix dispatched to ${res.to || mainRecipient}${ccTxt}`,
+        detail: `${res.filename || 'Overall_RMA_Matrix_Report.xlsx'} • ${res.dataset?.lineCount ?? 0} lines • ${res.dataset?.grandTotalPcs ?? 0} pcs`
+      });
+    } else {
+      setDailyMatrixStatus({
+        loading: false,
+        done: true,
+        success: false,
+        message: res?.message || res?.error || 'Failed to dispatch Daily Matrix email.',
+        detail: res?.diagnostic || ''
+      });
+    }
   };
 
   // Add CC email to list
@@ -443,7 +485,7 @@ export default function SettingsTab({
               )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xl">
-              When ON, test emails are safely sent exclusively to <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">mgan@a2z2go.net</code> with <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">Test - </code> in the subject. <strong>This setting is strictly restricted to Super Admin; all other staff roles and public intake users operate permanently in Live Mode.</strong>
+              When ON, test emails are safely sent exclusively to <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">mgan@a2z2go.net</code> with <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">[TEST] </code> at the very beginning of the subject. <strong>This setting is strictly restricted to Super Admin; all other staff roles and public intake users operate permanently in Live Mode.</strong>
             </p>
           </div>
 
@@ -546,25 +588,72 @@ export default function SettingsTab({
 
       {/* Google SMTP Email Dispatch Service Card */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
           <div className="flex items-center space-x-2.5">
             <Mail className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white">Google SMTP Notification Service</h2>
-              <span className="text-xs text-slate-500 dark:text-slate-400">Automated intake & catalog updates dispatcher</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                Automated intake alerts &amp; Daily 1:00 PM PHT Overall RMA Matrix (.xlsx) dispatcher
+              </span>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleTestSmtp}
-            disabled={smtpStatus.loading}
-            className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/70 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold rounded-xl border border-indigo-200 dark:border-indigo-800 flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${smtpStatus.loading ? 'animate-spin' : ''}`} />
-            <span>{smtpStatus.loading ? 'Authenticating...' : 'Test SMTP Credentials'}</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSendDailyMatrixNow}
+              disabled={dailyMatrixStatus.loading}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs disabled:opacity-60"
+            >
+              {dailyMatrixStatus.loading ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+              )}
+              <span>{dailyMatrixStatus.loading ? 'Dispatching Matrix...' : 'Send Daily Matrix Now'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleTestSmtp}
+              disabled={smtpStatus.loading}
+              className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/70 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold rounded-xl border border-indigo-200 dark:border-indigo-800 flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${smtpStatus.loading ? 'animate-spin' : ''}`} />
+              <span>{smtpStatus.loading ? 'Authenticating...' : 'Test SMTP Credentials'}</span>
+            </button>
+          </div>
         </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 text-xs">
+          <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-200 font-semibold">
+            <Send className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span>
+              <strong>Daily Auto-Email Schedule:</strong> 1:00 PM PHT (<code className="font-mono">Asia/Manila</code> / <code className="font-mono">05:00 UTC</code>) — Sends Combined Overall RMA Matrix (<code className="font-mono">.xlsx</code>) to configured Live To &amp; CC recipients.
+            </span>
+          </div>
+        </div>
+
+        {dailyMatrixStatus.done && (
+          <div className={`p-3.5 rounded-2xl border text-xs space-y-1 animate-in fade-in ${
+            dailyMatrixStatus.success
+              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+              : 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-700 text-rose-900 dark:text-rose-200'
+          }`}>
+            <div className="font-bold flex items-center gap-2">
+              {dailyMatrixStatus.success ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+              )}
+              <span>{dailyMatrixStatus.message}</span>
+            </div>
+            {dailyMatrixStatus.detail && (
+              <div className="text-[11px] font-mono opacity-85 pl-6">{dailyMatrixStatus.detail}</div>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
           <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">

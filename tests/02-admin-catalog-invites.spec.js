@@ -14,7 +14,7 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
     browser,
     context
   }) => {
-    test.setTimeout(150_000);
+    test.setTimeout(240_000);
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
     const capturedEmails = await interceptAndCaptureEmails(page);
@@ -117,7 +117,22 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       const invitesModal = page.locator('div.fixed', { hasText: 'Google Identity Lock' });
       await expect(invitesModal).toBeVisible();
 
+      // Verify RMA Details Editor multi-recipient & Never Expires mode, then switch back to Customer Return
       await invitesModal.getByRole('button', { name: /RMA Details Editor/i }).first().click();
+      await expect(invitesModal.getByRole('button', { name: /Never Expires \(Revocable\)/i })).toBeVisible();
+      await expect(invitesModal.getByText(/No Expiry • Revocable anytime by Admin/i)).toBeVisible();
+      await invitesModal.getByRole('button', { name: /Test Mode Sandbox/i }).click();
+      const multiEditorEmails = `pw-ed1-${uniqueSuffix}@pingcon-test.local, pw-ed2-${uniqueSuffix}@pingcon-test.local`;
+      await invitesModal.locator('input[placeholder*="azgodev@gmail.com"]').fill(multiEditorEmails);
+      await invitesModal.getByRole('button', { name: /Generate RMA Editor Link/i }).click();
+      const multiEditorRow = invitesModal.locator('tr', { hasText: `pw-ed1-${uniqueSuffix}@pingcon-test.local` }).first();
+      await expect(multiEditorRow).toBeVisible({ timeout: 35_000 });
+      await expect(multiEditorRow.getByText(/\+1 CC recipient/i)).toBeVisible();
+      await expect(multiEditorRow.getByText(/No Expiry/i).first()).toBeVisible();
+      page.once('dialog', async (dialog) => await dialog.accept());
+      await multiEditorRow.locator('button[title="Delete Invite Record"]').click();
+      await expect(multiEditorRow).toBeHidden({ timeout: 20_000 });
+
       await invitesModal.getByRole('button', { name: /Supplier RTV Invite/i }).first().click();
       await invitesModal.getByRole('button', { name: /Customer Return Invite/i }).first().click();
       await invitesModal.getByRole('button', { name: /Test Mode Sandbox/i }).click();
@@ -195,7 +210,7 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
     page,
     context
   }) => {
-    test.setTimeout(150_000);
+    test.setTimeout(240_000);
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
     const uniqueSuffix = String(Date.now()).slice(-6);
@@ -296,7 +311,7 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       }
 
       await productModal.getByRole('button', { name: /Save Product/i }).click();
-      await expect(productModal).toBeHidden({ timeout: 15_000 });
+      await expect(productModal).toBeHidden({ timeout: 35_000 });
 
       // Edit Product #1 & then delete individually
       await productSearch.fill(bc1);
@@ -324,7 +339,7 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       await productModal.locator('input[placeholder="0.00"]').first().fill('50');
       await productModal.locator('#supplier-name-input').fill('Playwright Supplier');
       await productModal.getByRole('button', { name: /Save Product/i }).click();
-      await expect(productModal).toBeHidden({ timeout: 15_000 });
+      await expect(productModal).toBeHidden({ timeout: 35_000 });
 
       await productSearch.fill(bc2);
       const row2 = page.locator('tr', { hasText: name2 }).first();

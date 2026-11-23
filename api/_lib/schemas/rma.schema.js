@@ -452,7 +452,7 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
     method: 'get',
     path: '/api/v1/rma-email-edit',
     summary: 'Load Scoped RMA Record for Email-Bound Editor Link',
-    description: 'Verifies caller Supabase Google OAuth JWT against the email-bound rma_editor invite token, enforces Live vs Test isolation, and returns only the scoped RMA details.',
+    description: 'Verifies caller Supabase Google OAuth JWT against the email-bound multi-recipient (To + CC) rma_editor invite token (No Expiry, revocable by Admin), enforces Live vs Test isolation, and returns only the scoped RMA details.',
     tags: ['RMA Reports'],
     security: [{ BearerAuth: [] }],
     request: {

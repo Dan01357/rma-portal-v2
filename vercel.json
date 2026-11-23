@@ -4,6 +4,12 @@
       "maxDuration": 30
     }
   },
+  "crons": [
+    {
+      "path": "/api/send-email?action=daily-matrix",
+      "schedule": "0 5 * * *"
+    }
+  ],
   "rewrites": [
     { "source": "/docs", "destination": "/api/docs" },
     { "source": "/api/openapi.json", "destination": "/api/docs?format=json" },

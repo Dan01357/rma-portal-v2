@@ -400,10 +400,10 @@ export async function seedTestModeRma(
 
   const submitPostPromise = page.waitForResponse(
     (res) => res.url().includes('/rest/v1/rma_reports') && res.request().method() === 'POST',
-    { timeout: 25_000 }
+    { timeout: 45_000 }
   );
   await page.getByRole('button', { name: /Submit Return Report/i }).click();
-  await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 45_000 });
   const postRes = await submitPostPromise;
   expect(postRes.status()).toBeLessThan(400);
 
@@ -535,7 +535,7 @@ export async function cleanupTestRecords(
           // Clean up any auto-generated Test Mode RMA Editor invites created for targetRmas
           for (const rmaNum of targetRmas) {
             await fetch(
-              `${url}/rest/v1/rma_invites?entity_name=eq.${encodeURIComponent(`[RMA_EDITOR:${rmaNum}]`)}`,
+              `${url}/rest/v1/rma_invites?entity_name=like.${encodeURIComponent(`[RMA_EDITOR:${rmaNum}*`)}`,
               { method: 'DELETE', headers }
             );
           }

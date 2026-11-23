@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-23T00:31:44.133Z
+Generated At: 2026-11-23T05:16:13.135Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -36,12 +36,14 @@ rma-portal-v2/
 │   │   │   │   │   │   ├── products.schema.js
 │   │   │   │   │   │   └── rma.schema.js
 │   │   │   │   ├── auth.js
+│   │   │   │   ├── dailyMatrixEmailHandler.js
 │   │   │   │   ├── geminiInspector.js
 │   │   │   │   ├── keyUtils.js
 │   │   │   │   ├── lookupHandler.js
 │   │   │   │   ├── mockProducts.js
 │   │   │   │   ├── openapiRegistry.js
 │   │   │   │   ├── rmaEmailEditHandler.js
+│   │   │   │   ├── smtpMailer.js
 │   │   │   │   ├── supabase.js
 │   │   │   │   └── verifyPinHandler.js
 │   │   ├── v1/
@@ -1289,7 +1291,7 @@ The system operates across several affiliated wholesale distribution and manufac
 - **Resizeable B&W RMA Box Sticker Studio (`ReturnQRModal.jsx`)**: Renders crisp plain B&W box stickers (`80 x 80 mm` Square, `100 x 100 mm`, `140 x 195 mm` Extra Large Half Letter, or custom mm) with PNG download and **US Letter (`8.5in x 11in`, `letter portrait`)** printing — no thermal 4x6" modal or colored clutter.
 
 ### B. Admin & Streamlined Operational Hubs (`/admin`)
-- **Gate Authentication**: Super Admin Test Mode / Live Mode OTP verification and Google Identity Lock invite gatekeeper (`GatekeeperPinModal.jsx`). Test Mode Sandbox dispatches all simulated emails exclusively to `mgan@a2z2go.net` with `Test - ` / `[TEST_MODE]` prefixes (`RMA-TEST-`, `CM-TEST-`, `RTV-TEST-`).
+- **Gate Authentication**: Super Admin Test Mode / Live Mode OTP verification and Google Identity Lock invite gatekeeper (`GatekeeperPinModal.jsx`). Test Mode Sandbox dispatches all simulated emails exclusively to `mgan@a2z2go.net` with **`[TEST] `** as the first word in email subjects (`RMA-TEST-`, `CM-TEST-`, `RTV-TEST-`, `[TEST_MODE]`).
 - **Streamlined Quick Actions Modal (`QuickRMAActionModal.jsx`)**:
   - Focused strictly on **Stream Switcher** (`Customer Hub` <-> `Supplier RTV`), prominent **4-Choice Outcome & Pickup Banner** (`Open 4-Choice / Pickup Window`), **Split Qty** (`-B`, `-C` tickets), **Edit Details & Documents** (with real-time `ProductAutoSuggest`), **Credit Memo Launch**, and **RMA Audit Trail** (deprecated Condition Grade, Quarantine locks, 5/6 triage cards, Buffer Slips, Driver QR Widget, and Gate Passes removed).
 - **4-Choice Outcome, 5-Photo Pickup & Unified US Letter Form (`SimpleSupplierRtvWizardModal.jsx` + `SupplierPickupFormModal.jsx`)**:
@@ -1297,7 +1299,8 @@ The system operates across several affiliated wholesale distribution and manufac
   - Driver Pickup Verification captures 5 Drive photos (`driver_license_front`, `driver_license_back`, `truck_plate`, `driver_handover`, `pickup_items`) + Driver Name + Plate # and renders a pure **US Letter (`8.5in x 11in`) B&W Unified Debit Claim / Replacement & Pickup Form** (auto dual-copy half-sheet cut for 1–4 items or repeating full-page copy per copy for 5+ items), plus sends 4 lifecycle emails with generated **PDF form attachments** (`Debit-Claim-Form-*.pdf` / `Replacement-Form-*.pdf`).
 - **Multi-RMA Consolidation**:
   - **Supplier RTV Batch Processing**: Select multiple RMAs (with 1-click `Select All Unclaimed for <Supplier>` and Single-Supplier Guard), issue ONE shared `RTV-` / `RTV-TEST-` claim, toggle **Auto-Combine Identical Items**, and send one consolidated email + PDF.
-  - **Overall RMA Matrix (`.xlsx`)**: Frozen-pane, auto-filtered Excel workbook with daily returned piece counts (`YYYY-MM-DD`), Good/Bad stock split, workflow statuses, and optional 0-return catalog SKUs.
+  - **Overall RMA Matrix (`.xlsx`) & Daily 1:00 PM PHT Auto-Email**: Frozen-pane, auto-filtered Excel workbook with daily returned piece counts (`YYYY-MM-DD`), Good/Bad stock split, workflow statuses, and optional 0-return catalog SKUs; automatically generated and emailed daily at 1:00 PM `Asia/Manila` (`05:00 UTC` via `/api/send-email?action=daily-matrix`) to configured Live `To` + `CC` recipients, or triggered manually via **Send Daily Matrix Now** in Settings.
+  - **Multi-Recipient & Never-Expiring Email RMA Editor**: New RMA Alert email links authorize the Primary `To` and ALL `CC` recipients on that notification with permanent validity (`No Expiry • Revocable by Admin`).
 - **SKU & Product Name Auto-Population (`ProductAutoSuggest.jsx`)**:
   - Bi-directional case-insensitive lookup across Supabase `products` and coworker's Laravel Cloud SQL (`erply_products`) via `/api/v1/products/lookup`.
 
@@ -1451,8 +1454,9 @@ All endpoints below reside under `https://rma-portal-v2.vercel.app`:
 | `GET` | `/api/v1/credit-memos`| **Yes** | List credit memos |
 | `POST` | `/api/v1/credit-memos`| **Yes** | Issue a credit memo voucher (editable Finance Head) |
 | `GET` | `/api/v1/credit-memos/:id`| **Yes** | Get single credit memo voucher |
-| `GET` | `/api/v1/rma-email-edit`| **Google JWT + Invite** | Load scoped RMA record for email-bound editor link (enforces Live/Test isolation) |
+| `GET` | `/api/v1/rma-email-edit`| **Google JWT + Invite** | Load scoped RMA record for multi-recipient (`To` + `CC`) never-expiring email editor link (enforces Live/Test isolation) |
 | `PATCH`| `/api/v1/rma-email-edit`| **Google JWT + Invite** | Save scoped RMA product/SKU/price/expiry/SI/DR/PO/manifest updates (routed via `/api/v1/rma?action=email-edit`) |
+| `GET`/`POST` | `/api/send-email?action=daily-matrix` | **Cron Secret / Admin JWT** | Daily 1:00 PM PHT (`05:00 UTC`) automated & manual Overall RMA Matrix (`.xlsx`) email dispatcher (`API_ROUTE_COUNT === 12`) |
 | `GET` | `/api/v1/api-keys` | Admin | List all registered API keys (masked) |
 | `POST` | `/api/v1/api-keys` | Admin | Generate a new API key (shows secret once) |
 | `PATCH`| `/api/v1/api-keys/:id`| Admin | Rotate an API key |
@@ -2227,6 +2231,12 @@ LIMIT 5;
       "maxDuration": 30
     }
   },
+  "crons": [
+    {
+      "path": "/api/send-email?action=daily-matrix",
+      "schedule": "0 5 * * *"
+    }
+  ],
   "rewrites": [
     { "source": "/docs", "destination": "/api/docs" },
     { "source": "/api/openapi.json", "destination": "/api/docs?format=json" },
@@ -4274,7 +4284,7 @@ Each test scenario defines:
 
 - [ ] **TC-P24-03 (Unambiguous `(YYYY-MM-DD)` / `(YYYY-MM-DD HH:mm)` Dates & `mgan@a2z2go.net` Sandbox Routing)**
   * **Location**: All tables, filter labels, ISO readouts, US Letter printables, `.xlsx` Matrix headers, and `/api/send-email` Test Mode payloads.
-  * **Expected Behavior**: All dates render in Asia/Manila `YYYY-MM-DD` / `YYYY-MM-DD HH:mm`; Test Mode emails route strictly to `mgan@a2z2go.net` with `Test - ` / `[TEST_MODE]` prefixes and zero live vendor/customer leaks.
+  * **Expected Behavior**: All dates render in Asia/Manila `YYYY-MM-DD` / `YYYY-MM-DD HH:mm`; Test Mode emails route strictly to `mgan@a2z2go.net` with `[TEST] ` as the very first word of the subject line (`[TEST_MODE]` metadata) and zero live vendor/customer leaks.
 
 - [ ] **TC-P24-04 (4 Lifecycle Emails w/ All 5 Pickup Photos & Official PDF Form Attachments)**
   * **Location**: `SimpleSupplierRtvWizardModal` + `notificationService.js`
@@ -4310,8 +4320,15 @@ Each test scenario defines:
   * **Location**: `CustomerRMAInvitesModal`, `GatekeeperPinModal`, `RmaEmailEditorView`, `notificationService.js`, `/api/v1/rma-email-edit`
   * **Expected Behavior**:
     1. `CustomerRMAInvitesModal` adds `✏️ RMA Details Editor` stream mode (`rma_editor` / `inv_edit_` / `inv_test_edit_`) and filter pill (`✏️ Editor`).
-    2. New RMA Alert emails auto-generate an email-bound editor invite (`toEmail` in Live Mode, `mgan@a2z2go.net` in Test Mode) and render a clickable **`✏️ Edit RMA Details & Documents`** button/link.
-    3. Opening the link reuses `GatekeeperPinModal` Google Identity Lock (NO OTP; enforces 403 Identity Mismatch, Expired, and Revoked checks), unlocking ONLY `RmaEmailEditorView` (zero Admin tabs/settings/trash/API keys) and saving updates server-side via `/api/v1/rma-email-edit` (`401`/`403` blocked when unauthenticated, mismatched, revoked, or cross-mode).
+    2. New RMA Alert emails auto-generate a never-expiring (`expires_at: null`, revocable by Admin) Google Identity-locked editor invite authorized for **`To` + ALL `CC` recipients** in Live Mode (or `mgan@a2z2go.net` in Test Mode) and render a clickable **`✏️ Edit RMA Details & Documents`** button/link.
+    3. Opening the link reuses `GatekeeperPinModal` Google Identity Lock (NO OTP; enforces 403 Identity Mismatch and Admin Revoked checks without false expiration), unlocking ONLY `RmaEmailEditorView` (zero Admin tabs/settings/trash/API keys) and saving updates server-side via `/api/v1/rma-email-edit` (`401`/`403` blocked when unauthenticated, non-recipient, revoked, or cross-mode).
+
+- [ ] **TC-P24-11 (Automated Daily 1:00 PM PHT Overall RMA Matrix `.xlsx` Email & `[TEST]` First-Word Enforcement)**
+  * **Location**: `vercel.json` cron (`0 5 * * *`), `api/send-email.js?action=daily-matrix`, `api/_lib/dailyMatrixEmailHandler.js`, `SettingsTab.jsx`
+  * **Expected Behavior**:
+    1. Vercel Cron hits `/api/send-email?action=daily-matrix` daily at 1:00 PM PHT (`05:00 UTC`), adhering to the 12-function limit (`API_ROUTE_COUNT === 12`) and enforcing `CRON_SECRET` / Admin Bearer JWT authentication (`401` unauthenticated).
+    2. Queries Live `rma_reports`, `products`, and `credit_memos`, generates the strict Microsoft-Excel-valid 14-day rolling Overall RMA Matrix (`.xlsx`), and emails configured `rma_settings.email_recipients` (`To` + `CC`) once per Manila day (`daily_matrix_last_sent_pht_date`).
+    3. Clicking **Send Daily Matrix Now** in Settings dispatches manually on demand; when Test Mode is active, subject strictly starts with `[TEST] ` as the first word and sends only to `mgan@a2z2go.net`.
 
 ---
 
@@ -4821,7 +4838,7 @@ To ensure dock staff and administrators can train without corrupting production 
 1. **Strict Super Admin Gating**: Test Mode is strictly accessible only when authenticated as `super_admin` (isolated `RMA-TEST-`, `CM-TEST-`, `RTV-TEST-`, `[TEST_MODE]`, `is_test: true`).
 2. **Visual Awareness Banner**: When active, a prominent amber bar warns:
    > `🧪 Super Admin Sandbox Active — Test emails routed safely to mgan@a2z2go.net • Reports saved to database.`
-3. **Safe Test Email Interception**: During Test Mode, all intake and 4-lifecycle emails (Scrapped, Restocked, Debit Pickup PDF, Replacement Pickup PDF) route exclusively to **`mgan@a2z2go.net`** with `Test - ` / `[TEST_MODE]` prefixes (`to`/`cc` of live customers/bosses/vendors are sanitized out).
+3. **Safe Test Email Interception**: During Test Mode, all intake, daily matrix, and 4-lifecycle emails (Scrapped, Restocked, Debit Pickup PDF, Replacement Pickup PDF) route exclusively to **`mgan@a2z2go.net`** with **`[TEST] ` as the very first word of the subject line** (`[TEST_MODE]` metadata; live `to`/`cc` of customers/bosses/vendors are sanitized out).
 4. **Mandatory Expiration Validation & Unambiguous Dates**: Test Mode enforces mandatory `Expiry Date (YYYY-MM-DD)` alongside Supplier RTV, and all UI/email/print/Excel surfaces format dates strictly as `YYYY-MM-DD` / `YYYY-MM-DD HH:mm` (Asia/Manila).
 5. **Dock Worker Protection**: Unauthenticated mobile phone scans and invited customers are **100% locked to Live Mode**, ensuring real incoming customer returns are never misfiled as simulations.
 
@@ -5001,7 +5018,8 @@ Legacy 5/6 triage cards, Condition Grade dropdowns, Automated Lifecycle Stage ca
 - `[RMA Restocked]` (`restocked`): Dispatched when returned goods enter `Good Stock Area`.
 - `[Driver Picked Up - Debit Claim]` (`pickup_debit_claim`): Sent to internal distribution + supplier `To`/`CC` with all 5 pickup photos (accepting **ANY valid Philippine Government / Legal ID**: LTO Driver's License, PhilSys National ID, Passport, UMID, SSS, Postal, PRC, Voter's ID, TIN, Company ID) + generated **`Debit-Claim-Form-*.pdf`** attached.
 - `[Driver Picked Up - Replacement]` (`pickup_replacement`): Sent to internal distribution + supplier `To`/`CC` with all 5 pickup photos and **`Replacement-Form-*.pdf`** attached.
-- **New RMA Alert Email Editor Button**: Every New RMA Alert email embeds a Google Identity-locked **`✏️ Edit RMA Details & Documents`** button (`toEmail` in Live Mode, `mgan@a2z2go.net` in Test Mode) backed by `CustomerRMAInvitesModal` (`✏️ RMA Details Editor`), `GatekeeperPinModal`, `RmaEmailEditorView`, and `/api/v1/rma-email-edit`.
+- **New RMA Alert Email Editor Button**: Every New RMA Alert email embeds a never-expiring (`expires_at = null`, manually revocable by Admin) Google Identity-locked **`✏️ Edit RMA Details & Documents`** button authorized for **`To` + ALL `CC` recipients** on that email in Live Mode (`mgan@a2z2go.net` in Test Mode), backed by `CustomerRMAInvitesModal` (`✏️ RMA Details Editor` w/ `Never Expires`), `GatekeeperPinModal`, `RmaEmailEditorView`, and `/api/v1/rma-email-edit`.
+- **Daily 1:00 PM PHT Overall RMA Matrix Email Scheduler**: Runs automatically every day at **1:00 PM `Asia/Manila` (`05:00 UTC`)** via `/api/send-email?action=daily-matrix` (`api/_lib/dailyMatrixEmailHandler.js`, preserving `API_ROUTE_COUNT === 12`) to build and email the Live Combined Overall RMA Matrix (`.xlsx`) to configured `To` + `CC` recipients, with a **`Send Daily Matrix Now`** button in Admin Settings.
 
 
 
@@ -5114,15 +5132,12 @@ export default function handler(req, res) {
 --- END FILE: api/docs.js ---
 
 --- START FILE: api/send-email.js ---
-import nodemailer from 'nodemailer';
-
-function getDiagnosticHelp(errMsg, user, pass) {
-  const str = String(errMsg || '');
-  if (str.includes('535') || str.includes('BadCredentials') || str.includes('Username and Password not accepted')) {
-    return `Google SMTP rejected login for "${user}". Your App Password has ${pass.length} characters (Google App Passwords are 16 letters). If you see 535 Bad Credentials, please verify: (1) Ensure 2-Step Verification is enabled in your Google Account for ${user}, (2) Ensure the App Password was generated under ${user} (Google Account > Security > 2-Step Verification > App passwords), and (3) In Vercel Environment Variables, check GMAIL_APP_PASSWORD and make sure all 16 characters were pasted accurately.`;
-  }
-  return null;
-}
+import { handleDailyMatrixEmail } from './_lib/dailyMatrixEmailHandler.js';
+import {
+  createSmtpTransport,
+  formatTestEmailSubject,
+  getDiagnosticHelp
+} from './_lib/smtpMailer.js';
 
 export default async function handler(req, res) {
   // CORS configuration
@@ -5131,7 +5146,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, x-cron-secret, x-vercel-cron'
   );
 
   if (req.method === 'OPTIONS') {
@@ -5148,14 +5163,15 @@ export default async function handler(req, res) {
       }
     }
 
-    const smtpUser = String(process.env.SMTP_USER || process.env.GMAIL_USER || 'finance2@keysysincorporated.com').trim();
-    const rawPass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD || '';
-    
-    // CRITICAL: Google displays app passwords with spaces like "abcd efgh ijkl mnop".
-    // We strip all spaces/whitespace to ensure pure 16-character authentication with Google SMTP.
-    const cleanPass = String(rawPass).replace(/\s+/g, '').trim();
+    const requestedAction = String(req.query?.action || payload?.action || '').trim().toLowerCase();
+    if (requestedAction === 'daily-matrix') {
+      return await handleDailyMatrixEmail(req, res, payload);
+    }
 
-    if (!cleanPass) {
+    const smtp = createSmtpTransport();
+    const { smtpUser, rawPass, cleanPass, transporter, configured } = smtp;
+
+    if (!configured || !cleanPass) {
       console.warn('SMTP credentials (GMAIL_APP_PASSWORD) not configured in Vercel environment variables yet.');
       return res.status(200).json({
         success: false,
@@ -5164,27 +5180,6 @@ export default async function handler(req, res) {
         message: 'SMTP credentials (GMAIL_APP_PASSWORD) not configured in Vercel environment variables. Email notifications will be logged in console.'
       });
     }
-
-    const isGmail = !process.env.SMTP_HOST || process.env.SMTP_HOST.includes('gmail.com');
-    const transporter = nodemailer.createTransport(
-      isGmail
-        ? {
-            service: 'gmail',
-            auth: {
-              user: smtpUser,
-              pass: cleanPass
-            }
-          }
-        : {
-            host: process.env.SMTP_HOST,
-            port: Number(process.env.SMTP_PORT || 465),
-            secure: Number(process.env.SMTP_PORT || 465) === 465,
-            auth: {
-              user: smtpUser,
-              pass: cleanPass
-            }
-          }
-    );
 
     // Diagnostic/Testing Connection Ping
     if (req.method === 'GET' || payload?.action === 'test-connection') {
@@ -5248,9 +5243,7 @@ export default async function handler(req, res) {
 
       finalTo = 'mgan@a2z2go.net';
       finalCc = []; // empty to prevent other recipients from receiving anything
-      finalSubject = (/^(test\s*-|\[test)/i.test(finalSubject))
-        ? finalSubject
-        : `[TEST MODE] Test - ${finalSubject}`;
+      finalSubject = formatTestEmailSubject(finalSubject, true);
 
       const testBanner = `
         <div style="background-color: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 14px 18px; border-radius: 12px; margin-bottom: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px;">
@@ -8397,6 +8390,447 @@ export async function requireApiKey(req, res) {
 
 --- END FILE: api/_lib/auth.js ---
 
+--- START FILE: api/_lib/dailyMatrixEmailHandler.js ---
+import { supabase } from './supabase.js';
+import { sendJson, setCorsHeaders } from './auth.js';
+import {
+  createSmtpTransport,
+  formatTestEmailSubject,
+  escapeEmailHtml,
+  getDiagnosticHelp,
+  DEFAULT_EMAIL_RECIPIENTS
+} from './smtpMailer.js';
+import {
+  buildRmaMatrixXlsxBytes,
+  toManilaDateKey,
+  formatManilaHhmm,
+  formatManilaTimestampDisplay
+} from '../../src/utils/exportMatrixXlsx.js';
+import { isTestRecord } from '../../src/utils/rmaHelpers.js';
+
+const EMAIL_RECIPIENTS_KEY = 'email_recipients';
+const LAST_SENT_PHT_KEY = 'daily_matrix_last_sent_pht_date';
+
+const KNOWN_ADMIN_EMAILS = new Map([
+  ['finance2@keysysincorporated.com', 'super_admin'],
+  ['alleli.almaida@ph.keysys.com', 'admin'],
+  ['finance@a2z2go.net', 'admin'],
+  ['accountspayable@keysysincorporated.com', 'admin'],
+  ['finance4@keysysincorporated.com', 'admin'],
+  ['mark.aquino@a2z2go.net', 'admin'],
+  ['ralph.alido@a2z2go.net', 'admin'],
+  ['mgan@pingconmarketing.com', 'admin']
+]);
+
+function splitEmailList(raw) {
+  if (!raw) return [];
+  const arr = Array.isArray(raw) ? raw : String(raw).split(/[,;\s]+/);
+  const unique = new Set();
+  for (const entry of arr) {
+    const clean = String(entry || '').trim().toLowerCase();
+    if (clean && clean.includes('@') && clean.includes('.') && !clean.endsWith('.test')) {
+      unique.add(clean);
+    }
+  }
+  return Array.from(unique);
+}
+
+function sanitizeYmd(val) {
+  const s = String(val || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+}
+
+function subtractCalendarDaysYmd(ymd, days) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d));
+  utc.setUTCDate(utc.getUTCDate() - days);
+  return utc.toISOString().slice(0, 10);
+}
+
+async function authorizeDailyMatrixCaller(req) {
+  const cronSecret = String(process.env.CRON_SECRET || '').trim();
+  const authHeader = String(req.headers['authorization'] || req.headers['Authorization'] || '').trim();
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const xCronSecret = String(req.headers['x-cron-secret'] || '').trim();
+
+  if (cronSecret && (xCronSecret === cronSecret || bearerToken === cronSecret)) {
+    return { authorized: true, callerType: 'cron', actor: 'Vercel Cron Scheduler', role: 'cron' };
+  }
+
+  // When CRON_SECRET env var is unset on Vercel, trust Vercel's internal edge-stripped cron header
+  if (!cronSecret && req.headers['x-vercel-cron'] === '1' && process.env.VERCEL === '1') {
+    return { authorized: true, callerType: 'cron', actor: 'Vercel Cron Scheduler', role: 'cron' };
+  }
+
+  if (!bearerToken) {
+    return {
+      authorized: false,
+      status: 401,
+      error: 'UNAUTHORIZED',
+      message: 'Authentication required. Provide valid CRON_SECRET or Admin Bearer JWT.'
+    };
+  }
+
+  const { data: userData, error: userErr } = await supabase.auth.getUser(bearerToken);
+  const userEmail = String(userData?.user?.email || '').trim().toLowerCase();
+  if (userErr || !userEmail) {
+    return {
+      authorized: false,
+      status: 401,
+      error: 'INVALID_SESSION',
+      message: 'Session token is invalid or expired. Please sign in again.'
+    };
+  }
+
+  let empRow = null;
+  try {
+    const { data } = await supabase
+      .from('admin_users')
+      .select('email, role, is_active')
+      .eq('email', userEmail)
+      .maybeSingle();
+    empRow = data || null;
+  } catch {}
+
+  const role = empRow?.role || KNOWN_ADMIN_EMAILS.get(userEmail) || '';
+  const isActive = empRow ? empRow.is_active !== false : KNOWN_ADMIN_EMAILS.has(userEmail);
+
+  if (!isActive || !['super_admin', 'admin'].includes(role)) {
+    return {
+      authorized: false,
+      status: 403,
+      error: 'FORBIDDEN',
+      message: `Admin or Super Admin privileges required. Account (${userEmail}) has role "${role || 'none'}".`
+    };
+  }
+
+  return { authorized: true, callerType: 'admin', actor: userEmail, role };
+}
+
+function buildDailyMatrixEmailHtml({
+  dataset,
+  startDate,
+  endDate,
+  generatedManila,
+  filename,
+  toEmail,
+  ccList,
+  isTestMode,
+  triggeredBy
+}) {
+  const {
+    lineCount,
+    monitoredSkuCount,
+    grandTotalPcs,
+    totalBadStockPcs,
+    totalGoodStockPcs,
+    grandTotalValue
+  } = dataset;
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b; }
+        .container { max-width: 620px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+        .header { background: ${isTestMode ? '#92400e' : '#065f46'}; padding: 24px 28px; color: #ffffff; }
+        .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; background: rgba(255,255,255,0.2); color: #ffffff; margin-bottom: 8px; }
+        .title { margin: 0; font-size: 20px; font-weight: 800; line-height: 1.3; }
+        .content { padding: 26px; }
+        .kpi-grid { width: 100%; border-collapse: separate; border-spacing: 8px; margin: 12px 0 18px; }
+        .kpi-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; text-align: center; }
+        .kpi-label { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em; }
+        .kpi-val { font-size: 18px; font-weight: 900; color: #0f172a; margin-top: 4px; }
+        .meta-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; font-size: 12px; line-height: 1.6; color: #334155; }
+        .footer { background: #f1f5f9; padding: 14px 24px; font-size: 11px; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <span class="badge">${isTestMode ? '[TEST] DAILY MATRIX SANDBOX' : 'DAILY 1:00 PM PHT REPORT'}</span>
+          <h1 class="title">${isTestMode ? '[TEST] ' : ''}Daily Overall RMA Matrix Report</h1>
+          <div style="font-size: 12px; opacity: 0.9; margin-top: 4px;">
+            Customer Hub + Supplier RTV Combined Rolling Summary
+          </div>
+        </div>
+        <div class="content">
+          ${isTestMode ? `
+          <div style="background: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; font-weight: 700; font-size: 12px;">
+            [TEST] Sandbox Simulation Run — Redirected exclusively to mgan@a2z2go.net. Live recipients bypassed.
+          </div>` : ''}
+
+          <div style="background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 12px 16px; border-radius: 10px; margin-bottom: 16px; font-size: 13px; font-weight: 700;">
+            📎 Attached Excel Workbook: <span style="font-family: monospace;">${escapeEmailHtml(filename)}</span>
+          </div>
+
+          <table class="kpi-grid">
+            <tr>
+              <td class="kpi-box" width="33%">
+                <div class="kpi-label">Line Items / SKUs</div>
+                <div class="kpi-val">${lineCount.toLocaleString()} / ${monitoredSkuCount.toLocaleString()}</div>
+              </td>
+              <td class="kpi-box" width="33%">
+                <div class="kpi-label">Total Returned Pcs</div>
+                <div class="kpi-val">${grandTotalPcs.toLocaleString()}</div>
+              </td>
+              <td class="kpi-box" width="34%">
+                <div class="kpi-label">Total Value (PHP)</div>
+                <div class="kpi-val">PHP ${grandTotalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              </td>
+            </tr>
+            <tr>
+              <td class="kpi-box" colspan="3" style="text-align: left; font-size: 12px; color: #334155;">
+                <strong>Stock Condition Breakdown:</strong>
+                Bad Stock Returned = <strong>${totalBadStockPcs.toLocaleString()} pcs</strong> •
+                Good Stock Returned = <strong>${totalGoodStockPcs.toLocaleString()} pcs</strong>
+              </td>
+            </tr>
+          </table>
+
+          <div class="meta-card">
+            <div><strong>Reporting Window (YYYY-MM-DD):</strong> ${escapeEmailHtml(startDate)} to ${escapeEmailHtml(endDate)}</div>
+            <div><strong>Generated At (Asia/Manila YYYY-MM-DD HH:mm):</strong> ${escapeEmailHtml(generatedManila)}</div>
+            <div><strong>Dispatched To:</strong> <span style="font-family: monospace;">${escapeEmailHtml(toEmail)}</span></div>
+            ${ccList.length > 0 ? `<div><strong>CC Recipients:</strong> <span style="font-family: monospace;">${escapeEmailHtml(ccList.join(', '))}</span></div>` : ''}
+            <div><strong>Triggered By:</strong> ${escapeEmailHtml(triggeredBy)}</div>
+          </div>
+        </div>
+        <div class="footer">
+          Pingcon Marketing Operations • Automated Daily Overall RMA Matrix (.xlsx) Scheduler
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+}
+
+export async function handleDailyMatrixEmail(req, res, payload = {}) {
+  setCorsHeaders(res, req);
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    return sendJson(res, 405, {
+      success: false,
+      error: 'METHOD_NOT_ALLOWED',
+      message: 'Use GET (Vercel Cron) or POST (Manual Admin Dispatch).'
+    }, req);
+  }
+
+  const caller = await authorizeDailyMatrixCaller(req);
+  if (!caller.authorized) {
+    return sendJson(res, caller.status, {
+      success: false,
+      error: caller.error,
+      message: caller.message
+    }, req);
+  }
+
+  const body = (payload && typeof payload === 'object') ? payload : {};
+  const force = req.query?.force === 'true' || req.query?.force === '1' || body.force === true;
+  const dryRun = req.query?.dryRun === 'true' || req.query?.dryRun === '1' || body.dryRun === true;
+  const includeAttachmentBase64 =
+    req.query?.includeAttachmentBase64 === 'true' ||
+    req.query?.includeAttachmentBase64 === '1' ||
+    body.includeAttachmentBase64 === true;
+
+  // Cron schedule strictly runs in Live Mode; manual admin run can explicitly request Test Sandbox
+  const requestedTestMode =
+    caller.callerType !== 'cron' &&
+    Boolean(body.isTestMode === true || req.query?.isTestMode === 'true' || req.query?.mode === 'test');
+
+  const todayManila = toManilaDateKey(new Date());
+  const endDate = sanitizeYmd(body.endDate || req.query?.endDate) || todayManila;
+  const startDate = sanitizeYmd(body.startDate || req.query?.startDate) || subtractCalendarDaysYmd(endDate, 13);
+
+  try {
+    // 1. Read email recipients & last daily cron marker from rma_settings
+    const { data: settingsRows, error: settingsErr } = await supabase
+      .from('rma_settings')
+      .select('key, value')
+      .in('key', [EMAIL_RECIPIENTS_KEY, LAST_SENT_PHT_KEY]);
+
+    if (settingsErr) {
+      return sendJson(res, 500, {
+        success: false,
+        error: 'SETTINGS_QUERY_FAILED',
+        message: settingsErr.message
+      }, req);
+    }
+
+    const settingsMap = new Map((settingsRows || []).map((row) => [row.key, row.value]));
+    const savedRecipients = settingsMap.get(EMAIL_RECIPIENTS_KEY);
+    const lastSentPhtDate = String(settingsMap.get(LAST_SENT_PHT_KEY) || '').trim();
+
+    if (!force && !dryRun && !requestedTestMode && lastSentPhtDate === todayManila) {
+      return sendJson(res, 200, {
+        success: true,
+        skipped: true,
+        reason: 'ALREADY_SENT_TODAY',
+        phtDate: todayManila,
+        message: `Daily Overall RMA Matrix already dispatched for Manila date ${todayManila}.`
+      }, req);
+    }
+
+    // 2. Query Live or Test records in parallel (strictly isolated via isTestRecord)
+    const [reportsRes, productsRes, memosRes] = await Promise.all([
+      supabase.from('rma_reports').select('*').order('created_at', { ascending: false }),
+      supabase.from('products').select('*'),
+      supabase.from('credit_memos').select('*')
+    ]);
+
+    if (reportsRes.error) {
+      return sendJson(res, 500, {
+        success: false,
+        error: 'REPORTS_QUERY_FAILED',
+        message: reportsRes.error.message
+      }, req);
+    }
+
+    const allReports = Array.isArray(reportsRes.data) ? reportsRes.data : [];
+    const allProducts = Array.isArray(productsRes.data) ? productsRes.data : [];
+    const allMemos = Array.isArray(memosRes.data) ? memosRes.data : [];
+
+    const scopedReports = allReports.filter((r) => Boolean(isTestRecord(r)) === requestedTestMode);
+    const scopedMemos = allMemos.filter((m) => Boolean(isTestRecord(m)) === requestedTestMode);
+
+    // 3. Build identical Microsoft Excel-valid OOXML .xlsx buffer used in browser download
+    const { bytes, dataset } = buildRmaMatrixXlsxBytes({
+      reports: scopedReports,
+      products: allProducts,
+      creditMemos: scopedMemos,
+      startDate,
+      endDate,
+      activeStream: 'all',
+      isTestMode: requestedTestMode
+    });
+
+    const configuredToList = splitEmailList(savedRecipients?.toEmail);
+    const configuredTo = configuredToList[0] || DEFAULT_EMAIL_RECIPIENTS.toEmail;
+    const configuredCc = Array.isArray(savedRecipients?.baseCcList)
+      ? splitEmailList(savedRecipients.baseCcList).filter((e) => e !== configuredTo)
+      : DEFAULT_EMAIL_RECIPIENTS.baseCcList.filter((e) => e !== configuredTo);
+
+    const finalTo = requestedTestMode ? 'mgan@a2z2go.net' : configuredTo;
+    const finalCc = requestedTestMode ? [] : configuredCc;
+
+    const hhmm = formatManilaHhmm(new Date());
+    const generatedManila = formatManilaTimestampDisplay(new Date());
+    const filename = `${requestedTestMode ? 'TEST_' : ''}Overall_RMA_Matrix_Report_${startDate}_to_${endDate} ${hhmm}.xlsx`;
+
+    const baseSubject = `[Daily RMA Matrix Report] Overall RMA Matrix (${startDate} to ${endDate}) — ${dataset.grandTotalPcs} pcs`;
+    const finalSubject = formatTestEmailSubject(baseSubject, requestedTestMode);
+    const finalFromName = requestedTestMode
+      ? '[TEST] Pingcon RMA Operations Portal'
+      : 'Pingcon RMA Operations Portal';
+
+    const htmlBody = buildDailyMatrixEmailHtml({
+      dataset,
+      startDate,
+      endDate,
+      generatedManila,
+      filename,
+      toEmail: finalTo,
+      ccList: finalCc,
+      isTestMode: requestedTestMode,
+      triggeredBy: caller.actor
+    });
+
+    const textBody = `${requestedTestMode ? '[TEST] ' : ''}Daily Overall RMA Matrix Report (${startDate} to ${endDate})\nLine Items: ${dataset.lineCount}, SKUs: ${dataset.monitoredSkuCount}, Total Pcs: ${dataset.grandTotalPcs}, Total Value: PHP ${dataset.grandTotalValue.toFixed(2)}\nGenerated (PHT): ${generatedManila}\nTo: ${finalTo}${finalCc.length ? `\nCC: ${finalCc.join(', ')}` : ''}`;
+
+    const smtp = createSmtpTransport();
+    let emailMessageId = null;
+
+    if (!dryRun) {
+      if (!smtp.configured) {
+        return sendJson(res, 200, {
+          success: false,
+          notConfigured: true,
+          user: smtp.smtpUser,
+          message: 'SMTP credentials (GMAIL_APP_PASSWORD) not configured in Vercel environment variables.'
+        }, req);
+      }
+
+      try {
+        const info = await smtp.transporter.sendMail({
+          from: `"${finalFromName}" <${smtp.smtpUser}>`,
+          to: finalTo,
+          cc: finalCc.length > 0 ? finalCc : undefined,
+          subject: finalSubject,
+          html: htmlBody,
+          text: textBody,
+          attachments: [
+            {
+              filename,
+              content: Buffer.from(bytes),
+              contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            }
+          ]
+        });
+        emailMessageId = info?.messageId || null;
+      } catch (smtpErr) {
+        const diagnostic = getDiagnosticHelp(smtpErr.message, smtp.smtpUser, smtp.cleanPass);
+        return sendJson(res, 500, {
+          success: false,
+          error: 'SMTP_SEND_FAILED',
+          message: smtpErr.message,
+          diagnostic
+        }, req);
+      }
+
+      // Record daily Live PHT idempotency date only after genuine non-test SMTP send
+      if (!requestedTestMode) {
+        await supabase
+          .from('rma_settings')
+          .upsert({
+            key: LAST_SENT_PHT_KEY,
+            value: todayManila,
+            updated_at: new Date().toISOString()
+          });
+      }
+    }
+
+    return sendJson(res, 200, {
+      success: true,
+      dryRun,
+      isTestMode: requestedTestMode,
+      phtDate: todayManila,
+      startDate,
+      endDate,
+      to: finalTo,
+      cc: finalCc,
+      subject: finalSubject,
+      fromName: finalFromName,
+      filename,
+      messageId: emailMessageId,
+      triggeredBy: caller.actor,
+      dataset: {
+        lineCount: dataset.lineCount,
+        monitoredSkuCount: dataset.monitoredSkuCount,
+        grandTotalPcs: dataset.grandTotalPcs,
+        totalBadStockPcs: dataset.totalBadStockPcs,
+        totalGoodStockPcs: dataset.totalGoodStockPcs,
+        grandTotalValue: dataset.grandTotalValue
+      },
+      ...(includeAttachmentBase64 ? { attachmentBase64: Buffer.from(bytes).toString('base64') } : {})
+    }, req);
+  } catch (err) {
+    console.error('[Daily Matrix Handler Error]:', err);
+    return sendJson(res, 500, {
+      success: false,
+      error: 'DAILY_MATRIX_ERROR',
+      message: err.message || 'Failed to generate or dispatch Daily Overall RMA Matrix.'
+    }, req);
+  }
+}
+
+--- END FILE: api/_lib/dailyMatrixEmailHandler.js ---
+
 --- START FILE: api/_lib/geminiInspector.js ---
 /**
  * Shared image normalization helper for Google Gemini Flash inspection calls.
@@ -9371,7 +9805,8 @@ Retained for backwards-compatible REST API clients only; the streamlined portal 
 - **\`rma_type: "supplier_outbound"\`**: Defective merchandise batched for outbound Return to Vendor (RTV) recovery, 5-photo driver pickup verification with US Letter B&W PDF forms, and shared multi-RMA \`RTV-\` claims.
 - **Multi-Item Batch Manifests**: Batched returns are represented with \`is_parent: true\`, \`items\` (JSONB breakdown of line items), \`total_items\`, and \`total_quantity\`. Child records link via \`parent_rma_id\`.
 - **Printable Forms**: Standardized strictly on US Letter (\`8.5in x 11in\`, plain black-and-white ink) for Sticker Studio sheets, Credit Memo Vouchers, and Unified Debit Claim / Replacement & Pickup Forms (accepting any valid Philippine Government / Legal ID).
-- **Email-Bound RMA Editor (\`/api/v1/rma-email-edit\`)**: Scoped Google Identity Lock endpoint for authorized email recipients (routed cleanly without extra Vercel functions) to update supplier, product/SKU, pricing, expiry (\`YYYY-MM-DD\`), and SI/DR/PO documents.
+- **Email-Bound RMA Editor (\`/api/v1/rma-email-edit\`)**: Scoped Google Identity Lock endpoint allowing all authorized **To + CC recipients** (\`No Expiry • Revocable by Admin\`, routed cleanly without extra Vercel functions) to update supplier, product/SKU, pricing, expiry (\`YYYY-MM-DD\`), and SI/DR/PO documents.
+- **Automated Daily Overall RMA Matrix (\`/api/send-email?action=daily-matrix\`)**: Scheduled via Vercel Cron daily at **1:00 PM PHT (\`05:00 UTC\`)** (and manually triggerable from Settings) to generate and email the combined Live Overall RMA Matrix (\`.xlsx\`) workbook to configured \`To\` + \`CC\` recipients; all Test Mode emails enforce \`[TEST]\` as the very first word in the subject line.
 
 Click **Authorize** on the top right to test live endpoints directly from this interactive documentation.
       `,
@@ -9423,7 +9858,7 @@ function extractInviteRmaNumber(invite) {
     return String(invite.rma_number).trim();
   }
   const ent = String(invite.entity_name || '');
-  const match = ent.match(/^\[RMA_EDITOR:([^\]]+)\]/);
+  const match = ent.match(/^\[RMA_EDITOR:([^|\]]+)(?:\|([^\]]*))?\]/);
   if (match && match[1] && match[1] !== 'ANY') {
     return match[1].trim();
   }
@@ -9432,6 +9867,38 @@ function extractInviteRmaNumber(invite) {
     return branch;
   }
   return '';
+}
+
+function extractAllowedEmails(invite) {
+  if (!invite) return [];
+  const set = new Set();
+  const addEmail = (val) => {
+    const clean = String(val || '').trim().toLowerCase();
+    if (clean && clean.includes('@')) set.add(clean);
+  };
+  addEmail(invite.authorized_email);
+  if (Array.isArray(invite.authorized_emails)) invite.authorized_emails.forEach(addEmail);
+  if (Array.isArray(invite.allowed_emails)) invite.allowed_emails.forEach(addEmail);
+  const ent = String(invite.entity_name || '');
+  const match = ent.match(/^\[RMA_EDITOR:[^|\]]*\|([^\]]*)\]/);
+  if (match && match[1]) {
+    match[1].split(',').forEach(addEmail);
+  }
+  return Array.from(set);
+}
+
+function isPermanentInvite(invite) {
+  if (!invite) return false;
+  const exp = invite.expires_at;
+  return Boolean(
+    invite.no_expiry === true ||
+    invite.never_expires === true ||
+    String(invite.duration_unit || '').toLowerCase() === 'permanent' ||
+    exp === null ||
+    exp === undefined ||
+    String(exp).startsWith('9999-') ||
+    (typeof exp === 'string' && new Date(exp).getUTCFullYear() >= 9999)
+  );
 }
 
 function isTestReport(report) {
@@ -9558,13 +10025,16 @@ export async function handleRmaEmailEdit(req, res) {
     }, req);
   }
 
-  const expTs = new Date(invite.expires_at).getTime();
-  if (!Number.isFinite(expTs) || Date.now() > expTs) {
-    return sendJson(res, 403, {
-      success: false,
-      error: 'INVITE_EXPIRED',
-      message: 'This RMA editor authorization link has expired.'
-    }, req);
+  const inviteIsPermanent = isPermanentInvite(invite);
+  if (!inviteIsPermanent) {
+    const expTs = new Date(invite.expires_at).getTime();
+    if (!Number.isFinite(expTs) || Date.now() > expTs) {
+      return sendJson(res, 403, {
+        success: false,
+        error: 'INVITE_EXPIRED',
+        message: 'This RMA editor authorization link has expired.'
+      }, req);
+    }
   }
 
   if (!isEditorInvite(invite)) {
@@ -9575,14 +10045,15 @@ export async function handleRmaEmailEdit(req, res) {
     }, req);
   }
 
-  const authorizedEmail = String(invite.authorized_email || '').trim().toLowerCase();
-  if (!authorizedEmail || userEmail !== authorizedEmail) {
+  const allowedEmails = extractAllowedEmails(invite);
+  if (allowedEmails.length === 0 || !allowedEmails.includes(userEmail)) {
     return sendJson(res, 403, {
       success: false,
       error: 'IDENTITY_MISMATCH',
-      message: `Access Denied: Signed-in Google account (${userEmail}) does not match authorized recipient (${authorizedEmail}).`
+      message: `Access Denied: Signed-in Google account (${userEmail}) is not in authorized recipients (${allowedEmails.join(', ')}).`
     }, req);
   }
+  const authorizedEmail = userEmail;
 
   // 3. Enforce RMA Scope & Live vs Test Isolation
   const requestedRma = String(req.query?.rma || req.query?.rma_number || body.rma_number || body.editRma || '').trim();
@@ -9637,6 +10108,9 @@ export async function handleRmaEmailEdit(req, res) {
       success: true,
       mode: inviteIsTest ? 'test' : 'live',
       authorized_email: authorizedEmail,
+      authorized_emails: allowedEmails,
+      no_expiry: inviteIsPermanent,
+      expires_at: inviteIsPermanent ? null : (invite.expires_at || null),
       scope_locked_rma: Boolean(lockedRma),
       report: {
         id: report.id,
@@ -10836,7 +11310,7 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
     method: 'get',
     path: '/api/v1/rma-email-edit',
     summary: 'Load Scoped RMA Record for Email-Bound Editor Link',
-    description: 'Verifies caller Supabase Google OAuth JWT against the email-bound rma_editor invite token, enforces Live vs Test isolation, and returns only the scoped RMA details.',
+    description: 'Verifies caller Supabase Google OAuth JWT against the email-bound multi-recipient (To + CC) rma_editor invite token (No Expiry, revocable by Admin), enforces Live vs Test isolation, and returns only the scoped RMA details.',
     tags: ['RMA Reports'],
     security: [{ BearerAuth: [] }],
     request: {
@@ -10899,6 +11373,98 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
 }
 
 --- END FILE: api/_lib/schemas/rma.schema.js ---
+
+--- START FILE: api/_lib/smtpMailer.js ---
+import nodemailer from 'nodemailer';
+
+export const DEFAULT_EMAIL_RECIPIENTS = {
+  toEmail: 'azgodev@gmail.com',
+  baseCcList: [
+    'mgan@pingconmarketing.com',
+    'marketing@pingconmarketing.com',
+    'azgan@pingconmarketing.com',
+    'jaezelle.benito@pingconmarketing.com'
+  ]
+};
+
+export function escapeEmailHtml(val) {
+  return String(val ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * Ensures Test Mode email subjects ALWAYS begin with "[TEST] " as the first word,
+ * stripping legacy "Test -" or "[TEST MODE]" prefixes to prevent duplication.
+ */
+export function formatTestEmailSubject(subject, isTestMode = false) {
+  const raw = String(subject || '').trim();
+  if (!isTestMode) return raw;
+  let clean = raw;
+  while (/^(?:\[test(?:\s+mode)?\]|test\s*[-:])\s*/i.test(clean)) {
+    clean = clean.replace(/^(?:\[test(?:\s+mode)?\]|test\s*[-:])\s*/i, '').trim();
+  }
+  return clean ? `[TEST] ${clean}` : '[TEST] Notification';
+}
+
+export function getDiagnosticHelp(errMsg, user, pass) {
+  const str = String(errMsg || '');
+  if (str.includes('535') || str.includes('BadCredentials') || str.includes('Username and Password not accepted')) {
+    return `Google SMTP rejected login for "${user}". Your App Password has ${pass.length} characters (Google App Passwords are 16 letters). If you see 535 Bad Credentials, please verify: (1) Ensure 2-Step Verification is enabled in your Google Account for ${user}, (2) Ensure the App Password was generated under ${user} (Google Account > Security > 2-Step Verification > App passwords), and (3) In Vercel Environment Variables, check GMAIL_APP_PASSWORD and make sure all 16 characters were pasted accurately.`;
+  }
+  return null;
+}
+
+export function createSmtpTransport() {
+  const smtpUser = String(process.env.SMTP_USER || process.env.GMAIL_USER || 'finance2@keysysincorporated.com').trim();
+  const rawPass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD || '';
+  const cleanPass = String(rawPass).replace(/\s+/g, '').trim();
+
+  if (!cleanPass) {
+    return {
+      configured: false,
+      transporter: null,
+      smtpUser,
+      rawPass,
+      cleanPass,
+      hadSpaces: rawPass.includes(' ')
+    };
+  }
+
+  const isGmail = !process.env.SMTP_HOST || process.env.SMTP_HOST.includes('gmail.com');
+  const transporter = nodemailer.createTransport(
+    isGmail
+      ? {
+          service: 'gmail',
+          auth: {
+            user: smtpUser,
+            pass: cleanPass
+          }
+        }
+      : {
+          host: process.env.SMTP_HOST,
+          port: Number(process.env.SMTP_PORT || 465),
+          secure: Number(process.env.SMTP_PORT || 465) === 465,
+          auth: {
+            user: smtpUser,
+            pass: cleanPass
+          }
+        }
+  );
+
+  return {
+    configured: true,
+    transporter,
+    smtpUser,
+    rawPass,
+    cleanPass,
+    hadSpaces: rawPass.includes(' ')
+  };
+}
+
+--- END FILE: api/_lib/smtpMailer.js ---
 
 --- START FILE: api/_lib/supabase.js ---
 import { createClient } from '@supabase/supabase-js';
@@ -11409,7 +11975,7 @@ import RMAMatrixExportModal from './components/RMAMatrixExportModal';
 import RmaEmailEditorView from './components/RmaEmailEditorView';
 import GatekeeperPinModal from './components/GatekeeperPinModal';
 import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
-import { inviteService, formatRemainingCountdown } from './services/inviteService';
+import { inviteService, formatRemainingCountdown, isPermanentInvite } from './services/inviteService';
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
@@ -11621,18 +12187,28 @@ export default function App() {
   // Active Real-Time Watchdog for Gatekeeper Session Expiration (Unbypassable live enforcement)
   useEffect(() => {
     const expStr = gateSession?.expires_at || gateSession?.expiresAt;
-    if (!expStr) {
-      setSessionCountdown({ text: '', isExpired: false, totalSeconds: 0 });
+    if (!gateSession) {
+      setSessionCountdown({ text: '', isExpired: false, isPermanent: false, totalSeconds: 0 });
+      return;
+    }
+
+    if (isPermanentInvite(gateSession) || !expStr) {
+      setSessionCountdown({
+        text: 'No Expiry • Revocable by Admin',
+        isExpired: false,
+        isPermanent: true,
+        totalSeconds: Infinity
+      });
       return;
     }
 
     const checkExpiration = () => {
       const expTime = new Date(expStr).getTime();
       const now = Date.now();
-      const countdown = formatRemainingCountdown(expStr, gateSession?.status || 'active');
+      const countdown = formatRemainingCountdown(expStr, gateSession?.status || 'active', gateSession);
       setSessionCountdown(countdown);
 
-      if (now >= expTime || countdown.isExpired) {
+      if (!countdown.isPermanent && (now >= expTime || countdown.isExpired)) {
         // Session reached expiration!
         try {
           localStorage.removeItem('rma_portal_gate_session');
@@ -12429,6 +13005,7 @@ export default function App() {
   };
 
   const handleArchiveReport = async (id, rmaNumber, item) => {
+    mutationEpochRef.current += 1;
     try {
       setRecentReportsList(prev => prev.map(r => {
         if ((id && r.id === id) || (rmaNumber && r.rma_number === rmaNumber)) {
@@ -12446,6 +13023,7 @@ export default function App() {
         return r;
       }));
       await catalogService.archiveReport(id, rmaNumber, currentUser?.name || 'Staff');
+      mutationEpochRef.current += 1;
       showToast(`Archived RMA #${rmaNumber} to Archive Vault.`, 'success');
       refreshAllData();
     } catch (e) {
@@ -12455,6 +13033,7 @@ export default function App() {
   };
 
   const handleBulkArchiveReports = async (reportsList) => {
+    mutationEpochRef.current += 1;
     try {
       const idSet = new Set(reportsList.map(r => r.id).filter(Boolean));
       const rmaSet = new Set(reportsList.map(r => r.rma_number).filter(Boolean));
@@ -12474,6 +13053,7 @@ export default function App() {
         return r;
       }));
       await catalogService.archiveMultipleReports(reportsList, currentUser?.name || 'Staff');
+      mutationEpochRef.current += 1;
       setCustomerHubResetTick(t => t + 1);
       showToast(`Archived ${reportsList.length} return reports to Archive Vault.`, 'success');
       refreshAllData();
@@ -12485,22 +13065,24 @@ export default function App() {
 
   const handleRestoreFromTrashOrArchive = async (item) => {
     if (!item) return;
+    mutationEpochRef.current += 1;
+    setRecentReportsList(prev => prev.map(r => {
+      if ((item.id && r.id === item.id) || (item.rma_number && r.rma_number === item.rma_number)) {
+        const meta = { ...(r.ai_document_metadata || {}) };
+        delete meta.is_trashed;
+        delete meta.trashed_at;
+        delete meta.trashed_by;
+        delete meta.purge_after;
+        delete meta.is_archived;
+        delete meta.archived_at;
+        delete meta.archived_by;
+        return { ...r, ai_document_metadata: meta };
+      }
+      return r;
+    }));
     try {
       await catalogService.restoreReport(item.id, item.rma_number, currentUser?.name || 'Staff');
-      setRecentReportsList(prev => prev.map(r => {
-        if ((item.id && r.id === item.id) || (item.rma_number && r.rma_number === item.rma_number)) {
-          const meta = { ...(r.ai_document_metadata || {}) };
-          delete meta.is_trashed;
-          delete meta.trashed_at;
-          delete meta.trashed_by;
-          delete meta.purge_after;
-          delete meta.is_archived;
-          delete meta.archived_at;
-          delete meta.archived_by;
-          return { ...r, ai_document_metadata: meta };
-        }
-        return r;
-      }));
+      mutationEpochRef.current += 1;
       showToast(`Restored RMA #${item.rma_number} back to active workspace.`, 'success');
       refreshAllData();
     } catch (e) {
@@ -12511,6 +13093,7 @@ export default function App() {
 
   const handlePermanentlyDeleteReport = async (item) => {
     if (!item) return;
+    mutationEpochRef.current += 1;
     try {
       setRecentReportsList(prev => prev.filter(r => {
         if (item.id && r.id === item.id) return false;
@@ -12518,6 +13101,7 @@ export default function App() {
         return true;
       }));
       await catalogService.permanentlyDeleteReport(item.id, item.rma_number, item);
+      mutationEpochRef.current += 1;
       showToast(`Permanently deleted RMA #${item.rma_number}.`, 'success');
       refreshAllData();
     } catch (e) {
@@ -12745,6 +13329,7 @@ export default function App() {
   const handleConfirmDelete = async () => {
     if (!deleteModalState) return;
     setIsDeleteModalLoading(true);
+    mutationEpochRef.current += 1;
     try {
       if (deleteModalState.type === 'product') {
         const prod = deleteModalState.item;
@@ -12814,16 +13399,18 @@ export default function App() {
         refreshAllData();
       } else if (deleteModalState.type === 'credit_memo') {
         const memo = deleteModalState.item;
-        await creditMemoService.deleteCreditMemo(memo.credit_memo_number, memo.report_id);
         setCreditMemosList(prev => prev.filter(m => m.credit_memo_number !== memo.credit_memo_number));
+        await creditMemoService.deleteCreditMemo(memo.credit_memo_number, memo.report_id);
+        mutationEpochRef.current += 1;
         showToast(`Credit Memo ${memo.credit_memo_number} voided and removed.`, 'success');
         refreshAllData();
       } else if (deleteModalState.type === 'bulk_credit_memos') {
         const items = deleteModalState.items || [];
         const memoNumbers = items.map(m => m.credit_memo_number);
-        await creditMemoService.deleteMultipleCreditMemos(memoNumbers);
         const numSet = new Set(memoNumbers);
         setCreditMemosList(prev => prev.filter(m => !numSet.has(m.credit_memo_number)));
+        await creditMemoService.deleteMultipleCreditMemos(memoNumbers);
+        mutationEpochRef.current += 1;
         showToast(`Successfully voided and deleted ${items.length} credit memos from database.`, 'success');
         refreshAllData();
       } else if (deleteModalState.type === 'clear_sandbox') {
@@ -12846,6 +13433,7 @@ export default function App() {
         showToast('All Sandbox Test Mode records, memos, and RTV claims permanently cleared.', 'success');
         await refreshAllData();
       }
+      mutationEpochRef.current += 1;
       setDeleteModalState(null);
     } catch (e) {
       showToast(e.message || 'Failed to delete item from database', 'error');
@@ -12908,6 +13496,7 @@ export default function App() {
   const refreshQueuedRef = useRef(false);
   const bgRefreshTimerRef = useRef(null);
   const lastAutoPurgeRef = useRef(0);
+  const mutationEpochRef = useRef(0);
   const [paperworkShake, setPaperworkShake] = useState(false);
   const [paperworkError, setPaperworkError] = useState(null);
   const [siNumber, setSiNumber] = useState('');
@@ -13557,9 +14146,15 @@ export default function App() {
   };
 
   const executeRefreshBatch = async () => {
+    const batchEpoch = mutationEpochRef.current;
+    let sawStaleMutation = false;
     await Promise.allSettled([
-      catalogService.getPendingBarcodes().then(pending => setPendingBarcodesList(pending || [])),
+      catalogService.getPendingBarcodes().then(pending => {
+        if (mutationEpochRef.current !== batchEpoch) { sawStaleMutation = true; return; }
+        setPendingBarcodesList(pending || []);
+      }),
       catalogService.getRecentReports(100).then(reports => {
+        if (mutationEpochRef.current !== batchEpoch) { sawStaleMutation = true; return; }
         setRecentReportsList(reports || []);
         if (Array.isArray(reports) && reports.length > 0) {
           const nowMs = Date.now();
@@ -13569,10 +14164,19 @@ export default function App() {
           }
         }
       }),
-      catalogService.getSavedProducts().then(saved => setSavedProductsList(saved || [])),
+      catalogService.getSavedProducts().then(saved => {
+        if (mutationEpochRef.current !== batchEpoch) { sawStaleMutation = true; return; }
+        setSavedProductsList(saved || []);
+      }),
       authService.getEmployees().then(staff => setStaffList(staff || [])),
-      creditMemoService.getCreditMemos().then(memos => setCreditMemosList(memos || []))
+      creditMemoService.getCreditMemos().then(memos => {
+        if (mutationEpochRef.current !== batchEpoch) { sawStaleMutation = true; return; }
+        setCreditMemosList(memos || []);
+      })
     ]);
+    if (sawStaleMutation) {
+      refreshQueuedRef.current = true;
+    }
   };
 
   // Coalesce concurrent refreshes so at most one Supabase sync batch runs at a time.
@@ -23498,7 +24102,13 @@ import {
   Ban,
   FileEdit
 } from 'lucide-react';
-import { inviteService, formatRemainingCountdown, isRmaEditorInvite } from '../services/inviteService';
+import {
+  inviteService,
+  formatRemainingCountdown,
+  isRmaEditorInvite,
+  getInviteAllowedEmails,
+  isPermanentInvite
+} from '../services/inviteService';
 import TablePagination from './TablePagination';
 import { copyTextSafe } from '../utils/clipboard';
 import { formatDateTimeYmdHm } from '../utils/rmaHelpers';
@@ -23532,9 +24142,10 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   const [entityName, setEntityName] = useState('');
   const [targetRmaNumber, setTargetRmaNumber] = useState('');
   
-  // Customizable expiration limit (input number + unit: minutes, hours, days)
+  // Customizable expiration limit (input number + unit: minutes, hours, days) or permanent never-expires
   const [expiryNumber, setExpiryNumber] = useState(24);
   const [expiryUnit, setExpiryUnit] = useState('hours');
+  const [noExpiry, setNoExpiry] = useState(false);
 
   // Filter for the invites table
   const [streamFilter, setStreamFilter] = useState('all'); // 'all' | 'customer_inbound' | 'supplier_outbound'
@@ -23576,6 +24187,9 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
 
   // Live computed expiration preview
   const computedExpiryPreview = useMemo(() => {
+    if (noExpiry) {
+      return 'No Expiry • Revocable anytime by Admin';
+    }
     const num = Math.max(1, parseInt(expiryNumber, 10) || 1);
     const unit = String(expiryUnit || 'hours').toLowerCase();
     let ms = num * 3600 * 1000;
@@ -23584,14 +24198,20 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
 
     const expDate = new Date(Date.now() + ms);
     return `Expires (YYYY-MM-DD HH:mm): ${formatDateTimeYmdHm(expDate)}`;
-  }, [expiryNumber, expiryUnit]);
+  }, [expiryNumber, expiryUnit, noExpiry]);
 
   const handleGenerate = async (e) => {
     e.preventDefault();
-    if (!authorizedEmail.trim()) {
+    const parsedEmails = Array.from(new Set(
+      authorizedEmail
+        .split(/[,;\s]+/)
+        .map((em) => em.trim().toLowerCase())
+        .filter((em) => em.includes('@'))
+    ));
+    if (parsedEmails.length === 0) {
       setErrorMessage(
         streamType === 'rma_editor'
-          ? 'Please enter the authorized Google email for the RMA Editor recipient.'
+          ? 'Please enter one or more authorized Google emails (comma-separated for multiple recipients).'
           : streamType === 'supplier_outbound'
             ? 'Please enter the authorized supplier / vendor representative email.'
             : 'Please enter the authorized customer / reporter email.'
@@ -23605,12 +24225,14 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       const createdBy = currentUser?.name || 'Pingcon Staff';
       const newInv = await inviteService.createInvite({
         streamType,
-        authorizedEmail: authorizedEmail.trim(),
+        authorizedEmail: parsedEmails[0],
+        authorizedEmails: parsedEmails,
         entityName: streamType === 'rma_editor' ? targetRmaNumber.trim() : entityName.trim(),
         storeBranch: streamType === 'rma_editor' ? targetRmaNumber.trim() : entityName.trim(),
         rmaNumber: streamType === 'rma_editor' ? targetRmaNumber.trim() : '',
-        durationValue: Math.max(1, parseInt(expiryNumber, 10) || 1),
-        durationUnit: expiryUnit,
+        durationValue: noExpiry ? 0 : Math.max(1, parseInt(expiryNumber, 10) || 1),
+        durationUnit: noExpiry ? 'permanent' : expiryUnit,
+        noExpiry,
         createdBy,
         isTest: inviteIsTestMode
       });
@@ -23810,6 +24432,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
               type="button"
               onClick={() => {
                 setStreamType('customer_inbound');
+                setNoExpiry(false);
                 setErrorMessage(null);
               }}
               className={`flex-1 min-w-[170px] py-3 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
@@ -23829,6 +24452,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
               type="button"
               onClick={() => {
                 setStreamType('supplier_outbound');
+                setNoExpiry(false);
                 setErrorMessage(null);
               }}
               className={`flex-1 min-w-[170px] py-3 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
@@ -23848,6 +24472,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
               type="button"
               onClick={() => {
                 setStreamType('rma_editor');
+                setNoExpiry(true);
                 setErrorMessage(null);
               }}
               className={`flex-1 min-w-[170px] py-3 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
@@ -23935,13 +24560,13 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
-                    type="email"
+                    type={streamType === 'rma_editor' ? 'text' : 'email'}
                     required
                     value={authorizedEmail}
                     onChange={(e) => setAuthorizedEmail(e.target.value)}
                     placeholder={
                       streamType === 'rma_editor'
-                        ? 'e.g. finance@pingconmarketing.com'
+                        ? 'e.g. azgodev@gmail.com, mgan@pingconmarketing.com'
                         : streamType === 'supplier_outbound'
                           ? 'e.g. vendor.qa@liwayway.com'
                           : 'e.g. daniloalvaro031717@gmail.com'
@@ -23951,7 +24576,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 </div>
                 <p className="text-[10px] text-slate-400">
                   {streamType === 'rma_editor'
-                    ? 'Only this Google account can edit details & commercial docs'
+                    ? 'Comma-separated Google emails allowed to edit details & commercial docs'
                     : streamType === 'supplier_outbound'
                       ? 'Vendor QA or delivery lead Google account'
                       : 'Store manager or receiving supervisor Google account'}
@@ -24012,9 +24637,11 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                       type="number"
                       min="1"
                       max="365"
-                      required
+                      required={!noExpiry}
+                      disabled={noExpiry}
                       value={expiryNumber}
                       onChange={(e) => {
+                        setNoExpiry(false);
                         const val = e.target.value;
                         if (val === '') {
                           setExpiryNumber('');
@@ -24028,15 +24655,19 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                           setExpiryNumber(1);
                         }
                       }}
-                      className="w-full px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-black font-mono text-center text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs"
+                      className="w-full px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-black font-mono text-center text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs disabled:opacity-45"
                       placeholder="24"
                     />
                   </div>
                   <div className="relative flex-1">
                     <select
                       value={expiryUnit}
-                      onChange={(e) => setExpiryUnit(e.target.value)}
-                      className="w-full px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs"
+                      disabled={noExpiry}
+                      onChange={(e) => {
+                        setNoExpiry(false);
+                        setExpiryUnit(e.target.value);
+                      }}
+                      className="w-full px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs disabled:opacity-45"
                     >
                       <option value="minutes">Minutes</option>
                       <option value="hours">Hours</option>
@@ -24053,13 +24684,27 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 <Clock className="w-3 h-3 text-slate-400" />
                 Quick Presets:
               </span>
+              {streamType === 'rma_editor' && (
+                <button
+                  type="button"
+                  onClick={() => setNoExpiry((prev) => !prev)}
+                  className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
+                    noExpiry
+                      ? 'bg-emerald-600 text-white shadow-2xs'
+                      : 'bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-50'
+                  }`}
+                >
+                  Never Expires (Revocable)
+                </button>
+              )}
               {PRESET_EXPIRIES.map((preset) => {
-                const isSelected = Number(expiryNumber) === preset.num && expiryUnit === preset.unit;
+                const isSelected = !noExpiry && Number(expiryNumber) === preset.num && expiryUnit === preset.unit;
                 return (
                   <button
                     key={preset.label}
                     type="button"
                     onClick={() => {
+                      setNoExpiry(false);
                       setExpiryNumber(preset.num);
                       setExpiryUnit(preset.unit);
                     }}
@@ -24139,7 +24784,9 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                       ? 'text-purple-800 dark:text-purple-300 bg-purple-200/60 dark:bg-purple-900/60'
                       : 'text-emerald-800 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/60'
                 }`}>
-                  Validity: {generatedInvite.duration_display || 'Custom'} • Expires (YYYY-MM-DD HH:mm): {formatDateTimeYmdHm(generatedInvite.expires_at)}
+                  {isPermanentInvite(generatedInvite)
+                    ? 'Validity: No Expiry • Revocable by Admin'
+                    : `Validity: ${generatedInvite.duration_display || 'Custom'} • Expires (YYYY-MM-DD HH:mm): ${formatDateTimeYmdHm(generatedInvite.expires_at)}`}
                 </span>
               </div>
 
@@ -24285,11 +24932,13 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {paginatedInvites.map((inv) => {
-                      const countdown = formatRemainingCountdown(inv.expires_at, inv.status);
+                      const countdown = formatRemainingCountdown(inv.expires_at, inv.status, inv);
                       const isRevoked = inv.status === 'revoked';
                       const isExpired = countdown.isExpired;
                       const isSupplier = inv.stream_type === 'supplier_outbound';
                       const isEditor = isRmaEditorInvite(inv);
+                      const allowedEmailsList = getInviteAllowedEmails(inv);
+                      const permanent = isPermanentInvite(inv);
 
                       return (
                         <tr key={inv.token || inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
@@ -24318,8 +24967,17 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                               )}
                             </div>
                           </td>
-                          <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">
-                            {inv.authorized_email}
+                          <td className="p-3 font-mono font-bold text-slate-900 dark:text-white max-w-[260px]">
+                            {allowedEmailsList.length > 1 ? (
+                              <div className="space-y-0.5">
+                                <div className="truncate">{allowedEmailsList[0]}</div>
+                                <div className="text-[10px] font-sans font-semibold text-indigo-600 dark:text-indigo-400" title={allowedEmailsList.join(', ')}>
+                                  +{allowedEmailsList.length - 1} CC recipient{allowedEmailsList.length - 1 > 1 ? 's' : ''}: {allowedEmailsList.slice(1).join(', ')}
+                                </div>
+                              </div>
+                            ) : (
+                              inv.authorized_email
+                            )}
                           </td>
                           <td className="p-3 text-slate-700 dark:text-slate-300 font-semibold">
                             {isEditor
@@ -24327,11 +24985,17 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                               : (inviteService.normalizeEntityName(inv.entity_name || inv.store_branch) || <span className="text-slate-400 italic">Optional / Open</span>)}
                           </td>
                           <td className="p-3 text-slate-600 dark:text-slate-400 font-mono text-[11px]">
-                            {inv.duration_display || '24 hour(s)'}
+                            {permanent ? 'No Expiry' : (inv.duration_display || '24 hour(s)')}
                           </td>
                           <td className="p-3 font-mono text-[11px]">
-                            <span className={isExpired ? 'text-slate-400' : 'text-blue-600 dark:text-blue-400 font-bold'}>
-                              {countdown.text}
+                            <span className={
+                              isExpired
+                                ? 'text-slate-400'
+                                : permanent
+                                  ? 'text-emerald-600 dark:text-emerald-400 font-bold'
+                                  : 'text-blue-600 dark:text-blue-400 font-bold'
+                            }>
+                              {permanent && !isRevoked ? 'No Expiry • Revocable by Admin' : countdown.text}
                             </span>
                           </td>
                           <td className="p-3">
@@ -25495,7 +26159,15 @@ import {
   FileEdit
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { inviteService, formatRemainingCountdown, normalizeEntityName, isRmaEditorInvite, extractRmaNumberFromInvite } from '../services/inviteService';
+import {
+  inviteService,
+  formatRemainingCountdown,
+  normalizeEntityName,
+  isRmaEditorInvite,
+  extractRmaNumberFromInvite,
+  getInviteAllowedEmails,
+  isPermanentInvite
+} from '../services/inviteService';
 
 // Capture OAuth callback hash tokens synchronously at bundle evaluation time before any URL cleanup runs
 let initialCapturedOAuthHash = null;
@@ -25564,6 +26236,7 @@ export default function GatekeeperPinModal({
   const [countdownStr, setCountdownStr] = useState('');
   const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [selectedMagicEmail, setSelectedMagicEmail] = useState('');
 
   const hasValidatedRef = useRef(false);
   const validatedTokenRef = useRef(null);
@@ -25614,7 +26287,8 @@ export default function GatekeeperPinModal({
 
   // 2. Cryptographic Google OAuth Identity Verification
   const verifyIdentityWithSupabase = useCallback(async (invite, sessionUser = null) => {
-    if (!invite?.authorized_email) return;
+    const allowedEmails = getInviteAllowedEmails(invite);
+    if (!invite || allowedEmails.length === 0) return;
     // Never unlock while initiating outbound redirect to accounts.google.com
     if (isRedirectingToGoogleRef.current) return;
 
@@ -25701,10 +26375,12 @@ export default function GatekeeperPinModal({
         } catch {}
 
         const userEmail = user.email.toLowerCase().trim();
-        const authorizedEmail = invite.authorized_email.toLowerCase().trim();
+        const allowedEmails = getInviteAllowedEmails(invite);
+        const authorizedEmail = allowedEmails[0] || String(invite.authorized_email || '').toLowerCase().trim();
+        const permanent = isPermanentInvite(invite);
 
-        if (userEmail === authorizedEmail) {
-          // SUCCESS: Authenticated Google identity matches the authorized invite email!
+        if (allowedEmails.includes(userEmail)) {
+          // SUCCESS: Authenticated Google identity matches one of the authorized invite emails!
           setIdentityMismatch(null);
           setOauthError(null);
 
@@ -25728,19 +26404,21 @@ export default function GatekeeperPinModal({
             stream_type: resolvedStream,
             rma_number: finalRmaNum,
             is_test: isTestInvite,
-            authorized_email: authorizedEmail,
+            authorized_email: userEmail,
+            authorized_emails: allowedEmails,
+            no_expiry: permanent,
             entity_name: resolvedEntity,
             store_branch: isEditorLink ? finalRmaNum : resolvedEntity,
             user_email: userEmail,
             user_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
-            expires_at: invite.expires_at,
-            profileName: resolvedEntity || authorizedEmail,
+            expires_at: permanent ? null : invite.expires_at,
+            profileName: resolvedEntity || userEmail || authorizedEmail,
             unlockedAt: new Date().toISOString()
           };
 
           try {
             localStorage.setItem('rma_portal_gate_session', JSON.stringify(unlockedSession));
-            localStorage.setItem('rma_reporter_contact', authorizedEmail);
+            localStorage.setItem('rma_reporter_contact', userEmail);
             localStorage.setItem('rma_portal_verified_email', userEmail);
           } catch {}
 
@@ -25760,7 +26438,8 @@ export default function GatekeeperPinModal({
 
           setIdentityMismatch({
             signedInEmail: user.email,
-            authorizedEmail: invite.authorized_email
+            authorizedEmail: allowedEmails.join(', ') || invite.authorized_email,
+            authorizedEmails: allowedEmails
           });
           setIsCheckingAuth(false);
           setIsValidatingToken(false);
@@ -25902,12 +26581,30 @@ export default function GatekeeperPinModal({
     };
   }, [validationResult, verifyIdentityWithSupabase, identityMismatch]);
 
+  useEffect(() => {
+    const emails = getInviteAllowedEmails(validationResult?.invite);
+    if (emails.length > 0 && (!selectedMagicEmail || !emails.includes(selectedMagicEmail))) {
+      setSelectedMagicEmail(emails[0]);
+    }
+  }, [validationResult?.invite, selectedMagicEmail]);
+
   // 5. Live ticking countdown timer for valid invite (updates every 1s)
   useEffect(() => {
-    if (!validationResult?.valid || !validationResult?.invite?.expires_at) return;
+    if (!validationResult?.valid || !validationResult?.invite) return;
+
+    if (isPermanentInvite(validationResult.invite)) {
+      setCountdownStr('No Expiry • Revocable by Admin');
+      return;
+    }
+
+    if (!validationResult.invite.expires_at) return;
 
     const updateTimer = () => {
-      const countdown = formatRemainingCountdown(validationResult.invite.expires_at, validationResult.invite.status);
+      const countdown = formatRemainingCountdown(
+        validationResult.invite.expires_at,
+        validationResult.invite.status,
+        validationResult.invite
+      );
       setCountdownStr(countdown.text);
       if (countdown.isExpired) {
         setValidationResult(prev => prev ? { ...prev, valid: false, error: 'EXPIRED' } : null);
@@ -25917,7 +26614,7 @@ export default function GatekeeperPinModal({
     updateTimer();
     const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
-  }, [validationResult?.valid, validationResult?.invite?.expires_at, validationResult?.invite?.status]);
+  }, [validationResult?.valid, validationResult?.invite]);
 
   // 6. Handle "Continue with Google" OAuth trigger
   const handleContinueWithGoogle = async () => {
@@ -25949,6 +26646,7 @@ export default function GatekeeperPinModal({
         ? `${window.location.origin}/intake?token=${encodeURIComponent(activeToken)}`
         : window.location.href;
       
+      const allowedEmails = getInviteAllowedEmails(validationResult.invite);
       // Use skipBrowserRedirect: true first to safely get the authorization URL
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -25958,7 +26656,7 @@ export default function GatekeeperPinModal({
           queryParams: {
             access_type: 'offline',
             prompt: 'select_account',
-            login_hint: validationResult.invite.authorized_email
+            ...(allowedEmails.length === 1 ? { login_hint: allowedEmails[0] } : {})
           }
         }
       });
@@ -25989,7 +26687,8 @@ export default function GatekeeperPinModal({
 
   // 7. Send Magic Link Email (Passwordless OTP fallback strictly delivered to the authorized email)
   const handleSendMagicLink = async () => {
-    if (!validationResult?.invite?.authorized_email) return;
+    const allowedEmails = getInviteAllowedEmails(validationResult?.invite);
+    if (allowedEmails.length === 0) return;
     setIsSendingMagicLink(true);
     setOauthError(null);
     try {
@@ -26007,7 +26706,11 @@ export default function GatekeeperPinModal({
       const redirectUrl = activeToken
         ? `${window.location.origin}/intake?token=${encodeURIComponent(activeToken)}`
         : window.location.href;
-      const targetEmail = validationResult.invite.authorized_email.toLowerCase().trim();
+      const targetEmail = (
+        selectedMagicEmail && allowedEmails.includes(selectedMagicEmail)
+          ? selectedMagicEmail
+          : allowedEmails[0]
+      ).toLowerCase().trim();
       const { error } = await supabase.auth.signInWithOtp({
         email: targetEmail,
         options: {
@@ -26069,8 +26772,12 @@ export default function GatekeeperPinModal({
                 <strong className="block text-slate-900 dark:text-white font-mono mt-0.5 text-sm">{identityMismatch.signedInEmail}</strong>
               </p>
               <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                This private return link was issued strictly to:
-                <strong className="block text-emerald-600 dark:text-emerald-400 font-mono mt-0.5 text-sm">{identityMismatch.authorizedEmail}</strong>
+                {identityMismatch.authorizedEmails?.length > 1
+                  ? `This private link was issued strictly to authorized recipients (${identityMismatch.authorizedEmails.length}):`
+                  : 'This private return link was issued strictly to:'}
+                <strong className="block text-emerald-600 dark:text-emerald-400 font-mono mt-0.5 text-xs break-all">
+                  {identityMismatch.authorizedEmail}
+                </strong>
               </p>
               <div className="text-[11px] text-rose-700 dark:text-rose-300 font-bold pt-2 border-t border-rose-200 dark:border-rose-900/40">
                 Forwarding return links is prohibited under Pingcon Wholesale Governance.
@@ -26230,6 +26937,11 @@ export default function GatekeeperPinModal({
         ) : (() => {
           const isEditorLock = isRmaEditorInvite(validationResult?.invite);
           const lockedRmaTarget = extractRmaNumberFromInvite(validationResult?.invite);
+          const allowedEmails = getInviteAllowedEmails(validationResult?.invite);
+          const permanentInvite = isPermanentInvite(validationResult?.invite);
+          const activeMagicEmail = (selectedMagicEmail && allowedEmails.includes(selectedMagicEmail))
+            ? selectedMagicEmail
+            : (allowedEmails[0] || validationResult.invite.authorized_email);
           return (
           /* 5. Valid Token -> 1-Click Google Identity Lock OAuth Screen (Zero Admin Buttons) */
           <div className="space-y-5 animate-in zoom-in-95">
@@ -26280,14 +26992,34 @@ export default function GatekeeperPinModal({
             {/* Recipient Card */}
             <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs text-left space-y-2 text-slate-800 dark:text-slate-200">
               <div className="text-[10px] uppercase font-bold text-slate-400">
-                {isEditorLock ? 'Private RMA Edit Link Issued Exclusively To:' : 'Private Return Link Issued Exclusively To:'}
+                {allowedEmails.length > 1
+                  ? `Authorized To & CC Recipients (${allowedEmails.length}):`
+                  : isEditorLock
+                    ? 'Private RMA Edit Link Issued Exclusively To:'
+                    : 'Private Return Link Issued Exclusively To:'}
               </div>
-              <div className={`font-mono font-black text-sm flex items-center gap-1.5 break-all ${
-                isEditorLock ? 'text-indigo-600 dark:text-indigo-400' : isSupplier ? 'text-purple-600 dark:text-purple-400' : 'text-blue-600 dark:text-blue-400'
-              }`}>
-                <Mail className={`w-4 h-4 shrink-0 ${isEditorLock ? 'text-indigo-600' : isSupplier ? 'text-purple-600' : 'text-blue-600'}`} />
-                <span>{validationResult.invite.authorized_email}</span>
-              </div>
+              {allowedEmails.length > 1 ? (
+                <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
+                  {allowedEmails.map((em) => (
+                    <div
+                      key={em}
+                      className={`font-mono font-bold text-xs flex items-center gap-1.5 break-all ${
+                        isEditorLock ? 'text-indigo-600 dark:text-indigo-400' : isSupplier ? 'text-purple-600 dark:text-purple-400' : 'text-blue-600 dark:text-blue-400'
+                      }`}
+                    >
+                      <Mail className="w-3.5 h-3.5 shrink-0" />
+                      <span>{em}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className={`font-mono font-black text-sm flex items-center gap-1.5 break-all ${
+                  isEditorLock ? 'text-indigo-600 dark:text-indigo-400' : isSupplier ? 'text-purple-600 dark:text-purple-400' : 'text-blue-600 dark:text-blue-400'
+                }`}>
+                  <Mail className={`w-4 h-4 shrink-0 ${isEditorLock ? 'text-indigo-600' : isSupplier ? 'text-purple-600' : 'text-blue-600'}`} />
+                  <span>{allowedEmails[0] || validationResult.invite.authorized_email}</span>
+                </div>
+              )}
               
               {/* Target RMA Record OR Entity Name */}
               {isEditorLock && lockedRmaTarget ? (
@@ -26311,7 +27043,12 @@ export default function GatekeeperPinModal({
                 </div>
               )}
 
-              {countdownStr && (
+              {permanentInvite ? (
+                <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 pt-0.5">
+                  <ShieldCheck className="w-3 h-3 shrink-0" />
+                  <span>No Expiry • Revocable by Admin</span>
+                </div>
+              ) : countdownStr && (
                 <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 pt-0.5">
                   <Clock className="w-3 h-3 shrink-0" />
                   <span>Valid for: {countdownStr}</span>
@@ -26350,7 +27087,7 @@ export default function GatekeeperPinModal({
                     className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60 shadow-sm"
                   >
                     <Mail className="w-4 h-4" />
-                    <span>{magicLinkSent ? '✓ One-Time Link Dispatched to Your Inbox' : isSendingMagicLink ? 'Dispatching Access Link...' : `Email One-Time Access Link to ${validationResult.invite.authorized_email}`}</span>
+                    <span>{magicLinkSent ? '✓ One-Time Link Dispatched to Your Inbox' : isSendingMagicLink ? 'Dispatching Access Link...' : `Email One-Time Access Link to ${activeMagicEmail}`}</span>
                   </button>
                 </div>
               </div>
@@ -26364,7 +27101,7 @@ export default function GatekeeperPinModal({
                   <span>Secure Access Link Dispatched</span>
                 </div>
                 <p className="text-[11px] leading-relaxed text-emerald-800 dark:text-emerald-300">
-                  A one-time secure login link has been dispatched to <strong className="font-mono">{validationResult.invite.authorized_email}</strong>. Please check your inbox and click the link to automatically access the return portal.
+                  A one-time secure login link has been dispatched to <strong className="font-mono">{activeMagicEmail}</strong>. Please check your inbox and click the link to automatically access the return portal.
                 </p>
               </div>
             )}
@@ -26396,6 +27133,22 @@ export default function GatekeeperPinModal({
                 )}
               </button>
 
+              {allowedEmails.length > 1 && (
+                <select
+                  aria-label="Select recipient inbox for one-time link"
+                  value={activeMagicEmail}
+                  onChange={(e) => {
+                    setSelectedMagicEmail(e.target.value);
+                    setMagicLinkSent(false);
+                  }}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-[11px] font-mono font-bold text-slate-800 dark:text-slate-200"
+                >
+                  {allowedEmails.map((em) => (
+                    <option key={em} value={em}>{em}</option>
+                  ))}
+                </select>
+              )}
+
               <button
                 type="button"
                 onClick={handleSendMagicLink}
@@ -26403,7 +27156,7 @@ export default function GatekeeperPinModal({
                 className="w-full py-2.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 shadow-2xs"
               >
                 <Mail className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                <span>{magicLinkSent ? '✓ One-Time Link Dispatched to Your Inbox' : isSendingMagicLink ? 'Dispatching Access Link...' : 'Email One-Time Access Link to ' + validationResult.invite.authorized_email}</span>
+                <span>{magicLinkSent ? '✓ One-Time Link Dispatched to Your Inbox' : isSendingMagicLink ? 'Dispatching Access Link...' : 'Email One-Time Access Link to ' + activeMagicEmail}</span>
               </button>
             </div>
           </div>
@@ -36090,7 +36843,12 @@ export default function RmaEmailEditorView({
                 <Mail className="w-3 h-3 text-blue-500" />
                 {gateSession?.user_email || gateSession?.authorized_email}
               </span>
-              {sessionCountdown?.text && (
+              {(gateSession?.no_expiry || sessionCountdown?.isPermanent) ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-mono font-bold border bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800">
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>No Expiry • Revocable by Admin</span>
+                </span>
+              ) : sessionCountdown?.text && (
                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-mono font-bold border ${
                   sessionCountdown.totalSeconds < 300
                     ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-300 dark:border-rose-800'
@@ -39333,7 +40091,9 @@ import {
   Shield,
   KeyRound,
   ExternalLink,
-  MapPin
+  MapPin,
+  FileSpreadsheet,
+  Send
 } from 'lucide-react';
 import { rmaApi, supabase } from '../supabaseClient';
 import { applyEmailTestMode, getWarehouseLocations } from '../utils/rmaHelpers';
@@ -39363,6 +40123,14 @@ export default function SettingsTab({
     diagnostic: '',
     passLength: null,
     hadSpaces: false
+  });
+
+  const [dailyMatrixStatus, setDailyMatrixStatus] = useState({
+    loading: false,
+    done: false,
+    success: false,
+    message: '',
+    detail: ''
   });
 
   // Super Admin Configurable RMA Email Recipients State
@@ -39494,6 +40262,38 @@ export default function SettingsTab({
       passLength: res.passLength || null,
       hadSpaces: Boolean(res.hadSpaces)
     });
+  };
+
+  const handleSendDailyMatrixNow = async () => {
+    setDailyMatrixStatus({
+      loading: true,
+      done: false,
+      success: false,
+      message: 'Generating & emailing Overall RMA Matrix (.xlsx)...',
+      detail: ''
+    });
+    const res = await notificationService.sendDailyMatrixEmailNow({
+      isTestMode: Boolean(isTestMode),
+      force: true
+    });
+    if (res?.success) {
+      const ccTxt = Array.isArray(res.cc) && res.cc.length > 0 ? ` (CC: ${res.cc.join(', ')})` : '';
+      setDailyMatrixStatus({
+        loading: false,
+        done: true,
+        success: true,
+        message: `Daily Matrix dispatched to ${res.to || mainRecipient}${ccTxt}`,
+        detail: `${res.filename || 'Overall_RMA_Matrix_Report.xlsx'} • ${res.dataset?.lineCount ?? 0} lines • ${res.dataset?.grandTotalPcs ?? 0} pcs`
+      });
+    } else {
+      setDailyMatrixStatus({
+        loading: false,
+        done: true,
+        success: false,
+        message: res?.message || res?.error || 'Failed to dispatch Daily Matrix email.',
+        detail: res?.diagnostic || ''
+      });
+    }
   };
 
   // Add CC email to list
@@ -39757,7 +40557,7 @@ export default function SettingsTab({
               )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xl">
-              When ON, test emails are safely sent exclusively to <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">mgan@a2z2go.net</code> with <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">Test - </code> in the subject. <strong>This setting is strictly restricted to Super Admin; all other staff roles and public intake users operate permanently in Live Mode.</strong>
+              When ON, test emails are safely sent exclusively to <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">mgan@a2z2go.net</code> with <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">[TEST] </code> at the very beginning of the subject. <strong>This setting is strictly restricted to Super Admin; all other staff roles and public intake users operate permanently in Live Mode.</strong>
             </p>
           </div>
 
@@ -39860,25 +40660,72 @@ export default function SettingsTab({
 
       {/* Google SMTP Email Dispatch Service Card */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
           <div className="flex items-center space-x-2.5">
             <Mail className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white">Google SMTP Notification Service</h2>
-              <span className="text-xs text-slate-500 dark:text-slate-400">Automated intake & catalog updates dispatcher</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                Automated intake alerts &amp; Daily 1:00 PM PHT Overall RMA Matrix (.xlsx) dispatcher
+              </span>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleTestSmtp}
-            disabled={smtpStatus.loading}
-            className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/70 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold rounded-xl border border-indigo-200 dark:border-indigo-800 flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${smtpStatus.loading ? 'animate-spin' : ''}`} />
-            <span>{smtpStatus.loading ? 'Authenticating...' : 'Test SMTP Credentials'}</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSendDailyMatrixNow}
+              disabled={dailyMatrixStatus.loading}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs disabled:opacity-60"
+            >
+              {dailyMatrixStatus.loading ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+              )}
+              <span>{dailyMatrixStatus.loading ? 'Dispatching Matrix...' : 'Send Daily Matrix Now'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleTestSmtp}
+              disabled={smtpStatus.loading}
+              className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/70 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold rounded-xl border border-indigo-200 dark:border-indigo-800 flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${smtpStatus.loading ? 'animate-spin' : ''}`} />
+              <span>{smtpStatus.loading ? 'Authenticating...' : 'Test SMTP Credentials'}</span>
+            </button>
+          </div>
         </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 text-xs">
+          <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-200 font-semibold">
+            <Send className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span>
+              <strong>Daily Auto-Email Schedule:</strong> 1:00 PM PHT (<code className="font-mono">Asia/Manila</code> / <code className="font-mono">05:00 UTC</code>) — Sends Combined Overall RMA Matrix (<code className="font-mono">.xlsx</code>) to configured Live To &amp; CC recipients.
+            </span>
+          </div>
+        </div>
+
+        {dailyMatrixStatus.done && (
+          <div className={`p-3.5 rounded-2xl border text-xs space-y-1 animate-in fade-in ${
+            dailyMatrixStatus.success
+              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+              : 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-700 text-rose-900 dark:text-rose-200'
+          }`}>
+            <div className="font-bold flex items-center gap-2">
+              {dailyMatrixStatus.success ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+              )}
+              <span>{dailyMatrixStatus.message}</span>
+            </div>
+            {dailyMatrixStatus.detail && (
+              <div className="text-[11px] font-mono opacity-85 pl-6">{dailyMatrixStatus.detail}</div>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
           <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-200 dark:border-slate-800">
@@ -51770,6 +52617,10 @@ const CREDIT_MEMOS_STORAGE_KEY = 'rma_portal_credit_memos_v2';
 const CONSOLIDATED_CM_SETTINGS_KEY = 'consolidated_cm_items_store';
 const CONSOLIDATED_CM_LOCAL_KEY = 'rma_consolidated_cm_items_v1';
 
+// Prevent in-flight background fetches or stale localStorage caches from resurrecting voided Credit Memos
+let cmMutationEpoch = 0;
+const recentlyVoidedCmNumbers = new Set();
+
 function buildPackedCmNotes(humanNotes, isTest, consolidatedItems = [], rmaNumbers = [], reportIds = []) {
   let base = stripCreditMemoMetaTag(humanNotes || '');
   if (isTest && !base.includes('[TEST_MODE]')) {
@@ -51903,7 +52754,9 @@ export const creditMemoService = {
    * legacy 'rma_reports' notes, and local storage
    */
   async getCreditMemos() {
+    const fetchEpoch = cmMutationEpoch;
     const memosMap = new Map();
+    let dbTableQuerySucceeded = false;
     const consolidatedStore = await this.getConsolidatedItemsStore();
 
     // 1. Primary Source: Dedicated Supabase 'credit_memos' table
@@ -51914,8 +52767,9 @@ export const creditMemoService = {
         .order('credit_issued_at', { ascending: false });
 
       if (!error && Array.isArray(dbMemos)) {
+        dbTableQuerySucceeded = true;
         for (const m of dbMemos) {
-          if (m.credit_memo_number) {
+          if (m.credit_memo_number && !recentlyVoidedCmNumbers.has(m.credit_memo_number)) {
             const creditAmt = Number(m.credit_amount ?? m.amount ?? 0);
             const grossAmt = Number(m.amount ?? m.credit_amount ?? 0);
             memosMap.set(m.credit_memo_number, {
@@ -51947,7 +52801,12 @@ export const creditMemoService = {
           if (r.notes && typeof r.notes === 'string' && r.notes.includes('credit_memo_number')) {
             try {
               const memoData = JSON.parse(r.notes);
-              if (memoData && memoData.credit_memo_number && !memosMap.has(memoData.credit_memo_number)) {
+              if (
+                memoData &&
+                memoData.credit_memo_number &&
+                !recentlyVoidedCmNumbers.has(memoData.credit_memo_number) &&
+                !memosMap.has(memoData.credit_memo_number)
+              ) {
                 const creditAmt = Number(memoData.credit_amount ?? memoData.amount ?? 0);
                 const grossAmt = Number(memoData.amount ?? memoData.credit_amount ?? 0);
                 const combined = {
@@ -51975,14 +52834,17 @@ export const creditMemoService = {
       console.warn('Supabase rma_reports memos fallback notice:', e);
     }
 
-    // 3. Merge with local cache for offline/unsynced entries
+    // 3. Merge with local cache ONLY for unsynced offline entries (or when DB query failed)
     try {
       const raw = localStorage.getItem(CREDIT_MEMOS_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
           parsed.forEach(m => {
-            if (m.credit_memo_number && !memosMap.has(m.credit_memo_number)) {
+            if (!m?.credit_memo_number || recentlyVoidedCmNumbers.has(m.credit_memo_number)) return;
+            // If Supabase table read succeeded, never resurrect DB-synced memos already deleted on server
+            if (dbTableQuerySucceeded && m.is_synced_to_db !== false) return;
+            if (!memosMap.has(m.credit_memo_number)) {
               memosMap.set(m.credit_memo_number, m);
             }
           });
@@ -52012,10 +52874,12 @@ export const creditMemoService = {
     });
     list.sort((a, b) => new Date(b.credit_issued_at || b.created_at || 0) - new Date(a.credit_issued_at || a.created_at || 0));
 
-    // Update local cache with latest merged list
-    try {
-      localStorage.setItem(CREDIT_MEMOS_STORAGE_KEY, JSON.stringify(list));
-    } catch (e) {}
+    // Update local cache with latest merged list ONLY if no newer mutation occurred while fetching
+    if (fetchEpoch === cmMutationEpoch) {
+      try {
+        localStorage.setItem(CREDIT_MEMOS_STORAGE_KEY, JSON.stringify(list));
+      } catch (e) {}
+    }
 
     return list;
   },
@@ -52049,6 +52913,8 @@ export const creditMemoService = {
     const modeExisting = existing.filter((m) => isTestRecord(m) === isTest);
     const cmNumber = memoData.credit_memo_number || this.generateCreditMemoNumber(modeExisting.length, isTest);
 
+    recentlyVoidedCmNumbers.delete(cmNumber);
+    cmMutationEpoch += 1;
     const isConsolidated = consolidatedItems.length > 1 || rmaNumbersList.length > 1;
     const joinedRmas = rmaNumbersList.join(', ');
     const displayRmaField = isConsolidated
@@ -52302,6 +53168,8 @@ export const creditMemoService = {
    * Delete / Void a Credit Memo (resets ALL linked rma_reports rows for consolidated memos)
    */
   async deleteCreditMemo(cmNumber, reportId) {
+    if (cmNumber) recentlyVoidedCmNumbers.add(cmNumber);
+    cmMutationEpoch += 1;
     const existing = await this.getCreditMemos();
     const target = existing.find(m => m.credit_memo_number === cmNumber);
     const filtered = existing.filter(m => m.credit_memo_number !== cmNumber);
@@ -52359,6 +53227,7 @@ export const creditMemoService = {
     }
 
     await Promise.allSettled(ops);
+    cmMutationEpoch += 1;
 
     return { success: true };
   },
@@ -52368,6 +53237,8 @@ export const creditMemoService = {
    */
   async deleteMultipleCreditMemos(memoNumbers = []) {
     if (!memoNumbers || memoNumbers.length === 0) return { success: true };
+    memoNumbers.forEach((n) => { if (n) recentlyVoidedCmNumbers.add(n); });
+    cmMutationEpoch += 1;
     const numSet = new Set(memoNumbers);
 
     const existing = await this.getCreditMemos();
@@ -52444,10 +53315,11 @@ export const creditMemoService = {
 
 --- START FILE: src/services/inviteService.js ---
 import { supabase } from '../supabaseClient';
-import { formatDateTimeYmdHm } from '../utils/rmaHelpers';
+import { formatDateTimeYmdHm, formatTestEmailSubject } from '../utils/rmaHelpers';
 
 const SETTINGS_KEY = 'customer_rma_invites_store';
 const LOCAL_STORAGE_KEY = 'rma_customer_invites_v1';
+export const NO_EXPIRY_DB_SENTINEL = '9999-12-31T23:59:59.000Z';
 
 function getLocalInvites() {
   try {
@@ -52508,11 +53380,43 @@ export function extractRmaNumberFromInvite(inv) {
     return String(inv.rma_number).trim();
   }
   const ent = String(inv.entity_name || '');
-  const m = ent.match(/^\[RMA_EDITOR:([^\]]+)\]/);
+  const m = ent.match(/^\[RMA_EDITOR:([^|\]]+)(?:\|([^\]]*))?\]/);
   if (m && m[1] && m[1] !== 'ANY') return m[1].trim();
   const br = String(inv.store_branch || '').trim();
   if (/^RMA-(?:TEST-)?\d{4}-/i.test(br)) return br;
   return '';
+}
+
+export function getInviteAllowedEmails(inv) {
+  if (!inv) return [];
+  const emailSet = new Set();
+  const pushEmail = (val) => {
+    if (!val) return;
+    String(val)
+      .split(/[,;\s]+/)
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => e.includes('@'))
+      .forEach((e) => emailSet.add(e));
+  };
+  pushEmail(inv.authorized_email);
+  if (Array.isArray(inv.authorized_emails)) inv.authorized_emails.forEach(pushEmail);
+  if (Array.isArray(inv.allowed_emails)) inv.allowed_emails.forEach(pushEmail);
+  const ent = String(inv.entity_name || '');
+  const m = ent.match(/^\[RMA_EDITOR:[^|\]]*\|([^\]]*)\]/);
+  if (m && m[1]) pushEmail(m[1]);
+  return Array.from(emailSet);
+}
+
+export function isPermanentInvite(inv) {
+  if (!inv) return false;
+  const exp = inv.expires_at;
+  return Boolean(
+    inv.no_expiry === true ||
+    inv.never_expires === true ||
+    String(inv.duration_unit || '').toLowerCase() === 'permanent' ||
+    String(exp || '').startsWith('9999-') ||
+    (typeof exp === 'string' && new Date(exp).getUTCFullYear() >= 9999)
+  );
 }
 
 export function maskEmail(email) {
@@ -52526,11 +53430,26 @@ export function maskEmail(email) {
   return `${prefix}***${suffix}@${domain}`;
 }
 
-export function formatRemainingCountdown(expiresAt, status = 'active') {
-  if (status === 'revoked') return { text: 'Revoked', isExpired: true, isRevoked: true, totalSeconds: 0 };
-  if (!expiresAt) return { text: 'Expired', isExpired: true, isRevoked: false, totalSeconds: 0 };
+export function formatRemainingCountdown(expiresAt, status = 'active', invite = null) {
+  if (status === 'revoked') {
+    return { text: 'Revoked', isExpired: true, isRevoked: true, isPermanent: false, totalSeconds: 0 };
+  }
+  if (
+    isPermanentInvite(invite) ||
+    String(expiresAt || '').startsWith('9999-') ||
+    (typeof expiresAt === 'string' && new Date(expiresAt).getUTCFullYear() >= 9999)
+  ) {
+    return {
+      text: 'No Expiry • Revocable by Admin',
+      isExpired: false,
+      isRevoked: false,
+      isPermanent: true,
+      totalSeconds: Infinity
+    };
+  }
+  if (!expiresAt) return { text: 'Expired', isExpired: true, isRevoked: false, isPermanent: false, totalSeconds: 0 };
   const diff = new Date(expiresAt).getTime() - Date.now();
-  if (diff <= 0) return { text: 'Expired', isExpired: true, isRevoked: false, totalSeconds: 0 };
+  if (diff <= 0) return { text: 'Expired', isExpired: true, isRevoked: false, isPermanent: false, totalSeconds: 0 };
 
   const totalSecs = Math.floor(diff / 1000);
   const totalMins = Math.floor(diff / (1000 * 60));
@@ -52541,36 +53460,37 @@ export function formatRemainingCountdown(expiresAt, status = 'active') {
   if (hours >= 24) {
     const days = Math.floor(hours / 24);
     const remHours = hours % 24;
-    return { text: `${days}d ${remHours}h ${mins}m remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
+    return { text: `${days}d ${remHours}h ${mins}m remaining`, isExpired: false, isRevoked: false, isPermanent: false, totalSeconds: totalSecs };
   }
   if (hours > 0) {
-    return { text: `${hours}h ${mins}m ${secs}s remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
+    return { text: `${hours}h ${mins}m ${secs}s remaining`, isExpired: false, isRevoked: false, isPermanent: false, totalSeconds: totalSecs };
   }
   if (mins > 0) {
-    return { text: `${mins}m ${secs}s remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
+    return { text: `${mins}m ${secs}s remaining`, isExpired: false, isRevoked: false, isPermanent: false, totalSeconds: totalSecs };
   }
-  return { text: `${secs}s remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
+  return { text: `${secs}s remaining`, isExpired: false, isRevoked: false, isPermanent: false, totalSeconds: totalSecs };
 }
 
 /**
  * Cryptographic Google OAuth Identity Verification
- * Validates whether the authenticated Google account matches the invite's authorized email.
+ * Validates whether the authenticated Google account matches ANY authorized email on the invite.
  */
 export function verifyGoogleIdentity(user, invite) {
   if (!user || !user.email) {
     return { verified: false, error: 'NO_AUTHENTICATED_USER' };
   }
-  if (!invite || !invite.authorized_email) {
+  const allowedEmails = getInviteAllowedEmails(invite);
+  if (!invite || allowedEmails.length === 0) {
     return { verified: false, error: 'NO_INVITE_EMAIL' };
   }
   const userEmail = user.email.toLowerCase().trim();
-  const authorizedEmail = invite.authorized_email.toLowerCase().trim();
 
-  if (userEmail !== authorizedEmail) {
+  if (!allowedEmails.includes(userEmail)) {
     return {
       verified: false,
       userEmail: user.email,
-      authorizedEmail: invite.authorized_email,
+      authorizedEmail: allowedEmails.join(', '),
+      authorizedEmails: allowedEmails,
       error: 'IDENTITY_MISMATCH'
     };
   }
@@ -52578,7 +53498,8 @@ export function verifyGoogleIdentity(user, invite) {
   return {
     verified: true,
     userEmail: user.email,
-    authorizedEmail: invite.authorized_email
+    authorizedEmail: userEmail,
+    authorizedEmails: allowedEmails
   };
 }
 
@@ -52604,10 +53525,18 @@ export function hydrateInviteRecord(raw) {
   const isEditor = isRmaEditorInvite(raw);
   const rmaNum = extractRmaNumberFromInvite(raw);
   const ent = isEditor ? '' : (normalizeEntityName(raw.store_branch) || normalizeEntityName(raw.entity_name));
+  const allowedEmails = getInviteAllowedEmails(raw);
+  const permanent = isPermanentInvite(raw);
   return {
     ...raw,
     stream_type: isEditor ? 'rma_editor' : (raw.stream_type || 'customer_inbound'),
     rma_number: rmaNum || raw.rma_number || null,
+    authorized_email: allowedEmails[0] || String(raw.authorized_email || '').trim().toLowerCase(),
+    authorized_emails: allowedEmails,
+    allowed_emails: allowedEmails,
+    no_expiry: permanent,
+    expires_at: permanent ? null : (raw.expires_at || null),
+    duration_display: permanent ? 'No Expiry' : (raw.duration_display || '24 hour(s)'),
     is_test: isTestInviteToken(raw),
     entity_name: isEditor ? (rmaNum ? `RMA ${rmaNum}` : 'RMA Details Editor') : ent,
     store_branch: isEditor ? (rmaNum || '') : ent
@@ -52619,6 +53548,8 @@ export const inviteService = {
   normalizeEntityName,
   isRmaEditorInvite,
   extractRmaNumberFromInvite,
+  getInviteAllowedEmails,
+  isPermanentInvite,
   /**
    * Fetch all invites from Supabase (table or fallback settings)
    */
@@ -52632,8 +53563,20 @@ export const inviteService = {
         const prev = mergedMap.get(hydrated.token);
         if (!prev) {
           mergedMap.set(hydrated.token, hydrated);
-        } else if (hydrated.status === 'revoked' && prev.status !== 'revoked') {
-          mergedMap.set(hydrated.token, { ...prev, ...hydrated, status: 'revoked' });
+        } else {
+          const unionEmails = Array.from(new Set([...(prev.authorized_emails || []), ...(hydrated.authorized_emails || [])]));
+          const permanent = Boolean(prev.no_expiry || hydrated.no_expiry);
+          mergedMap.set(hydrated.token, {
+            ...prev,
+            ...hydrated,
+            authorized_email: hydrated.authorized_email || prev.authorized_email,
+            authorized_emails: unionEmails,
+            allowed_emails: unionEmails,
+            no_expiry: permanent,
+            expires_at: permanent ? null : (hydrated.expires_at ?? prev.expires_at),
+            duration_display: permanent ? 'No Expiry' : (hydrated.duration_display || prev.duration_display),
+            status: (hydrated.status === 'revoked' || prev.status === 'revoked') ? 'revoked' : hydrated.status
+          });
         }
       });
     };
@@ -52677,23 +53620,38 @@ export const inviteService = {
   async createInvite({
     streamType = 'customer_inbound',
     authorizedEmail,
+    authorizedEmails = [],
     entityName = '',
     storeBranch = '',
     rmaNumber = '',
     durationValue = 24,
     durationUnit = 'hours',
     durationHours = null,
+    noExpiry = false,
     createdBy = 'Staff',
     isTest = false
   }) {
-    if (!authorizedEmail || !authorizedEmail.trim()) {
+    const emailSet = new Set();
+    const absorbEmailInput = (raw) => {
+      if (!raw) return;
+      String(raw)
+        .split(/[,;\s]+/)
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => e.includes('@'))
+        .forEach((e) => emailSet.add(e));
+    };
+    absorbEmailInput(authorizedEmail);
+    if (Array.isArray(authorizedEmails)) authorizedEmails.forEach(absorbEmailInput);
+    const cleanAllowedEmails = Array.from(emailSet);
+
+    if (cleanAllowedEmails.length === 0) {
       throw new Error('Authorized Google Email is required.');
     }
 
     const cleanStream = streamType === 'rma_editor'
       ? 'rma_editor'
       : (streamType === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound');
-    const cleanEmail = authorizedEmail.trim().toLowerCase();
+    const cleanEmail = cleanAllowedEmails[0];
     const cleanRmaNum = cleanStream === 'rma_editor'
       ? String(rmaNumber || entityName || storeBranch || '').trim()
       : '';
@@ -52702,36 +53660,48 @@ export const inviteService = {
       : normalizeEntityName(entityName || storeBranch || '');
 
     // Postgres table public.rma_invites checks stream_type IN ('customer_inbound', 'supplier_outbound')
-    // Encode rma_editor metadata cleanly inside entity_name/store_branch & token prefix to prevent constraint errors.
+    // Encode rma_editor metadata & multi-recipient allowlist cleanly inside entity_name without breaking schema constraints.
     const dbStream = cleanStream === 'rma_editor' ? 'customer_inbound' : cleanStream;
     const dbEntityFallback = cleanStream === 'supplier_outbound' ? 'Master Supplier Partner' : 'Pingcon Wholesale Client';
+    const editorEmailTag = cleanAllowedEmails.length > 1 ? `|${cleanAllowedEmails.join(',')}` : '';
     const dbEntityValue = cleanStream === 'rma_editor'
-      ? (cleanRmaNum ? `[RMA_EDITOR:${cleanRmaNum}]` : '[RMA_EDITOR]')
+      ? (cleanRmaNum ? `[RMA_EDITOR:${cleanRmaNum}${editorEmailTag}]` : `[RMA_EDITOR:ANY${editorEmailTag}]`)
       : (cleanEntity || dbEntityFallback);
     const dbStoreBranch = cleanStream === 'rma_editor' ? (cleanRmaNum || 'RMA Editor') : cleanEntity;
 
-    // Calculate expiration in milliseconds based on user-customized input number and unit
-    let durationMs = 24 * 3600 * 1000;
-    const num = Math.max(1, parseInt(durationValue, 10) || 1);
-    const unit = String(durationUnit || 'hours').toLowerCase();
+    // Calculate expiration (permanent links use DB sentinel 9999-12-31T23:59:59.000Z in NOT NULL column, hydrated as expires_at: null)
+    const unitRaw = String(durationUnit || 'hours').toLowerCase();
+    const isPermanent = Boolean(noExpiry || unitRaw === 'permanent');
 
-    if (durationHours !== null && durationHours !== undefined) {
-      durationMs = Number(durationHours) * 3600 * 1000;
-    } else if (unit.startsWith('min')) {
-      durationMs = num * 60 * 1000;
-    } else if (unit.startsWith('day')) {
-      durationMs = num * 24 * 3600 * 1000;
-    } else {
-      durationMs = num * 3600 * 1000;
-    }
+    let num = Math.max(1, parseInt(durationValue, 10) || 1);
+    let unit = unitRaw;
+    let dbExpiresAt = '';
+    let durationDisplay = '';
 
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + durationMs).toISOString();
+    if (isPermanent) {
+      num = 0;
+      unit = 'permanent';
+      dbExpiresAt = NO_EXPIRY_DB_SENTINEL;
+      durationDisplay = 'No Expiry';
+    } else {
+      let durationMs = 24 * 3600 * 1000;
+      if (durationHours !== null && durationHours !== undefined) {
+        durationMs = Number(durationHours) * 3600 * 1000;
+      } else if (unit.startsWith('min')) {
+        durationMs = num * 60 * 1000;
+      } else if (unit.startsWith('day')) {
+        durationMs = num * 24 * 3600 * 1000;
+      } else {
+        durationMs = num * 3600 * 1000;
+      }
+      dbExpiresAt = new Date(now.getTime() + durationMs).toISOString();
+      const displayUnit = unit.startsWith('min') ? 'min(s)' : unit.startsWith('day') ? 'day(s)' : 'hour(s)';
+      durationDisplay = `${num} ${displayUnit}`;
+    }
+
     const cleanIsTest = Boolean(isTest);
     const token = generateInviteToken(cleanIsTest, cleanStream);
-
-    const displayUnit = unit.startsWith('min') ? 'min(s)' : unit.startsWith('day') ? 'day(s)' : 'hour(s)';
-    const durationDisplay = `${num} ${displayUnit}`;
 
     const dbInsertPayload = {
       token,
@@ -52742,7 +53712,7 @@ export const inviteService = {
       duration_value: num,
       duration_unit: unit,
       duration_display: durationDisplay,
-      expires_at: expiresAt,
+      expires_at: dbExpiresAt,
       created_by: createdBy,
       status: 'active',
       created_at: now.toISOString(),
@@ -52765,6 +53735,9 @@ export const inviteService = {
             ...data,
             stream_type: cleanStream,
             rma_number: cleanRmaNum || null,
+            authorized_emails: cleanAllowedEmails,
+            allowed_emails: cleanAllowedEmails,
+            no_expiry: isPermanent,
             is_test: cleanIsTest || isTestInviteToken(data)
           });
         }
@@ -52779,6 +53752,10 @@ export const inviteService = {
     const newInvite = createdRecord || {
       id: `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       ...dbInsertPayload,
+      expires_at: isPermanent ? null : dbExpiresAt,
+      no_expiry: isPermanent,
+      authorized_emails: cleanAllowedEmails,
+      allowed_emails: cleanAllowedEmails,
       stream_type: cleanStream,
       rma_number: cleanRmaNum || null,
       is_test: cleanIsTest,
@@ -52902,7 +53879,7 @@ export const inviteService = {
           if (cached.status === 'revoked') {
             return { valid: false, invite: cached, error: 'REVOKED' };
           }
-          if (Date.now() > new Date(cached.expires_at).getTime()) {
+          if (!isPermanentInvite(cached) && Date.now() > new Date(cached.expires_at).getTime()) {
             return { valid: false, invite: cached, error: 'EXPIRED' };
           }
           return { valid: true, invite: cached, transient: true };
@@ -52917,9 +53894,11 @@ export const inviteService = {
       return { valid: false, invite, error: 'REVOKED' };
     }
 
-    const expTime = new Date(invite.expires_at).getTime();
-    if (Date.now() > expTime) {
-      return { valid: false, invite, error: 'EXPIRED' };
+    if (!isPermanentInvite(invite)) {
+      const expTime = new Date(invite.expires_at).getTime();
+      if (!Number.isFinite(expTime) || Date.now() > expTime) {
+        return { valid: false, invite, error: 'EXPIRED' };
+      }
     }
 
     return { valid: true, invite };
@@ -53050,14 +54029,21 @@ export const inviteService = {
     const entityLabel = isEditor
       ? (rmaTarget ? `RMA ${rmaTarget}` : 'Scoped RMA Record')
       : (invite.entity_name || invite.store_branch || (isSupplierRtv ? 'Vendor Partner' : 'Store Partner'));
-    const expDateStr = `${formatDateTimeYmdHm(invite.expires_at)} (YYYY-MM-DD HH:mm)`;
+    const allowedList = getInviteAllowedEmails(invite);
+    const primaryEmail = allowedList[0] || invite.authorized_email;
+    const ccEmails = allowedList.slice(1);
+    const recipientsText = allowedList.join(', ');
+    const permanent = isPermanentInvite(invite);
+    const expDateStr = permanent
+      ? 'No Expiry (Revocable anytime by Admin)'
+      : `${formatDateTimeYmdHm(invite.expires_at)} (YYYY-MM-DD HH:mm)`;
 
     const rawSubject = isEditor
       ? `[Authorized RMA Editor Access] Edit RMA Details & Documents (${entityLabel})`
       : isSupplierRtv
         ? `[Authorized Supplier RTV Access] Pingcon Return to Vendor Portal Link (${entityLabel})`
         : `[Authorized Access] Your Pingcon RMA Return Portal Link (${entityLabel})`;
-    const subject = isTestInv ? `Test - ${rawSubject}` : rawSubject;
+    const subject = formatTestEmailSubject(rawSubject, isTestInv);
 
     const headerGrad = isEditor
       ? 'linear-gradient(135deg, #312e81, #4f46e5)'
@@ -53081,7 +54067,7 @@ export const inviteService = {
             </p>
           </div>
           <div style="padding: 24px;">
-            <p style="font-size: 14px; margin-top: 0;">Hello <strong>${invite.authorized_email}</strong>,</p>
+            <p style="font-size: 14px; margin-top: 0;">Hello <strong>${recipientsText}</strong>,</p>
             <p style="font-size: 13px; line-height: 1.6; color: #475569;">
               You have been granted official authorization to ${
                 isEditor
@@ -53094,10 +54080,10 @@ export const inviteService = {
             <div style="background: #f1f5f9; border-radius: 12px; padding: 16px; margin: 20px 0; border: 1px solid #cbd5e1;">
               <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Security Notice</div>
               <div style="font-size: 12px; margin-top: 4px; color: #1e293b; line-height: 1.5;">
-                🔒 This link is cryptographically locked to your Google Account (<strong>${invite.authorized_email}</strong>). Forwarding is strictly prohibited.
+                🔒 This link is cryptographically locked to ${allowedList.length > 1 ? 'these authorized Google Accounts' : 'your Google Account'} (<strong>${recipientsText}</strong>). Forwarding to unauthorized users is strictly prohibited.
               </div>
               <div style="font-size: 11px; color: #64748b; margin-top: 8px;">
-                ⏱️ Link Validity: <strong>${invite.duration_display || '24 hours'}</strong> (Expires: ${expDateStr})
+                ⏱️ Link Validity: <strong>${permanent ? 'No Expiry • Revocable by Admin' : (invite.duration_display || '24 hours')}</strong> (${permanent ? 'Permanent until revoked' : `Expires: ${expDateStr}`})
               </div>
             </div>
             <div style="text-align: center; margin: 28px 0;">
@@ -53122,11 +54108,12 @@ export const inviteService = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        to: invite.authorized_email,
+        to: primaryEmail,
+        ...(ccEmails.length > 0 ? { cc: ccEmails } : {}),
         subject,
         html,
         isTestMode: isTestInv,
-        text: `Pingcon RMA Portal Link: ${inviteUrl}\n\nAuthorized for: ${invite.authorized_email}\nExpires: ${expDateStr}\n\nThis link is locked to your Google account. Forwarding is prohibited.`
+        text: `Pingcon RMA Portal Link: ${inviteUrl}\n\nAuthorized for: ${recipientsText}\nValidity: ${expDateStr}\n\nThis link is locked to authorized Google account(s). Forwarding to unauthorized users is prohibited.`
       })
     });
 
@@ -53164,6 +54151,7 @@ import {
   isTestRecord,
   formatDateYmd,
   formatDateTimeYmdHm,
+  formatTestEmailSubject,
   getRealPhotos,
   getConsolidatedPickupItems,
   formatPeso
@@ -53378,6 +54366,9 @@ export const notificationService = {
     const mapUrl = hasGps ? `https://www.google.com/maps?q=${report.gps_latitude},${report.gps_longitude}` : null;
     const editUrl = editorContext?.editUrl || '';
     const editorAuthorizedEmail = editorContext?.editorAuthorizedEmail || '';
+    const editorAuthorizedEmails = Array.isArray(editorContext?.editorAuthorizedEmails) && editorContext.editorAuthorizedEmails.length > 0
+      ? editorContext.editorAuthorizedEmails
+      : (editorAuthorizedEmail ? [editorAuthorizedEmail] : [config.toEmail]);
 
     return `
       <!DOCTYPE html>
@@ -53404,8 +54395,8 @@ export const notificationService = {
       <body>
         <div class="container">
           <div class="header">
-            <span class="badge">${isTestMode ? `[TEST MODE] ${config.companyName}` : config.companyName}</span>
-            <h1 class="title">${isTestMode ? 'Test - ' : ''}New RMA Return Report: ${rmaNumber}</h1>
+            <span class="badge">${isTestMode ? `[TEST] ${config.companyName}` : config.companyName}</span>
+            <h1 class="title">${isTestMode ? '[TEST] ' : ''}New RMA Return Report: ${rmaNumber}</h1>
             <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Automated Warehouse Intake Notification</div>
           </div>
           
@@ -53514,7 +54505,11 @@ export const notificationService = {
                 ✏️ Edit RMA Details &amp; Documents
               </a>
               <div style="font-size: 11px; color: #475569; margin-top: 10px; line-height: 1.4;">
-                🔒 Protected by Pingcon Google Identity Lock for <strong style="font-family: monospace; color: #0f172a;">${escapeEmailHtml(editorAuthorizedEmail || config.toEmail)}</strong>
+                🔒 Protected by Pingcon Google Identity Lock for ${
+                  editorAuthorizedEmails.length > 1
+                    ? `all authorized To &amp; CC recipients (<strong style="font-family: monospace; color: #0f172a;">${escapeEmailHtml(editorAuthorizedEmails.join(', '))}</strong>)`
+                    : `<strong style="font-family: monospace; color: #0f172a;">${escapeEmailHtml(editorAuthorizedEmails[0] || config.toEmail)}</strong>`
+                } • No expiry (revocable anytime by Admin)
               </div>
             </div>` : ''}
 
@@ -53584,19 +54579,27 @@ export const notificationService = {
       }
       const finalCcList = Array.from(ccSet);
       const toEmail = config.toEmail;
-      const editorAuthorizedEmail = testActive ? 'mgan@a2z2go.net' : toEmail;
+      const editorAuthorizedEmails = testActive
+        ? ['mgan@a2z2go.net']
+        : Array.from(new Set(
+            [toEmail, ...finalCcList]
+              .map((e) => String(e || '').trim().toLowerCase())
+              .filter((e) => e.includes('@'))
+          ));
+      const editorAuthorizedEmail = editorAuthorizedEmails[0] || (testActive ? 'mgan@a2z2go.net' : toEmail);
 
       let editUrl = '';
-      if (report.rma_number && editorAuthorizedEmail) {
+      if (report.rma_number && editorAuthorizedEmails.length > 0) {
         try {
           const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://rma-portal-pingconmarketing.vercel.app';
           const editorInvite = await inviteService.createInvite({
             streamType: 'rma_editor',
             authorizedEmail: editorAuthorizedEmail,
+            authorizedEmails: editorAuthorizedEmails,
             rmaNumber: report.rma_number,
             entityName: report.rma_number,
-            durationValue: 7,
-            durationUnit: 'days',
+            noExpiry: true,
+            durationUnit: 'permanent',
             createdBy: 'Automated New RMA Alert',
             isTest: testActive
           });
@@ -53608,14 +54611,10 @@ export const notificationService = {
         }
       }
 
-      let subject = `[RMA Alert] ${report.rma_number || 'New Return'}: ${report.name || report.barcode} (${report.reason || 'Damaged'})`;
+      const rawSubject = `[RMA Alert] ${report.rma_number || 'New Return'}: ${report.name || report.barcode} (${report.reason || 'Damaged'})`;
+      const subject = formatTestEmailSubject(rawSubject, testActive);
 
-      if (testActive) {
-        // Subject email must have "Test - " as the first word
-        subject = `Test - [RMA Alert] ${report.rma_number || 'New Return'}: ${report.name || report.barcode} (${report.reason || 'Damaged'})`;
-      }
-
-      const htmlBody = this.generateEmailHtml(report, config, testActive, { editUrl, editorAuthorizedEmail });
+      const htmlBody = this.generateEmailHtml(report, config, testActive, { editUrl, editorAuthorizedEmail, editorAuthorizedEmails });
 
       const photos = Array.isArray(report.photos) 
         ? report.photos 
@@ -53645,7 +54644,7 @@ export const notificationService = {
           html: htmlBody,
           isTestMode: testActive,
           attachments,
-          text: `${testActive ? 'Test - ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Expiry Date (YYYY-MM-DD): ${expiryInfo.text}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}${editUrl ? `\n\nEdit RMA Details & Documents (${editorAuthorizedEmail}): ${editUrl}` : ''}`
+          text: `${testActive ? '[TEST] ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Expiry Date (YYYY-MM-DD): ${expiryInfo.text}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}${editUrl ? `\n\nEdit RMA Details & Documents (${editorAuthorizedEmails.join(', ')} • No Expiry): ${editUrl}` : ''}`
         })
       });
 
@@ -53702,7 +54701,7 @@ export const notificationService = {
         <div class="container">
           <div class="header">
             <span class="badge">${isTestMode ? `[TEST] ${badgeText}` : badgeText}</span>
-            <h1 class="title">${isTestMode ? 'Test - ' : ''}${title}: ${product.name}</h1>
+            <h1 class="title">${isTestMode ? '[TEST] ' : ''}${title}: ${product.name}</h1>
             <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Verified Catalog Master Record Update</div>
           </div>
           
@@ -53808,11 +54807,8 @@ export const notificationService = {
       const finalCcList = Array.from(ccSet);
       const toEmail = config.toEmail;
 
-      let subject = `[Product Catalog] ${isNew ? 'New Product Added' : 'Product Details Updated'}: ${product.name} (${product.barcode})`;
-
-      if (testActive) {
-        subject = `Test - [Product Catalog] ${isNew ? 'New Product Added' : 'Product Details Updated'}: ${product.name} (${product.barcode})`;
-      }
+      const rawSubject = `[Product Catalog] ${isNew ? 'New Product Added' : 'Product Details Updated'}: ${product.name} (${product.barcode})`;
+      const subject = formatTestEmailSubject(rawSubject, testActive);
 
       const htmlBody = this.generateProductEmailHtml(product, config, isNew, editorName, testActive);
 
@@ -53829,7 +54825,7 @@ export const notificationService = {
           subject,
           html: htmlBody,
           isTestMode: testActive,
-          text: `${testActive ? 'Test - ' : ''}Product ${isNew ? 'Added' : 'Updated'}: ${product.name} (${product.barcode}). SKU: ${product.code || 'N/A'}. AE: ${product.aeName || product.ae_name || 'N/A'}`
+          text: `${testActive ? '[TEST] ' : ''}Product ${isNew ? 'Added' : 'Updated'}: ${product.name} (${product.barcode}). SKU: ${product.code || 'N/A'}. AE: ${product.aeName || product.ae_name || 'N/A'}`
         })
       });
 
@@ -53968,8 +54964,8 @@ export const notificationService = {
       <body>
         <div class="container">
           <div class="header">
-            <span class="badge">${isTestMode ? `[TEST MODE] ${ev.badge}` : ev.badge}</span>
-            <h1 class="title">${isTestMode ? 'Test - ' : ''}${escapeEmailHtml(ev.title)}</h1>
+            <span class="badge">${isTestMode ? `[TEST] ${ev.badge}` : ev.badge}</span>
+            <h1 class="title">${isTestMode ? '[TEST] ' : ''}${escapeEmailHtml(ev.title)}</h1>
             <div style="font-size: 12px; opacity: 0.9; margin-top: 4px;">${escapeEmailHtml(ev.subtitle)}</div>
           </div>
 
@@ -54201,7 +55197,7 @@ export const notificationService = {
         pickup_replacement: `[Driver Picked Up - Replacement] ${batchTag}${claimNo || rmaNumber}: ${pickup.supplier_name || primaryReport.supplier_name || 'Supplier'}`
       };
       const baseSubject = subjectLabelMap[eventType] || `[RMA Update] ${batchTag}${rmaNumber}`;
-      const subject = testActive ? `Test - ${baseSubject}` : baseSubject;
+      const subject = formatTestEmailSubject(baseSubject, testActive);
 
       // Collect pickup verification photos + RMA intake photos across all bundled RMAs
       const pickupPhotoLabels = [
@@ -54298,7 +55294,7 @@ export const notificationService = {
           html: htmlBody,
           isTestMode: testActive,
           attachments,
-          text: `${testActive ? 'Test - ' : ''}${baseSubject} • Processed by ${actorName} at ${eventTimeStr} (YYYY-MM-DD HH:mm).`
+          text: `${testActive ? '[TEST] ' : ''}${baseSubject} • Processed by ${actorName} at ${eventTimeStr} (YYYY-MM-DD HH:mm).`
         })
       });
 
@@ -54311,6 +55307,47 @@ export const notificationService = {
       return await res.json();
     } catch (err) {
       console.warn(`Non-blocking error sending lifecycle email (${eventType}):`, err.message);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Manually trigger the Daily Overall RMA Matrix (.xlsx) email dispatch
+   */
+  async sendDailyMatrixEmailNow({ isTestMode = false, force = true, dryRun = false } = {}) {
+    try {
+      let accessToken = '';
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        accessToken = session?.access_token || '';
+      } catch {}
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
+
+      const res = await fetch('/api/send-email?action=daily-matrix', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'daily-matrix',
+          isTestMode: Boolean(isTestMode),
+          force: Boolean(force),
+          dryRun: Boolean(dryRun)
+        })
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return {
+          success: false,
+          status: res.status,
+          error: data?.message || data?.error || `HTTP ${res.status}`
+        };
+      }
+      return data || { success: false, error: 'Empty response from server.' };
+    } catch (err) {
       return { success: false, error: err.message };
     }
   },
@@ -54520,9 +55557,8 @@ export const pinRequestService = {
       // Filter valid email addresses and ensure NO Account Executive email is included
       const cleanCcList = baseCcList.filter(e => typeof e === 'string' && e.includes('@'));
 
-      const subject = isTestMode
-        ? `Test - [Action Required] New Return PIN Authorization Request: ${requestRecord.requester_name} (${requestRecord.organization_name || requestRecord.access_slug})`
-        : `[Action Required] New Return PIN Authorization Request: ${requestRecord.requester_name} (${requestRecord.organization_name || requestRecord.access_slug})`;
+      const rawSubject = `[Action Required] New Return PIN Authorization Request: ${requestRecord.requester_name} (${requestRecord.organization_name || requestRecord.access_slug})`;
+      const subject = isTestMode ? `[TEST] ${rawSubject}` : rawSubject;
 
       const portalUrl = typeof window !== 'undefined' && window.location?.origin 
         ? `${window.location.origin}/admin` 
@@ -54553,7 +55589,7 @@ export const pinRequestService = {
           <div class="container">
             <div class="header">
               <span class="badge">Return Authorization Request</span>
-              <h1 class="title">${isTestMode ? 'Test - ' : ''}New PIN Code Request Pending Review</h1>
+              <h1 class="title">${isTestMode ? '[TEST] ' : ''}New PIN Code Request Pending Review</h1>
               <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Pingcon RMA Return Gatekeeper</div>
             </div>
             <div class="content">
@@ -54603,7 +55639,7 @@ export const pinRequestService = {
         </html>
       `;
 
-      const textBody = `${isTestMode ? 'Test - ' : ''}New Return PIN Authorization Request:\n\nRequester: ${requestRecord.requester_name} (${requestRecord.requester_email})\nStore/Branch: ${requestRecord.organization_name || 'N/A'}\nStation: /${requestRecord.access_slug}\nNotes: ${requestRecord.notes || 'None'}\n\nPlease review and approve in Admin Portal: ${portalUrl}`;
+      const textBody = `${isTestMode ? '[TEST] ' : ''}New Return PIN Authorization Request:\n\nRequester: ${requestRecord.requester_name} (${requestRecord.requester_email})\nStore/Branch: ${requestRecord.organization_name || 'N/A'}\nStation: /${requestRecord.access_slug}\nNotes: ${requestRecord.notes || 'None'}\n\nPlease review and approve in Admin Portal: ${portalUrl}`;
 
       console.log(`[PIN Request Alert Dispatch] Sending alert to TO: "${toEmail}", CC: [${cleanCcList.join(', ')}], TestMode: ${isTestMode}`);
 
@@ -54806,7 +55842,7 @@ export const pinRequestService = {
         body: JSON.stringify({
           to: target.requester_email,
           fromName: 'Keysys & Pingcon RMA Gatekeeper',
-          subject: 'Your Keysys / Pingcon Return Authorization PIN',
+          subject: isTestMode ? '[TEST] Your Keysys / Pingcon Return Authorization PIN' : 'Your Keysys / Pingcon Return Authorization PIN',
           html: htmlContent,
           text: textFallback,
           isTestMode: Boolean(isTestMode)
@@ -61930,6 +62966,20 @@ export function getConsolidatedPickupItems({
     rawCount: flatRows.length,
     hasCombinableDuplicates
   };
+}
+
+/**
+ * Normalizes email subjects in Test Mode so "[TEST]" is strictly the first word
+ * without duplicate "[TEST]" / "[TEST MODE]" / "Test -" prefixes.
+ */
+export function formatTestEmailSubject(subject, isTestMode = false) {
+  const raw = String(subject || '').trim();
+  if (!isTestMode) return raw;
+  let clean = raw;
+  while (/^(?:\[test(?:\s+mode)?\]|test\s*[-:])\s*/i.test(clean)) {
+    clean = clean.replace(/^(?:\[test(?:\s+mode)?\]|test\s*[-:])\s*/i, '').trim();
+  }
+  return clean ? `[TEST] ${clean}` : '[TEST] Notification';
 }
 
 

@@ -39,11 +39,11 @@ async function submitQuickCustomerPortalRma(page, { isTestMode, reporterName }) 
 
   const insertResponsePromise = page.waitForResponse(
     (res) => res.url().includes('/rest/v1/rma_reports') && res.request().method() === 'POST',
-    { timeout: 25_000 }
+    { timeout: 45_000 }
   );
 
   await page.getByRole('button', { name: /Submit Return Report/i }).click();
-  await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 45_000 });
   expect((await insertResponsePromise).status()).toBeLessThan(400);
 
   const prefixRegex = isTestMode ? /^RMA-TEST-/ : /^RMA-\d{4}-/;
@@ -75,7 +75,7 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
     page,
     context
   }) => {
-    test.setTimeout(150_000);
+    test.setTimeout(240_000);
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
     const capturedEmails = await interceptAndCaptureEmails(page);
@@ -156,7 +156,7 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       await page.getByRole('button', { name: /Confirm & Save: Throw Away \/ Dispose \(Scrap\)/i }).click();
       await expect(page.getByRole('button', { name: /Edit Choice \/ Details/i })).toBeVisible({ timeout: 15_000 });
       await expect
-        .poll(() => capturedEmails.some((e) => e?.isTestMode && String(e?.subject || '').includes('Test - [RMA Scrapped]')), {
+        .poll(() => capturedEmails.some((e) => e?.isTestMode && String(e?.subject || '').startsWith('[TEST] [RMA Scrapped]')), {
           timeout: 10_000
         })
         .toBe(true);

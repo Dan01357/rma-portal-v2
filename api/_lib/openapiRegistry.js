@@ -139,7 +139,8 @@ Retained for backwards-compatible REST API clients only; the streamlined portal 
 - **\`rma_type: "supplier_outbound"\`**: Defective merchandise batched for outbound Return to Vendor (RTV) recovery, 5-photo driver pickup verification with US Letter B&W PDF forms, and shared multi-RMA \`RTV-\` claims.
 - **Multi-Item Batch Manifests**: Batched returns are represented with \`is_parent: true\`, \`items\` (JSONB breakdown of line items), \`total_items\`, and \`total_quantity\`. Child records link via \`parent_rma_id\`.
 - **Printable Forms**: Standardized strictly on US Letter (\`8.5in x 11in\`, plain black-and-white ink) for Sticker Studio sheets, Credit Memo Vouchers, and Unified Debit Claim / Replacement & Pickup Forms (accepting any valid Philippine Government / Legal ID).
-- **Email-Bound RMA Editor (\`/api/v1/rma-email-edit\`)**: Scoped Google Identity Lock endpoint for authorized email recipients (routed cleanly without extra Vercel functions) to update supplier, product/SKU, pricing, expiry (\`YYYY-MM-DD\`), and SI/DR/PO documents.
+- **Email-Bound RMA Editor (\`/api/v1/rma-email-edit\`)**: Scoped Google Identity Lock endpoint allowing all authorized **To + CC recipients** (\`No Expiry • Revocable by Admin\`, routed cleanly without extra Vercel functions) to update supplier, product/SKU, pricing, expiry (\`YYYY-MM-DD\`), and SI/DR/PO documents.
+- **Automated Daily Overall RMA Matrix (\`/api/send-email?action=daily-matrix\`)**: Scheduled via Vercel Cron daily at **1:00 PM PHT (\`05:00 UTC\`)** (and manually triggerable from Settings) to generate and email the combined Live Overall RMA Matrix (\`.xlsx\`) workbook to configured \`To\` + \`CC\` recipients; all Test Mode emails enforce \`[TEST]\` as the very first word in the subject line.
 
 Click **Authorize** on the top right to test live endpoints directly from this interactive documentation.
       `,

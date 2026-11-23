@@ -1,8 +1,9 @@
 import { supabase } from '../supabaseClient';
-import { formatDateTimeYmdHm } from '../utils/rmaHelpers';
+import { formatDateTimeYmdHm, formatTestEmailSubject } from '../utils/rmaHelpers';
 
 const SETTINGS_KEY = 'customer_rma_invites_store';
 const LOCAL_STORAGE_KEY = 'rma_customer_invites_v1';
+export const NO_EXPIRY_DB_SENTINEL = '9999-12-31T23:59:59.000Z';
 
 function getLocalInvites() {
   try {
@@ -63,11 +64,43 @@ export function extractRmaNumberFromInvite(inv) {
     return String(inv.rma_number).trim();
   }
   const ent = String(inv.entity_name || '');
-  const m = ent.match(/^\[RMA_EDITOR:([^\]]+)\]/);
+  const m = ent.match(/^\[RMA_EDITOR:([^|\]]+)(?:\|([^\]]*))?\]/);
   if (m && m[1] && m[1] !== 'ANY') return m[1].trim();
   const br = String(inv.store_branch || '').trim();
   if (/^RMA-(?:TEST-)?\d{4}-/i.test(br)) return br;
   return '';
+}
+
+export function getInviteAllowedEmails(inv) {
+  if (!inv) return [];
+  const emailSet = new Set();
+  const pushEmail = (val) => {
+    if (!val) return;
+    String(val)
+      .split(/[,;\s]+/)
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => e.includes('@'))
+      .forEach((e) => emailSet.add(e));
+  };
+  pushEmail(inv.authorized_email);
+  if (Array.isArray(inv.authorized_emails)) inv.authorized_emails.forEach(pushEmail);
+  if (Array.isArray(inv.allowed_emails)) inv.allowed_emails.forEach(pushEmail);
+  const ent = String(inv.entity_name || '');
+  const m = ent.match(/^\[RMA_EDITOR:[^|\]]*\|([^\]]*)\]/);
+  if (m && m[1]) pushEmail(m[1]);
+  return Array.from(emailSet);
+}
+
+export function isPermanentInvite(inv) {
+  if (!inv) return false;
+  const exp = inv.expires_at;
+  return Boolean(
+    inv.no_expiry === true ||
+    inv.never_expires === true ||
+    String(inv.duration_unit || '').toLowerCase() === 'permanent' ||
+    String(exp || '').startsWith('9999-') ||
+    (typeof exp === 'string' && new Date(exp).getUTCFullYear() >= 9999)
+  );
 }
 
 export function maskEmail(email) {
@@ -81,11 +114,26 @@ export function maskEmail(email) {
   return `${prefix}***${suffix}@${domain}`;
 }
 
-export function formatRemainingCountdown(expiresAt, status = 'active') {
-  if (status === 'revoked') return { text: 'Revoked', isExpired: true, isRevoked: true, totalSeconds: 0 };
-  if (!expiresAt) return { text: 'Expired', isExpired: true, isRevoked: false, totalSeconds: 0 };
+export function formatRemainingCountdown(expiresAt, status = 'active', invite = null) {
+  if (status === 'revoked') {
+    return { text: 'Revoked', isExpired: true, isRevoked: true, isPermanent: false, totalSeconds: 0 };
+  }
+  if (
+    isPermanentInvite(invite) ||
+    String(expiresAt || '').startsWith('9999-') ||
+    (typeof expiresAt === 'string' && new Date(expiresAt).getUTCFullYear() >= 9999)
+  ) {
+    return {
+      text: 'No Expiry • Revocable by Admin',
+      isExpired: false,
+      isRevoked: false,
+      isPermanent: true,
+      totalSeconds: Infinity
+    };
+  }
+  if (!expiresAt) return { text: 'Expired', isExpired: true, isRevoked: false, isPermanent: false, totalSeconds: 0 };
   const diff = new Date(expiresAt).getTime() - Date.now();
-  if (diff <= 0) return { text: 'Expired', isExpired: true, isRevoked: false, totalSeconds: 0 };
+  if (diff <= 0) return { text: 'Expired', isExpired: true, isRevoked: false, isPermanent: false, totalSeconds: 0 };
 
   const totalSecs = Math.floor(diff / 1000);
   const totalMins = Math.floor(diff / (1000 * 60));
@@ -96,36 +144,37 @@ export function formatRemainingCountdown(expiresAt, status = 'active') {
   if (hours >= 24) {
     const days = Math.floor(hours / 24);
     const remHours = hours % 24;
-    return { text: `${days}d ${remHours}h ${mins}m remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
+    return { text: `${days}d ${remHours}h ${mins}m remaining`, isExpired: false, isRevoked: false, isPermanent: false, totalSeconds: totalSecs };
   }
   if (hours > 0) {
-    return { text: `${hours}h ${mins}m ${secs}s remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
+    return { text: `${hours}h ${mins}m ${secs}s remaining`, isExpired: false, isRevoked: false, isPermanent: false, totalSeconds: totalSecs };
   }
   if (mins > 0) {
-    return { text: `${mins}m ${secs}s remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
+    return { text: `${mins}m ${secs}s remaining`, isExpired: false, isRevoked: false, isPermanent: false, totalSeconds: totalSecs };
   }
-  return { text: `${secs}s remaining`, isExpired: false, isRevoked: false, totalSeconds: totalSecs };
+  return { text: `${secs}s remaining`, isExpired: false, isRevoked: false, isPermanent: false, totalSeconds: totalSecs };
 }
 
 /**
  * Cryptographic Google OAuth Identity Verification
- * Validates whether the authenticated Google account matches the invite's authorized email.
+ * Validates whether the authenticated Google account matches ANY authorized email on the invite.
  */
 export function verifyGoogleIdentity(user, invite) {
   if (!user || !user.email) {
     return { verified: false, error: 'NO_AUTHENTICATED_USER' };
   }
-  if (!invite || !invite.authorized_email) {
+  const allowedEmails = getInviteAllowedEmails(invite);
+  if (!invite || allowedEmails.length === 0) {
     return { verified: false, error: 'NO_INVITE_EMAIL' };
   }
   const userEmail = user.email.toLowerCase().trim();
-  const authorizedEmail = invite.authorized_email.toLowerCase().trim();
 
-  if (userEmail !== authorizedEmail) {
+  if (!allowedEmails.includes(userEmail)) {
     return {
       verified: false,
       userEmail: user.email,
-      authorizedEmail: invite.authorized_email,
+      authorizedEmail: allowedEmails.join(', '),
+      authorizedEmails: allowedEmails,
       error: 'IDENTITY_MISMATCH'
     };
   }
@@ -133,7 +182,8 @@ export function verifyGoogleIdentity(user, invite) {
   return {
     verified: true,
     userEmail: user.email,
-    authorizedEmail: invite.authorized_email
+    authorizedEmail: userEmail,
+    authorizedEmails: allowedEmails
   };
 }
 
@@ -159,10 +209,18 @@ export function hydrateInviteRecord(raw) {
   const isEditor = isRmaEditorInvite(raw);
   const rmaNum = extractRmaNumberFromInvite(raw);
   const ent = isEditor ? '' : (normalizeEntityName(raw.store_branch) || normalizeEntityName(raw.entity_name));
+  const allowedEmails = getInviteAllowedEmails(raw);
+  const permanent = isPermanentInvite(raw);
   return {
     ...raw,
     stream_type: isEditor ? 'rma_editor' : (raw.stream_type || 'customer_inbound'),
     rma_number: rmaNum || raw.rma_number || null,
+    authorized_email: allowedEmails[0] || String(raw.authorized_email || '').trim().toLowerCase(),
+    authorized_emails: allowedEmails,
+    allowed_emails: allowedEmails,
+    no_expiry: permanent,
+    expires_at: permanent ? null : (raw.expires_at || null),
+    duration_display: permanent ? 'No Expiry' : (raw.duration_display || '24 hour(s)'),
     is_test: isTestInviteToken(raw),
     entity_name: isEditor ? (rmaNum ? `RMA ${rmaNum}` : 'RMA Details Editor') : ent,
     store_branch: isEditor ? (rmaNum || '') : ent
@@ -174,6 +232,8 @@ export const inviteService = {
   normalizeEntityName,
   isRmaEditorInvite,
   extractRmaNumberFromInvite,
+  getInviteAllowedEmails,
+  isPermanentInvite,
   /**
    * Fetch all invites from Supabase (table or fallback settings)
    */
@@ -187,8 +247,20 @@ export const inviteService = {
         const prev = mergedMap.get(hydrated.token);
         if (!prev) {
           mergedMap.set(hydrated.token, hydrated);
-        } else if (hydrated.status === 'revoked' && prev.status !== 'revoked') {
-          mergedMap.set(hydrated.token, { ...prev, ...hydrated, status: 'revoked' });
+        } else {
+          const unionEmails = Array.from(new Set([...(prev.authorized_emails || []), ...(hydrated.authorized_emails || [])]));
+          const permanent = Boolean(prev.no_expiry || hydrated.no_expiry);
+          mergedMap.set(hydrated.token, {
+            ...prev,
+            ...hydrated,
+            authorized_email: hydrated.authorized_email || prev.authorized_email,
+            authorized_emails: unionEmails,
+            allowed_emails: unionEmails,
+            no_expiry: permanent,
+            expires_at: permanent ? null : (hydrated.expires_at ?? prev.expires_at),
+            duration_display: permanent ? 'No Expiry' : (hydrated.duration_display || prev.duration_display),
+            status: (hydrated.status === 'revoked' || prev.status === 'revoked') ? 'revoked' : hydrated.status
+          });
         }
       });
     };
@@ -232,23 +304,38 @@ export const inviteService = {
   async createInvite({
     streamType = 'customer_inbound',
     authorizedEmail,
+    authorizedEmails = [],
     entityName = '',
     storeBranch = '',
     rmaNumber = '',
     durationValue = 24,
     durationUnit = 'hours',
     durationHours = null,
+    noExpiry = false,
     createdBy = 'Staff',
     isTest = false
   }) {
-    if (!authorizedEmail || !authorizedEmail.trim()) {
+    const emailSet = new Set();
+    const absorbEmailInput = (raw) => {
+      if (!raw) return;
+      String(raw)
+        .split(/[,;\s]+/)
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => e.includes('@'))
+        .forEach((e) => emailSet.add(e));
+    };
+    absorbEmailInput(authorizedEmail);
+    if (Array.isArray(authorizedEmails)) authorizedEmails.forEach(absorbEmailInput);
+    const cleanAllowedEmails = Array.from(emailSet);
+
+    if (cleanAllowedEmails.length === 0) {
       throw new Error('Authorized Google Email is required.');
     }
 
     const cleanStream = streamType === 'rma_editor'
       ? 'rma_editor'
       : (streamType === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound');
-    const cleanEmail = authorizedEmail.trim().toLowerCase();
+    const cleanEmail = cleanAllowedEmails[0];
     const cleanRmaNum = cleanStream === 'rma_editor'
       ? String(rmaNumber || entityName || storeBranch || '').trim()
       : '';
@@ -257,36 +344,48 @@ export const inviteService = {
       : normalizeEntityName(entityName || storeBranch || '');
 
     // Postgres table public.rma_invites checks stream_type IN ('customer_inbound', 'supplier_outbound')
-    // Encode rma_editor metadata cleanly inside entity_name/store_branch & token prefix to prevent constraint errors.
+    // Encode rma_editor metadata & multi-recipient allowlist cleanly inside entity_name without breaking schema constraints.
     const dbStream = cleanStream === 'rma_editor' ? 'customer_inbound' : cleanStream;
     const dbEntityFallback = cleanStream === 'supplier_outbound' ? 'Master Supplier Partner' : 'Pingcon Wholesale Client';
+    const editorEmailTag = cleanAllowedEmails.length > 1 ? `|${cleanAllowedEmails.join(',')}` : '';
     const dbEntityValue = cleanStream === 'rma_editor'
-      ? (cleanRmaNum ? `[RMA_EDITOR:${cleanRmaNum}]` : '[RMA_EDITOR]')
+      ? (cleanRmaNum ? `[RMA_EDITOR:${cleanRmaNum}${editorEmailTag}]` : `[RMA_EDITOR:ANY${editorEmailTag}]`)
       : (cleanEntity || dbEntityFallback);
     const dbStoreBranch = cleanStream === 'rma_editor' ? (cleanRmaNum || 'RMA Editor') : cleanEntity;
 
-    // Calculate expiration in milliseconds based on user-customized input number and unit
-    let durationMs = 24 * 3600 * 1000;
-    const num = Math.max(1, parseInt(durationValue, 10) || 1);
-    const unit = String(durationUnit || 'hours').toLowerCase();
+    // Calculate expiration (permanent links use DB sentinel 9999-12-31T23:59:59.000Z in NOT NULL column, hydrated as expires_at: null)
+    const unitRaw = String(durationUnit || 'hours').toLowerCase();
+    const isPermanent = Boolean(noExpiry || unitRaw === 'permanent');
 
-    if (durationHours !== null && durationHours !== undefined) {
-      durationMs = Number(durationHours) * 3600 * 1000;
-    } else if (unit.startsWith('min')) {
-      durationMs = num * 60 * 1000;
-    } else if (unit.startsWith('day')) {
-      durationMs = num * 24 * 3600 * 1000;
-    } else {
-      durationMs = num * 3600 * 1000;
-    }
+    let num = Math.max(1, parseInt(durationValue, 10) || 1);
+    let unit = unitRaw;
+    let dbExpiresAt = '';
+    let durationDisplay = '';
 
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + durationMs).toISOString();
+    if (isPermanent) {
+      num = 0;
+      unit = 'permanent';
+      dbExpiresAt = NO_EXPIRY_DB_SENTINEL;
+      durationDisplay = 'No Expiry';
+    } else {
+      let durationMs = 24 * 3600 * 1000;
+      if (durationHours !== null && durationHours !== undefined) {
+        durationMs = Number(durationHours) * 3600 * 1000;
+      } else if (unit.startsWith('min')) {
+        durationMs = num * 60 * 1000;
+      } else if (unit.startsWith('day')) {
+        durationMs = num * 24 * 3600 * 1000;
+      } else {
+        durationMs = num * 3600 * 1000;
+      }
+      dbExpiresAt = new Date(now.getTime() + durationMs).toISOString();
+      const displayUnit = unit.startsWith('min') ? 'min(s)' : unit.startsWith('day') ? 'day(s)' : 'hour(s)';
+      durationDisplay = `${num} ${displayUnit}`;
+    }
+
     const cleanIsTest = Boolean(isTest);
     const token = generateInviteToken(cleanIsTest, cleanStream);
-
-    const displayUnit = unit.startsWith('min') ? 'min(s)' : unit.startsWith('day') ? 'day(s)' : 'hour(s)';
-    const durationDisplay = `${num} ${displayUnit}`;
 
     const dbInsertPayload = {
       token,
@@ -297,7 +396,7 @@ export const inviteService = {
       duration_value: num,
       duration_unit: unit,
       duration_display: durationDisplay,
-      expires_at: expiresAt,
+      expires_at: dbExpiresAt,
       created_by: createdBy,
       status: 'active',
       created_at: now.toISOString(),
@@ -320,6 +419,9 @@ export const inviteService = {
             ...data,
             stream_type: cleanStream,
             rma_number: cleanRmaNum || null,
+            authorized_emails: cleanAllowedEmails,
+            allowed_emails: cleanAllowedEmails,
+            no_expiry: isPermanent,
             is_test: cleanIsTest || isTestInviteToken(data)
           });
         }
@@ -334,6 +436,10 @@ export const inviteService = {
     const newInvite = createdRecord || {
       id: `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       ...dbInsertPayload,
+      expires_at: isPermanent ? null : dbExpiresAt,
+      no_expiry: isPermanent,
+      authorized_emails: cleanAllowedEmails,
+      allowed_emails: cleanAllowedEmails,
       stream_type: cleanStream,
       rma_number: cleanRmaNum || null,
       is_test: cleanIsTest,
@@ -457,7 +563,7 @@ export const inviteService = {
           if (cached.status === 'revoked') {
             return { valid: false, invite: cached, error: 'REVOKED' };
           }
-          if (Date.now() > new Date(cached.expires_at).getTime()) {
+          if (!isPermanentInvite(cached) && Date.now() > new Date(cached.expires_at).getTime()) {
             return { valid: false, invite: cached, error: 'EXPIRED' };
           }
           return { valid: true, invite: cached, transient: true };
@@ -472,9 +578,11 @@ export const inviteService = {
       return { valid: false, invite, error: 'REVOKED' };
     }
 
-    const expTime = new Date(invite.expires_at).getTime();
-    if (Date.now() > expTime) {
-      return { valid: false, invite, error: 'EXPIRED' };
+    if (!isPermanentInvite(invite)) {
+      const expTime = new Date(invite.expires_at).getTime();
+      if (!Number.isFinite(expTime) || Date.now() > expTime) {
+        return { valid: false, invite, error: 'EXPIRED' };
+      }
     }
 
     return { valid: true, invite };
@@ -605,14 +713,21 @@ export const inviteService = {
     const entityLabel = isEditor
       ? (rmaTarget ? `RMA ${rmaTarget}` : 'Scoped RMA Record')
       : (invite.entity_name || invite.store_branch || (isSupplierRtv ? 'Vendor Partner' : 'Store Partner'));
-    const expDateStr = `${formatDateTimeYmdHm(invite.expires_at)} (YYYY-MM-DD HH:mm)`;
+    const allowedList = getInviteAllowedEmails(invite);
+    const primaryEmail = allowedList[0] || invite.authorized_email;
+    const ccEmails = allowedList.slice(1);
+    const recipientsText = allowedList.join(', ');
+    const permanent = isPermanentInvite(invite);
+    const expDateStr = permanent
+      ? 'No Expiry (Revocable anytime by Admin)'
+      : `${formatDateTimeYmdHm(invite.expires_at)} (YYYY-MM-DD HH:mm)`;
 
     const rawSubject = isEditor
       ? `[Authorized RMA Editor Access] Edit RMA Details & Documents (${entityLabel})`
       : isSupplierRtv
         ? `[Authorized Supplier RTV Access] Pingcon Return to Vendor Portal Link (${entityLabel})`
         : `[Authorized Access] Your Pingcon RMA Return Portal Link (${entityLabel})`;
-    const subject = isTestInv ? `Test - ${rawSubject}` : rawSubject;
+    const subject = formatTestEmailSubject(rawSubject, isTestInv);
 
     const headerGrad = isEditor
       ? 'linear-gradient(135deg, #312e81, #4f46e5)'
@@ -636,7 +751,7 @@ export const inviteService = {
             </p>
           </div>
           <div style="padding: 24px;">
-            <p style="font-size: 14px; margin-top: 0;">Hello <strong>${invite.authorized_email}</strong>,</p>
+            <p style="font-size: 14px; margin-top: 0;">Hello <strong>${recipientsText}</strong>,</p>
             <p style="font-size: 13px; line-height: 1.6; color: #475569;">
               You have been granted official authorization to ${
                 isEditor
@@ -649,10 +764,10 @@ export const inviteService = {
             <div style="background: #f1f5f9; border-radius: 12px; padding: 16px; margin: 20px 0; border: 1px solid #cbd5e1;">
               <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Security Notice</div>
               <div style="font-size: 12px; margin-top: 4px; color: #1e293b; line-height: 1.5;">
-                🔒 This link is cryptographically locked to your Google Account (<strong>${invite.authorized_email}</strong>). Forwarding is strictly prohibited.
+                🔒 This link is cryptographically locked to ${allowedList.length > 1 ? 'these authorized Google Accounts' : 'your Google Account'} (<strong>${recipientsText}</strong>). Forwarding to unauthorized users is strictly prohibited.
               </div>
               <div style="font-size: 11px; color: #64748b; margin-top: 8px;">
-                ⏱️ Link Validity: <strong>${invite.duration_display || '24 hours'}</strong> (Expires: ${expDateStr})
+                ⏱️ Link Validity: <strong>${permanent ? 'No Expiry • Revocable by Admin' : (invite.duration_display || '24 hours')}</strong> (${permanent ? 'Permanent until revoked' : `Expires: ${expDateStr}`})
               </div>
             </div>
             <div style="text-align: center; margin: 28px 0;">
@@ -677,11 +792,12 @@ export const inviteService = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        to: invite.authorized_email,
+        to: primaryEmail,
+        ...(ccEmails.length > 0 ? { cc: ccEmails } : {}),
         subject,
         html,
         isTestMode: isTestInv,
-        text: `Pingcon RMA Portal Link: ${inviteUrl}\n\nAuthorized for: ${invite.authorized_email}\nExpires: ${expDateStr}\n\nThis link is locked to your Google account. Forwarding is prohibited.`
+        text: `Pingcon RMA Portal Link: ${inviteUrl}\n\nAuthorized for: ${recipientsText}\nValidity: ${expDateStr}\n\nThis link is locked to authorized Google account(s). Forwarding to unauthorized users is prohibited.`
       })
     });
 

@@ -487,7 +487,7 @@ To ensure dock staff and administrators can train without corrupting production 
 1. **Strict Super Admin Gating**: Test Mode is strictly accessible only when authenticated as `super_admin` (isolated `RMA-TEST-`, `CM-TEST-`, `RTV-TEST-`, `[TEST_MODE]`, `is_test: true`).
 2. **Visual Awareness Banner**: When active, a prominent amber bar warns:
    > `🧪 Super Admin Sandbox Active — Test emails routed safely to mgan@a2z2go.net • Reports saved to database.`
-3. **Safe Test Email Interception**: During Test Mode, all intake and 4-lifecycle emails (Scrapped, Restocked, Debit Pickup PDF, Replacement Pickup PDF) route exclusively to **`mgan@a2z2go.net`** with `Test - ` / `[TEST_MODE]` prefixes (`to`/`cc` of live customers/bosses/vendors are sanitized out).
+3. **Safe Test Email Interception**: During Test Mode, all intake, daily matrix, and 4-lifecycle emails (Scrapped, Restocked, Debit Pickup PDF, Replacement Pickup PDF) route exclusively to **`mgan@a2z2go.net`** with **`[TEST] ` as the very first word of the subject line** (`[TEST_MODE]` metadata; live `to`/`cc` of customers/bosses/vendors are sanitized out).
 4. **Mandatory Expiration Validation & Unambiguous Dates**: Test Mode enforces mandatory `Expiry Date (YYYY-MM-DD)` alongside Supplier RTV, and all UI/email/print/Excel surfaces format dates strictly as `YYYY-MM-DD` / `YYYY-MM-DD HH:mm` (Asia/Manila).
 5. **Dock Worker Protection**: Unauthenticated mobile phone scans and invited customers are **100% locked to Live Mode**, ensuring real incoming customer returns are never misfiled as simulations.
 
@@ -667,7 +667,8 @@ Legacy 5/6 triage cards, Condition Grade dropdowns, Automated Lifecycle Stage ca
 - `[RMA Restocked]` (`restocked`): Dispatched when returned goods enter `Good Stock Area`.
 - `[Driver Picked Up - Debit Claim]` (`pickup_debit_claim`): Sent to internal distribution + supplier `To`/`CC` with all 5 pickup photos (accepting **ANY valid Philippine Government / Legal ID**: LTO Driver's License, PhilSys National ID, Passport, UMID, SSS, Postal, PRC, Voter's ID, TIN, Company ID) + generated **`Debit-Claim-Form-*.pdf`** attached.
 - `[Driver Picked Up - Replacement]` (`pickup_replacement`): Sent to internal distribution + supplier `To`/`CC` with all 5 pickup photos and **`Replacement-Form-*.pdf`** attached.
-- **New RMA Alert Email Editor Button**: Every New RMA Alert email embeds a Google Identity-locked **`✏️ Edit RMA Details & Documents`** button (`toEmail` in Live Mode, `mgan@a2z2go.net` in Test Mode) backed by `CustomerRMAInvitesModal` (`✏️ RMA Details Editor`), `GatekeeperPinModal`, `RmaEmailEditorView`, and `/api/v1/rma-email-edit`.
+- **New RMA Alert Email Editor Button**: Every New RMA Alert email embeds a never-expiring (`expires_at = null`, manually revocable by Admin) Google Identity-locked **`✏️ Edit RMA Details & Documents`** button authorized for **`To` + ALL `CC` recipients** on that email in Live Mode (`mgan@a2z2go.net` in Test Mode), backed by `CustomerRMAInvitesModal` (`✏️ RMA Details Editor` w/ `Never Expires`), `GatekeeperPinModal`, `RmaEmailEditorView`, and `/api/v1/rma-email-edit`.
+- **Daily 1:00 PM PHT Overall RMA Matrix Email Scheduler**: Runs automatically every day at **1:00 PM `Asia/Manila` (`05:00 UTC`)** via `/api/send-email?action=daily-matrix` (`api/_lib/dailyMatrixEmailHandler.js`, preserving `API_ROUTE_COUNT === 12`) to build and email the Live Combined Overall RMA Matrix (`.xlsx`) to configured `To` + `CC` recipients, with a **`Send Daily Matrix Now`** button in Admin Settings.
 
 
 

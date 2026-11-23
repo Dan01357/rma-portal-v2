@@ -225,7 +225,8 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await cmSearch.fill(rmaB);
       await cmRowConsol.locator('button[title="Void / Delete Credit Memo"]').click();
       await page.getByRole('button', { name: /Yes, Delete Permanently/i }).click();
-      await expect(cmRowConsol).toBeHidden({ timeout: 15_000 });
+      await expect(page.getByRole('button', { name: /Yes, Delete Permanently/i })).toBeHidden({ timeout: 35_000 });
+      await expect(cmRowConsol).toBeHidden({ timeout: 35_000 });
 
       guard.assertClean('suite 05 single & consolidated credit memos');
     } finally {

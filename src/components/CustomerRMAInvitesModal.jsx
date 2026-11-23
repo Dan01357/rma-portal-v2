@@ -19,7 +19,13 @@ import {
   Ban,
   FileEdit
 } from 'lucide-react';
-import { inviteService, formatRemainingCountdown, isRmaEditorInvite } from '../services/inviteService';
+import {
+  inviteService,
+  formatRemainingCountdown,
+  isRmaEditorInvite,
+  getInviteAllowedEmails,
+  isPermanentInvite
+} from '../services/inviteService';
 import TablePagination from './TablePagination';
 import { copyTextSafe } from '../utils/clipboard';
 import { formatDateTimeYmdHm } from '../utils/rmaHelpers';
@@ -53,9 +59,10 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   const [entityName, setEntityName] = useState('');
   const [targetRmaNumber, setTargetRmaNumber] = useState('');
   
-  // Customizable expiration limit (input number + unit: minutes, hours, days)
+  // Customizable expiration limit (input number + unit: minutes, hours, days) or permanent never-expires
   const [expiryNumber, setExpiryNumber] = useState(24);
   const [expiryUnit, setExpiryUnit] = useState('hours');
+  const [noExpiry, setNoExpiry] = useState(false);
 
   // Filter for the invites table
   const [streamFilter, setStreamFilter] = useState('all'); // 'all' | 'customer_inbound' | 'supplier_outbound'
@@ -97,6 +104,9 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
 
   // Live computed expiration preview
   const computedExpiryPreview = useMemo(() => {
+    if (noExpiry) {
+      return 'No Expiry • Revocable anytime by Admin';
+    }
     const num = Math.max(1, parseInt(expiryNumber, 10) || 1);
     const unit = String(expiryUnit || 'hours').toLowerCase();
     let ms = num * 3600 * 1000;
@@ -105,14 +115,20 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
 
     const expDate = new Date(Date.now() + ms);
     return `Expires (YYYY-MM-DD HH:mm): ${formatDateTimeYmdHm(expDate)}`;
-  }, [expiryNumber, expiryUnit]);
+  }, [expiryNumber, expiryUnit, noExpiry]);
 
   const handleGenerate = async (e) => {
     e.preventDefault();
-    if (!authorizedEmail.trim()) {
+    const parsedEmails = Array.from(new Set(
+      authorizedEmail
+        .split(/[,;\s]+/)
+        .map((em) => em.trim().toLowerCase())
+        .filter((em) => em.includes('@'))
+    ));
+    if (parsedEmails.length === 0) {
       setErrorMessage(
         streamType === 'rma_editor'
-          ? 'Please enter the authorized Google email for the RMA Editor recipient.'
+          ? 'Please enter one or more authorized Google emails (comma-separated for multiple recipients).'
           : streamType === 'supplier_outbound'
             ? 'Please enter the authorized supplier / vendor representative email.'
             : 'Please enter the authorized customer / reporter email.'
@@ -126,12 +142,14 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       const createdBy = currentUser?.name || 'Pingcon Staff';
       const newInv = await inviteService.createInvite({
         streamType,
-        authorizedEmail: authorizedEmail.trim(),
+        authorizedEmail: parsedEmails[0],
+        authorizedEmails: parsedEmails,
         entityName: streamType === 'rma_editor' ? targetRmaNumber.trim() : entityName.trim(),
         storeBranch: streamType === 'rma_editor' ? targetRmaNumber.trim() : entityName.trim(),
         rmaNumber: streamType === 'rma_editor' ? targetRmaNumber.trim() : '',
-        durationValue: Math.max(1, parseInt(expiryNumber, 10) || 1),
-        durationUnit: expiryUnit,
+        durationValue: noExpiry ? 0 : Math.max(1, parseInt(expiryNumber, 10) || 1),
+        durationUnit: noExpiry ? 'permanent' : expiryUnit,
+        noExpiry,
         createdBy,
         isTest: inviteIsTestMode
       });
@@ -331,6 +349,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
               type="button"
               onClick={() => {
                 setStreamType('customer_inbound');
+                setNoExpiry(false);
                 setErrorMessage(null);
               }}
               className={`flex-1 min-w-[170px] py-3 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
@@ -350,6 +369,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
               type="button"
               onClick={() => {
                 setStreamType('supplier_outbound');
+                setNoExpiry(false);
                 setErrorMessage(null);
               }}
               className={`flex-1 min-w-[170px] py-3 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
@@ -369,6 +389,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
               type="button"
               onClick={() => {
                 setStreamType('rma_editor');
+                setNoExpiry(true);
                 setErrorMessage(null);
               }}
               className={`flex-1 min-w-[170px] py-3 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
@@ -456,13 +477,13 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
-                    type="email"
+                    type={streamType === 'rma_editor' ? 'text' : 'email'}
                     required
                     value={authorizedEmail}
                     onChange={(e) => setAuthorizedEmail(e.target.value)}
                     placeholder={
                       streamType === 'rma_editor'
-                        ? 'e.g. finance@pingconmarketing.com'
+                        ? 'e.g. azgodev@gmail.com, mgan@pingconmarketing.com'
                         : streamType === 'supplier_outbound'
                           ? 'e.g. vendor.qa@liwayway.com'
                           : 'e.g. daniloalvaro031717@gmail.com'
@@ -472,7 +493,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 </div>
                 <p className="text-[10px] text-slate-400">
                   {streamType === 'rma_editor'
-                    ? 'Only this Google account can edit details & commercial docs'
+                    ? 'Comma-separated Google emails allowed to edit details & commercial docs'
                     : streamType === 'supplier_outbound'
                       ? 'Vendor QA or delivery lead Google account'
                       : 'Store manager or receiving supervisor Google account'}
@@ -533,9 +554,11 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                       type="number"
                       min="1"
                       max="365"
-                      required
+                      required={!noExpiry}
+                      disabled={noExpiry}
                       value={expiryNumber}
                       onChange={(e) => {
+                        setNoExpiry(false);
                         const val = e.target.value;
                         if (val === '') {
                           setExpiryNumber('');
@@ -549,15 +572,19 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                           setExpiryNumber(1);
                         }
                       }}
-                      className="w-full px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-black font-mono text-center text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs"
+                      className="w-full px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-black font-mono text-center text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 shadow-2xs disabled:opacity-45"
                       placeholder="24"
                     />
                   </div>
                   <div className="relative flex-1">
                     <select
                       value={expiryUnit}
-                      onChange={(e) => setExpiryUnit(e.target.value)}
-                      className="w-full px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs"
+                      disabled={noExpiry}
+                      onChange={(e) => {
+                        setNoExpiry(false);
+                        setExpiryUnit(e.target.value);
+                      }}
+                      className="w-full px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs disabled:opacity-45"
                     >
                       <option value="minutes">Minutes</option>
                       <option value="hours">Hours</option>
@@ -574,13 +601,27 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 <Clock className="w-3 h-3 text-slate-400" />
                 Quick Presets:
               </span>
+              {streamType === 'rma_editor' && (
+                <button
+                  type="button"
+                  onClick={() => setNoExpiry((prev) => !prev)}
+                  className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
+                    noExpiry
+                      ? 'bg-emerald-600 text-white shadow-2xs'
+                      : 'bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-50'
+                  }`}
+                >
+                  Never Expires (Revocable)
+                </button>
+              )}
               {PRESET_EXPIRIES.map((preset) => {
-                const isSelected = Number(expiryNumber) === preset.num && expiryUnit === preset.unit;
+                const isSelected = !noExpiry && Number(expiryNumber) === preset.num && expiryUnit === preset.unit;
                 return (
                   <button
                     key={preset.label}
                     type="button"
                     onClick={() => {
+                      setNoExpiry(false);
                       setExpiryNumber(preset.num);
                       setExpiryUnit(preset.unit);
                     }}
@@ -660,7 +701,9 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                       ? 'text-purple-800 dark:text-purple-300 bg-purple-200/60 dark:bg-purple-900/60'
                       : 'text-emerald-800 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/60'
                 }`}>
-                  Validity: {generatedInvite.duration_display || 'Custom'} • Expires (YYYY-MM-DD HH:mm): {formatDateTimeYmdHm(generatedInvite.expires_at)}
+                  {isPermanentInvite(generatedInvite)
+                    ? 'Validity: No Expiry • Revocable by Admin'
+                    : `Validity: ${generatedInvite.duration_display || 'Custom'} • Expires (YYYY-MM-DD HH:mm): ${formatDateTimeYmdHm(generatedInvite.expires_at)}`}
                 </span>
               </div>
 
@@ -806,11 +849,13 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {paginatedInvites.map((inv) => {
-                      const countdown = formatRemainingCountdown(inv.expires_at, inv.status);
+                      const countdown = formatRemainingCountdown(inv.expires_at, inv.status, inv);
                       const isRevoked = inv.status === 'revoked';
                       const isExpired = countdown.isExpired;
                       const isSupplier = inv.stream_type === 'supplier_outbound';
                       const isEditor = isRmaEditorInvite(inv);
+                      const allowedEmailsList = getInviteAllowedEmails(inv);
+                      const permanent = isPermanentInvite(inv);
 
                       return (
                         <tr key={inv.token || inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
@@ -839,8 +884,17 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                               )}
                             </div>
                           </td>
-                          <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">
-                            {inv.authorized_email}
+                          <td className="p-3 font-mono font-bold text-slate-900 dark:text-white max-w-[260px]">
+                            {allowedEmailsList.length > 1 ? (
+                              <div className="space-y-0.5">
+                                <div className="truncate">{allowedEmailsList[0]}</div>
+                                <div className="text-[10px] font-sans font-semibold text-indigo-600 dark:text-indigo-400" title={allowedEmailsList.join(', ')}>
+                                  +{allowedEmailsList.length - 1} CC recipient{allowedEmailsList.length - 1 > 1 ? 's' : ''}: {allowedEmailsList.slice(1).join(', ')}
+                                </div>
+                              </div>
+                            ) : (
+                              inv.authorized_email
+                            )}
                           </td>
                           <td className="p-3 text-slate-700 dark:text-slate-300 font-semibold">
                             {isEditor
@@ -848,11 +902,17 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                               : (inviteService.normalizeEntityName(inv.entity_name || inv.store_branch) || <span className="text-slate-400 italic">Optional / Open</span>)}
                           </td>
                           <td className="p-3 text-slate-600 dark:text-slate-400 font-mono text-[11px]">
-                            {inv.duration_display || '24 hour(s)'}
+                            {permanent ? 'No Expiry' : (inv.duration_display || '24 hour(s)')}
                           </td>
                           <td className="p-3 font-mono text-[11px]">
-                            <span className={isExpired ? 'text-slate-400' : 'text-blue-600 dark:text-blue-400 font-bold'}>
-                              {countdown.text}
+                            <span className={
+                              isExpired
+                                ? 'text-slate-400'
+                                : permanent
+                                  ? 'text-emerald-600 dark:text-emerald-400 font-bold'
+                                  : 'text-blue-600 dark:text-blue-400 font-bold'
+                            }>
+                              {permanent && !isRevoked ? 'No Expiry • Revocable by Admin' : countdown.text}
                             </span>
                           </td>
                           <td className="p-3">

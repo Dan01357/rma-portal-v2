@@ -1844,7 +1844,7 @@ Each test scenario defines:
 
 - [ ] **TC-P24-03 (Unambiguous `(YYYY-MM-DD)` / `(YYYY-MM-DD HH:mm)` Dates & `mgan@a2z2go.net` Sandbox Routing)**
   * **Location**: All tables, filter labels, ISO readouts, US Letter printables, `.xlsx` Matrix headers, and `/api/send-email` Test Mode payloads.
-  * **Expected Behavior**: All dates render in Asia/Manila `YYYY-MM-DD` / `YYYY-MM-DD HH:mm`; Test Mode emails route strictly to `mgan@a2z2go.net` with `Test - ` / `[TEST_MODE]` prefixes and zero live vendor/customer leaks.
+  * **Expected Behavior**: All dates render in Asia/Manila `YYYY-MM-DD` / `YYYY-MM-DD HH:mm`; Test Mode emails route strictly to `mgan@a2z2go.net` with `[TEST] ` as the very first word of the subject line (`[TEST_MODE]` metadata) and zero live vendor/customer leaks.
 
 - [ ] **TC-P24-04 (4 Lifecycle Emails w/ All 5 Pickup Photos & Official PDF Form Attachments)**
   * **Location**: `SimpleSupplierRtvWizardModal` + `notificationService.js`
@@ -1880,8 +1880,15 @@ Each test scenario defines:
   * **Location**: `CustomerRMAInvitesModal`, `GatekeeperPinModal`, `RmaEmailEditorView`, `notificationService.js`, `/api/v1/rma-email-edit`
   * **Expected Behavior**:
     1. `CustomerRMAInvitesModal` adds `✏️ RMA Details Editor` stream mode (`rma_editor` / `inv_edit_` / `inv_test_edit_`) and filter pill (`✏️ Editor`).
-    2. New RMA Alert emails auto-generate an email-bound editor invite (`toEmail` in Live Mode, `mgan@a2z2go.net` in Test Mode) and render a clickable **`✏️ Edit RMA Details & Documents`** button/link.
-    3. Opening the link reuses `GatekeeperPinModal` Google Identity Lock (NO OTP; enforces 403 Identity Mismatch, Expired, and Revoked checks), unlocking ONLY `RmaEmailEditorView` (zero Admin tabs/settings/trash/API keys) and saving updates server-side via `/api/v1/rma-email-edit` (`401`/`403` blocked when unauthenticated, mismatched, revoked, or cross-mode).
+    2. New RMA Alert emails auto-generate a never-expiring (`expires_at: null`, revocable by Admin) Google Identity-locked editor invite authorized for **`To` + ALL `CC` recipients** in Live Mode (or `mgan@a2z2go.net` in Test Mode) and render a clickable **`✏️ Edit RMA Details & Documents`** button/link.
+    3. Opening the link reuses `GatekeeperPinModal` Google Identity Lock (NO OTP; enforces 403 Identity Mismatch and Admin Revoked checks without false expiration), unlocking ONLY `RmaEmailEditorView` (zero Admin tabs/settings/trash/API keys) and saving updates server-side via `/api/v1/rma-email-edit` (`401`/`403` blocked when unauthenticated, non-recipient, revoked, or cross-mode).
+
+- [ ] **TC-P24-11 (Automated Daily 1:00 PM PHT Overall RMA Matrix `.xlsx` Email & `[TEST]` First-Word Enforcement)**
+  * **Location**: `vercel.json` cron (`0 5 * * *`), `api/send-email.js?action=daily-matrix`, `api/_lib/dailyMatrixEmailHandler.js`, `SettingsTab.jsx`
+  * **Expected Behavior**:
+    1. Vercel Cron hits `/api/send-email?action=daily-matrix` daily at 1:00 PM PHT (`05:00 UTC`), adhering to the 12-function limit (`API_ROUTE_COUNT === 12`) and enforcing `CRON_SECRET` / Admin Bearer JWT authentication (`401` unauthenticated).
+    2. Queries Live `rma_reports`, `products`, and `credit_memos`, generates the strict Microsoft-Excel-valid 14-day rolling Overall RMA Matrix (`.xlsx`), and emails configured `rma_settings.email_recipients` (`To` + `CC`) once per Manila day (`daily_matrix_last_sent_pht_date`).
+    3. Clicking **Send Daily Matrix Now** in Settings dispatches manually on demand; when Test Mode is active, subject strictly starts with `[TEST] ` as the first word and sends only to `mgan@a2z2go.net`.
 
 ---
 

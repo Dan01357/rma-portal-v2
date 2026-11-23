@@ -25,7 +25,7 @@ function extractInviteRmaNumber(invite) {
     return String(invite.rma_number).trim();
   }
   const ent = String(invite.entity_name || '');
-  const match = ent.match(/^\[RMA_EDITOR:([^\]]+)\]/);
+  const match = ent.match(/^\[RMA_EDITOR:([^|\]]+)(?:\|([^\]]*))?\]/);
   if (match && match[1] && match[1] !== 'ANY') {
     return match[1].trim();
   }
@@ -34,6 +34,38 @@ function extractInviteRmaNumber(invite) {
     return branch;
   }
   return '';
+}
+
+function extractAllowedEmails(invite) {
+  if (!invite) return [];
+  const set = new Set();
+  const addEmail = (val) => {
+    const clean = String(val || '').trim().toLowerCase();
+    if (clean && clean.includes('@')) set.add(clean);
+  };
+  addEmail(invite.authorized_email);
+  if (Array.isArray(invite.authorized_emails)) invite.authorized_emails.forEach(addEmail);
+  if (Array.isArray(invite.allowed_emails)) invite.allowed_emails.forEach(addEmail);
+  const ent = String(invite.entity_name || '');
+  const match = ent.match(/^\[RMA_EDITOR:[^|\]]*\|([^\]]*)\]/);
+  if (match && match[1]) {
+    match[1].split(',').forEach(addEmail);
+  }
+  return Array.from(set);
+}
+
+function isPermanentInvite(invite) {
+  if (!invite) return false;
+  const exp = invite.expires_at;
+  return Boolean(
+    invite.no_expiry === true ||
+    invite.never_expires === true ||
+    String(invite.duration_unit || '').toLowerCase() === 'permanent' ||
+    exp === null ||
+    exp === undefined ||
+    String(exp).startsWith('9999-') ||
+    (typeof exp === 'string' && new Date(exp).getUTCFullYear() >= 9999)
+  );
 }
 
 function isTestReport(report) {
@@ -160,13 +192,16 @@ export async function handleRmaEmailEdit(req, res) {
     }, req);
   }
 
-  const expTs = new Date(invite.expires_at).getTime();
-  if (!Number.isFinite(expTs) || Date.now() > expTs) {
-    return sendJson(res, 403, {
-      success: false,
-      error: 'INVITE_EXPIRED',
-      message: 'This RMA editor authorization link has expired.'
-    }, req);
+  const inviteIsPermanent = isPermanentInvite(invite);
+  if (!inviteIsPermanent) {
+    const expTs = new Date(invite.expires_at).getTime();
+    if (!Number.isFinite(expTs) || Date.now() > expTs) {
+      return sendJson(res, 403, {
+        success: false,
+        error: 'INVITE_EXPIRED',
+        message: 'This RMA editor authorization link has expired.'
+      }, req);
+    }
   }
 
   if (!isEditorInvite(invite)) {
@@ -177,14 +212,15 @@ export async function handleRmaEmailEdit(req, res) {
     }, req);
   }
 
-  const authorizedEmail = String(invite.authorized_email || '').trim().toLowerCase();
-  if (!authorizedEmail || userEmail !== authorizedEmail) {
+  const allowedEmails = extractAllowedEmails(invite);
+  if (allowedEmails.length === 0 || !allowedEmails.includes(userEmail)) {
     return sendJson(res, 403, {
       success: false,
       error: 'IDENTITY_MISMATCH',
-      message: `Access Denied: Signed-in Google account (${userEmail}) does not match authorized recipient (${authorizedEmail}).`
+      message: `Access Denied: Signed-in Google account (${userEmail}) is not in authorized recipients (${allowedEmails.join(', ')}).`
     }, req);
   }
+  const authorizedEmail = userEmail;
 
   // 3. Enforce RMA Scope & Live vs Test Isolation
   const requestedRma = String(req.query?.rma || req.query?.rma_number || body.rma_number || body.editRma || '').trim();
@@ -239,6 +275,9 @@ export async function handleRmaEmailEdit(req, res) {
       success: true,
       mode: inviteIsTest ? 'test' : 'live',
       authorized_email: authorizedEmail,
+      authorized_emails: allowedEmails,
+      no_expiry: inviteIsPermanent,
+      expires_at: inviteIsPermanent ? null : (invite.expires_at || null),
       scope_locked_rma: Boolean(lockedRma),
       report: {
         id: report.id,

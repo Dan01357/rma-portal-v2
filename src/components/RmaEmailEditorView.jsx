@@ -301,7 +301,12 @@ export default function RmaEmailEditorView({
                 <Mail className="w-3 h-3 text-blue-500" />
                 {gateSession?.user_email || gateSession?.authorized_email}
               </span>
-              {sessionCountdown?.text && (
+              {(gateSession?.no_expiry || sessionCountdown?.isPermanent) ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-mono font-bold border bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800">
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>No Expiry • Revocable by Admin</span>
+                </span>
+              ) : sessionCountdown?.text && (
                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-mono font-bold border ${
                   sessionCountdown.totalSeconds < 300
                     ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-300 dark:border-rose-800'

@@ -1696,4 +1696,18 @@ export function getConsolidatedPickupItems({
   };
 }
 
+/**
+ * Normalizes email subjects in Test Mode so "[TEST]" is strictly the first word
+ * without duplicate "[TEST]" / "[TEST MODE]" / "Test -" prefixes.
+ */
+export function formatTestEmailSubject(subject, isTestMode = false) {
+  const raw = String(subject || '').trim();
+  if (!isTestMode) return raw;
+  let clean = raw;
+  while (/^(?:\[test(?:\s+mode)?\]|test\s*[-:])\s*/i.test(clean)) {
+    clean = clean.replace(/^(?:\[test(?:\s+mode)?\]|test\s*[-:])\s*/i, '').trim();
+  }
+  return clean ? `[TEST] ${clean}` : '[TEST] Notification';
+}
+
 

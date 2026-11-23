@@ -99,7 +99,7 @@ import RMAMatrixExportModal from './components/RMAMatrixExportModal';
 import RmaEmailEditorView from './components/RmaEmailEditorView';
 import GatekeeperPinModal from './components/GatekeeperPinModal';
 import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
-import { inviteService, formatRemainingCountdown } from './services/inviteService';
+import { inviteService, formatRemainingCountdown, isPermanentInvite } from './services/inviteService';
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
 import { QRCodeSVG } from 'qrcode.react';
@@ -311,18 +311,28 @@ export default function App() {
   // Active Real-Time Watchdog for Gatekeeper Session Expiration (Unbypassable live enforcement)
   useEffect(() => {
     const expStr = gateSession?.expires_at || gateSession?.expiresAt;
-    if (!expStr) {
-      setSessionCountdown({ text: '', isExpired: false, totalSeconds: 0 });
+    if (!gateSession) {
+      setSessionCountdown({ text: '', isExpired: false, isPermanent: false, totalSeconds: 0 });
+      return;
+    }
+
+    if (isPermanentInvite(gateSession) || !expStr) {
+      setSessionCountdown({
+        text: 'No Expiry • Revocable by Admin',
+        isExpired: false,
+        isPermanent: true,
+        totalSeconds: Infinity
+      });
       return;
     }
 
     const checkExpiration = () => {
       const expTime = new Date(expStr).getTime();
       const now = Date.now();
-      const countdown = formatRemainingCountdown(expStr, gateSession?.status || 'active');
+      const countdown = formatRemainingCountdown(expStr, gateSession?.status || 'active', gateSession);
       setSessionCountdown(countdown);
 
-      if (now >= expTime || countdown.isExpired) {
+      if (!countdown.isPermanent && (now >= expTime || countdown.isExpired)) {
         // Session reached expiration!
         try {
           localStorage.removeItem('rma_portal_gate_session');
@@ -1119,6 +1129,7 @@ export default function App() {
   };
 
   const handleArchiveReport = async (id, rmaNumber, item) => {
+    mutationEpochRef.current += 1;
     try {
       setRecentReportsList(prev => prev.map(r => {
         if ((id && r.id === id) || (rmaNumber && r.rma_number === rmaNumber)) {
@@ -1136,6 +1147,7 @@ export default function App() {
         return r;
       }));
       await catalogService.archiveReport(id, rmaNumber, currentUser?.name || 'Staff');
+      mutationEpochRef.current += 1;
       showToast(`Archived RMA #${rmaNumber} to Archive Vault.`, 'success');
       refreshAllData();
     } catch (e) {
@@ -1145,6 +1157,7 @@ export default function App() {
   };
 
   const handleBulkArchiveReports = async (reportsList) => {
+    mutationEpochRef.current += 1;
     try {
       const idSet = new Set(reportsList.map(r => r.id).filter(Boolean));
       const rmaSet = new Set(reportsList.map(r => r.rma_number).filter(Boolean));
@@ -1164,6 +1177,7 @@ export default function App() {
         return r;
       }));
       await catalogService.archiveMultipleReports(reportsList, currentUser?.name || 'Staff');
+      mutationEpochRef.current += 1;
       setCustomerHubResetTick(t => t + 1);
       showToast(`Archived ${reportsList.length} return reports to Archive Vault.`, 'success');
       refreshAllData();
@@ -1175,22 +1189,24 @@ export default function App() {
 
   const handleRestoreFromTrashOrArchive = async (item) => {
     if (!item) return;
+    mutationEpochRef.current += 1;
+    setRecentReportsList(prev => prev.map(r => {
+      if ((item.id && r.id === item.id) || (item.rma_number && r.rma_number === item.rma_number)) {
+        const meta = { ...(r.ai_document_metadata || {}) };
+        delete meta.is_trashed;
+        delete meta.trashed_at;
+        delete meta.trashed_by;
+        delete meta.purge_after;
+        delete meta.is_archived;
+        delete meta.archived_at;
+        delete meta.archived_by;
+        return { ...r, ai_document_metadata: meta };
+      }
+      return r;
+    }));
     try {
       await catalogService.restoreReport(item.id, item.rma_number, currentUser?.name || 'Staff');
-      setRecentReportsList(prev => prev.map(r => {
-        if ((item.id && r.id === item.id) || (item.rma_number && r.rma_number === item.rma_number)) {
-          const meta = { ...(r.ai_document_metadata || {}) };
-          delete meta.is_trashed;
-          delete meta.trashed_at;
-          delete meta.trashed_by;
-          delete meta.purge_after;
-          delete meta.is_archived;
-          delete meta.archived_at;
-          delete meta.archived_by;
-          return { ...r, ai_document_metadata: meta };
-        }
-        return r;
-      }));
+      mutationEpochRef.current += 1;
       showToast(`Restored RMA #${item.rma_number} back to active workspace.`, 'success');
       refreshAllData();
     } catch (e) {
@@ -1201,6 +1217,7 @@ export default function App() {
 
   const handlePermanentlyDeleteReport = async (item) => {
     if (!item) return;
+    mutationEpochRef.current += 1;
     try {
       setRecentReportsList(prev => prev.filter(r => {
         if (item.id && r.id === item.id) return false;
@@ -1208,6 +1225,7 @@ export default function App() {
         return true;
       }));
       await catalogService.permanentlyDeleteReport(item.id, item.rma_number, item);
+      mutationEpochRef.current += 1;
       showToast(`Permanently deleted RMA #${item.rma_number}.`, 'success');
       refreshAllData();
     } catch (e) {
@@ -1435,6 +1453,7 @@ export default function App() {
   const handleConfirmDelete = async () => {
     if (!deleteModalState) return;
     setIsDeleteModalLoading(true);
+    mutationEpochRef.current += 1;
     try {
       if (deleteModalState.type === 'product') {
         const prod = deleteModalState.item;
@@ -1504,16 +1523,18 @@ export default function App() {
         refreshAllData();
       } else if (deleteModalState.type === 'credit_memo') {
         const memo = deleteModalState.item;
-        await creditMemoService.deleteCreditMemo(memo.credit_memo_number, memo.report_id);
         setCreditMemosList(prev => prev.filter(m => m.credit_memo_number !== memo.credit_memo_number));
+        await creditMemoService.deleteCreditMemo(memo.credit_memo_number, memo.report_id);
+        mutationEpochRef.current += 1;
         showToast(`Credit Memo ${memo.credit_memo_number} voided and removed.`, 'success');
         refreshAllData();
       } else if (deleteModalState.type === 'bulk_credit_memos') {
         const items = deleteModalState.items || [];
         const memoNumbers = items.map(m => m.credit_memo_number);
-        await creditMemoService.deleteMultipleCreditMemos(memoNumbers);
         const numSet = new Set(memoNumbers);
         setCreditMemosList(prev => prev.filter(m => !numSet.has(m.credit_memo_number)));
+        await creditMemoService.deleteMultipleCreditMemos(memoNumbers);
+        mutationEpochRef.current += 1;
         showToast(`Successfully voided and deleted ${items.length} credit memos from database.`, 'success');
         refreshAllData();
       } else if (deleteModalState.type === 'clear_sandbox') {
@@ -1536,6 +1557,7 @@ export default function App() {
         showToast('All Sandbox Test Mode records, memos, and RTV claims permanently cleared.', 'success');
         await refreshAllData();
       }
+      mutationEpochRef.current += 1;
       setDeleteModalState(null);
     } catch (e) {
       showToast(e.message || 'Failed to delete item from database', 'error');
@@ -1598,6 +1620,7 @@ export default function App() {
   const refreshQueuedRef = useRef(false);
   const bgRefreshTimerRef = useRef(null);
   const lastAutoPurgeRef = useRef(0);
+  const mutationEpochRef = useRef(0);
   const [paperworkShake, setPaperworkShake] = useState(false);
   const [paperworkError, setPaperworkError] = useState(null);
   const [siNumber, setSiNumber] = useState('');
@@ -2247,9 +2270,15 @@ export default function App() {
   };
 
   const executeRefreshBatch = async () => {
+    const batchEpoch = mutationEpochRef.current;
+    let sawStaleMutation = false;
     await Promise.allSettled([
-      catalogService.getPendingBarcodes().then(pending => setPendingBarcodesList(pending || [])),
+      catalogService.getPendingBarcodes().then(pending => {
+        if (mutationEpochRef.current !== batchEpoch) { sawStaleMutation = true; return; }
+        setPendingBarcodesList(pending || []);
+      }),
       catalogService.getRecentReports(100).then(reports => {
+        if (mutationEpochRef.current !== batchEpoch) { sawStaleMutation = true; return; }
         setRecentReportsList(reports || []);
         if (Array.isArray(reports) && reports.length > 0) {
           const nowMs = Date.now();
@@ -2259,10 +2288,19 @@ export default function App() {
           }
         }
       }),
-      catalogService.getSavedProducts().then(saved => setSavedProductsList(saved || [])),
+      catalogService.getSavedProducts().then(saved => {
+        if (mutationEpochRef.current !== batchEpoch) { sawStaleMutation = true; return; }
+        setSavedProductsList(saved || []);
+      }),
       authService.getEmployees().then(staff => setStaffList(staff || [])),
-      creditMemoService.getCreditMemos().then(memos => setCreditMemosList(memos || []))
+      creditMemoService.getCreditMemos().then(memos => {
+        if (mutationEpochRef.current !== batchEpoch) { sawStaleMutation = true; return; }
+        setCreditMemosList(memos || []);
+      })
     ]);
+    if (sawStaleMutation) {
+      refreshQueuedRef.current = true;
+    }
   };
 
   // Coalesce concurrent refreshes so at most one Supabase sync batch runs at a time.

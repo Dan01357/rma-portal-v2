@@ -13,7 +13,15 @@ import {
   FileEdit
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { inviteService, formatRemainingCountdown, normalizeEntityName, isRmaEditorInvite, extractRmaNumberFromInvite } from '../services/inviteService';
+import {
+  inviteService,
+  formatRemainingCountdown,
+  normalizeEntityName,
+  isRmaEditorInvite,
+  extractRmaNumberFromInvite,
+  getInviteAllowedEmails,
+  isPermanentInvite
+} from '../services/inviteService';
 
 // Capture OAuth callback hash tokens synchronously at bundle evaluation time before any URL cleanup runs
 let initialCapturedOAuthHash = null;
@@ -82,6 +90,7 @@ export default function GatekeeperPinModal({
   const [countdownStr, setCountdownStr] = useState('');
   const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [selectedMagicEmail, setSelectedMagicEmail] = useState('');
 
   const hasValidatedRef = useRef(false);
   const validatedTokenRef = useRef(null);
@@ -132,7 +141,8 @@ export default function GatekeeperPinModal({
 
   // 2. Cryptographic Google OAuth Identity Verification
   const verifyIdentityWithSupabase = useCallback(async (invite, sessionUser = null) => {
-    if (!invite?.authorized_email) return;
+    const allowedEmails = getInviteAllowedEmails(invite);
+    if (!invite || allowedEmails.length === 0) return;
     // Never unlock while initiating outbound redirect to accounts.google.com
     if (isRedirectingToGoogleRef.current) return;
 
@@ -219,10 +229,12 @@ export default function GatekeeperPinModal({
         } catch {}
 
         const userEmail = user.email.toLowerCase().trim();
-        const authorizedEmail = invite.authorized_email.toLowerCase().trim();
+        const allowedEmails = getInviteAllowedEmails(invite);
+        const authorizedEmail = allowedEmails[0] || String(invite.authorized_email || '').toLowerCase().trim();
+        const permanent = isPermanentInvite(invite);
 
-        if (userEmail === authorizedEmail) {
-          // SUCCESS: Authenticated Google identity matches the authorized invite email!
+        if (allowedEmails.includes(userEmail)) {
+          // SUCCESS: Authenticated Google identity matches one of the authorized invite emails!
           setIdentityMismatch(null);
           setOauthError(null);
 
@@ -246,19 +258,21 @@ export default function GatekeeperPinModal({
             stream_type: resolvedStream,
             rma_number: finalRmaNum,
             is_test: isTestInvite,
-            authorized_email: authorizedEmail,
+            authorized_email: userEmail,
+            authorized_emails: allowedEmails,
+            no_expiry: permanent,
             entity_name: resolvedEntity,
             store_branch: isEditorLink ? finalRmaNum : resolvedEntity,
             user_email: userEmail,
             user_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
-            expires_at: invite.expires_at,
-            profileName: resolvedEntity || authorizedEmail,
+            expires_at: permanent ? null : invite.expires_at,
+            profileName: resolvedEntity || userEmail || authorizedEmail,
             unlockedAt: new Date().toISOString()
           };
 
           try {
             localStorage.setItem('rma_portal_gate_session', JSON.stringify(unlockedSession));
-            localStorage.setItem('rma_reporter_contact', authorizedEmail);
+            localStorage.setItem('rma_reporter_contact', userEmail);
             localStorage.setItem('rma_portal_verified_email', userEmail);
           } catch {}
 
@@ -278,7 +292,8 @@ export default function GatekeeperPinModal({
 
           setIdentityMismatch({
             signedInEmail: user.email,
-            authorizedEmail: invite.authorized_email
+            authorizedEmail: allowedEmails.join(', ') || invite.authorized_email,
+            authorizedEmails: allowedEmails
           });
           setIsCheckingAuth(false);
           setIsValidatingToken(false);
@@ -420,12 +435,30 @@ export default function GatekeeperPinModal({
     };
   }, [validationResult, verifyIdentityWithSupabase, identityMismatch]);
 
+  useEffect(() => {
+    const emails = getInviteAllowedEmails(validationResult?.invite);
+    if (emails.length > 0 && (!selectedMagicEmail || !emails.includes(selectedMagicEmail))) {
+      setSelectedMagicEmail(emails[0]);
+    }
+  }, [validationResult?.invite, selectedMagicEmail]);
+
   // 5. Live ticking countdown timer for valid invite (updates every 1s)
   useEffect(() => {
-    if (!validationResult?.valid || !validationResult?.invite?.expires_at) return;
+    if (!validationResult?.valid || !validationResult?.invite) return;
+
+    if (isPermanentInvite(validationResult.invite)) {
+      setCountdownStr('No Expiry • Revocable by Admin');
+      return;
+    }
+
+    if (!validationResult.invite.expires_at) return;
 
     const updateTimer = () => {
-      const countdown = formatRemainingCountdown(validationResult.invite.expires_at, validationResult.invite.status);
+      const countdown = formatRemainingCountdown(
+        validationResult.invite.expires_at,
+        validationResult.invite.status,
+        validationResult.invite
+      );
       setCountdownStr(countdown.text);
       if (countdown.isExpired) {
         setValidationResult(prev => prev ? { ...prev, valid: false, error: 'EXPIRED' } : null);
@@ -435,7 +468,7 @@ export default function GatekeeperPinModal({
     updateTimer();
     const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
-  }, [validationResult?.valid, validationResult?.invite?.expires_at, validationResult?.invite?.status]);
+  }, [validationResult?.valid, validationResult?.invite]);
 
   // 6. Handle "Continue with Google" OAuth trigger
   const handleContinueWithGoogle = async () => {
@@ -467,6 +500,7 @@ export default function GatekeeperPinModal({
         ? `${window.location.origin}/intake?token=${encodeURIComponent(activeToken)}`
         : window.location.href;
       
+      const allowedEmails = getInviteAllowedEmails(validationResult.invite);
       // Use skipBrowserRedirect: true first to safely get the authorization URL
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -476,7 +510,7 @@ export default function GatekeeperPinModal({
           queryParams: {
             access_type: 'offline',
             prompt: 'select_account',
-            login_hint: validationResult.invite.authorized_email
+            ...(allowedEmails.length === 1 ? { login_hint: allowedEmails[0] } : {})
           }
         }
       });
@@ -507,7 +541,8 @@ export default function GatekeeperPinModal({
 
   // 7. Send Magic Link Email (Passwordless OTP fallback strictly delivered to the authorized email)
   const handleSendMagicLink = async () => {
-    if (!validationResult?.invite?.authorized_email) return;
+    const allowedEmails = getInviteAllowedEmails(validationResult?.invite);
+    if (allowedEmails.length === 0) return;
     setIsSendingMagicLink(true);
     setOauthError(null);
     try {
@@ -525,7 +560,11 @@ export default function GatekeeperPinModal({
       const redirectUrl = activeToken
         ? `${window.location.origin}/intake?token=${encodeURIComponent(activeToken)}`
         : window.location.href;
-      const targetEmail = validationResult.invite.authorized_email.toLowerCase().trim();
+      const targetEmail = (
+        selectedMagicEmail && allowedEmails.includes(selectedMagicEmail)
+          ? selectedMagicEmail
+          : allowedEmails[0]
+      ).toLowerCase().trim();
       const { error } = await supabase.auth.signInWithOtp({
         email: targetEmail,
         options: {
@@ -587,8 +626,12 @@ export default function GatekeeperPinModal({
                 <strong className="block text-slate-900 dark:text-white font-mono mt-0.5 text-sm">{identityMismatch.signedInEmail}</strong>
               </p>
               <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                This private return link was issued strictly to:
-                <strong className="block text-emerald-600 dark:text-emerald-400 font-mono mt-0.5 text-sm">{identityMismatch.authorizedEmail}</strong>
+                {identityMismatch.authorizedEmails?.length > 1
+                  ? `This private link was issued strictly to authorized recipients (${identityMismatch.authorizedEmails.length}):`
+                  : 'This private return link was issued strictly to:'}
+                <strong className="block text-emerald-600 dark:text-emerald-400 font-mono mt-0.5 text-xs break-all">
+                  {identityMismatch.authorizedEmail}
+                </strong>
               </p>
               <div className="text-[11px] text-rose-700 dark:text-rose-300 font-bold pt-2 border-t border-rose-200 dark:border-rose-900/40">
                 Forwarding return links is prohibited under Pingcon Wholesale Governance.
@@ -748,6 +791,11 @@ export default function GatekeeperPinModal({
         ) : (() => {
           const isEditorLock = isRmaEditorInvite(validationResult?.invite);
           const lockedRmaTarget = extractRmaNumberFromInvite(validationResult?.invite);
+          const allowedEmails = getInviteAllowedEmails(validationResult?.invite);
+          const permanentInvite = isPermanentInvite(validationResult?.invite);
+          const activeMagicEmail = (selectedMagicEmail && allowedEmails.includes(selectedMagicEmail))
+            ? selectedMagicEmail
+            : (allowedEmails[0] || validationResult.invite.authorized_email);
           return (
           /* 5. Valid Token -> 1-Click Google Identity Lock OAuth Screen (Zero Admin Buttons) */
           <div className="space-y-5 animate-in zoom-in-95">
@@ -798,14 +846,34 @@ export default function GatekeeperPinModal({
             {/* Recipient Card */}
             <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs text-left space-y-2 text-slate-800 dark:text-slate-200">
               <div className="text-[10px] uppercase font-bold text-slate-400">
-                {isEditorLock ? 'Private RMA Edit Link Issued Exclusively To:' : 'Private Return Link Issued Exclusively To:'}
+                {allowedEmails.length > 1
+                  ? `Authorized To & CC Recipients (${allowedEmails.length}):`
+                  : isEditorLock
+                    ? 'Private RMA Edit Link Issued Exclusively To:'
+                    : 'Private Return Link Issued Exclusively To:'}
               </div>
-              <div className={`font-mono font-black text-sm flex items-center gap-1.5 break-all ${
-                isEditorLock ? 'text-indigo-600 dark:text-indigo-400' : isSupplier ? 'text-purple-600 dark:text-purple-400' : 'text-blue-600 dark:text-blue-400'
-              }`}>
-                <Mail className={`w-4 h-4 shrink-0 ${isEditorLock ? 'text-indigo-600' : isSupplier ? 'text-purple-600' : 'text-blue-600'}`} />
-                <span>{validationResult.invite.authorized_email}</span>
-              </div>
+              {allowedEmails.length > 1 ? (
+                <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
+                  {allowedEmails.map((em) => (
+                    <div
+                      key={em}
+                      className={`font-mono font-bold text-xs flex items-center gap-1.5 break-all ${
+                        isEditorLock ? 'text-indigo-600 dark:text-indigo-400' : isSupplier ? 'text-purple-600 dark:text-purple-400' : 'text-blue-600 dark:text-blue-400'
+                      }`}
+                    >
+                      <Mail className="w-3.5 h-3.5 shrink-0" />
+                      <span>{em}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className={`font-mono font-black text-sm flex items-center gap-1.5 break-all ${
+                  isEditorLock ? 'text-indigo-600 dark:text-indigo-400' : isSupplier ? 'text-purple-600 dark:text-purple-400' : 'text-blue-600 dark:text-blue-400'
+                }`}>
+                  <Mail className={`w-4 h-4 shrink-0 ${isEditorLock ? 'text-indigo-600' : isSupplier ? 'text-purple-600' : 'text-blue-600'}`} />
+                  <span>{allowedEmails[0] || validationResult.invite.authorized_email}</span>
+                </div>
+              )}
               
               {/* Target RMA Record OR Entity Name */}
               {isEditorLock && lockedRmaTarget ? (
@@ -829,7 +897,12 @@ export default function GatekeeperPinModal({
                 </div>
               )}
 
-              {countdownStr && (
+              {permanentInvite ? (
+                <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 pt-0.5">
+                  <ShieldCheck className="w-3 h-3 shrink-0" />
+                  <span>No Expiry • Revocable by Admin</span>
+                </div>
+              ) : countdownStr && (
                 <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 pt-0.5">
                   <Clock className="w-3 h-3 shrink-0" />
                   <span>Valid for: {countdownStr}</span>
@@ -868,7 +941,7 @@ export default function GatekeeperPinModal({
                     className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60 shadow-sm"
                   >
                     <Mail className="w-4 h-4" />
-                    <span>{magicLinkSent ? '✓ One-Time Link Dispatched to Your Inbox' : isSendingMagicLink ? 'Dispatching Access Link...' : `Email One-Time Access Link to ${validationResult.invite.authorized_email}`}</span>
+                    <span>{magicLinkSent ? '✓ One-Time Link Dispatched to Your Inbox' : isSendingMagicLink ? 'Dispatching Access Link...' : `Email One-Time Access Link to ${activeMagicEmail}`}</span>
                   </button>
                 </div>
               </div>
@@ -882,7 +955,7 @@ export default function GatekeeperPinModal({
                   <span>Secure Access Link Dispatched</span>
                 </div>
                 <p className="text-[11px] leading-relaxed text-emerald-800 dark:text-emerald-300">
-                  A one-time secure login link has been dispatched to <strong className="font-mono">{validationResult.invite.authorized_email}</strong>. Please check your inbox and click the link to automatically access the return portal.
+                  A one-time secure login link has been dispatched to <strong className="font-mono">{activeMagicEmail}</strong>. Please check your inbox and click the link to automatically access the return portal.
                 </p>
               </div>
             )}
@@ -914,6 +987,22 @@ export default function GatekeeperPinModal({
                 )}
               </button>
 
+              {allowedEmails.length > 1 && (
+                <select
+                  aria-label="Select recipient inbox for one-time link"
+                  value={activeMagicEmail}
+                  onChange={(e) => {
+                    setSelectedMagicEmail(e.target.value);
+                    setMagicLinkSent(false);
+                  }}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-[11px] font-mono font-bold text-slate-800 dark:text-slate-200"
+                >
+                  {allowedEmails.map((em) => (
+                    <option key={em} value={em}>{em}</option>
+                  ))}
+                </select>
+              )}
+
               <button
                 type="button"
                 onClick={handleSendMagicLink}
@@ -921,7 +1010,7 @@ export default function GatekeeperPinModal({
                 className="w-full py-2.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 shadow-2xs"
               >
                 <Mail className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                <span>{magicLinkSent ? '✓ One-Time Link Dispatched to Your Inbox' : isSendingMagicLink ? 'Dispatching Access Link...' : 'Email One-Time Access Link to ' + validationResult.invite.authorized_email}</span>
+                <span>{magicLinkSent ? '✓ One-Time Link Dispatched to Your Inbox' : isSendingMagicLink ? 'Dispatching Access Link...' : 'Email One-Time Access Link to ' + activeMagicEmail}</span>
               </button>
             </div>
           </div>

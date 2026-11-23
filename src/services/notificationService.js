@@ -19,6 +19,7 @@ import {
   isTestRecord,
   formatDateYmd,
   formatDateTimeYmdHm,
+  formatTestEmailSubject,
   getRealPhotos,
   getConsolidatedPickupItems,
   formatPeso
@@ -233,6 +234,9 @@ export const notificationService = {
     const mapUrl = hasGps ? `https://www.google.com/maps?q=${report.gps_latitude},${report.gps_longitude}` : null;
     const editUrl = editorContext?.editUrl || '';
     const editorAuthorizedEmail = editorContext?.editorAuthorizedEmail || '';
+    const editorAuthorizedEmails = Array.isArray(editorContext?.editorAuthorizedEmails) && editorContext.editorAuthorizedEmails.length > 0
+      ? editorContext.editorAuthorizedEmails
+      : (editorAuthorizedEmail ? [editorAuthorizedEmail] : [config.toEmail]);
 
     return `
       <!DOCTYPE html>
@@ -259,8 +263,8 @@ export const notificationService = {
       <body>
         <div class="container">
           <div class="header">
-            <span class="badge">${isTestMode ? `[TEST MODE] ${config.companyName}` : config.companyName}</span>
-            <h1 class="title">${isTestMode ? 'Test - ' : ''}New RMA Return Report: ${rmaNumber}</h1>
+            <span class="badge">${isTestMode ? `[TEST] ${config.companyName}` : config.companyName}</span>
+            <h1 class="title">${isTestMode ? '[TEST] ' : ''}New RMA Return Report: ${rmaNumber}</h1>
             <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Automated Warehouse Intake Notification</div>
           </div>
           
@@ -369,7 +373,11 @@ export const notificationService = {
                 ✏️ Edit RMA Details &amp; Documents
               </a>
               <div style="font-size: 11px; color: #475569; margin-top: 10px; line-height: 1.4;">
-                🔒 Protected by Pingcon Google Identity Lock for <strong style="font-family: monospace; color: #0f172a;">${escapeEmailHtml(editorAuthorizedEmail || config.toEmail)}</strong>
+                🔒 Protected by Pingcon Google Identity Lock for ${
+                  editorAuthorizedEmails.length > 1
+                    ? `all authorized To &amp; CC recipients (<strong style="font-family: monospace; color: #0f172a;">${escapeEmailHtml(editorAuthorizedEmails.join(', '))}</strong>)`
+                    : `<strong style="font-family: monospace; color: #0f172a;">${escapeEmailHtml(editorAuthorizedEmails[0] || config.toEmail)}</strong>`
+                } • No expiry (revocable anytime by Admin)
               </div>
             </div>` : ''}
 
@@ -439,19 +447,27 @@ export const notificationService = {
       }
       const finalCcList = Array.from(ccSet);
       const toEmail = config.toEmail;
-      const editorAuthorizedEmail = testActive ? 'mgan@a2z2go.net' : toEmail;
+      const editorAuthorizedEmails = testActive
+        ? ['mgan@a2z2go.net']
+        : Array.from(new Set(
+            [toEmail, ...finalCcList]
+              .map((e) => String(e || '').trim().toLowerCase())
+              .filter((e) => e.includes('@'))
+          ));
+      const editorAuthorizedEmail = editorAuthorizedEmails[0] || (testActive ? 'mgan@a2z2go.net' : toEmail);
 
       let editUrl = '';
-      if (report.rma_number && editorAuthorizedEmail) {
+      if (report.rma_number && editorAuthorizedEmails.length > 0) {
         try {
           const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://rma-portal-pingconmarketing.vercel.app';
           const editorInvite = await inviteService.createInvite({
             streamType: 'rma_editor',
             authorizedEmail: editorAuthorizedEmail,
+            authorizedEmails: editorAuthorizedEmails,
             rmaNumber: report.rma_number,
             entityName: report.rma_number,
-            durationValue: 7,
-            durationUnit: 'days',
+            noExpiry: true,
+            durationUnit: 'permanent',
             createdBy: 'Automated New RMA Alert',
             isTest: testActive
           });
@@ -463,14 +479,10 @@ export const notificationService = {
         }
       }
 
-      let subject = `[RMA Alert] ${report.rma_number || 'New Return'}: ${report.name || report.barcode} (${report.reason || 'Damaged'})`;
+      const rawSubject = `[RMA Alert] ${report.rma_number || 'New Return'}: ${report.name || report.barcode} (${report.reason || 'Damaged'})`;
+      const subject = formatTestEmailSubject(rawSubject, testActive);
 
-      if (testActive) {
-        // Subject email must have "Test - " as the first word
-        subject = `Test - [RMA Alert] ${report.rma_number || 'New Return'}: ${report.name || report.barcode} (${report.reason || 'Damaged'})`;
-      }
-
-      const htmlBody = this.generateEmailHtml(report, config, testActive, { editUrl, editorAuthorizedEmail });
+      const htmlBody = this.generateEmailHtml(report, config, testActive, { editUrl, editorAuthorizedEmail, editorAuthorizedEmails });
 
       const photos = Array.isArray(report.photos) 
         ? report.photos 
@@ -500,7 +512,7 @@ export const notificationService = {
           html: htmlBody,
           isTestMode: testActive,
           attachments,
-          text: `${testActive ? 'Test - ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Expiry Date (YYYY-MM-DD): ${expiryInfo.text}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}${editUrl ? `\n\nEdit RMA Details & Documents (${editorAuthorizedEmail}): ${editUrl}` : ''}`
+          text: `${testActive ? '[TEST] ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Expiry Date (YYYY-MM-DD): ${expiryInfo.text}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}${editUrl ? `\n\nEdit RMA Details & Documents (${editorAuthorizedEmails.join(', ')} • No Expiry): ${editUrl}` : ''}`
         })
       });
 
@@ -557,7 +569,7 @@ export const notificationService = {
         <div class="container">
           <div class="header">
             <span class="badge">${isTestMode ? `[TEST] ${badgeText}` : badgeText}</span>
-            <h1 class="title">${isTestMode ? 'Test - ' : ''}${title}: ${product.name}</h1>
+            <h1 class="title">${isTestMode ? '[TEST] ' : ''}${title}: ${product.name}</h1>
             <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Verified Catalog Master Record Update</div>
           </div>
           
@@ -663,11 +675,8 @@ export const notificationService = {
       const finalCcList = Array.from(ccSet);
       const toEmail = config.toEmail;
 
-      let subject = `[Product Catalog] ${isNew ? 'New Product Added' : 'Product Details Updated'}: ${product.name} (${product.barcode})`;
-
-      if (testActive) {
-        subject = `Test - [Product Catalog] ${isNew ? 'New Product Added' : 'Product Details Updated'}: ${product.name} (${product.barcode})`;
-      }
+      const rawSubject = `[Product Catalog] ${isNew ? 'New Product Added' : 'Product Details Updated'}: ${product.name} (${product.barcode})`;
+      const subject = formatTestEmailSubject(rawSubject, testActive);
 
       const htmlBody = this.generateProductEmailHtml(product, config, isNew, editorName, testActive);
 
@@ -684,7 +693,7 @@ export const notificationService = {
           subject,
           html: htmlBody,
           isTestMode: testActive,
-          text: `${testActive ? 'Test - ' : ''}Product ${isNew ? 'Added' : 'Updated'}: ${product.name} (${product.barcode}). SKU: ${product.code || 'N/A'}. AE: ${product.aeName || product.ae_name || 'N/A'}`
+          text: `${testActive ? '[TEST] ' : ''}Product ${isNew ? 'Added' : 'Updated'}: ${product.name} (${product.barcode}). SKU: ${product.code || 'N/A'}. AE: ${product.aeName || product.ae_name || 'N/A'}`
         })
       });
 
@@ -823,8 +832,8 @@ export const notificationService = {
       <body>
         <div class="container">
           <div class="header">
-            <span class="badge">${isTestMode ? `[TEST MODE] ${ev.badge}` : ev.badge}</span>
-            <h1 class="title">${isTestMode ? 'Test - ' : ''}${escapeEmailHtml(ev.title)}</h1>
+            <span class="badge">${isTestMode ? `[TEST] ${ev.badge}` : ev.badge}</span>
+            <h1 class="title">${isTestMode ? '[TEST] ' : ''}${escapeEmailHtml(ev.title)}</h1>
             <div style="font-size: 12px; opacity: 0.9; margin-top: 4px;">${escapeEmailHtml(ev.subtitle)}</div>
           </div>
 
@@ -1056,7 +1065,7 @@ export const notificationService = {
         pickup_replacement: `[Driver Picked Up - Replacement] ${batchTag}${claimNo || rmaNumber}: ${pickup.supplier_name || primaryReport.supplier_name || 'Supplier'}`
       };
       const baseSubject = subjectLabelMap[eventType] || `[RMA Update] ${batchTag}${rmaNumber}`;
-      const subject = testActive ? `Test - ${baseSubject}` : baseSubject;
+      const subject = formatTestEmailSubject(baseSubject, testActive);
 
       // Collect pickup verification photos + RMA intake photos across all bundled RMAs
       const pickupPhotoLabels = [
@@ -1153,7 +1162,7 @@ export const notificationService = {
           html: htmlBody,
           isTestMode: testActive,
           attachments,
-          text: `${testActive ? 'Test - ' : ''}${baseSubject} • Processed by ${actorName} at ${eventTimeStr} (YYYY-MM-DD HH:mm).`
+          text: `${testActive ? '[TEST] ' : ''}${baseSubject} • Processed by ${actorName} at ${eventTimeStr} (YYYY-MM-DD HH:mm).`
         })
       });
 
@@ -1166,6 +1175,47 @@ export const notificationService = {
       return await res.json();
     } catch (err) {
       console.warn(`Non-blocking error sending lifecycle email (${eventType}):`, err.message);
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Manually trigger the Daily Overall RMA Matrix (.xlsx) email dispatch
+   */
+  async sendDailyMatrixEmailNow({ isTestMode = false, force = true, dryRun = false } = {}) {
+    try {
+      let accessToken = '';
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        accessToken = session?.access_token || '';
+      } catch {}
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
+
+      const res = await fetch('/api/send-email?action=daily-matrix', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'daily-matrix',
+          isTestMode: Boolean(isTestMode),
+          force: Boolean(force),
+          dryRun: Boolean(dryRun)
+        })
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return {
+          success: false,
+          status: res.status,
+          error: data?.message || data?.error || `HTTP ${res.status}`
+        };
+      }
+      return data || { success: false, error: 'Empty response from server.' };
+    } catch (err) {
       return { success: false, error: err.message };
     }
   },

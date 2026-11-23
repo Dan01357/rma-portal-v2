@@ -1,12 +1,9 @@
-import nodemailer from 'nodemailer';
-
-function getDiagnosticHelp(errMsg, user, pass) {
-  const str = String(errMsg || '');
-  if (str.includes('535') || str.includes('BadCredentials') || str.includes('Username and Password not accepted')) {
-    return `Google SMTP rejected login for "${user}". Your App Password has ${pass.length} characters (Google App Passwords are 16 letters). If you see 535 Bad Credentials, please verify: (1) Ensure 2-Step Verification is enabled in your Google Account for ${user}, (2) Ensure the App Password was generated under ${user} (Google Account > Security > 2-Step Verification > App passwords), and (3) In Vercel Environment Variables, check GMAIL_APP_PASSWORD and make sure all 16 characters were pasted accurately.`;
-  }
-  return null;
-}
+import { handleDailyMatrixEmail } from './_lib/dailyMatrixEmailHandler.js';
+import {
+  createSmtpTransport,
+  formatTestEmailSubject,
+  getDiagnosticHelp
+} from './_lib/smtpMailer.js';
 
 export default async function handler(req, res) {
   // CORS configuration
@@ -15,7 +12,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, x-cron-secret, x-vercel-cron'
   );
 
   if (req.method === 'OPTIONS') {
@@ -32,14 +29,15 @@ export default async function handler(req, res) {
       }
     }
 
-    const smtpUser = String(process.env.SMTP_USER || process.env.GMAIL_USER || 'finance2@keysysincorporated.com').trim();
-    const rawPass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD || '';
-    
-    // CRITICAL: Google displays app passwords with spaces like "abcd efgh ijkl mnop".
-    // We strip all spaces/whitespace to ensure pure 16-character authentication with Google SMTP.
-    const cleanPass = String(rawPass).replace(/\s+/g, '').trim();
+    const requestedAction = String(req.query?.action || payload?.action || '').trim().toLowerCase();
+    if (requestedAction === 'daily-matrix') {
+      return await handleDailyMatrixEmail(req, res, payload);
+    }
 
-    if (!cleanPass) {
+    const smtp = createSmtpTransport();
+    const { smtpUser, rawPass, cleanPass, transporter, configured } = smtp;
+
+    if (!configured || !cleanPass) {
       console.warn('SMTP credentials (GMAIL_APP_PASSWORD) not configured in Vercel environment variables yet.');
       return res.status(200).json({
         success: false,
@@ -48,27 +46,6 @@ export default async function handler(req, res) {
         message: 'SMTP credentials (GMAIL_APP_PASSWORD) not configured in Vercel environment variables. Email notifications will be logged in console.'
       });
     }
-
-    const isGmail = !process.env.SMTP_HOST || process.env.SMTP_HOST.includes('gmail.com');
-    const transporter = nodemailer.createTransport(
-      isGmail
-        ? {
-            service: 'gmail',
-            auth: {
-              user: smtpUser,
-              pass: cleanPass
-            }
-          }
-        : {
-            host: process.env.SMTP_HOST,
-            port: Number(process.env.SMTP_PORT || 465),
-            secure: Number(process.env.SMTP_PORT || 465) === 465,
-            auth: {
-              user: smtpUser,
-              pass: cleanPass
-            }
-          }
-    );
 
     // Diagnostic/Testing Connection Ping
     if (req.method === 'GET' || payload?.action === 'test-connection') {
@@ -132,9 +109,7 @@ export default async function handler(req, res) {
 
       finalTo = 'mgan@a2z2go.net';
       finalCc = []; // empty to prevent other recipients from receiving anything
-      finalSubject = (/^(test\s*-|\[test)/i.test(finalSubject))
-        ? finalSubject
-        : `[TEST MODE] Test - ${finalSubject}`;
+      finalSubject = formatTestEmailSubject(finalSubject, true);
 
       const testBanner = `
         <div style="background-color: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 14px 18px; border-radius: 12px; margin-bottom: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px;">

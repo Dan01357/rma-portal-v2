@@ -85,7 +85,7 @@ The system operates across several affiliated wholesale distribution and manufac
 - **Resizeable B&W RMA Box Sticker Studio (`ReturnQRModal.jsx`)**: Renders crisp plain B&W box stickers (`80 x 80 mm` Square, `100 x 100 mm`, `140 x 195 mm` Extra Large Half Letter, or custom mm) with PNG download and **US Letter (`8.5in x 11in`, `letter portrait`)** printing — no thermal 4x6" modal or colored clutter.
 
 ### B. Admin & Streamlined Operational Hubs (`/admin`)
-- **Gate Authentication**: Super Admin Test Mode / Live Mode OTP verification and Google Identity Lock invite gatekeeper (`GatekeeperPinModal.jsx`). Test Mode Sandbox dispatches all simulated emails exclusively to `mgan@a2z2go.net` with `Test - ` / `[TEST_MODE]` prefixes (`RMA-TEST-`, `CM-TEST-`, `RTV-TEST-`).
+- **Gate Authentication**: Super Admin Test Mode / Live Mode OTP verification and Google Identity Lock invite gatekeeper (`GatekeeperPinModal.jsx`). Test Mode Sandbox dispatches all simulated emails exclusively to `mgan@a2z2go.net` with **`[TEST] `** as the first word in email subjects (`RMA-TEST-`, `CM-TEST-`, `RTV-TEST-`, `[TEST_MODE]`).
 - **Streamlined Quick Actions Modal (`QuickRMAActionModal.jsx`)**:
   - Focused strictly on **Stream Switcher** (`Customer Hub` <-> `Supplier RTV`), prominent **4-Choice Outcome & Pickup Banner** (`Open 4-Choice / Pickup Window`), **Split Qty** (`-B`, `-C` tickets), **Edit Details & Documents** (with real-time `ProductAutoSuggest`), **Credit Memo Launch**, and **RMA Audit Trail** (deprecated Condition Grade, Quarantine locks, 5/6 triage cards, Buffer Slips, Driver QR Widget, and Gate Passes removed).
 - **4-Choice Outcome, 5-Photo Pickup & Unified US Letter Form (`SimpleSupplierRtvWizardModal.jsx` + `SupplierPickupFormModal.jsx`)**:
@@ -93,7 +93,8 @@ The system operates across several affiliated wholesale distribution and manufac
   - Driver Pickup Verification captures 5 Drive photos (`driver_license_front`, `driver_license_back`, `truck_plate`, `driver_handover`, `pickup_items`) + Driver Name + Plate # and renders a pure **US Letter (`8.5in x 11in`) B&W Unified Debit Claim / Replacement & Pickup Form** (auto dual-copy half-sheet cut for 1–4 items or repeating full-page copy per copy for 5+ items), plus sends 4 lifecycle emails with generated **PDF form attachments** (`Debit-Claim-Form-*.pdf` / `Replacement-Form-*.pdf`).
 - **Multi-RMA Consolidation**:
   - **Supplier RTV Batch Processing**: Select multiple RMAs (with 1-click `Select All Unclaimed for <Supplier>` and Single-Supplier Guard), issue ONE shared `RTV-` / `RTV-TEST-` claim, toggle **Auto-Combine Identical Items**, and send one consolidated email + PDF.
-  - **Overall RMA Matrix (`.xlsx`)**: Frozen-pane, auto-filtered Excel workbook with daily returned piece counts (`YYYY-MM-DD`), Good/Bad stock split, workflow statuses, and optional 0-return catalog SKUs.
+  - **Overall RMA Matrix (`.xlsx`) & Daily 1:00 PM PHT Auto-Email**: Frozen-pane, auto-filtered Excel workbook with daily returned piece counts (`YYYY-MM-DD`), Good/Bad stock split, workflow statuses, and optional 0-return catalog SKUs; automatically generated and emailed daily at 1:00 PM `Asia/Manila` (`05:00 UTC` via `/api/send-email?action=daily-matrix`) to configured Live `To` + `CC` recipients, or triggered manually via **Send Daily Matrix Now** in Settings.
+  - **Multi-Recipient & Never-Expiring Email RMA Editor**: New RMA Alert email links authorize the Primary `To` and ALL `CC` recipients on that notification with permanent validity (`No Expiry • Revocable by Admin`).
 - **SKU & Product Name Auto-Population (`ProductAutoSuggest.jsx`)**:
   - Bi-directional case-insensitive lookup across Supabase `products` and coworker's Laravel Cloud SQL (`erply_products`) via `/api/v1/products/lookup`.
 
@@ -247,8 +248,9 @@ All endpoints below reside under `https://rma-portal-v2.vercel.app`:
 | `GET` | `/api/v1/credit-memos`| **Yes** | List credit memos |
 | `POST` | `/api/v1/credit-memos`| **Yes** | Issue a credit memo voucher (editable Finance Head) |
 | `GET` | `/api/v1/credit-memos/:id`| **Yes** | Get single credit memo voucher |
-| `GET` | `/api/v1/rma-email-edit`| **Google JWT + Invite** | Load scoped RMA record for email-bound editor link (enforces Live/Test isolation) |
+| `GET` | `/api/v1/rma-email-edit`| **Google JWT + Invite** | Load scoped RMA record for multi-recipient (`To` + `CC`) never-expiring email editor link (enforces Live/Test isolation) |
 | `PATCH`| `/api/v1/rma-email-edit`| **Google JWT + Invite** | Save scoped RMA product/SKU/price/expiry/SI/DR/PO/manifest updates (routed via `/api/v1/rma?action=email-edit`) |
+| `GET`/`POST` | `/api/send-email?action=daily-matrix` | **Cron Secret / Admin JWT** | Daily 1:00 PM PHT (`05:00 UTC`) automated & manual Overall RMA Matrix (`.xlsx`) email dispatcher (`API_ROUTE_COUNT === 12`) |
 | `GET` | `/api/v1/api-keys` | Admin | List all registered API keys (masked) |
 | `POST` | `/api/v1/api-keys` | Admin | Generate a new API key (shows secret once) |
 | `PATCH`| `/api/v1/api-keys/:id`| Admin | Rotate an API key |

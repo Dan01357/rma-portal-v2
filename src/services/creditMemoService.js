@@ -12,6 +12,10 @@ const CREDIT_MEMOS_STORAGE_KEY = 'rma_portal_credit_memos_v2';
 const CONSOLIDATED_CM_SETTINGS_KEY = 'consolidated_cm_items_store';
 const CONSOLIDATED_CM_LOCAL_KEY = 'rma_consolidated_cm_items_v1';
 
+// Prevent in-flight background fetches or stale localStorage caches from resurrecting voided Credit Memos
+let cmMutationEpoch = 0;
+const recentlyVoidedCmNumbers = new Set();
+
 function buildPackedCmNotes(humanNotes, isTest, consolidatedItems = [], rmaNumbers = [], reportIds = []) {
   let base = stripCreditMemoMetaTag(humanNotes || '');
   if (isTest && !base.includes('[TEST_MODE]')) {
@@ -145,7 +149,9 @@ export const creditMemoService = {
    * legacy 'rma_reports' notes, and local storage
    */
   async getCreditMemos() {
+    const fetchEpoch = cmMutationEpoch;
     const memosMap = new Map();
+    let dbTableQuerySucceeded = false;
     const consolidatedStore = await this.getConsolidatedItemsStore();
 
     // 1. Primary Source: Dedicated Supabase 'credit_memos' table
@@ -156,8 +162,9 @@ export const creditMemoService = {
         .order('credit_issued_at', { ascending: false });
 
       if (!error && Array.isArray(dbMemos)) {
+        dbTableQuerySucceeded = true;
         for (const m of dbMemos) {
-          if (m.credit_memo_number) {
+          if (m.credit_memo_number && !recentlyVoidedCmNumbers.has(m.credit_memo_number)) {
             const creditAmt = Number(m.credit_amount ?? m.amount ?? 0);
             const grossAmt = Number(m.amount ?? m.credit_amount ?? 0);
             memosMap.set(m.credit_memo_number, {
@@ -189,7 +196,12 @@ export const creditMemoService = {
           if (r.notes && typeof r.notes === 'string' && r.notes.includes('credit_memo_number')) {
             try {
               const memoData = JSON.parse(r.notes);
-              if (memoData && memoData.credit_memo_number && !memosMap.has(memoData.credit_memo_number)) {
+              if (
+                memoData &&
+                memoData.credit_memo_number &&
+                !recentlyVoidedCmNumbers.has(memoData.credit_memo_number) &&
+                !memosMap.has(memoData.credit_memo_number)
+              ) {
                 const creditAmt = Number(memoData.credit_amount ?? memoData.amount ?? 0);
                 const grossAmt = Number(memoData.amount ?? memoData.credit_amount ?? 0);
                 const combined = {
@@ -217,14 +229,17 @@ export const creditMemoService = {
       console.warn('Supabase rma_reports memos fallback notice:', e);
     }
 
-    // 3. Merge with local cache for offline/unsynced entries
+    // 3. Merge with local cache ONLY for unsynced offline entries (or when DB query failed)
     try {
       const raw = localStorage.getItem(CREDIT_MEMOS_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
           parsed.forEach(m => {
-            if (m.credit_memo_number && !memosMap.has(m.credit_memo_number)) {
+            if (!m?.credit_memo_number || recentlyVoidedCmNumbers.has(m.credit_memo_number)) return;
+            // If Supabase table read succeeded, never resurrect DB-synced memos already deleted on server
+            if (dbTableQuerySucceeded && m.is_synced_to_db !== false) return;
+            if (!memosMap.has(m.credit_memo_number)) {
               memosMap.set(m.credit_memo_number, m);
             }
           });
@@ -254,10 +269,12 @@ export const creditMemoService = {
     });
     list.sort((a, b) => new Date(b.credit_issued_at || b.created_at || 0) - new Date(a.credit_issued_at || a.created_at || 0));
 
-    // Update local cache with latest merged list
-    try {
-      localStorage.setItem(CREDIT_MEMOS_STORAGE_KEY, JSON.stringify(list));
-    } catch (e) {}
+    // Update local cache with latest merged list ONLY if no newer mutation occurred while fetching
+    if (fetchEpoch === cmMutationEpoch) {
+      try {
+        localStorage.setItem(CREDIT_MEMOS_STORAGE_KEY, JSON.stringify(list));
+      } catch (e) {}
+    }
 
     return list;
   },
@@ -291,6 +308,8 @@ export const creditMemoService = {
     const modeExisting = existing.filter((m) => isTestRecord(m) === isTest);
     const cmNumber = memoData.credit_memo_number || this.generateCreditMemoNumber(modeExisting.length, isTest);
 
+    recentlyVoidedCmNumbers.delete(cmNumber);
+    cmMutationEpoch += 1;
     const isConsolidated = consolidatedItems.length > 1 || rmaNumbersList.length > 1;
     const joinedRmas = rmaNumbersList.join(', ');
     const displayRmaField = isConsolidated
@@ -544,6 +563,8 @@ export const creditMemoService = {
    * Delete / Void a Credit Memo (resets ALL linked rma_reports rows for consolidated memos)
    */
   async deleteCreditMemo(cmNumber, reportId) {
+    if (cmNumber) recentlyVoidedCmNumbers.add(cmNumber);
+    cmMutationEpoch += 1;
     const existing = await this.getCreditMemos();
     const target = existing.find(m => m.credit_memo_number === cmNumber);
     const filtered = existing.filter(m => m.credit_memo_number !== cmNumber);
@@ -601,6 +622,7 @@ export const creditMemoService = {
     }
 
     await Promise.allSettled(ops);
+    cmMutationEpoch += 1;
 
     return { success: true };
   },
@@ -610,6 +632,8 @@ export const creditMemoService = {
    */
   async deleteMultipleCreditMemos(memoNumbers = []) {
     if (!memoNumbers || memoNumbers.length === 0) return { success: true };
+    memoNumbers.forEach((n) => { if (n) recentlyVoidedCmNumbers.add(n); });
+    cmMutationEpoch += 1;
     const numSet = new Set(memoNumbers);
 
     const existing = await this.getCreditMemos();

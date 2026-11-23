@@ -11,6 +11,7 @@ import {
   mockPhotoUploadSuccess,
   setPublicPortalTestMode,
   gotoAdmin,
+  readSupabasePublicEnv,
   cleanupTestRecords
 } from './helpers/testUtils.js';
 
@@ -144,16 +145,19 @@ function assertEmailPayloadClean({ payload, expectedExpiry, expectTestMode }) {
   expect(Boolean(payload.isTestMode)).toBe(expectTestMode);
 
   if (expectTestMode) {
-    expect(payload.subject).toMatch(/^Test - /);
+    expect(payload.subject).toMatch(/^\[TEST\] /);
+    expect(payload.subject).not.toMatch(/^(?:Test\s*-|\[TEST MODE\]|\[TEST\]\s+\[TEST\])/i);
     expect(payload.fromName).toContain('[TEST]');
     expect(payload.html).toContain('mgan@a2z2go.net');
   } else {
-    expect(payload.subject).not.toMatch(/^Test - /);
+    expect(payload.subject).not.toMatch(/^(?:\[TEST|Test\s*-)/i);
     expect(payload.fromName).not.toContain('[TEST]');
+    expect(payload.html).toContain('To &amp; CC recipients');
   }
 
   // Clickable Edit RMA Details & Documents CTA inside generated HTML email
   expect(payload.html).toContain('Edit RMA Details &amp; Documents');
+  expect(payload.html).toContain('No expiry (revocable anytime by Admin)');
   expect(payload.html).toMatch(/\/intake\?token=inv_(?:test_)?edit_/);
 
   // Unambiguous Expiry Date (YYYY-MM-DD) & Submission Date (YYYY-MM-DD HH:mm)
@@ -193,6 +197,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       // =========================================================================
       // Prevent mocked Live intake from writing synthetic Live invite records into Supabase
       let interceptLiveInviteWrites = true;
+      let capturedLiveEditorInvite = null;
       await page.route('**/rest/v1/rma_invites**', async (route) => {
         const req = route.request();
         if (interceptLiveInviteWrites && req.method() === 'POST') {
@@ -202,6 +207,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
             body = Array.isArray(parsed) ? parsed[0] : parsed;
           } catch {}
           if (body && !String(body.token || '').startsWith('inv_test_')) {
+            capturedLiveEditorInvite = body;
             return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(body) });
           }
         }
@@ -267,6 +273,16 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
         expectedExpiry: '2027-03-15',
         expectTestMode: false
       });
+      // Verify Live Mode New RMA editor invite includes To + ALL CC recipients & Never-Expires sentinel
+      expect(capturedLiveEditorInvite).toBeTruthy();
+      expect(capturedLiveEditorInvite.duration_unit).toBe('permanent');
+      expect(capturedLiveEditorInvite.duration_display).toBe('No Expiry');
+      expect(capturedLiveEditorInvite.expires_at).toBe('9999-12-31T23:59:59.000Z');
+      expect(capturedLiveEditorInvite.entity_name).toContain('|');
+      expect(capturedLiveEditorInvite.entity_name).toContain(String(capturedEmails[0].to).toLowerCase());
+      for (const ccAddr of (capturedEmails[0].cc || [])) {
+        expect(capturedLiveEditorInvite.entity_name).toContain(String(ccAddr).toLowerCase());
+      }
 
       // Turn off Live invite interception so Step 2 (Test Sandbox) persists real invites & cleans up cleanly
       interceptLiveInviteWrites = false;
@@ -321,7 +337,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       await expect.poll(() => capturedEmails.length, { timeout: 12_000 }).toBeGreaterThan(countBeforeScrap);
       const scrapMail = capturedEmails[capturedEmails.length - 1];
       expect(scrapMail.isTestMode).toBe(true);
-      expect(scrapMail.subject).toMatch(/^Test - \[RMA Scrapped\]/);
+      expect(scrapMail.subject).toMatch(/^\[TEST\] \[RMA Scrapped\]/);
 
       // (b) Restocked lifecycle email
       await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
@@ -332,7 +348,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       await expect.poll(() => capturedEmails.length, { timeout: 12_000 }).toBeGreaterThan(countBeforeRestock);
       const restockMail = capturedEmails[capturedEmails.length - 1];
       expect(restockMail.isTestMode).toBe(true);
-      expect(restockMail.subject).toMatch(/^Test - \[RMA Restocked\]/);
+      expect(restockMail.subject).toMatch(/^\[TEST\] \[RMA Restocked\]/);
 
       const completeDriverPickup = async (optionRegex) => {
         await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
@@ -394,7 +410,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       // (c) Driver Picked Up for Debit Claim -> PDF + Supplier To/CC + 5 photos
       const debitMail = await completeDriverPickup(/Accepted for Debit \/ Credit|Return to supplier for Debit Claim/i);
       expect(debitMail.isTestMode).toBe(true);
-      expect(debitMail.subject).toMatch(/^Test - \[Driver Picked Up - Debit Claim\]/);
+      expect(debitMail.subject).toMatch(/^\[TEST\] \[Driver Picked Up - Debit Claim\]/);
       expect(debitMail.to).toContain('vendor-claims@example.com');
       expect(debitMail.cc).toContain('vendor-cc@example.com');
       expect(debitMail.html).toContain('Driver Pickup Verification Photos (5/5)');
@@ -408,7 +424,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       // (d) Driver Picked Up for Replacement -> PDF + Supplier To/CC + 5 photos
       const replaceMail = await completeDriverPickup(/Replaced with Good Stock|Return to supplier for Replacement \/ Exchange/i);
       expect(replaceMail.isTestMode).toBe(true);
-      expect(replaceMail.subject).toMatch(/^Test - \[Driver Picked Up - Replacement\]/);
+      expect(replaceMail.subject).toMatch(/^\[TEST\] \[Driver Picked Up - Replacement\]/);
       expect(replaceMail.to).toContain('vendor-claims@example.com');
       expect(replaceMail.cc).toContain('vendor-cc@example.com');
       const replacePdfAtt = (replaceMail.attachments || []).find((a) => String(a.filename || '').startsWith('Replacement-Form-'));
@@ -536,12 +552,25 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       const editorPage = await editorCtx.newPage();
       const editorGuard = attachStrictGuards(editorPage);
       try {
+        // When Playwright injects a synthetic `.pweditorsig` JWT for external OAuth simulation,
+        // avoid sending the unsigned test JWT to live PostgREST (swap Bearer back to anon key so live DB checks still execute cleanly).
+        const { anonKey: editorAnonKey } = readSupabasePublicEnv();
+        await editorPage.route('**/rest/v1/**', async (route) => {
+          const req = route.request();
+          const hdrs = { ...req.headers() };
+          if (String(hdrs.authorization || '').includes('.pweditorsig') && editorAnonKey) {
+            hdrs.authorization = `Bearer ${editorAnonKey}`;
+          }
+          return route.continue({ headers: hdrs });
+        });
+
         const parsedEditorUrl = new URL(editorHref);
         const editorPathWithQuery = `${parsedEditorUrl.pathname}${parsedEditorUrl.search}`;
 
         await editorPage.goto(editorPathWithQuery, { waitUntil: 'domcontentloaded' });
         await expect(editorPage.getByText('RMA Details Editor Authorization')).toBeVisible({ timeout: 20_000 });
         await expect(editorPage.getByText('mgan@a2z2go.net', { exact: true }).first()).toBeVisible();
+        await expect(editorPage.getByText(/No Expiry.*Revocable by Admin/i).first()).toBeVisible();
         await expect(editorPage.getByText(rmaNum).first()).toBeVisible();
 
         const buildMockJwt = (emailAddr) => {
@@ -683,7 +712,8 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
         );
 
         await expect(editorPage.getByText('RMA Details & Documents Editor').first()).toBeVisible({ timeout: 20_000 });
-        await expect(editorPage.getByText(/Link expires in:/i).first()).toBeVisible();
+        await expect(editorPage.getByText(/No Expiry.*Revocable by Admin/i).first()).toBeVisible();
+        await expect(editorPage.getByText(/Link expires in:/i)).toBeHidden();
         await expect(editorPage.getByText('Admin Portal')).toBeHidden();
         await expect(editorPage.getByRole('button', { name: /Credit Memos/i })).toBeHidden();
         await expect(editorPage.getByRole('button', { name: /Scan RMA QR/i })).toBeHidden();
@@ -701,10 +731,144 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
         expect(savedPayload?.updates?.supplier_name).toBe('Mondelez Philippines');
 
         editorGuard.assertClean('suite 07 standalone email RMA editor');
+
+        // Verify Multi-Recipient (To + CC) Editor Invite allows a CC recipient to unlock while still blocking outsiders
+        const multiToken = await page.evaluate(async ({ targetRma, supaUrl: url, anonKey: key }) => {
+          const rawAuthKey = Object.keys(localStorage).find((k) => /^sb-.*-auth-token$/.test(k));
+          const parsedAuth = rawAuthKey ? JSON.parse(localStorage.getItem(rawAuthKey) || '{}') : null;
+          const bearer = parsedAuth?.access_token || parsedAuth?.currentSession?.access_token || key;
+          const tok = `inv_test_edit_${Date.now().toString(36)}_multi`;
+          const nowIso = new Date().toISOString();
+          const row = {
+            token: tok,
+            stream_type: 'customer_inbound',
+            authorized_email: 'mgan@a2z2go.net',
+            entity_name: `[RMA_EDITOR:${targetRma}|mgan@a2z2go.net,cc-reviewer@pingcon-test.local]`,
+            store_branch: targetRma,
+            duration_value: 0,
+            duration_unit: 'permanent',
+            duration_display: 'No Expiry',
+            expires_at: '9999-12-31T23:59:59.000Z',
+            created_by: 'Playwright Multi-Recipient Check',
+            status: 'active',
+            created_at: nowIso,
+            updated_at: nowIso
+          };
+          const res = await fetch(`${url}/rest/v1/rma_invites`, {
+            method: 'POST',
+            headers: { apikey: key, Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(row)
+          });
+          if (!res.ok) {
+            throw new Error(`Failed to create multi-recipient invite (${res.status}): ${await res.text()}`);
+          }
+          return tok;
+        }, { targetRma: rmaNum, ...readSupabasePublicEnv() });
+
+        try {
+          mockOAuthEmail = 'unauthorized-hacker@gmail.com';
+          await editorPage.evaluate(() => {
+            localStorage.clear();
+            sessionStorage.clear();
+          });
+          await editorPage.goto('about:blank');
+          const multiPath = `/intake?token=${encodeURIComponent(multiToken)}&editRma=${encodeURIComponent(rmaNum)}&mode=test`;
+          await editorPage.goto(multiPath, { waitUntil: 'domcontentloaded' });
+          await expect(editorPage.getByText(/Authorized To & CC Recipients \(2\)/i)).toBeVisible({ timeout: 20_000 });
+          await expect(editorPage.getByText('cc-reviewer@pingcon-test.local', { exact: true }).first()).toBeVisible();
+          await expect(editorPage.getByText(/No Expiry.*Revocable by Admin/i).first()).toBeVisible();
+
+          mockOAuthEmail = 'cc-reviewer@pingcon-test.local';
+          await editorPage.goto('about:blank');
+          await editorPage.goto(
+            `${multiPath}#access_token=${buildMockJwt('cc-reviewer@pingcon-test.local')}&refresh_token=pw_ref&expires_in=3600`,
+            { waitUntil: 'domcontentloaded' }
+          );
+          await expect(editorPage.getByText('RMA Details & Documents Editor').first()).toBeVisible({ timeout: 20_000 });
+          await expect(editorPage.getByText('cc-reviewer@pingcon-test.local').first()).toBeVisible();
+          await expect(editorPage.getByText(/No Expiry.*Revocable by Admin/i).first()).toBeVisible();
+        } finally {
+          await page.evaluate(async ({ tok, supaUrl: url, anonKey: key }) => {
+            const rawAuthKey = Object.keys(localStorage).find((k) => /^sb-.*-auth-token$/.test(k));
+            const parsedAuth = rawAuthKey ? JSON.parse(localStorage.getItem(rawAuthKey) || '{}') : null;
+            const bearer = parsedAuth?.access_token || parsedAuth?.currentSession?.access_token || key;
+            await fetch(`${url}/rest/v1/rma_invites?token=eq.${encodeURIComponent(tok)}`, {
+              method: 'DELETE',
+              headers: { apikey: key, Authorization: `Bearer ${bearer}` }
+            });
+          }, { tok: multiToken, ...readSupabasePublicEnv() }).catch(() => {});
+        }
       } finally {
         editorGuard.detach();
         await editorCtx.close();
       }
+
+      // =========================================================================
+      // 5. DAILY OVERALL RMA MATRIX (.XLSX) AUTO-EMAILER + SETTINGS BUTTON QA
+      // =========================================================================
+      const unauthCronGet = await request.get('/api/send-email?action=daily-matrix');
+      expect(unauthCronGet.status()).toBe(401);
+      const forgedCronPost = await request.post('/api/send-email?action=daily-matrix', {
+        headers: { Authorization: 'Bearer forged.invalid.token', 'Content-Type': 'application/json' },
+        data: { force: true, dryRun: true }
+      });
+      expect(forgedCronPost.status()).toBe(401);
+
+      const adminJwt = await page.evaluate(() => {
+        const supaKey = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'));
+        return supaKey ? JSON.parse(localStorage.getItem(supaKey))?.access_token : null;
+      });
+      expect(adminJwt).toBeTruthy();
+
+      // Authenticated Live dry-run dispatch -> verifies OOXML .xlsx + To/CC + non-[TEST] subject
+      const liveMatrixRes = await request.get(
+        '/api/send-email?action=daily-matrix&dryRun=true&includeAttachmentBase64=true',
+        { headers: { Authorization: `Bearer ${adminJwt}` } }
+      );
+      expect(liveMatrixRes.status()).toBe(200);
+      const liveMatrixJson = await liveMatrixRes.json();
+      expect(liveMatrixJson.success).toBe(true);
+      expect(liveMatrixJson.dryRun).toBe(true);
+      expect(liveMatrixJson.isTestMode).toBe(false);
+      expect(liveMatrixJson.to).toBeTruthy();
+      expect(Array.isArray(liveMatrixJson.cc)).toBe(true);
+      expect(liveMatrixJson.subject).not.toMatch(/^\[TEST\] /);
+      expect(liveMatrixJson.filename).toMatch(/^Overall_RMA_Matrix_Report_\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2} \d{4}\.xlsx$/);
+      assertStrictOoxmlWorkbook(Buffer.from(liveMatrixJson.attachmentBase64, 'base64'), { expectMatrixPanes: true });
+
+      // Authenticated Test Mode dry-run dispatch -> [TEST] first word + strictly mgan@a2z2go.net + empty CC
+      const testMatrixRes = await request.post('/api/send-email?action=daily-matrix', {
+        headers: { Authorization: `Bearer ${adminJwt}`, 'Content-Type': 'application/json' },
+        data: { action: 'daily-matrix', dryRun: true, isTestMode: true, force: true, includeAttachmentBase64: true }
+      });
+      expect(testMatrixRes.status()).toBe(200);
+      const testMatrixJson = await testMatrixRes.json();
+      expect(testMatrixJson.success).toBe(true);
+      expect(testMatrixJson.isTestMode).toBe(true);
+      expect(testMatrixJson.to).toBe('mgan@a2z2go.net');
+      expect(testMatrixJson.cc).toEqual([]);
+      expect(testMatrixJson.subject).toMatch(/^\[TEST\] /);
+      expect(testMatrixJson.filename).toMatch(/^TEST_Overall_RMA_Matrix_Report_/);
+      assertStrictOoxmlWorkbook(Buffer.from(testMatrixJson.attachmentBase64, 'base64'), { expectMatrixPanes: true });
+
+      // UI Check: SettingsTab -> Send Daily Matrix Now button
+      await page.route('**/api/send-email?action=daily-matrix**', async (route) => {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            to: liveMatrixJson.to,
+            cc: liveMatrixJson.cc,
+            filename: liveMatrixJson.filename,
+            dataset: liveMatrixJson.dataset
+          })
+        });
+      });
+      await page.getByRole('button', { name: /Settings & SMTP/i }).click();
+      await expect(page.getByText(/1:00 PM PHT/i).first()).toBeVisible();
+      await page.getByRole('button', { name: /Send Daily Matrix Now/i }).click();
+      await expect(page.getByText(/Daily Matrix dispatched to/i).first()).toBeVisible({ timeout: 15_000 });
 
       guard.assertClean('suite 07 lifecycle emails + pdf + overall matrix xlsx');
     } finally {

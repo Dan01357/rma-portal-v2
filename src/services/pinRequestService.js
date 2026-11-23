@@ -179,9 +179,8 @@ export const pinRequestService = {
       // Filter valid email addresses and ensure NO Account Executive email is included
       const cleanCcList = baseCcList.filter(e => typeof e === 'string' && e.includes('@'));
 
-      const subject = isTestMode
-        ? `Test - [Action Required] New Return PIN Authorization Request: ${requestRecord.requester_name} (${requestRecord.organization_name || requestRecord.access_slug})`
-        : `[Action Required] New Return PIN Authorization Request: ${requestRecord.requester_name} (${requestRecord.organization_name || requestRecord.access_slug})`;
+      const rawSubject = `[Action Required] New Return PIN Authorization Request: ${requestRecord.requester_name} (${requestRecord.organization_name || requestRecord.access_slug})`;
+      const subject = isTestMode ? `[TEST] ${rawSubject}` : rawSubject;
 
       const portalUrl = typeof window !== 'undefined' && window.location?.origin 
         ? `${window.location.origin}/admin` 
@@ -212,7 +211,7 @@ export const pinRequestService = {
           <div class="container">
             <div class="header">
               <span class="badge">Return Authorization Request</span>
-              <h1 class="title">${isTestMode ? 'Test - ' : ''}New PIN Code Request Pending Review</h1>
+              <h1 class="title">${isTestMode ? '[TEST] ' : ''}New PIN Code Request Pending Review</h1>
               <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;">Pingcon RMA Return Gatekeeper</div>
             </div>
             <div class="content">
@@ -262,7 +261,7 @@ export const pinRequestService = {
         </html>
       `;
 
-      const textBody = `${isTestMode ? 'Test - ' : ''}New Return PIN Authorization Request:\n\nRequester: ${requestRecord.requester_name} (${requestRecord.requester_email})\nStore/Branch: ${requestRecord.organization_name || 'N/A'}\nStation: /${requestRecord.access_slug}\nNotes: ${requestRecord.notes || 'None'}\n\nPlease review and approve in Admin Portal: ${portalUrl}`;
+      const textBody = `${isTestMode ? '[TEST] ' : ''}New Return PIN Authorization Request:\n\nRequester: ${requestRecord.requester_name} (${requestRecord.requester_email})\nStore/Branch: ${requestRecord.organization_name || 'N/A'}\nStation: /${requestRecord.access_slug}\nNotes: ${requestRecord.notes || 'None'}\n\nPlease review and approve in Admin Portal: ${portalUrl}`;
 
       console.log(`[PIN Request Alert Dispatch] Sending alert to TO: "${toEmail}", CC: [${cleanCcList.join(', ')}], TestMode: ${isTestMode}`);
 
@@ -465,7 +464,7 @@ export const pinRequestService = {
         body: JSON.stringify({
           to: target.requester_email,
           fromName: 'Keysys & Pingcon RMA Gatekeeper',
-          subject: 'Your Keysys / Pingcon Return Authorization PIN',
+          subject: isTestMode ? '[TEST] Your Keysys / Pingcon Return Authorization PIN' : 'Your Keysys / Pingcon Return Authorization PIN',
           html: htmlContent,
           text: textFallback,
           isTestMode: Boolean(isTestMode)
