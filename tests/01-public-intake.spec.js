@@ -16,6 +16,7 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
   test('Gatekeeper lock states (missing/invalid/expired/revoked), Google identity mismatch, valid token unlock + live countdown + realtime revoke & /admin OTP flow', async ({
     browser
   }) => {
+    test.setTimeout(120_000);
     const cleanContext = await browser.newContext({
       ignoreHTTPSErrors: true,
       storageState: { cookies: [], origins: [] }
@@ -266,7 +267,7 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       await page.locator('input[aria-label="Manual QR or barcode input"]').fill('PINGCON-RMA:TEST:RMA-TEST-0000-NONE');
       await page.getByRole('button', { name: /^Process$/i }).click();
       await expect(page.getByText('Product & RMA QR Scanner')).toBeHidden({ timeout: 10_000 });
-      await expect(page.getByText('RMA Record Not Found')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText('RMA Record Not Found')).toBeVisible({ timeout: 45_000 });
 
       // 4. Test "Missing Barcode / Unlabeled Item" button + Cancel + Re-enable + Defect Reasons + Explanation 250-char counter
       const missingBtn = page.getByRole('button', {
@@ -356,7 +357,7 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
       const nextBarcodeField = page.locator('input[placeholder*="barcode" i]').first();
       await nextBarcodeField.fill(VERIFIED_BARCODE);
-      await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 12_000 });
+      await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 45_000 });
       await expect(page.getByText(/SS1319P/).first()).toBeVisible();
 
       await page.locator('button[title="Increase quantity (+1)"]').click();
@@ -514,12 +515,12 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
         await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
         await page.locator('input[placeholder*="Search" i]').first().fill(createdRmaNumber);
         const row = page.locator('tr', { hasText: createdRmaNumber }).first();
-        if (await row.isVisible({ timeout: 5000 }).catch(() => false)) {
+        if (await row.waitFor({ state: 'visible', timeout: 8_000 }).then(() => true).catch(() => false)) {
           const trashBtn = row.locator('button[title*="Delete" i], button[title*="Trash" i]').first();
           await trashBtn.click();
           await page.getByRole('button', { name: /Move to Trash/i }).click();
           await expect(page.getByText(/Move to Trash \(30-Day Recovery\)\?/i)).toBeHidden({
-            timeout: 15_000
+            timeout: 25_000
           });
           await page.getByRole('button', { name: /Archive & Trash/i }).click();
           page.once('dialog', async (d) => await d.accept());

@@ -142,6 +142,9 @@ export default defineConfig(({ mode }) => {
               if (pathname === '/api/v1/rma') {
                 return await invokeHandler(() => import('./api/v1/rma/index.js'));
               }
+              if (pathname === '/api/v1/rma-email-edit') {
+                return await invokeHandler(() => import('./api/v1/rma/index.js'), { action: 'email-edit' });
+              }
               if (pathname.startsWith('/api/v1/rma/')) {
                 const id = decodeURIComponent(pathname.slice('/api/v1/rma/'.length));
                 return await invokeHandler(() => import('./api/v1/rma/[id].js'), { id });

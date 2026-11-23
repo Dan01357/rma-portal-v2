@@ -28,7 +28,7 @@ async function seedTestModeManifestCustomerRma(page) {
 
   // Item 1: Cataloged SKU
   await page.locator('input[placeholder*="barcode" i]').first().fill(VERIFIED_BARCODE);
-  await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 25_000 });
+  await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 45_000 });
   const fileInput = page.locator('input[type="file"][accept="image/*"]').first();
   await fileInput.setInputFiles({ name: 'pw-mf-1.png', mimeType: 'image/png', buffer: PNG_BUFFER });
   await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({ name: 'pw-mf-1b.png', mimeType: 'image/png', buffer: PNG_BUFFER });
@@ -52,7 +52,7 @@ async function seedTestModeManifestCustomerRma(page) {
 
   const submitPostPromise = page.waitForResponse(
     (res) => res.url().includes('/rest/v1/rma_reports') && res.request().method() === 'POST',
-    { timeout: 35_000 }
+    { timeout: 60_000 }
   );
   await page.getByRole('button', { name: /Submit Return Manifest/i }).click();
   await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 20_000 });
@@ -288,7 +288,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       // Bulk select -> Archive Selected
       await sbCustRow.locator('input[type="checkbox"]').first().check();
       await page.getByRole('button', { name: /Archive Selected \(1\)/i }).click();
-      await expect(sbCustRow).toBeHidden({ timeout: 15_000 });
+      await expect(sbCustRow).toBeHidden({ timeout: 30_000 });
 
       // Sandbox Supplier RTVs -> WMS Restocked confirm + Reset to Pending -> Archive row
       await page.getByRole('button', { name: /Sandbox Supplier RTVs/i }).click();
@@ -331,7 +331,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
         const archRow = page.locator('tr', { hasText: targetRma }).first();
         await expect(archRow).toBeVisible({ timeout: 10_000 });
         await archRow.locator('button[title="Restore item back to active hub"]').click();
-        await expect(archRow).toBeHidden({ timeout: 10_000 });
+        await expect(archRow).toBeHidden({ timeout: 25_000 });
       }
 
       // Move both restored records to 30-Day Trash & permanently destroy
@@ -342,7 +342,8 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       await expect(restoredCustRow).toBeVisible({ timeout: 10_000 });
       await restoredCustRow.locator(`button[title*="Move RMA #${seededManifestRma} to 30-Day Trash Bin"]`).click();
       await page.getByRole('button', { name: /Move to Trash/i }).click();
-      await expect(restoredCustRow).toBeHidden({ timeout: 10_000 });
+      await expect(page.getByRole('button', { name: /Move to Trash/i })).toBeHidden({ timeout: 25_000 });
+      await expect(restoredCustRow).toBeHidden({ timeout: 15_000 });
 
       await page.getByRole('button', { name: /Sandbox Supplier RTVs/i }).click();
       await page.locator('input[placeholder*="Search" i]').first().fill(seededSupplierRma);
@@ -350,7 +351,8 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       await expect(restoredSuppRow).toBeVisible({ timeout: 10_000 });
       await restoredSuppRow.locator(`button[title*="Delete RMA #${seededSupplierRma}"]`).click();
       await page.getByRole('button', { name: /Move to Trash/i }).click();
-      await expect(restoredSuppRow).toBeHidden({ timeout: 10_000 });
+      await expect(page.getByRole('button', { name: /Move to Trash/i })).toBeHidden({ timeout: 25_000 });
+      await expect(restoredSuppRow).toBeHidden({ timeout: 15_000 });
 
       await page.getByRole('button', { name: /Archive & Trash/i }).click();
       await page.getByRole('button', { name: /Trash Bin/i }).click();

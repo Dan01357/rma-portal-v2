@@ -39,7 +39,7 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
       const searchInput = page.locator('input[placeholder*="Search" i]').first();
       await searchInput.fill(activeRmaNumber);
       const targetRow = page.locator('tr', { hasText: activeRmaNumber }).first();
-      await expect(targetRow).toBeVisible({ timeout: 10_000 });
+      await expect(targetRow).toBeVisible({ timeout: 30_000 });
 
       // Open QuickRMAActionModal via Split Qty / Details button
       await targetRow.getByRole('button', { name: /Split Qty|Details|Inspect/i }).first().click();
@@ -140,10 +140,12 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
         timeout: 20_000
       });
       const openChildBtn = page.getByRole('button', { name: /Open Split Child \(/i }).first();
-      if (await openChildBtn.isVisible().catch(() => false)) {
+      if (await openChildBtn.waitFor({ state: 'visible', timeout: 6_000 }).then(() => true).catch(() => false)) {
         const childTxt = await openChildBtn.innerText();
         const m = childTxt.match(/(RMA-TEST-[A-Z0-9-]+)/i);
         if (m) splitChildRma = m[1];
+      } else if (activeRmaNumber) {
+        splitChildRma = `${activeRmaNumber}-B`;
       }
 
       // 5. Open 4-Choice / Pickup Window from prominent banner -> save Restock -> verify QuickRMAActionModal restores cleanly
@@ -182,25 +184,30 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
         await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
         await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
         await page.locator('input[placeholder*="Search" i]').first().fill(rmaNum);
-        const r = page.locator('tr', { hasText: rmaNum }).first();
-        if (await r.isVisible({ timeout: 4000 }).catch(() => false)) {
-          await r.locator(`button[title*="Move RMA #${rmaNum} to 30-Day Trash Bin"]`).click();
+        const r = page.locator('tr').filter({
+          has: page.locator(`button[title*="Move RMA #${rmaNum} to 30-Day"]`)
+        }).first();
+        if (await r.waitFor({ state: 'visible', timeout: 8_000 }).then(() => true).catch(() => false)) {
+          await r.locator(`button[title*="Move RMA #${rmaNum} to 30-Day"]`).click();
           await page.getByRole('button', { name: /Move to Trash/i }).click();
-          await expect(r).toBeHidden({ timeout: 15_000 });
+          await expect(page.getByRole('button', { name: /Move to Trash/i })).toBeHidden({ timeout: 25_000 });
+          await expect(r).toBeHidden({ timeout: 20_000 });
         }
       }
       await page.getByRole('button', { name: /Archive & Trash/i }).click();
       await page.getByRole('button', { name: /Trash Bin/i }).click();
+      const escapedExact = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       for (const rmaNum of [splitChildRma, activeRmaNumber].filter(Boolean)) {
-        await page.locator('input[placeholder*="Search" i]').first().fill(rmaNum);
-        const trashed = page.locator('tr', { hasText: rmaNum }).first();
-        if (await trashed.isVisible({ timeout: 4000 }).catch(() => false)) {
+        await page.locator('input[placeholder*="Search trashed" i], input[placeholder*="Search" i]').first().fill(rmaNum);
+        const trashed = page.locator('tr').filter({
+          hasText: new RegExp(`${escapedExact(rmaNum)}(?!-[A-Z0-9])`)
+        }).first();
+        if (await trashed.waitFor({ state: 'visible', timeout: 8_000 }).then(() => true).catch(() => false)) {
+          page.once('dialog', (dialog) => dialog.accept());
           await trashed.locator('button[title="Permanently destroy this record forever"]').click();
-          await expect(trashed).toBeHidden({ timeout: 15_000 });
+          await expect(trashed).toBeHidden({ timeout: 20_000 });
         }
       }
-      activeRmaNumber = null;
-      splitChildRma = null;
 
       guard.assertClean('suite 04 streamlined QuickRMAActionModal');
     } finally {

@@ -80,25 +80,27 @@ The system operates across several affiliated wholesale distribution and manufac
 - **Auto-Fill & Quantity Counter**:
   - Scanning increments item quantity automatically.
   - Volume controls: `[-]` and `[+]` buttons plus direct numerical input.
-- **Proof Photo Upload**: Compressed directly in-browser to WebP; synced to Google Workspace Shared Drive or Supabase Storage.
+- **Proof Photo Upload & Paperwork AI**: Compressed directly in-browser to WebP; synced to Google Workspace Shared Drive or Supabase Storage. Paperwork Zone 2 validates SI/DR/PO documents via Gemini Flash AI.
 - **Dock GPS Capture**: Optionally captures geolocation coordinates (`latitude`, `longitude`, `accuracy`) if within dock threshold (<= 150m).
-- **Thermal 4x6" RMA Box Label**: Renders multi-item summary label featuring high-density 1D Code128 barcode, 2D QR Code, total item count, total quantity, and branch details. Optimized for thermal label printers (Zebra, Dymo) and mobile screen printing.
+- **Resizeable B&W RMA Box Sticker Studio (`ReturnQRModal.jsx`)**: Renders crisp plain B&W box stickers (`80 x 80 mm` Square, `100 x 100 mm`, `140 x 195 mm` Extra Large Half Letter, or custom mm) with PNG download and **US Letter (`8.5in x 11in`, `letter portrait`)** printing — no thermal 4x6" modal or colored clutter.
 
-### B. Admin & Warehouse Intake Review (`/admin`)
-- **Gate Authentication**: OTP verification and email-based Super Admin authentication.
-- **Mobile Quick Actions Modal (`QuickRMAActionModal.jsx`)**:
-  - Optimized for warehouse supervisors on phones and tablets.
-  - Allows immediate SKU assignment, catalog creation, photo inspection, and Credit Memo issuance.
-- **SKU & Product Name Auto-Population**:
-  - Bi-directional auto-fill: Selecting a product name auto-populates its SKU; typing a SKU auto-populates its name, price, VAT, and supplier.
-  - Pulls live suggestions from the external Laravel Cloud Purchase Orders API (`purchase-order-db-production-ff1oho.laravel.cloud/api/v1`).
-- **Bulk Report Management**: Batch status updates, report filtering, and bulk deletion with safety confirmation modals.
+### B. Admin & Streamlined Operational Hubs (`/admin`)
+- **Gate Authentication**: Super Admin Test Mode / Live Mode OTP verification and Google Identity Lock invite gatekeeper (`GatekeeperPinModal.jsx`). Test Mode Sandbox dispatches all simulated emails exclusively to `mgan@a2z2go.net` with `Test - ` / `[TEST_MODE]` prefixes (`RMA-TEST-`, `CM-TEST-`, `RTV-TEST-`).
+- **Streamlined Quick Actions Modal (`QuickRMAActionModal.jsx`)**:
+  - Focused strictly on **Stream Switcher** (`Customer Hub` <-> `Supplier RTV`), prominent **4-Choice Outcome & Pickup Banner** (`Open 4-Choice / Pickup Window`), **Split Qty** (`-B`, `-C` tickets), **Edit Details & Documents** (with real-time `ProductAutoSuggest`), **Credit Memo Launch**, and **RMA Audit Trail** (deprecated Condition Grade, Quarantine locks, 5/6 triage cards, Buffer Slips, Driver QR Widget, and Gate Passes removed).
+- **4-Choice Outcome, 5-Photo Pickup & Unified US Letter Form (`SimpleSupplierRtvWizardModal.jsx` + `SupplierPickupFormModal.jsx`)**:
+  - Single streamlined 4-choice triage across both Customer Hub & Supplier RTV (`Debit Claim`, `Replacement / Exchange`, `Scrap / Dispose`, `Put Back on Good Shelf (Restock)`).
+  - Driver Pickup Verification captures 5 Drive photos (`driver_license_front`, `driver_license_back`, `truck_plate`, `driver_handover`, `pickup_items`) + Driver Name + Plate # and renders a pure **US Letter (`8.5in x 11in`) B&W Unified Debit Claim / Replacement & Pickup Form** (auto dual-copy half-sheet cut for 1–4 items or repeating full-page copy per copy for 5+ items), plus sends 4 lifecycle emails with generated **PDF form attachments** (`Debit-Claim-Form-*.pdf` / `Replacement-Form-*.pdf`).
+- **Multi-RMA Consolidation**:
+  - **Supplier RTV Batch Processing**: Select multiple RMAs (with 1-click `Select All Unclaimed for <Supplier>` and Single-Supplier Guard), issue ONE shared `RTV-` / `RTV-TEST-` claim, toggle **Auto-Combine Identical Items**, and send one consolidated email + PDF.
+  - **Overall RMA Matrix (`.xlsx`)**: Frozen-pane, auto-filtered Excel workbook with daily returned piece counts (`YYYY-MM-DD`), Good/Bad stock split, workflow statuses, and optional 0-return catalog SKUs.
+- **SKU & Product Name Auto-Population (`ProductAutoSuggest.jsx`)**:
+  - Bi-directional case-insensitive lookup across Supabase `products` and coworker's Laravel Cloud SQL (`erply_products`) via `/api/v1/products/lookup`.
 
-### C. Finance & Credit Memo Engine
-- **Issuance**: Generates official Credit Memo vouchers linked to an RMA report and a physical pull-out reference number (`pull_out_ref`).
-- **Credit Memo ID**: Auto-generates `CM-YYYYMMDD-XXXX`.
-- **Calculations**: Unit price (net or with VAT) multiplied by quantity equals credited amount.
-- **Printable Vouchers**: Renders printable and downloadable PDF vouchers formatted for wholesale accounting records.
+### C. Finance & Credit Memo Engine (Single & Multi-RMA Consolidated)
+- **Single & Consolidated Issuance (`CreditMemoModal.jsx`)**: Generates official Credit Memo vouchers (`CM-YYYY-XXXX` / `CM-TEST-YYYY-XXXX`) linked to one or multiple Customer Inbound RMAs (`+ Consolidated Credit Memo (N RMAs)`), enforcing Missing-SKU Validation Guard and >₱10,000 Super Admin Governance, with itemized breakdowns persisted safely in `rma_settings.consolidated_cm_items_store` (zero `PGRST204` schema errors).
+- **12% VAT Calculations**: Unit price (net / VAT-inclusive) with percentage deduction chips (100%, 90%, 75%, 50%, 25%) and `Pull Out Date (YYYY-MM-DD)` + `Analiza B. Benoza` Finance Head default.
+- **US Letter B&W Printable Vouchers (`CreditMemoVoucherModal.jsx`)**: Renders crisp pure black-and-white **US Letter (`8.5in x 11in`)** single and multi-item consolidated PDF/print vouchers (`CONSOLIDATED (N RMAs)`), plus `.xlsx` exports with 12% VAT breakdown.
 
 ### D. Multi-System REST API v1
 - **Protected Endpoints**: Full CRUD for RMA reports, catalog products, and credit memos.
@@ -131,27 +133,28 @@ The system operates across several affiliated wholesale distribution and manufac
 | `price` | `numeric(12,2) DEFAULT 0.00` | Net unit price |
 | `price_with_vat` | `numeric(12,2) DEFAULT 0.00` | Unit price inclusive of 12% VAT |
 | `unit_name` | `text DEFAULT 'pc'` | Packaging unit (pc, box, case, pack) |
-| `status` | `text DEFAULT 'pending'` | `pending`, `pending_admin_details`, `logged`, `resolved` |
-| `location` | `text` | Warehouse slot / rack |
+| `status` | `text DEFAULT 'pending'` | `pending`, `received_at_dock`, `under_inspection`, `picked_up`, `credit_memo_issued`, `resolved`, `closed`, `rejected` |
+| `warehouse_location` | `text` | Standardized warehouse area (`Good Stock Area`, `Supplier Return Area (RTV)`, `Disposal / Scrap Area`) |
 | `reason` | `text` | Damage / defect reason |
 | `explanation` | `text` | Detailed notes |
-| `photos` | `jsonb DEFAULT '[]'::jsonb` | Array of uploaded photo URLs |
+| `photos` | `jsonb DEFAULT '[]'::jsonb` | Array of uploaded intake & 5 pickup photo URLs |
 | `gps_latitude` | `numeric(10,7)` | Dock GPS latitude |
 | `gps_longitude` | `numeric(10,7)` | Dock GPS longitude |
 | `reporter_name` | `text` | Customer or warehouse lead name |
-| `reporter_contact`| `text` | Contact phone or email |
-| `reported_by` | `text` | Attribution tag (e.g. `Jarmen (API)` or `Reporter`) |
+| `reporter_contact`| `text` | Verified Google email / contact phone |
+| `reported_by` | `text` | Attribution tag (e.g. `Partner System (API)` or `Reporter`) |
 | `ae_name` | `text` | Assigned Account Executive |
 | `ae_email` | `text` | AE notification email |
+| `expiry_date` | `date` | Product expiration date (`YYYY-MM-DD`; required for Supplier RTV & Test Mode) |
 | `parent_rma_id` | `bigint REFERENCES rma_reports(id)` | Manifest parent ticket ID |
 | `is_parent` | `boolean DEFAULT false` | Flag if record is multi-item parent manifest |
 | `items` | `jsonb DEFAULT '[]'::jsonb` | Embedded array of child line items |
 | `total_items` | `integer DEFAULT 1` | Total distinct line items in manifest |
 | `total_quantity` | `integer DEFAULT 1` | Total units returned across manifest |
-| `disposition` | `text` | Triage action (`Restock to Inventory`, `RTV`, `Scrap`) |
-| `condition_grade` | `text` | Grade classification (e.g. `A - Resellable`, `B`, `C`) |
-| `warehouse_location` | `text` | Assigned warehouse rack/bin slot |
-| `created_at` | `timestamptz DEFAULT now()` | Timestamp of intake |
+| `disposition` | `text` | 4-Choice outcome (`Debit Claim`, `Replacement / Exchange`, `Scrap`, `Restock`) or legacy triage label |
+| `is_test` | `boolean DEFAULT false` | Strict Test Mode Sandbox isolation flag (`[TEST_MODE]`, `RMA-TEST-`) |
+| `ai_document_metadata` | `jsonb` | OCR paperwork metadata, `supplier_pickup` (5 photos + `claim_number` + emails), & `workflow_resolution` |
+| `created_at` | `timestamptz DEFAULT now()` | Timestamp of intake (rendered in `YYYY-MM-DD HH:mm` Asia/Manila) |
 
 ### 2. `public.rma_items` (Normalized Multi-Item Return Lines)
 | Column | Type | Description |
@@ -244,6 +247,8 @@ All endpoints below reside under `https://rma-portal-v2.vercel.app`:
 | `GET` | `/api/v1/credit-memos`| **Yes** | List credit memos |
 | `POST` | `/api/v1/credit-memos`| **Yes** | Issue a credit memo voucher (editable Finance Head) |
 | `GET` | `/api/v1/credit-memos/:id`| **Yes** | Get single credit memo voucher |
+| `GET` | `/api/v1/rma-email-edit`| **Google JWT + Invite** | Load scoped RMA record for email-bound editor link (enforces Live/Test isolation) |
+| `PATCH`| `/api/v1/rma-email-edit`| **Google JWT + Invite** | Save scoped RMA product/SKU/price/expiry/SI/DR/PO/manifest updates (routed via `/api/v1/rma?action=email-edit`) |
 | `GET` | `/api/v1/api-keys` | Admin | List all registered API keys (masked) |
 | `POST` | `/api/v1/api-keys` | Admin | Generate a new API key (shows secret once) |
 | `PATCH`| `/api/v1/api-keys/:id`| Admin | Rotate an API key |

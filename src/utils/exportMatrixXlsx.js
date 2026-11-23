@@ -339,8 +339,9 @@ export function buildRmaMatrixDataset({
       const expiryDate = formatDateYmd(rawExp);
       const pickupDateTime = isPickedUp && pickup.picked_up_at ? formatDateTimeYmdHm(pickup.picked_up_at) : '';
       const driverName = String(pickup.driver_name || '').trim();
+      const driverIdStr = [pickup.driver_id_type, pickup.driver_license_no].filter(Boolean).join(': ');
       const truckPlate = String(pickup.truck_plate || '').trim();
-      const driverAndPlate = [driverName, truckPlate ? `(${truckPlate})` : ''].filter(Boolean).join(' ');
+      const driverAndPlate = [driverName, driverIdStr ? `[${driverIdStr}]` : '', truckPlate ? `(${truckPlate})` : ''].filter(Boolean).join(' ');
       const claimOrMemoNo = outcome.claimNumber || pickup.claim_number || linkedMemo || '';
 
       rows.push({
@@ -845,6 +846,7 @@ export function buildRmaMatrixXlsxBytes({
   <sheetViews>
     <sheetView tabSelected="1" workbookViewId="0">
       <pane xSplit="5" ySplit="5" topLeftCell="F6" activePane="bottomRight" state="frozen"/>
+      <selection pane="bottomRight" activeCell="F6" sqref="F6"/>
     </sheetView>
   </sheetViews>
   <sheetFormatPr defaultRowHeight="19" outlineLevelCol="1"/>
@@ -855,38 +857,22 @@ export function buildRmaMatrixXlsxBytes({
   ${mergeXml}
 </worksheet>`;
 
-  const sheetTabName = activeStream === 'supplier_outbound'
+  const rawSheetTabName = activeStream === 'supplier_outbound'
     ? (isTestMode ? 'Test Supplier RTV Matrix' : 'Supplier RTV Matrix')
     : activeStream === 'customer_inbound'
       ? (isTestMode ? 'Test Customer Hub Matrix' : 'Customer Hub Matrix')
       : (isTestMode ? 'Test Overall RMA Matrix' : 'Overall RMA Matrix');
+  const sheetTabName = rawSheetTabName.replace(/[\\/?*[\]:]/g, ' ').trim().slice(0, 31) || 'Matrix';
 
-  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets>
-    <sheet name="${escapeXml(sheetTabName.slice(0, 31))}" sheetId="1" r:id="rId1"/>
-  </sheets>
-</workbook>`;
+  // Keep OPC package/relationship XML compact (zero inter-element newlines/indentation inside
+  // <Types> or <Relationships>) so desktop Microsoft Excel's strict OPC parser opens it cleanly.
+  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${escapeXml(sheetTabName)}" sheetId="1" r:id="rId1"/></sheets></workbook>`;
 
-  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-package.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-package.spreadsheetml.worksheet+xml"/>
-  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-package.spreadsheetml.styles+xml"/>
-</Types>`;
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`;
 
-  const rootRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
-</Relationships>`;
+  const rootRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
 
-  const wbRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-</Relationships>`;
+  const wbRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
 
   const bytes = buildStoredZip([
     { name: '[Content_Types].xml', content: contentTypesXml },

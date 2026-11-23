@@ -1,18 +1,19 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { 
-  ShieldCheck, 
-  ShieldAlert, 
-  Lock, 
-  RefreshCw, 
+import {
+  ShieldCheck,
+  ShieldAlert,
+  Lock,
+  RefreshCw,
   AlertTriangle,
   Building2,
   Clock,
   Mail,
   Truck,
-  Store
+  Store,
+  FileEdit
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { inviteService, formatRemainingCountdown, normalizeEntityName } from '../services/inviteService';
+import { inviteService, formatRemainingCountdown, normalizeEntityName, isRmaEditorInvite, extractRmaNumberFromInvite } from '../services/inviteService';
 
 // Capture OAuth callback hash tokens synchronously at bundle evaluation time before any URL cleanup runs
 let initialCapturedOAuthHash = null;
@@ -139,6 +140,7 @@ export default function GatekeeperPinModal({
 
     try {
       let user = sessionUser;
+      let resolvedAccessToken = initialCapturedOAuthHash?.access_token || '';
 
       // 1. If we captured an OAuth access_token in the URL hash on return from Google, verify it directly
       if (!user && initialCapturedOAuthHash?.access_token) {
@@ -165,6 +167,9 @@ export default function GatekeeperPinModal({
         for (let attempt = 0; attempt < 4; attempt++) {
           try {
             const { data: { session } } = await supabase.auth.getSession();
+            if (session?.access_token) {
+              resolvedAccessToken = session.access_token;
+            }
             if (session?.user?.email) {
               user = session.user;
               break;
@@ -182,6 +187,8 @@ export default function GatekeeperPinModal({
       }
 
       if (user && user.email) {
+        const isEditorLink = isRmaEditorInvite(invite);
+        const boundRma = extractRmaNumberFromInvite(invite);
         // Consume the one-time OAuth return flags now that we have resolved the user
         initialPageLoadHadAuthCallback = false;
         initialCapturedOAuthHash = null;
@@ -190,8 +197,11 @@ export default function GatekeeperPinModal({
           localStorage.removeItem('rma_oauth_in_progress');
           sessionStorage.removeItem('rma_pending_oauth_token');
           localStorage.removeItem('rma_pending_oauth_token');
+          if (resolvedAccessToken) {
+            sessionStorage.setItem('rma_oauth_access_token', resolvedAccessToken);
+          }
 
-          // Clean up OAuth tokens from URL hash and ensure /intake?token=... is preserved
+          // Clean up OAuth tokens from URL hash and ensure /intake?token=... (&editRma=...) is preserved
           if (typeof window !== 'undefined') {
             const cleanUrl = new URL(window.location.href);
             cleanUrl.hash = '';
@@ -200,6 +210,9 @@ export default function GatekeeperPinModal({
             }
             if (!cleanUrl.searchParams.get('token') && invite.token) {
               cleanUrl.searchParams.set('token', invite.token);
+            }
+            if (isEditorLink && boundRma && !cleanUrl.searchParams.get('editRma')) {
+              cleanUrl.searchParams.set('editRma', boundRma);
             }
             window.history.replaceState(null, '', cleanUrl.pathname + cleanUrl.search);
           }
@@ -213,8 +226,14 @@ export default function GatekeeperPinModal({
           setIdentityMismatch(null);
           setOauthError(null);
 
-          const resolvedEntity = normalizeEntityName(invite.entity_name || invite.store_branch);
-          const resolvedStream = invite.stream_type || 'customer_inbound';
+          const urlEditRma = typeof window !== 'undefined'
+            ? (new URLSearchParams(window.location.search).get('editRma') || '')
+            : '';
+          const finalRmaNum = isEditorLink ? (boundRma || urlEditRma.trim()) : '';
+          const resolvedEntity = isEditorLink
+            ? (finalRmaNum ? `RMA ${finalRmaNum}` : 'RMA Details Editor')
+            : normalizeEntityName(invite.entity_name || invite.store_branch);
+          const resolvedStream = isEditorLink ? 'rma_editor' : (invite.stream_type || 'customer_inbound');
           const isTestInvite = Boolean(
             invite.is_test ||
             String(invite.token || '').startsWith('inv_test_') ||
@@ -225,10 +244,11 @@ export default function GatekeeperPinModal({
             type: 'external_customer',
             token: invite.token,
             stream_type: resolvedStream,
+            rma_number: finalRmaNum,
             is_test: isTestInvite,
             authorized_email: authorizedEmail,
             entity_name: resolvedEntity,
-            store_branch: resolvedEntity,
+            store_branch: isEditorLink ? finalRmaNum : resolvedEntity,
             user_email: userEmail,
             user_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
             expires_at: invite.expires_at,
@@ -253,6 +273,7 @@ export default function GatekeeperPinModal({
           await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
           try {
             localStorage.removeItem('rma_portal_gate_session');
+            sessionStorage.removeItem('rma_oauth_access_token');
           } catch {}
 
           setIdentityMismatch({
@@ -724,24 +745,36 @@ export default function GatekeeperPinModal({
               </div>
             </div>
           )
-        ) : (
+        ) : (() => {
+          const isEditorLock = isRmaEditorInvite(validationResult?.invite);
+          const lockedRmaTarget = extractRmaNumberFromInvite(validationResult?.invite);
+          return (
           /* 5. Valid Token -> 1-Click Google Identity Lock OAuth Screen (Zero Admin Buttons) */
           <div className="space-y-5 animate-in zoom-in-95">
             <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mx-auto shadow-inner ${
-              isSupplier 
-                ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-600 dark:text-purple-400' 
-                : 'bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400'
+              isEditorLock
+                ? 'bg-indigo-100 dark:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400'
+                : isSupplier 
+                  ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-600 dark:text-purple-400' 
+                  : 'bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400'
             }`}>
-              {isSupplier ? <Truck className="w-8 h-8" /> : <ShieldCheck className="w-8 h-8" />}
+              {isEditorLock ? <FileEdit className="w-8 h-8" /> : isSupplier ? <Truck className="w-8 h-8" /> : <ShieldCheck className="w-8 h-8" />}
             </div>
 
             <div className="space-y-1">
               <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border inline-flex items-center gap-1 ${
-                isSupplier
-                  ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border-purple-300 dark:border-purple-700'
-                  : 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
+                isEditorLock
+                  ? 'bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700'
+                  : isSupplier
+                    ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border-purple-300 dark:border-purple-700'
+                    : 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
               }`}>
-                {isSupplier ? (
+                {isEditorLock ? (
+                  <>
+                    <FileEdit className="w-3 h-3" />
+                    <span>RMA Details Editor Authorization</span>
+                  </>
+                ) : isSupplier ? (
                   <>
                     <Truck className="w-3 h-3" />
                     <span>Supplier RTV Authorization</span>
@@ -754,24 +787,35 @@ export default function GatekeeperPinModal({
                 )}
               </span>
               <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
-                {isSupplier ? 'Pingcon Return to Vendor Portal' : 'Pingcon RMA Portal'}
+                {isEditorLock
+                  ? 'Pingcon RMA Details & Documents Editor'
+                  : isSupplier
+                    ? 'Pingcon Return to Vendor Portal'
+                    : 'Pingcon RMA Portal'}
               </h2>
             </div>
 
             {/* Recipient Card */}
             <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs text-left space-y-2 text-slate-800 dark:text-slate-200">
               <div className="text-[10px] uppercase font-bold text-slate-400">
-                Private Return Link Issued Exclusively To:
+                {isEditorLock ? 'Private RMA Edit Link Issued Exclusively To:' : 'Private Return Link Issued Exclusively To:'}
               </div>
               <div className={`font-mono font-black text-sm flex items-center gap-1.5 break-all ${
-                isSupplier ? 'text-purple-600 dark:text-purple-400' : 'text-blue-600 dark:text-blue-400'
+                isEditorLock ? 'text-indigo-600 dark:text-indigo-400' : isSupplier ? 'text-purple-600 dark:text-purple-400' : 'text-blue-600 dark:text-blue-400'
               }`}>
-                <Mail className={`w-4 h-4 shrink-0 ${isSupplier ? 'text-purple-600' : 'text-blue-600'}`} />
+                <Mail className={`w-4 h-4 shrink-0 ${isEditorLock ? 'text-indigo-600' : isSupplier ? 'text-purple-600' : 'text-blue-600'}`} />
                 <span>{validationResult.invite.authorized_email}</span>
               </div>
               
-              {/* Entity Name (Store Branch or Supplier) */}
-              {(validationResult.invite.entity_name || validationResult.invite.store_branch) && (
+              {/* Target RMA Record OR Entity Name */}
+              {isEditorLock && lockedRmaTarget ? (
+                <div className="text-[11px] text-slate-700 dark:text-slate-300 flex items-center gap-1 pt-0.5 font-bold">
+                  <FileEdit className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                  <span>
+                    Target RMA Record: <strong className="font-mono text-indigo-700 dark:text-indigo-300">{lockedRmaTarget}</strong>
+                  </span>
+                </div>
+              ) : (validationResult.invite.entity_name || validationResult.invite.store_branch) && (
                 <div className="text-[11px] text-slate-700 dark:text-slate-300 flex items-center gap-1 pt-0.5 font-bold">
                   {isSupplier ? (
                     <Truck className="w-3.5 h-3.5 text-purple-500 shrink-0" />
@@ -881,7 +925,8 @@ export default function GatekeeperPinModal({
               </button>
             </div>
           </div>
-        )}
+          );
+        })()}
 
       </div>
     </div>

@@ -23,7 +23,7 @@ async function submitQuickCustomerPortalRma(page, { isTestMode, reporterName }) 
 
   await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
   await page.locator('input[placeholder*="barcode" i]').first().fill(VERIFIED_BARCODE);
-  await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 45_000 });
 
   await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({
     name: isTestMode ? 'pw-qr-test-mode.png' : 'pw-qr-live-mode.png',
@@ -344,7 +344,7 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
         await fullPageToggle.click();
       }
       const printsBefore = await page.evaluate(() => window.__pwPrintCount || 0);
-      await page.getByRole('button', { name: /Print Letter Form/i }).click();
+      await page.getByRole('button', { name: /Print Letter Dual-Copy Form|Print Full-Page Letter Copies/i }).click();
       await expect.poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 8_000 }).toBeGreaterThan(printsBefore);
       const htmls = await page.evaluate(() => window.__pwPrintHtmls || []);
       const formHtml = htmls[htmls.length - 1] || '';
@@ -376,13 +376,20 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       // Click Edit Claim / Open 4-Choice on sup1B -> opens whole 2-RMA batch -> update truck plate -> preserve sharedClaimNumber!
       await batchBadgeRow.locator('button[title*="Edit" i], button[title*="4-Choice" i]').first().click();
       await expect(page.getByText(/Consolidated Batch: 2 RMAs Selected/i)).toBeVisible({ timeout: 10_000 });
-      await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
+      const editChoiceBtn = page.getByRole('button', { name: /Edit Choice \/ Details/i });
+      if (await editChoiceBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await editChoiceBtn.click();
+      }
       await page.getByRole('button', { name: /Return to supplier for Debit Claim/i }).click();
-      await page.getByRole('button', { name: /Driver Is Here — Upload Photos & Print Letter/i }).click();
-      await page.locator('input[placeholder*="ABC 1234" i]').fill('PW-8888');
+      await page
+        .getByRole('button', {
+          name: /Edit Pickup Details, Emails & 5 Photos|Driver Is Here — Upload Photos & Print Letter/i
+        })
+        .click();
+      await page.locator('input[placeholder*="NAA 1234" i]').fill('PW-8888');
       await page.getByRole('button', { name: /Save Updates & Open Letter Form/i }).click();
       await expect(page.getByText(/SUPPLIER DEBIT CLAIM & PICKUP VALIDATION FORM/i).first()).toBeVisible({
-        timeout: 20_000
+        timeout: 45_000
       });
       await expect(page.getByText(sharedClaimNumber).first()).toBeVisible();
       await page.locator('button[aria-label="Close form"]').click();

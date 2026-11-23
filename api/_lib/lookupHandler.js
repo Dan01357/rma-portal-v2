@@ -323,7 +323,10 @@ export default async function handler(req, res) {
         const responses = await Promise.all(
           erplyUrls.map(async (url) => {
             try {
-              const r = await fetch(url, { headers: { 'X-API-Key': key, 'Accept': 'application/json' } });
+              const r = await fetch(url, {
+                headers: { 'X-API-Key': key, 'Accept': 'application/json' },
+                signal: AbortSignal.timeout(5000)
+              });
               if (!r.ok) return [];
               const j = await r.json();
               return Array.isArray(j?.data) ? j.data : [];

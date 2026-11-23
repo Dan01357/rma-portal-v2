@@ -531,6 +531,38 @@ export async function cleanupTestRecords(
               }
             }
           }
+
+          // Clean up any auto-generated Test Mode RMA Editor invites created for targetRmas
+          for (const rmaNum of targetRmas) {
+            await fetch(
+              `${url}/rest/v1/rma_invites?entity_name=eq.${encodeURIComponent(`[RMA_EDITOR:${rmaNum}]`)}`,
+              { method: 'DELETE', headers }
+            );
+          }
+
+          const invRes = await fetch(
+            `${url}/rest/v1/rma_settings?key=eq.customer_rma_invites_store&select=value`,
+            { headers }
+          );
+          if (invRes.ok) {
+            const invJson = await invRes.json();
+            const invList = invJson?.[0]?.value;
+            if (Array.isArray(invList)) {
+              const filteredInv = invList.filter((i) => {
+                if (!i) return false;
+                if (targetRmas.includes(i.rma_number) || targetRmas.includes(i.store_branch)) return false;
+                if (String(i.entity_name || '').startsWith('[RMA_EDITOR:') && targetRmas.some((r) => String(i.entity_name).includes(r))) return false;
+                return true;
+              });
+              if (filteredInv.length !== invList.length) {
+                await fetch(`${url}/rest/v1/rma_settings?key=eq.customer_rma_invites_store`, {
+                  method: 'PATCH',
+                  headers,
+                  body: JSON.stringify({ value: filteredInv })
+                });
+              }
+            }
+          }
         } catch {}
       },
       { targetRmas: rmas, targetClaims: claims, targetCms: cms, url: supaUrl, key: anonKey }

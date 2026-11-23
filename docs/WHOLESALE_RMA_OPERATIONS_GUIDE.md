@@ -15,19 +15,19 @@ The Wholesale RMA Portal v2 is an enterprise reverse logistics and return mercha
 ```mermaid
 flowchart TD
     A["1. Dock Arrival & Public Scan\n(/ on Mobile/Desktop)"] --> B{"Barcode in Catalog?"}
-    B -- Yes --> C["Auto-Populate Product Specs\nCapture Dock Proof & GPS\nGenerate RMA # & Box Sticker"]
-    B -- No --> D["Flag as 'pending_admin_details'\nCapture Unidentified Item\nStaff Alert Dispatched"]
-    C --> E["2. Physical Intake & Box Labeling\nPrint 4x6' Thermal Sticker\nAttach to Box"]
-    D --> F["Admin SKU Assignment\nServerless Multi-Catalog Auto-Suggest\n(Supabase + ERPLY ERP + Wholesale)"]
+    B -- Yes --> C["Auto-Populate Product Specs\nCapture Dock Proof & GPS\nGenerate RMA # & B&W Box Sticker"]
+    B -- No --> D["Flag as 'Awaiting SKU'\nCapture Unidentified Item\nStaff Alert Dispatched"]
+    C --> E["2. Physical Intake & Box Labeling\nPrint Resizeable B&W QR Sticker\n(US Letter 8.5x11in) Attach to Box"]
+    D --> F["Admin SKU Assignment\nCase-Insensitive Multi-Catalog Auto-Suggest\n(Supabase + ERPLY ERP erply_products)"]
     F --> C
-    E --> G["3. Physical Inspection & Triage\nGrade: A/B/C/D\nDisposition: Restock / RTV / Quarantine / Scrap\nAssign Rack/Bin Location"]
-    G --> H{"Claim Value > ₱10,000?"}
+    E --> G["3. Streamlined 4-Choice Outcome & 5-Photo Pickup\nDebit Claim / Replacement / Scrap / Restock\nSplit Qty (-B, -C) & Stream Switcher"]
+    G --> H{"Customer Credit Memo\n> ₱10,000?"}
     H -- Yes --> I["Super Admin Authorization Required"]
     H -- No --> J["Standard Admin / Finance Approval"]
-    I --> K["4. Finance Credit Memo Issuance\n12% VAT Breakdown\nIssue CM-YYYY-XXXX Voucher"]
+    I --> K["4. Finance Credit Memo (Single & Consolidated)\n12% VAT Breakdown, US Letter B&W Voucher\nIssue CM-YYYY-XXXX / CM-TEST-YYYY-XXXX"]
     J --> K
-    K --> L["5. Supplier Chargeback (RTV)\nBatch Debit Claims for Savemore,\nLiwayway, Pingcon & Bonita"]
-    L --> M["6. Headless REST API Sync\nPrimary System, Jarmen, Jelo, Arlito\nvia SHA-256 API Key Vault"]
+    K --> L["5. Supplier Chargeback (Single & Batch RTV)\nUnified US Letter B&W Debit/Replacement Form\n5-Photo Pickup + PDF Lifecycle Emails"]
+    L --> M["6. Headless REST API Sync & Overall Matrix (.xlsx)\nPartner Systems via SHA-256 API Key Vault\n& Frozen-Pane Excel Workbooks"]
 ```
 
 ### Consolidated Enterprise Operational Architecture
@@ -90,7 +90,7 @@ Restricted strictly to authenticated `SUPER_ADMIN` and `ADMIN` personnel:
 - Accessible via **"QR Keys & PINs"** in the top navigation and tab bar.
 - **Dynamic Profile Creation**: "+ New QR Access Code" generates custom slugs and random 6-digit PINs.
 - **Instant PIN & Expiry Modification**: Administrators can change PINs or adjust expiry hours without reprinting posters.
-- **High-Resolution Poster & Sticker Printing**: Renders print-ready A4 or 4x6" sheets with the generated station QR code, instructions, and an optional PIN visibility toggle.
+- **High-Resolution Poster Printing**: Renders print-ready US Letter (`8.5" x 11"`, `letter portrait`) sheets with the generated station QR code and instructions.
 - **1-Click Revocation**: Toggling status to `Inactive` immediately blocks all inbound scans from that profile.
 
 ### 1.5 Unbypassable Cooldown Lockout System & Anti-Fraud Architecture
@@ -267,104 +267,61 @@ Once merchandise is physically sorted at the inspection benches, warehouse inspe
 
 ### 3.1 Direct Access from Return Reports Table
 Inspectors do not need to switch tabs or scan codes again:
-- **Clicking anywhere on a report row** in the Return Reports table opens the **Quick RMA Processing Modal**.
+- **Clicking anywhere on a report row** in the Return Reports table opens the **Quick RMA Processing Modal** (`RMA Details & Quick Actions`).
 - **Clicking the RMA number link** (`RMA-2026-...`) opens the modal.
-- **Clicking the "Inspect / Triage" button** opens the modal.
+- **Clicking the "Details" / "Split Qty" button** opens the modal.
 
-### 3.2 Condition Grading Standards
-Inspectors select from 4 enterprise condition grades:
-* **Grade A — Like New / Resellable**: Pristine factory packaging, seals intact. Suitable for immediate restocking to active pick locations.
-* **Grade B — Damaged Packaging Only**: Carton crushed, torn exterior box, but inner product 100% intact and non-expired. Suitable for repackaging or discount wholesale clearance.
-* **Grade C — Defective / Parts Only**: Electrical failure, broken components, leakage. Requires Return to Vendor (RTV) debit claim or component salvage.
-* **Grade D — Total Loss / Scrap**: Expired food items, shattered glass, contaminated chemicals. Hazardous waste or authorized destruction.
+### 3.2 Streamlined QuickRMAActionModal Controls
+Deprecated triage panels (Condition Grade dropdown, Automated Lifecycle Stage box, Hold / Quarantine controls, Buffer Slips, Driver QR Widget, Gate Passes, and 5/6 Triage Card grids) have been removed in favor of:
+1. **Stream Switcher**: Instant reclassification between **Customer Hub (Inbound)** and **Supplier RTV (Outbound)**.
+2. **Current 4-Choice Outcome & Pickup Banner + Launch Button**: Displays the live outcome & pickup timestamp (`YYYY-MM-DD HH:mm`) with **"Open 4-Choice / Pickup Window"**.
+3. **Split Quantity**: Split partial units into independent `-B` / `-C` child tickets (e.g., partial Restock & partial Debit Claim).
+4. **Edit Details & Documents**: Case-insensitive `ProductAutoSuggest` (`erply_products` + Supabase catalog) for Item Name/SKU, Commercial Doc #s (`SI #`, `DR #`, `PO #`), `Expiry Date (YYYY-MM-DD)` with explicit `ISO (YYYY-MM-DD)` confirmation readout, and Super Admin Restitution (>₱10,000 governance).
+5. **Customer Credit Memo Launch** & **RMA Audit Trail Timeline**.
 
-### 3.3 Stream-Specific Warehouse Disposition Cards & Purchasing Replenishment Switch
+### 3.3 Unified 4-Choice Outcomes & Purchasing Replenishment
+When opening the **4-Choice Outcome & Pickup Window** (`SimpleSupplierRtvWizardModal.jsx`), staff pick one clear operational decision:
 
-The triage workflow automatically adapts its decision matrix based on whether the ticket is a **Customer Return** (`rma_type: 'customer_inbound'`) or a **Supplier Outbound Defect** (`rma_type: 'supplier_outbound'`):
+#### A. Customer RMA Hub (`customer_inbound`):
+1. **💵 Driver Picked Up / Accepted for Debit / Credit**: Advances to 5-Photo Driver Verification & Unified US Letter Form.
+2. **🔄 Driver Picked Up / Replaced with Good Stock**: Advances to 5-Photo Driver Verification & Unified US Letter Replacement Form.
+3. **🗑️ Throw Away / Dispose (Scrap)**: Moves to `Disposal / Scrap Area` with **Re-Order Stock? (`YES` / `NO`)** selector & sends `[RMA Scrapped]` notification.
+4. **🟢 Put Back on Good Shelf (Restock)**: Moves to `Good Stock Area` (`needs_reorder: false`) & sends `[RMA Restocked]` notification.
 
-#### A. Customer RMA Hub (`customer_inbound` — 6 Cards):
-1. **🟢 1. Restock to Shelf** (`disposition: '2- Restock to Inventory'`):
-   - Prompts for `Target Rack / Bin Location *`.
-   - Routes to Coworker **Ready to Restock** queue (`needs_reorder: false`).
-2. **🟣 2. Move to Supplier RTV** (`disposition: '3- Return to Vendor (RTV)'`):
-   - Auto-sets bin to `'RTV-DOCK'`.
-   - Prompts the **Purchasing Replenishment Switch** (`[ 🔄 YES — Flag for Supplier Re-Order ]` vs `[ 🚫 NO — Do Not Re-Order ]`, default `YES`).
-   - Automatically transfers ticket to Supplier Hub (`rma_type: 'supplier_outbound'`).
-3. **🔴 3. Scrap / Dispose** (`disposition: '5- Scrap / Dispose'`):
-   - Auto-sets bin to `'SCRAP-BIN'`.
-   - Prompts the **Purchasing Replenishment Switch** (default `YES`).
-4. **🔵 4. Buffer Stock Swap (1:1)** (`disposition: '6- Buffer Stock Exchange'`):
-   - Opens the Buffer Stock Replacement Slip.
-   - Prompts the **Purchasing Replenishment Switch** (default `YES`, replacing buffer unit).
-5. **🟡 5. On Hold / Quarantine** (`disposition: '4- Quarantine'`, `status: 'under_inspection'`):
-   - Auto-sets bin to `'QUARANTINE-HOLD'`.
-   - Requires mandatory **Hold / Investigation Reason**.
-   - **Safety Lock:** Freezes Credit Memo, Restock, and Re-Order actions until released.
-6. **⚫ 6. Reject & Return to Customer** (`disposition: '8- Rejected / Return to Customer'`, `status: 'rejected'`):
-   - Auto-sets bin to `'OUTBOUND-RETURN-TO-STORE'`.
-   - Requires mandatory **Customer Rejection Reason**.
-   - **Safety Lock:** Permanently blocks Credit Memo.
-   - Provides button `[ 🖨️ Print Rejected Return Gate Pass ]` to dispatch the box back to customer.
+#### B. Supplier RTV Hub (`supplier_outbound`):
+1. **💵 Return to supplier for Debit Claim**: Assigns or reuses `RTV-` / `RTV-TEST-` claim #, captures 5 Drive pickup photos (`driver_license_front`, `driver_license_back`, `truck_plate`, `driver_handover`, `pickup_items`), opens US Letter B&W **SUPPLIER DEBIT CLAIM & PICKUP VALIDATION FORM**, and emails supplier + attached PDF.
+2. **🔄 Return to supplier for Replacement / Exchange**: Captures 5 pickup photos, opens US Letter B&W **SUPPLIER REPLACEMENT / EXCHANGE & PICKUP FORM**, and emails supplier + attached PDF.
+3. **🗑️ Throw Away / Dispose (Scrap)**: Moves to `Disposal / Scrap Area` with Re-Order switch & dispatches `[RMA Scrapped]` email.
+4. **🟢 Put Back on Good Shelf (Restock)**: Moves to `Good Stock Area` & dispatches `[RMA Restocked]` email.
 
-#### B. Supplier RTV Hub (`supplier_outbound` — 5 Cards):
-1. **⏳ 1. Pending Vendor Pickup** (`disposition: '1 - Pending Vendor Pickup'`):
-   - Staged in `RTV-DOCK`, prompts Replenishment Switch.
-2. **💵 2. Vendor Credit Settled** (`disposition: '3 - Vendor Credit / AP Deduction Settled'`):
-   - Vendor credit memo or AP deduction confirmed. Prompts Replenishment Switch.
-3. **🟢 3. Vendor Sent Replacement Stock** (`disposition: '4 - Vendor Replacement Stock Received'`):
-   - Prompts for shelf location. Routes to Coworker **Ready to Restock** queue and sets `needs_reorder: false`.
-4. **🔴 4. Vendor Rejected Claim** (`disposition: '5 - Claim Rejected by Vendor'`):
-   - Auto-sets bin to `'SCRAP-BIN'`. Blocks Debit Claims. Prompts Replenishment Switch.
-5. **🟡 5. Under Vendor Dispute** (`disposition: '4- Quarantine'`):
-   - Auto-sets bin to `'QUARANTINE-HOLD'`. Requires dispute note. Freezes Debit Claims.
-
-### 3.4 Rack & Bin Location Tagging
-Inspectors input the physical warehouse address (e.g., `RACK-03-BIN-A`, `BAY-2-PALLET-09`, `QUARANTINE-LOCKER`). This prints directly on box labels for pickers.
-
-### 3.5 4x6" Thermal Box Label Printing
-Tapping **"Print 4x6" Label"** launches the thermal printing layout engineered specifically for standard 4x6-inch (101.6mm x 152.4mm) direct thermal label printers (Zebra, TSC, Rongta, Xprinter):
-* High-density Code128 machine-scannable barcode (`*RMA-YYYY-MMDD-XXXX*`)
-* High-contrast 2D QR Code linking to digital audit trail
-* Prominent Condition Grade and Disposition Callouts
-* Assigned Rack/Bin location in 24pt bold monospaced typography
-* Inspector name and timestamp
-* Automatic audit trail logging in `rma_reports.audit_trail` (`stage: 'THERMAL_PRINT'`).
+### 3.4 US Letter Plain B&W Sticker Studio (`ReturnQRModal.jsx`)
+Clicking any RMA QR sticker button opens the resizeable plain black-and-white **Box Sticker Studio**:
+* Presets: `Standard Square (80 x 80 mm)`, `Large Square (100 x 100 mm)`, `Extra Large (Half Letter) (140 x 195 mm)`, or custom mm width/height with `Reset` button.
+* Plain black-and-white ink on **US Letter (`8.5in x 11in`, `letter portrait`)** with explicit `Date & Time (YYYY-MM-DD HH:mm)` and `Expiry Date (YYYY-MM-DD)` stamps plus Reporter Signature line.
 
 ---
 
-## Chapter 4: Finance Credit Memo Issuance & Threshold Governance
+## Chapter 4: Finance Credit Memo Issuance (Single & Consolidated) & Threshold Governance
 
-### 4.1 Credit Memo Calculation & VAT Rules
-Finance officers review triaged returns to approve credit deductions for customers.
-1. **Base Value**: Quantity $\times$ Unit Price (inclusive of 12% Philippine VAT).
+### 4.1 Single & Multi-RMA Consolidated Credit Memos
+Finance officers can issue either a single-ticket Credit Memo or bundle multiple Customer Inbound RMAs into ONE **Consolidated Credit Memo**:
+1. **Multi-Select Consolidated Issuance**: Check 2+ rows in Customer RMA Hub and click **`+ Consolidated Credit Memo (N RMAs)`** (or **`⚡ Process Consolidated 4-Choice (N RMAs)`**).
+2. **Missing-SKU Validation Guard**: Inside Consolidated mode, any selected RMA missing an assigned SKU or ₱>0 price triggers an inline **Financial Validation Guard** with `Assign SKU` shortcuts or the ability to uncheck incomplete rows.
+3. **Deduction & 12% VAT Math**:
    $$\text{Gross Amount} = \text{Quantity} \times \text{Price with VAT}$$
-   $$\text{Net Amount} = \frac{\text{Gross Amount}}{1.12}$$
-   $$\text{VAT Amount} = \text{Gross Amount} - \text{Net Amount}$$
-2. **Deduction Percentage Buttons**: Quick-selection chips automatically calculate approved credit amounts:
-   * **100%**: Full refund / credit for factory defects.
-   * **75% / 50% / 25%**: Pro-rated credits for partial box returns, handling fees, or expired returns.
-3. **Pull-Out Reference Number (POR)**: Automatically generated in enterprise format:
-   `POR-YYYY-XXXX-XXXX` (e.g., `POR-2026-0004-8E1A`).
+   $$\text{Net Amount} = \frac{\text{Gross Amount}}{1.12}, \qquad \text{VAT Amount} = \text{Gross Amount} - \text{Net Amount}$$
+   Includes **100% Full**, **90% (-10%)**, **75%**, **50%**, **25%** quick chips, **`Pull Out Date (YYYY-MM-DD)`**, **`POR-YYYY-XXXX-XXXX`**, and editable Finance Head (**Analiza B. Benoza** default).
+4. **Database Schema Persistence**: Line-item arrays for Consolidated Credit Memos persist cleanly in `rma_settings.consolidated_cm_items_store` (plus clean `[CM_META:...]` recovery metadata stripped from UI/XLSX exports), ensuring `public.credit_memos` never suffers `PGRST204` missing-column errors.
 
 ### 4.2 Multi-Tier Financial Governance (₱10,000 Rule)
 To prevent unauthorized credit issuance on large wholesale claims:
 * **Claims $\le$ ₱10,000**: Standard Admins, Inventory Staff, and Finance Officers can approve and issue the credit memo immediately.
-* **Claims $>$ ₱10,000 (High-Value Claims)**:
-  * The system locks the **"Issue Credit Memo"** action button.
-  * Displays an amber alert:
-    > `High-Value Claim (> ₱10,000.00). Super Admin authorization required to issue credit memo.`
-  * Only users authenticated with the **`super_admin`** role can approve and issue the credit memo.
+* **Claims $>$ ₱10,000 (High-Value Claims)**: Locked behind Super Admin authorization (`super_admin` role required).
 
-### 4.3 Official Printable Credit Memo Voucher
-Issued credit memos generate an official voucher (`CM-YYYY-XXXX`) compliant with BIR/wholesale accounting:
-* Two-tone formal header with company seal
-* Linked RMA number, Pull-Out Reference (POR), Pull-Out Date
-* Line items with Gross Price, Net Price, 12% VAT amount, and Total Credit
-* Triple signature blocks:
-  1. *Prepared By (Warehouse/Dock)*
-  2. *Verified By (Finance & Accounting)*
-  3. *Approved By (General Manager / Super Admin)*
-* One-click PDF / Print preview with bulk multi-voucher batch printing support.
+### 4.3 Official US Letter Plain B&W Credit Memo Voucher & `.xlsx` Export
+Issued credit memos render a pure black-and-white **US Letter (`8.5in x 11in`, `letter portrait`)** official accounting voucher (`CM-YYYY-XXXX` / `CM-TEST-YYYY-XXXX`):
+* Supports both Single-Ticket Vouchers and **`CONSOLIDATED (N RMAs)`** multi-row vouchers with repeating headers across printed pages.
+* **Print Letter Voucher / PDF** & **Export Excel (`.xlsx`)** (including 12% VAT columns, clean notes without internal `[CM_META:]` tokens, and `YYYY-MM-DD` date headers).
 
 ---
 
@@ -379,22 +336,18 @@ When goods are triaged with disposition **"Return to Vendor (RTV)"**, the financ
 * **Keysys Incorporated**: POS hardware, thermal receipt printers, and barcode scanners.
 * **A2Z2GO Logistics Supply**: Packaging straps, cartons, and warehouse consumables.
 
-### 5.2 Batch Claim Aggregation & Debit Note Generation
-In the **Supplier Claims (RTV)** tab:
-1. Filter returns by specific supplier (e.g., *Liwayway Marketing*).
-2. Multi-select returned items using checkboxes.
-3. The dashboard calculates:
-   * Total Selected Items Count
-   * Total Physical Units
-   * Total Claim Debit Value (₱)
-4. Tapping **"+ Batch Debit Claim"** bundles selected returns into a formal supplier chargeback claim.
-5. Export formal Excel (`.xlsx`) reports for supplier credit accounting or print supplier debit vouchers.
+### 5.2 Multi-RMA Batch Consolidation & Unified US Letter Form
+In **Supplier Hub (RTV Claims)**:
+1. Filter by supplier (e.g. *Suy Sing Commercial Corp*) and click 1-click **`Select All Unclaimed for <Supplier>`**, or check individual rows.
+2. Click **`⚡ Process Consolidated Batch (N RMAs)`** to open the 4-Choice Outcome & Pickup Window for the whole batch.
+3. **Single-Supplier Guard**: If selected RMAs originate from different suppliers, Debit Claim / Replacement requires unifying the supplier name (`Unify supplier across all bundled RMAs`) before proceeding.
+4. Completing 5-Photo Driver Pickup issues **ONE shared `RTV-YYYY-XXXX` (or `RTV-TEST-...`) claim number** across all bundled RMAs, opens the pure B&W US Letter **Unified Debit Claim / Replacement Form** (featuring **`Auto-Combine Identical Items: ON/OFF`** toggle and **Auto half-sheet cut for 1–4 items vs Full Page per Copy repeating headers for 5+ items**), and sends **ONE consolidated email** with generated PDF attachment. Re-editing any batch member preserves the shared `RTV-` ID cleanly.
 
-### 5.3 Row-Level Operations & Triage Feature Parity
-Every line item in the Supplier Claims Hub offers complete operational parity with the Customer Hub:
-1. **Row Click-to-Inspect**: Clicking anywhere across a record row instantly opens `QuickRMAActionModal`, allowing warehouse leads to re-grade merchandise (A/B/C/D), modify storage bin locations (`RACK-A1` through `DOCK-INTAKE`), and add inspection notes.
-2. **Thermal 4x6" Box Label Printer**: The dedicated printer icon on each row opens `ThermalBoxLabelModal` pre-populated with item barcodes, bin locations, and clean 4-border thermal formatting.
-3. **In-Table "Assign SKU" Action**: Items intake-scanned with unknown barcodes or "Unidentified Item" status render an `[ Assign SKU ]` button. Clicking it launches the product auto-suggest modal, allowing warehouse operators to search ERPLY live catalog records, link the master supplier, and assign the official unit price. Once saved, the Supplier Hub updates dynamically with real-time pricing and computed claim totals.
+### 5.3 Row-Level Operations, Overall Matrix (`.xlsx`) & Auto-Suggest
+Every line item in Supplier Hub offers full operational parity:
+1. **4-Choice / Pickup & Details**: Open `SimpleSupplierRtvWizardModal` (`⚡ 4-Choice / Pickup`), `SupplierPickupFormModal` (`📄 Debit Claim Form` / `📄 Replacement Form`), or `QuickRMAActionModal` (`📋 Details`).
+2. **Overall RMA Matrix (`.xlsx`)**: Export combined or stream-filtered multi-day Excel matrices with frozen rows 1–5 & cols A–E, daily `(YYYY-MM-DD)` returned-piece breakdowns, Good vs Bad stock splits, Re-Ordered/Restocked/Scrapped/Replaced/Picked-Up flags, and optional 0-return catalog SKUs.
+3. **In-Table "Assign SKU" Action**: Case-insensitive multi-catalog auto-suggest queries Supabase `products` + coworker Laravel Cloud `erply_products` (`[trimmed, capitalized, uppercase, lowercase]` + SKU code query), locking existing barcodes while populating Name, SKU, Supplier, Prices (Net & VAT), Unit, and Pieces/Case.
 
 ### 5.4 Financial Validation & Safety Guard
 To eliminate erroneous ₱0.00 accounting claims or unassigned supplier deductions:
@@ -531,11 +484,12 @@ Content-Type: application/json
 ## Chapter 7: Sandbox Test Mode vs. Live Operations
 
 To ensure dock staff and administrators can train without corrupting production accounting:
-1. **Strict Super Admin Gating**: Test Mode is strictly accessible only when authenticated as `super_admin`.
+1. **Strict Super Admin Gating**: Test Mode is strictly accessible only when authenticated as `super_admin` (isolated `RMA-TEST-`, `CM-TEST-`, `RTV-TEST-`, `[TEST_MODE]`, `is_test: true`).
 2. **Visual Awareness Banner**: When active, a prominent amber bar warns:
-   > `⚡ Super Admin Sandbox Active — Submissions will simulate without sending real emails or dispatching warehouse stock.`
-3. **Email Interception**: During test mode, email notifications are routed exclusively to `finance2@keysysincorporated.com` with a `[TEST SIMULATION]` subject prefix. Real customer and AE emails are completely blocked.
-4. **Dock Worker Protection**: Unauthenticated mobile phone scans and dock staff tablets are **100% locked to Live Mode**, ensuring real incoming customer returns are never misfiled as simulations.
+   > `🧪 Super Admin Sandbox Active — Test emails routed safely to mgan@a2z2go.net • Reports saved to database.`
+3. **Safe Test Email Interception**: During Test Mode, all intake and 4-lifecycle emails (Scrapped, Restocked, Debit Pickup PDF, Replacement Pickup PDF) route exclusively to **`mgan@a2z2go.net`** with `Test - ` / `[TEST_MODE]` prefixes (`to`/`cc` of live customers/bosses/vendors are sanitized out).
+4. **Mandatory Expiration Validation & Unambiguous Dates**: Test Mode enforces mandatory `Expiry Date (YYYY-MM-DD)` alongside Supplier RTV, and all UI/email/print/Excel surfaces format dates strictly as `YYYY-MM-DD` / `YYYY-MM-DD HH:mm` (Asia/Manila).
+5. **Dock Worker Protection**: Unauthenticated mobile phone scans and invited customers are **100% locked to Live Mode**, ensuring real incoming customer returns are never misfiled as simulations.
 
 ---
 
@@ -697,50 +651,23 @@ Public intake users are kept fully aware of their session duration:
 
 ---
 
-## Chapter 12: 4-Pillar Operational Action Architecture, Workstation Queues & Database Constraint Safety
+## Chapter 12: Streamlined 4-Choice Architecture, Workstation Queues & Multi-RMA Consolidation
 
-To eliminate ambiguous triage decisions and prevent warehouse inventory disconnects, Wholesale RMA Portal v2 standardizes all physical returns into **4 operational pillars** and **3 scoped workstation queues**.
+To eliminate ambiguous triage decisions and print clutter, Pingcon Wholesale RMA Portal v2 standardizes operations into **4 clean choices per stream** and **3 scoped coworker queues**.
 
-### 12.1 Stream-Specific Physical Triage Cards
+### 12.1 Strictly Two Supplier RTV Printables & Unified 4-Choice Flow
+Legacy 5/6 triage cards, Condition Grade dropdowns, Automated Lifecycle Stage cards, Quarantine UI holds, Buffer Exchange Slips, Driver QR Widget, Thermal 4x6" Labels, and Vendor/Rejected Gate Passes have been retired:
+1. **Streamlined QuickRMAActionModal**: Keeps strictly Stream Switcher, Current 4-Choice Outcome Banner (`Open 4-Choice / Pickup Window`), `Split Qty` (`-B`/`-C`), `Edit Details & Documents` (`ProductAutoSuggest`), `+ Issue Credit Memo`, and `RMA Audit Trail`.
+2. **Strictly Two Supplier RTV Printables**:
+   - **Generated RMA QR Box Sticker** (`ReturnQRModal.jsx`, US Letter plain B&W, resizeable mm inputs + Half Letter preset).
+   - **Unified Debit Claim / Replacement & Pickup Form** (`SupplierPickupFormModal.jsx`, US Letter `8.5" x 11"` plain B&W, dual-copy compact cut for 1–4 items or repeating full-page copy for 5+ items, single & multi-RMA consolidated batches).
 
-When opening **Quick RMA Processing** (`QuickRMAActionModal.jsx`), physical inspectors are presented with stream-specific action cards:
-
-#### A. Customer RMA Inbound (6 Action Cards):
-1. 🟢 **Card #1 — Restock to Shelves / Resellable**: Good condition goods (`Grade A/B`). Sets `disposition: '2- Restock to Inventory'` and routes into the Restock Queue with rack/bin location.
-2. 🟣 **Card #2 — Move to Supplier RTV**: Defective or expired store returns qualifying for vendor chargeback. Automatically transfers the record to the Supplier Hub.
-3. 🔴 **Card #3 — Scrap / Total Loss Disposal**: Damaged beyond recovery (`Grade D`). Automatically stages in `SCRAP-BIN` and exposes the Purchasing Replenishment Switch (`[ 🔄 Re-Order: YES ]` vs `[ 🚫 Re-Order: NO ]`).
-4. 🔵 **Card #4 — Immediate 1-to-1 Buffer Stock Swap**: Emergency replacement dispatched to customer. Generates buffer handover slip and locks credit memo issuance to prevent double refunding.
-5. 🟡 **Card #5 — Quarantine / Put On Hold**: Suspicious defects, missing paperwork, or AE review needed. Freezes all financial claims until supervisor release.
-6. ⚫ **Card #6 — Reject Claim & Return to Customer**: Store error, customer negligence, or outside warranty. Opens Customer Rejection box (`CUSTOMER REJECTION REASON *`), AE notification, and Store Return Gate Pass.
-
-#### B. Supplier RTV Outbound (5 Action Cards):
-1. ⏳ **Card #1 — Stage at Dock for Vendor Pickup**: Default RTV state. Location: `RTV-DOCK`. Authorizes Official Vendor RTV Gate Pass printout.
-2. 💵 **Card #2 — Vendor AP Deduction / Credit Memo Settled**: Supplier granted credit note or AP debit memo deduction.
-3. 🟢 **Card #3 — Vendor Delivered Replacement Stock**: Supplier replaced physical merchandise 1-to-1. Staged at receiving bin and routed to Restock Queue.
-4. 🔴 **Card #4 — Claim Rejected by Vendor**: Vendor rejected return claim. Sets `SCRAP-BIN` and activates Purchasing Replenishment Switch (`YES` vs `NO`). **Strictly isolated from customer rejection gates.**
-5. 🟡 **Card #5 — Under Vendor Dispute / Hold**: Contested chargeback under negotiation. Freezes financial debit claims.
-
-### 12.2 Purchasing Replenishment Switch (`[ 🔄 Re-Order: YES ]` vs `[ 🚫 Re-Order: NO ]`)
-Whenever an item suffers total physical loss (Scrap, RTV, Buffer Swap, or Vendor Rejected):
-- An explicit toggle allows warehouse staff to decide whether procurement must re-order replacement inventory:
-  - `[ 🔄 Re-Order: YES ]` (Default): Item enters the **Supplier Re-Order Queue** (`?queue=reorder`). Coworkers place a PO to replenish stock.
-  - `[ 🚫 Re-Order: NO ]`: Item enters the **No Re-Order / Write-Off Queue** (`?queue=scrap_no_reorder`). No supplier purchase order is triggered.
-- Stored safely in `ai_document_metadata.needs_reorder: boolean` without polluting human notes.
-
-### 12.3 The 3 Scoped Workstation Queues
-Located in the top dark navy bar of both Customer RMA Hub and Supplier RTV Hub:
-1. `[ 📦 Ready to Restock (N) ]`: Filter for all items approved for warehouse restocking. Coworkers click `[ ✓ Restocked in WMS ]` to confirm.
-2. `[ 🔄 Supplier Re-Order (N) ]`: Filter for all lost items flagged `needs_reorder: true`. Coworkers click `[ ✓ PO Placed ]` to confirm replacement order.
-3. `[ 🚫 No Re-Order / Write-Off (N) ]`: Filter for all lost items where `needs_reorder: false`. Coworkers click `[ ✓ Written Off ]` to resolve write-offs.
-4. `[ ✕ Clear Queue Filter ]`: Dynamically appears to reset back to full hub view.
-
-### 12.4 PostgreSQL Check Constraint Safety & Lifecycle Status Resolution
-- **PostgreSQL Enum Check Constraint**: `public.rma_reports.status` enforces `rma_reports_status_check` (`'pending'`, `'received_at_dock'`, `'under_inspection'`, `'credit_memo_issued'`, `'vendor_claimed'`, `'buffer_replacement_dispatched'`, `'resolved'`, `'closed'`, `'rejected'`).
-- Direct mutations to `'restocked'` or `'scrapped'` are prevented. The platform safely sets `status: 'resolved'` and records `workflow_resolution: 'restocked' | 'reordered' | 'scrapped_no_reorder'` in `ai_document_metadata`.
-- All interfaces format resolved tickets into distinct operational stages:
-  - `6- Restocked` (emerald badge)
-  - `7- Re-Ordered (PO Placed)` (emerald/amber badge)
-  - `7- Scrapped / Written Off` (slate/rose badge)
+### 12.2 The 4 Lifecycle Email Triggers, PH Legal IDs & Email-Bound RMA Editor
+- `[RMA Scrapped]` (`scrapped`): Dispatched on Scrap confirmation (`Re-Order: YES/NO`).
+- `[RMA Restocked]` (`restocked`): Dispatched when returned goods enter `Good Stock Area`.
+- `[Driver Picked Up - Debit Claim]` (`pickup_debit_claim`): Sent to internal distribution + supplier `To`/`CC` with all 5 pickup photos (accepting **ANY valid Philippine Government / Legal ID**: LTO Driver's License, PhilSys National ID, Passport, UMID, SSS, Postal, PRC, Voter's ID, TIN, Company ID) + generated **`Debit-Claim-Form-*.pdf`** attached.
+- `[Driver Picked Up - Replacement]` (`pickup_replacement`): Sent to internal distribution + supplier `To`/`CC` with all 5 pickup photos and **`Replacement-Form-*.pdf`** attached.
+- **New RMA Alert Email Editor Button**: Every New RMA Alert email embeds a Google Identity-locked **`✏️ Edit RMA Details & Documents`** button (`toEmail` in Live Mode, `mgan@a2z2go.net` in Test Mode) backed by `CustomerRMAInvitesModal` (`✏️ RMA Details Editor`), `GatekeeperPinModal`, `RmaEmailEditorView`, and `/api/v1/rma-email-edit`.
 
 
 

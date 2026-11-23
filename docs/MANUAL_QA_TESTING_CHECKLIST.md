@@ -175,8 +175,8 @@ Each test scenario defines:
 - [ ] **TC-PUB-02 (Super Admin Sandbox Active)**
   * **Location**: Top of Public Portal (`/`)
   * **Action**: Log in as `super_admin` in Admin, enable Test Mode in Settings, then return to `/`.
-  * **Expected Behavior**: Amber warning banner appears: `⚡ Super Admin Sandbox Active — Submissions will simulate without sending real emails or dispatching warehouse stock.` The toggle switch indicates ON.
-  * **Edge Case**: Submitting a return records `is_test: true` in `rma_reports` and dispatches test emails exclusively to `finance2@keysysincorporated.com`.
+  * **Expected Behavior**: Amber warning banner appears: `🧪 Super Admin Sandbox Active — Test emails routed safely to mgan@a2z2go.net • Reports saved to database.` The toggle switch indicates ON.
+  * **Edge Case**: Submitting a return records `is_test: true` (`RMA-TEST-`) in `rma_reports` and dispatches test emails exclusively to `mgan@a2z2go.net`.
 
 - [ ] **TC-PUB-03 (Super Admin 1-Click Toggle)**
   * **Location**: Top banner toggle switch
@@ -257,9 +257,9 @@ Each test scenario defines:
   * **Action**: Upload a paper document with visible Sales Invoice, Delivery Receipt, and Purchase Order numbers.
   * **Expected Behavior**: Gemini Flash extracts the metadata within < 2s; displays green verification badge; independently auto-populates `Sales Invoice (SI) #`, `Delivery Receipt (DR) #`, and `Purchase Order (PO) #` in their dedicated input fields with `✓ Detected` badges. Also auto-fills Section 3 `Store / Branch Location *`. Reporters can manually edit or input them at any time.
 
-- [ ] **TC-QR-01 (Physical Reporter Signature Block on ALL RMA QR Codes & Printouts)**
-  * **Location**: Success Screen Ticket Preview, Return QR Modal, Thermal 4x6" Label Modal, and Downloaded PNGs/Stickers
-  * **Action**: Generate an RMA ticket or open any QR code view / printout.
+- [ ] **TC-QR-01 (Physical Reporter Signature Block on ALL RMA QR Codes & US Letter Printouts)**
+  * **Location**: Success Screen Ticket Preview, Resizeable B&W Return QR Modal (`80x80 mm`, `100x100 mm`, `140x195 mm Half Letter`, custom mm), and Downloaded PNGs/US Letter Sheets
+  * **Action**: Generate an RMA ticket or open any QR code view / printout (`letter portrait`, plain B&W).
   * **Expected Behavior**: Every sticker, modal, and high-resolution downloadable canvas features a dedicated physical signature block:
     * `REPORTER SIGNATURE / HANDOVER ACKNOWLEDGEMENT:`
     * `__________________________   Date: ____________________`
@@ -467,28 +467,22 @@ Each test scenario defines:
   * **Action**: Click button.
   * **Expected Behavior**: `QuickRMAActionModal` opens immediately.
 
-- [ ] **TC-REP-04 (Save Physical Triage & Immediate Optimistic UI Sync)**
-  * **Location**: Inside `QuickRMAActionModal`
-  * **Action**: Change Condition Grade to `Grade C`, Disposition to `Return to Vendor (RTV)`, Location to `RACK-04-BIN-B`, and click **"Save Physical Triage"**.
+- [ ] **TC-REP-04 (Streamlined `QuickRMAActionModal` & Immediate Optimistic UI Sync)**
+  * **Location**: Inside `QuickRMAActionModal` (`RMA Details & Quick Actions`)
+  * **Action**: Verify removed clutter widgets (`Condition Grade`, `Automated Lifecycle Stage`, `Hold / Quarantine`, `5/6 Physical Action cards`, `Buffer Stock`, `Driver QR Widget`, `4x6" Thermal`) are absent. Use **Stream Switcher**, **Open 4-Choice / Pickup Window**, **Split Qty (`-B` child)**, and **Edit Details & Documents** (`ProductAutoSuggest` + `SI/DR/PO` + `Expiry Date (YYYY-MM-DD)`).
   * **Expected Behavior**:
-    1. Success banner displays inside modal: `Warehouse triage & location saved successfully!`.
-    2. The underlying Return Reports table behind the modal updates **immediately** without requiring a page refresh.
-    3. `rma_reports` table row in Supabase updates with new specs and an audit trail entry.
+    1. All changes sync immediately to the active Customer Hub / Supplier RTV table without requiring a page reload.
+    2. `rma_reports` updates cleanly with an audit trail entry formatted in `YYYY-MM-DD HH:mm` (Asia/Manila).
 
-- [ ] **TC-REP-05 (4x6" Thermal Label from Table Row Printer Icon)**
-  * **Location**: Column 10 `Actions` -> Printer Icon button
-  * **Action**: Click printer icon.
-  * **Expected Behavior**: `ThermalBoxLabelModal` opens for that specific RMA item showing Code128 barcode, QR code, Condition Grade, and Rack/Bin location.
-  * **Audit Verification**: Printing appends a `THERMAL_PRINT` event to `rma_reports.audit_trail`.
+- [ ] **TC-REP-05 (US Letter Plain B&W Box QR Sticker Printing from Row Action)**
+  * **Location**: Row action `QrCode` button -> `ReturnQRModal`
+  * **Action**: Click QR sticker icon and toggle presets (`80x80 mm`, `100x100 mm`, `Extra Large (Half Letter) 140x195 mm`, custom mm, `Reset`) and print.
+  * **Expected Behavior**: Prints crisp pure black-and-white US Letter (`letter portrait`, never A4) sticker sheet with explicit `Date & Time (YYYY-MM-DD HH:mm)` and `Expiry Date (YYYY-MM-DD)`.
 
-- [ ] **TC-REP-06 (Mobile Card Parity & Triage Buttons)**
+- [ ] **TC-REP-06 (Mobile Card Parity & Action Buttons)**
   * **Location**: Mobile viewport ($\le 768\text{px}$) or Grid Card view
   * **Action**: Inspect card controls.
-  * **Expected Behavior**: Mobile card contains:
-    1. Clickable RMA number link.
-    2. Printer icon button (launches 4x6" thermal label).
-    3. **"Triage"** button (launches Quick Processing modal).
-    4. **"Assign SKU"** button (if uncatalogued).
+  * **Expected Behavior**: Mobile card contains clickable RMA link, **4-Choice / Pickup** button, **QR Sticker** button, **Details / Split Qty** button, and **Assign SKU** (if uncatalogued) with zero horizontal overflow at `390x844` and `840x390`.
 
 ### 4.1 Mobile Viewport & Zero-Overflow Safeguards (Portrait & Landscape)
 - [ ] **Return Reports Header Actions Wrap Test (Portrait 360px-420px)**
@@ -549,7 +543,7 @@ Each test scenario defines:
   * **Location**: Credit Memos Table -> Button **"CM Voucher"**
   * **Action**: Click button.
   * **Expected Behavior**: `CreditMemoVoucherModal` opens with formal BIR-compliant header, linked RMA number, Pull-Out Reference (`POR-...`), VAT breakdown, and triple signature blocks.
-  * **Edge Case**: Click **"Print Voucher"**; triggers clean print CSS formatted for A4/Letter without UI chrome.
+  * **Edge Case**: Click **"Print Letter Voucher / PDF"**; triggers clean plain black-and-white print CSS formatted strictly for US Letter (`8.5" x 11"`, `letter portrait`) without UI chrome or color backgrounds.
 
 ---
 
@@ -588,10 +582,10 @@ Each test scenario defines:
   * **Action**: Click anywhere on an item's table row (outside checkboxes and action buttons).
   * **Expected Behavior**: Immediately opens `QuickRMAActionModal` preloaded with the selected RMA number, allowing physical inspection, grading (A/B/C/D), rack/bin updates, and note audits.
 
-- [ ] **TC-RTV-07 (4x6" Thermal Box Label Printing from Supplier Hub)**
-  * **Location**: Supplier Hub Table Actions -> Printer icon (`<Printer />`)
-  * **Action**: Click the thermal printer icon on any row.
-  * **Expected Behavior**: Opens `ThermalBoxLabelModal` pre-configured with that return item, rendering barcodes, rack/bin location, and all 4 printable borders cleanly for direct 4x6" label output.
+- [ ] **TC-RTV-07 (Strictly 2 Supplier RTV Printables: Box QR Sticker & Unified US Letter Pickup Form)**
+  * **Location**: Supplier Hub Table Actions -> `QrCode` Sticker icon & `Debit Claim Form` / `Replacement Form` / `4-Choice / Pickup` button
+  * **Action**: Open both printable forms (`ReturnQRModal` & `SupplierPickupFormModal`).
+  * **Expected Behavior**: Renders plain black-and-white US Letter (`letter portrait`) layouts with dynamic header (`SUPPLIER DEBIT CLAIM & PICKUP VALIDATION FORM` vs `SUPPLIER REPLACEMENT / EXCHANGE & PICKUP FORM`) and smart compact half-sheet dual-copy (1–4 items) vs repeating full-page copy per copy (5+ items). No deprecated thermal 4x6" or Gate Pass modals exist.
 
 ---
 
@@ -1784,7 +1778,7 @@ Each test scenario defines:
        - `Return to supplier for Replacement / Exchange` (`supplier_exchange`)
        - `Throw Away / Dispose (Scrap)` (`scrap`)
        - `Put Back on Good Shelf (Restock)` (`restock_good`)
-    4. Execute each option (including **Save Choice Only** and **Driver Is Here — Upload Photos & Print A4** with 5 pickup photos + `SupplierPickupFormModal`) and verify Supabase saves cleanly with HTTP 200 and updates the Live Hubs.
+    4. Execute each option (including **Save Choice Only** and **Driver Is Here — Upload Photos & Print Letter** with 5 pickup photos + `SupplierPickupFormModal`) and verify Supabase saves cleanly with HTTP 200 and updates the Live Hubs.
   * **Expected Behavior**: Scanner stops the camera cleanly, closes, and immediately opens the 4-option wizard without silent failures, HTTP 406 `.maybeSingle()` errors on batch manifests, or HTTP 400 status check-constraint errors.
 
 - [ ] **TC-P23-02 (Test Mode — Public Portal QR Scanner Opens 4-Option Wizard & Preserves Sandbox Isolation)**
@@ -1838,31 +1832,69 @@ Each test scenario defines:
 
 ---
 
+## Section 24: Streamlined Portal v2, US Letter B&W Printables, Lifecycle PDF Emails, Overall Matrix (`.xlsx`), & Multi-RMA Consolidation
+
+- [ ] **TC-P24-01 (Deprecated Widget Removal & Streamlined `QuickRMAActionModal`)**
+  * **Location**: `QuickRMAActionModal`, `CustomerHubTab`, `SupplierClaimsTab`
+  * **Expected Behavior**: Zero instances of `Driver QR Widget`, `Print 4x6" Label`, `Buffer Stock Replacement`, `Vendor RTV Gate Pass`, `Rejected Return Gate Pass`, `Condition Grade`, `Automated Lifecycle Stage`, `Hold / Quarantine`, `5 Supplier RTV Cards`, or `6 Customer RMA Cards`. Strictly exposes Stream Switcher, 4-Choice Outcome Banner, `Split Qty`, `Edit Details & Documents`, `+ Issue Credit Memo`, and `RMA Audit Trail`.
+
+- [ ] **TC-P24-02 (Case-Insensitive ERPLY Auto-Suggest & Unified Field Preservation)**
+  * **Location**: `ProductAutoSuggest` across Assign SKU, Edit Product, & Quick Details Edit
+  * **Expected Behavior**: Lowercase SKU (`ss1319p`) or item name (`Magnolia`) queries Supabase + Laravel `erply_products` (`[trimmed, capitalized, uppercase, lowercase]` + `?code=`), preserving `supplierName`/`supplier_name`, prices, units, and pieces/case while locking existing barcodes on SKU assignment.
+
+- [ ] **TC-P24-03 (Unambiguous `(YYYY-MM-DD)` / `(YYYY-MM-DD HH:mm)` Dates & `mgan@a2z2go.net` Sandbox Routing)**
+  * **Location**: All tables, filter labels, ISO readouts, US Letter printables, `.xlsx` Matrix headers, and `/api/send-email` Test Mode payloads.
+  * **Expected Behavior**: All dates render in Asia/Manila `YYYY-MM-DD` / `YYYY-MM-DD HH:mm`; Test Mode emails route strictly to `mgan@a2z2go.net` with `Test - ` / `[TEST_MODE]` prefixes and zero live vendor/customer leaks.
+
+- [ ] **TC-P24-04 (4 Lifecycle Emails w/ All 5 Pickup Photos & Official PDF Form Attachments)**
+  * **Location**: `SimpleSupplierRtvWizardModal` + `notificationService.js`
+  * **Expected Behavior**:
+    1. `scrapped` -> `[RMA Scrapped]` with `Re-Order Requested?`.
+    2. `restocked` -> `[RMA Restocked]`.
+    3. `pickup_debit_claim` -> `[Driver Picked Up - Debit Claim]` to internal + supplier `To`/`CC`, embedding all **5/5 pickup photos** (`driver_license_front`, `driver_license_back`, `truck_plate`, `driver_handover`, `pickup_items`) and attaching **`Debit-Claim-Form-*.pdf`** (`%PDF-1.4`).
+    4. `pickup_replacement` -> `[Driver Picked Up - Replacement]` with all 5 pickup photos and **`Replacement-Form-*.pdf`** (`%PDF-1.4`).
+
+- [ ] **TC-P24-05 (Overall RMA Matrix `.xlsx` Export)**
+  * **Location**: Admin Hubs -> `Overall RMA Matrix (.xlsx)` / `Sandbox Overall Matrix (.xlsx)` (`RMAMatrixExportModal`)
+  * **Expected Behavior**: Exports freeze-paned (`xSplit="5" ySplit="5" topLeftCell="F6"`), grouped/outlined OOXML `.xlsx` containing `DAILY RETURNED PIECES (YYYY-MM-DD)`, Good/Bad stock split, `Re-Ordered?`/`Restocked?`/`Scrapped?`/`Replaced?`/`Picked Up by Driver?`, `Driver Pickup Date & Time (YYYY-MM-DD HH:mm)`, and zero legacy template columns (`BASKETPOPROC`, `Arlito`, `Jarmen`, `Buffer (30%)`, `Final Quantity to Order`).
+
+- [ ] **TC-P24-06 (Multi-RMA Consolidation — Supplier RTV Batch & Customer Credit Memos)**
+  * **Location**: `SupplierClaimsTab`, `CustomerHubTab`, `SimpleSupplierRtvWizardModal`, `SupplierPickupFormModal`, `CreditMemoModal`, `CreditMemoVoucherModal`
+  * **Expected Behavior**:
+    1. **Supplier RTV Batch**: 1-click `Select All Unclaimed for <Supplier>`, Single-Supplier Guard across mixed suppliers, `Process Consolidated Batch (N RMAs)` creates ONE shared `RTV-` / `RTV-TEST-` claim ID, `Auto-Combine Identical Items: ON/OFF` toggle & `Auto`/`Full Page per Copy` layout switch in `SupplierPickupFormModal`, ONE consolidated email + PDF, and Re-Edit Claim Preservation.
+    2. **Customer Credit Memos**: Checking multiple Customer Hub RMAs enables `+ Consolidated Credit Memo (N RMAs)`, runs Missing-SKU Validation Guard, persists consolidated items safely via `rma_settings.consolidated_cm_items_store` (zero `PGRST204`), renders `CONSOLIDATED (N RMAs)` US Letter B&W voucher & `🔗 Consolidated (N RMAs)` ledger badge, and Voiding cleanly resets all linked RMAs.
+
+- [ ] **TC-P24-07 (Automated Playwright End-to-End Regression Suite (`tests/01`–`08`))**
+  * **Location**: `tests/01-public-intake.spec.js` through `tests/08-api-docs-and-responsive.spec.js`
+  * **Expected Behavior**: Full Playwright suite executes with global `pageerror`, `console.error`, React hook warning (`#310`), and HTTP `>=400` traps across Desktop (`1280x800`), Mobile Portrait (`390x844`), and Mobile Landscape (`840x390`), plus REST API v1 + `/docs` + `PROJECT_CONTEXT.txt`.
+
+- [ ] **TC-P24-08 (Strict Microsoft Excel OOXML Validity for `.xlsx` Matrix & Table Exports)**
+  * **Location**: `exportMatrixXlsx.js` & `exportXlsx.js`
+  * **Expected Behavior**: Exported workbooks (`Overall_RMA_Matrix_Report_*.xlsx`, `TEST_Overall_RMA_Matrix_Report_*.xlsx`, and table `.xlsx` downloads) emit compact single-line `[Content_Types].xml`, `_rels/.rels`, `workbook.xml`, and `xl/_rels/workbook.xml.rels` with zero inter-element whitespace, zero overlapping `<mergeCell>`, valid `SUM(...)` formulas (including 0-row workbooks), and `<selection>` elements inside `<sheetViews>` — opening cleanly in desktop Microsoft Excel without `"file format is not valid"` errors.
+
+- [ ] **TC-P24-09 (Any Valid Philippine Government / Legal ID Verification in 4-Choice Pickup Flow)**
+  * **Location**: `SimpleSupplierRtvWizardModal`, `SupplierPickupFormModal`, `pickupFormPdf.js`, `notificationService.js`, `api/_lib/geminiInspector.js`
+  * **Expected Behavior**: Pickup supports selectable Philippine Government / Legal ID Types (`Driver's License (LTO)`, `PhilSys National ID`, `Philippine Passport`, `UMID Card`, `SSS ID`, `Postal ID`, `PRC Professional ID`, `Voter's ID / COMELEC`, `TIN / BIR Card`, `Company / Agency ID`, `Other Valid PH Gov't / Legal ID`) with Gemini OCR auto-detect, persisting `driver_id_type` alongside `driver_license_no` and rendering both cleanly in US Letter B&W forms, PDFs, emails, and Matrix exports.
+
+- [ ] **TC-P24-10 (Email-Bound Google Identity RMA Details Editor Link & Standalone Editor)**
+  * **Location**: `CustomerRMAInvitesModal`, `GatekeeperPinModal`, `RmaEmailEditorView`, `notificationService.js`, `/api/v1/rma-email-edit`
+  * **Expected Behavior**:
+    1. `CustomerRMAInvitesModal` adds `✏️ RMA Details Editor` stream mode (`rma_editor` / `inv_edit_` / `inv_test_edit_`) and filter pill (`✏️ Editor`).
+    2. New RMA Alert emails auto-generate an email-bound editor invite (`toEmail` in Live Mode, `mgan@a2z2go.net` in Test Mode) and render a clickable **`✏️ Edit RMA Details & Documents`** button/link.
+    3. Opening the link reuses `GatekeeperPinModal` Google Identity Lock (NO OTP; enforces 403 Identity Mismatch, Expired, and Revoked checks), unlocking ONLY `RmaEmailEditorView` (zero Admin tabs/settings/trash/API keys) and saving updates server-side via `/api/v1/rma-email-edit` (`401`/`403` blocked when unauthenticated, mismatched, revoked, or cross-mode).
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
 | :--- | :--- | :--- | :--- |
-| **Phase 1: Dock Arrival & Geofence** | Public Portal (`/`) | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 2: Admin SKU & ERP Lookup** | Return Reports & Catalog | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 3: Triage & Thermal Print** | Quick Processing Modal | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 4: Credit Memo ₱10K Rule** | Finance Accounting | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 5: Supplier RTV Claims** | Vendor Chargebacks | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 6: SHA-256 REST API Vault** | Partner Integration (`/docs`) | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 7: Free-Tier Optimization & Google Drive** | WebP Compression & Cloud Storage | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 8: Column Separation & Instant Submit** | Table Views & Storage Cleanup | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 9: Role-Based QR Gatekeeper & PIN Queue** | Gatekeeper Engine & SMTP Approvals | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 10: Inbound vs Outbound Logistics Segregation** | Customer RMA & Supplier RTV Hubs | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 11: Multi-Item Manifest & Polling** | Customer Hub & Quick Actions | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 12: SKU & Barcode Decoupling** | Product Engine & RMA Manifests | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 13: 1-Click Google Identity Lock** | Customer RMA Invites & OAuth Gate | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 14: Batch RMA & Realtime Revocation Watchdog** | Intake Portal & Gatekeeper Engine | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 15: 4-Pillar Action System & Financial Hold Safety Guard** | Quick Action Modal & Accounting | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 16: Coworker Inventory & Re-order Queues** | REST API & Queue Strip | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 17: Video Audit 9 Bug Fixes & UI Streamlining** | Workstation Bar & Action Cards | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 18: Enterprise Upgrade (Zero Stock Photos, Locations, CSV, Sandbox, Trash & Archive)** | Full Platform & REST API | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 19: Video QA Audit Resolution & Workflow Refinements** | Full Platform & REST API | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 20: Senior RMA Audit, SI/DR/PO Standardization & Silent Restitution** | Full Platform, REST API & Docs | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 21: Driver Delivery Handover, Test Sequence Isolation & Mandatory Expiration Date** | Full Platform, Mobile Driver Widget & REST API | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 22: Stream-Scoped Expiry Validation, QR Print Hook Safety, Full Test Mode Parity & Standardized Tables** | Customer Hub, Supplier RTV, Credit Memos & Test Sandbox | `READY FOR TESTING` | *Lead QA Director* |
-| **Phase 23: Email Expiry Date, Pingcon Email Branding & Genuine `.xlsx` Exports** | Notifications, Gatekeeper, Hubs, Credit Memos & Sandbox | `READY FOR TESTING` | *Lead QA Director* |
+| **Phase 1: Dock Arrival & Geofence** | Public Portal (`/`) | `VERIFIED (PLAYWRIGHT 01)` | *Lead QA Director* |
+| **Phase 2: Admin SKU & ERP Lookup** | Return Reports & Catalog | `VERIFIED (PLAYWRIGHT 02)` | *Lead QA Director* |
+| **Phase 3: Streamlined Sticker Studio & Letter B&W** | ReturnQRModal & Pickup Form | `VERIFIED (PLAYWRIGHT 01/06)` | *Lead QA Director* |
+| **Phase 4: Credit Memo ₱10K Rule & Consolidated CM** | Finance Accounting | `VERIFIED (PLAYWRIGHT 05)` | *Lead QA Director* |
+| **Phase 5: Supplier RTV Single & Batch Claims** | Supplier Hub & RTV Claims | `VERIFIED (PLAYWRIGHT 03/06)` | *Lead QA Director* |
+| **Phase 6: SHA-256 REST API Vault** | Partner Integration (`/docs`) | `VERIFIED (PLAYWRIGHT 08)` | *Lead QA Director* |
+| **Phase 7–23: Core Infrastructure, Queues, AI OCR, `.xlsx`** | Full Platform & Supabase | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
+| **Phase 24: Streamlined UI, US Letter B&W, 4 PDF Emails, Matrix & Consolidation** | End-to-End Platform & Docs | `VERIFIED` | *Lead QA Director* |
 

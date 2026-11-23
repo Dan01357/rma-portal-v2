@@ -12,6 +12,7 @@
     { "source": "/api/v1/ai/inspect-paperwork", "destination": "/api/upload-photo?action=inspect-paperwork" },
     { "source": "/api/v1/auth/verify-pin", "destination": "/api/v1/api-keys?action=verify-pin" },
     { "source": "/api/v1/auth/clear-cooldown", "destination": "/api/v1/api-keys?action=clear-cooldown" },
+    { "source": "/api/v1/rma-email-edit", "destination": "/api/v1/rma?action=email-edit" },
     { "source": "/api/v1/api-keys/:id", "destination": "/api/v1/api-keys/[id]?id=:id" },
     { "source": "/api/v1/rma/:id", "destination": "/api/v1/rma/[id]?id=:id" },
     { "source": "/api/v1/products/:id", "destination": "/api/v1/products/[id]?id=:id" },

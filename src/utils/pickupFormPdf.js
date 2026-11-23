@@ -299,15 +299,18 @@ function drawCopyHeaderAndMeta(ctx, startX, startY, width, copyTitle, info, comp
   ctx.font = `700 ${compact ? 18 : 20}px "Courier New", Courier, monospace`;
   ctx.fillText(info.truckPlate || '________________________', boxX + colHalf + 12, y + 27, colHalf - 24);
 
-  // Row 2: Driver Name | Driver License #
+  // Row 2: Driver Name | Valid Gov't / Legal ID #
   const r2Y = y + row1H;
   ctx.font = `700 ${compact ? 13 : 14}px Arial, Helvetica, sans-serif`;
-  ctx.fillText('DRIVER NAME', boxX + 12, r2Y + 4);
-  ctx.fillText('DRIVER LICENSE #', boxX + colHalf + 12, r2Y + 4);
+  ctx.fillText('DRIVER / REPRESENTATIVE NAME', boxX + 12, r2Y + 4);
+  ctx.fillText("VALID PH GOV'T / LEGAL ID #", boxX + colHalf + 12, r2Y + 4);
   ctx.font = `700 ${compact ? 17 : 19}px Arial, Helvetica, sans-serif`;
   ctx.fillText(info.driverName || '___________________________', boxX + 12, r2Y + 21, colHalf - 24);
-  ctx.font = `700 ${compact ? 17 : 19}px "Courier New", Courier, monospace`;
-  ctx.fillText(info.driverLicense || '___________________________', boxX + colHalf + 12, r2Y + 21, colHalf - 24);
+  const idDisplay = info.driverLicense
+    ? (info.driverIdType ? `[${info.driverIdType}] ${info.driverLicense}` : info.driverLicense)
+    : (info.driverIdType ? `[${info.driverIdType}] ________________` : '___________________________');
+  ctx.font = `700 ${compact ? 16 : 18}px "Courier New", Courier, monospace`;
+  ctx.fillText(idDisplay, boxX + colHalf + 12, r2Y + 21, colHalf - 24);
 
   // Row 3: Handwritten fields
   const r3Y = r2Y + row2H;
@@ -742,6 +745,7 @@ export function generatePickupFormPdfAttachment({
       supplierEmailCc: pickup.supplier_email_cc || '',
       truckPlate: pickup.truck_plate || '',
       driverName: pickup.driver_name || primaryReport.driver_name || '',
+      driverIdType: pickup.driver_id_type || '',
       driverLicense: pickup.driver_license_no || '',
       preparedBy,
       normalizedItems,

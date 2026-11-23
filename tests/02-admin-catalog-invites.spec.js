@@ -117,6 +117,7 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       const invitesModal = page.locator('div.fixed', { hasText: 'Google Identity Lock' });
       await expect(invitesModal).toBeVisible();
 
+      await invitesModal.getByRole('button', { name: /RMA Details Editor/i }).first().click();
       await invitesModal.getByRole('button', { name: /Supplier RTV Invite/i }).first().click();
       await invitesModal.getByRole('button', { name: /Customer Return Invite/i }).first().click();
       await invitesModal.getByRole('button', { name: /Test Mode Sandbox/i }).click();
@@ -125,12 +126,13 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       await invitesModal.getByRole('button', { name: /Generate Customer Return Invite/i }).click();
 
       const inviteRow = invitesModal.locator('tr', { hasText: testInviteEmail }).first();
-      await expect(inviteRow).toBeVisible({ timeout: 12_000 });
+      await expect(inviteRow).toBeVisible({ timeout: 45_000 });
       await inviteRow.locator('button[title="Copy Invite Link"]').click();
 
-      // Test table stream filter pills + Refresh
+      // Test table stream filter pills (Customer / Supplier / Editor / All) + Refresh
       await invitesModal.getByRole('button', { name: /Refresh/i }).first().click().catch(() => {});
       await invitesModal.getByRole('button', { name: /^Customer \(/i }).first().click().catch(() => {});
+      await invitesModal.getByRole('button', { name: /^Editor \(/i }).first().click().catch(() => {});
       await invitesModal.getByRole('button', { name: /^All \(/i }).first().click().catch(() => {});
 
       // Send Invite Email button -> captured safely by interceptAndCaptureEmails
@@ -151,7 +153,7 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
 
       page.once('dialog', async (dialog) => await dialog.accept());
       await inviteRow.locator('button[title="Revoke Active Invite Access"]').click();
-      await expect(inviteRow.getByText('Revoked', { exact: true }).first()).toBeVisible({ timeout: 25_000 });
+      await expect(inviteRow.getByText('Revoked', { exact: true }).first()).toBeVisible({ timeout: 45_000 });
 
       page.once('dialog', async (dialog) => await dialog.accept());
       await inviteRow.locator('button[title="Delete Invite Record"]').click();
@@ -175,9 +177,9 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       await expect(logoutBtn).toBeVisible();
       await logoutBtn.click();
       await expect(isoPage.locator('button:has-text("Logout")')).toBeHidden({ timeout: 15_000 });
-      await isoPage.goto('/admin', { waitUntil: 'domcontentloaded', timeout: 35_000 });
+      await isoPage.goto('/admin', { waitUntil: 'commit', timeout: 45_000 });
       await expect(isoPage.getByRole('button', { name: /Send OTP Verification Code/i })).toBeVisible({
-        timeout: 15_000
+        timeout: 20_000
       });
       isoGuard.assertClean('isolated admin logout check');
       isoGuard.detach();

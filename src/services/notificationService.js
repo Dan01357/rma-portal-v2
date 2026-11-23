@@ -14,6 +14,7 @@
  */
 import { supabase } from '../supabaseClient';
 import { authService } from './authService';
+import { inviteService } from './inviteService';
 import {
   isTestRecord,
   formatDateYmd,
@@ -215,7 +216,7 @@ export const notificationService = {
   /**
    * Build clean, modern HTML email notification body
    */
-  generateEmailHtml(report, config, isTestMode = false) {
+  generateEmailHtml(report, config, isTestMode = false, editorContext = null) {
     const rmaNumber = report.rma_number || 'RMA-PENDING';
     const itemName = report.name || `Unidentified Item (${report.barcode})`;
     const reporter = report.reporter_name || report.reported_by || 'Warehouse Staff';
@@ -226,9 +227,12 @@ export const notificationService = {
     const photos = Array.isArray(report.photos) 
       ? report.photos 
       : (typeof report.photos === 'string' ? JSON.parse(report.photos || '[]') : []);
+    const manifestItems = Array.isArray(report.items) ? report.items : [];
 
     const hasGps = report.gps_latitude && report.gps_longitude;
     const mapUrl = hasGps ? `https://www.google.com/maps?q=${report.gps_latitude},${report.gps_longitude}` : null;
+    const editUrl = editorContext?.editUrl || '';
+    const editorAuthorizedEmail = editorContext?.editorAuthorizedEmail || '';
 
     return `
       <!DOCTYPE html>
@@ -345,6 +349,30 @@ export const notificationService = {
               </div>
             </div>
 
+            ${manifestItems.length > 1 ? `
+            <div class="section-title">Manifest Items Breakdown (${manifestItems.length} Lines)</div>
+            <div class="card" style="padding: 12px;">
+              ${manifestItems.map((it, idx) => `
+                <div style="padding: 6px 0; ${idx > 0 ? 'border-top: 1px solid #e2e8f0;' : ''} font-size: 12px;">
+                  <strong>${idx + 1}. ${escapeEmailHtml(it.name || it.productName || it.barcode || 'Item')}</strong>
+                  <span style="color: #64748b; font-family: monospace;"> • Qty: ${Number(it.quantity) || 1} ${escapeEmailHtml(it.unit_name || it.unit || 'pc')} • Exp (YYYY-MM-DD): ${escapeEmailHtml(formatDateYmd(it.expiry_date) || 'N/A')}</span>
+                </div>
+              `).join('')}
+            </div>` : ''}
+
+            ${editUrl ? `
+            <div style="text-align: center; margin: 22px 0 18px; padding: 18px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px;">
+              <div style="font-size: 11px; font-weight: 800; color: #1e40af; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px;">
+                Update Supplier, Pricing, Expiry Date, or Commercial Documents (SI / DR / PO)
+              </div>
+              <a href="${escapeEmailHtml(editUrl)}" target="_blank" style="display: inline-block; padding: 12px 24px; background: #2563eb; color: #ffffff !important; text-decoration: none; border-radius: 10px; font-size: 13px; font-weight: 800; box-shadow: 0 3px 10px rgba(37,99,235,0.25);">
+                ✏️ Edit RMA Details &amp; Documents
+              </a>
+              <div style="font-size: 11px; color: #475569; margin-top: 10px; line-height: 1.4;">
+                🔒 Protected by Pingcon Google Identity Lock for <strong style="font-family: monospace; color: #0f172a;">${escapeEmailHtml(editorAuthorizedEmail || config.toEmail)}</strong>
+              </div>
+            </div>` : ''}
+
             ${photos.length > 0 ? `
             <div class="section-title">Proof Photos (${photos.length})</div>
             <div style="margin-top: 14px;">
@@ -411,6 +439,29 @@ export const notificationService = {
       }
       const finalCcList = Array.from(ccSet);
       const toEmail = config.toEmail;
+      const editorAuthorizedEmail = testActive ? 'mgan@a2z2go.net' : toEmail;
+
+      let editUrl = '';
+      if (report.rma_number && editorAuthorizedEmail) {
+        try {
+          const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://rma-portal-pingconmarketing.vercel.app';
+          const editorInvite = await inviteService.createInvite({
+            streamType: 'rma_editor',
+            authorizedEmail: editorAuthorizedEmail,
+            rmaNumber: report.rma_number,
+            entityName: report.rma_number,
+            durationValue: 7,
+            durationUnit: 'days',
+            createdBy: 'Automated New RMA Alert',
+            isTest: testActive
+          });
+          if (editorInvite?.token) {
+            editUrl = `${baseUrl}/intake?token=${encodeURIComponent(editorInvite.token)}&editRma=${encodeURIComponent(report.rma_number)}${testActive ? '&mode=test' : ''}`;
+          }
+        } catch (invErr) {
+          console.warn('Non-blocking notice generating RMA editor email link:', invErr?.message || invErr);
+        }
+      }
 
       let subject = `[RMA Alert] ${report.rma_number || 'New Return'}: ${report.name || report.barcode} (${report.reason || 'Damaged'})`;
 
@@ -419,7 +470,7 @@ export const notificationService = {
         subject = `Test - [RMA Alert] ${report.rma_number || 'New Return'}: ${report.name || report.barcode} (${report.reason || 'Damaged'})`;
       }
 
-      const htmlBody = this.generateEmailHtml(report, config, testActive);
+      const htmlBody = this.generateEmailHtml(report, config, testActive, { editUrl, editorAuthorizedEmail });
 
       const photos = Array.isArray(report.photos) 
         ? report.photos 
@@ -449,7 +500,7 @@ export const notificationService = {
           html: htmlBody,
           isTestMode: testActive,
           attachments,
-          text: `${testActive ? 'Test - ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Expiry Date (YYYY-MM-DD): ${expiryInfo.text}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}`
+          text: `${testActive ? 'Test - ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Expiry Date (YYYY-MM-DD): ${expiryInfo.text}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}${editUrl ? `\n\nEdit RMA Details & Documents (${editorAuthorizedEmail}): ${editUrl}` : ''}`
         })
       });
 
@@ -850,7 +901,7 @@ export const notificationService = {
                   <div class="col-val">${escapeEmailHtml(pickup.driver_name || 'Not specified')}</div>
                 </div>
                 <div class="row">
-                  <div class="col-label">Driver License / ID #:</div>
+                  <div class="col-label">Driver Valid Gov’t / Legal ID${pickup.driver_id_type ? ` (${escapeEmailHtml(pickup.driver_id_type)})` : ''} #:</div>
                   <div class="col-val" style="font-family: monospace;">${escapeEmailHtml(pickup.driver_license_no || 'Not specified')}</div>
                 </div>
                 <div class="row">
@@ -1009,15 +1060,18 @@ export const notificationService = {
 
       // Collect pickup verification photos + RMA intake photos across all bundled RMAs
       const pickupPhotoLabels = [
-        { key: 'id_license', label: 'Driver License / ID' },
-        { key: 'driver_face', label: 'Driver Face / Selfie' },
-        { key: 'truck_plate', label: 'Truck Plate Number' },
-        { key: 'loaded_items', label: 'Loaded RMA Items' },
-        { key: 'signed_form', label: 'Signed Form Photo' }
+        { keys: ['driver_license_front', 'id_license'], label: 'Driver Valid Gov’t / Legal ID — FRONT' },
+        { keys: ['driver_license_back'], label: 'Driver Valid Gov’t / Legal ID — BACK' },
+        { keys: ['truck_plate'], label: 'Delivery Truck Plate Number' },
+        { keys: ['driver_handover', 'driver_face'], label: 'Driver / Co-Worker Photo' },
+        { keys: ['pickup_items', 'loaded_items', 'signed_form'], label: 'Damaged Item(s) Picked Up' }
       ];
       const pickupPhotoObj = (pickup.photos && typeof pickup.photos === 'object') ? pickup.photos : {};
       const pickupPhotoEntries = pickupPhotoLabels
-        .map((slot) => ({ label: slot.label, url: pickupPhotoObj[slot.key] }))
+        .map((slot) => ({
+          label: slot.label,
+          url: slot.keys.map((k) => pickupPhotoObj[k]).find((u) => Boolean(u))
+        }))
         .filter((e) => Boolean(e.url));
 
       const pickupUrlSet = new Set(pickupPhotoEntries.map((e) => e.url));

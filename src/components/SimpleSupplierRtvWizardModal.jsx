@@ -104,21 +104,35 @@ function getFourOptions(isSupplierStream) {
   ];
 }
 
+const PH_LEGAL_ID_TYPES = [
+  "Driver's License (LTO)",
+  'PhilSys National ID (PhilID / ePhilID)',
+  'Philippine Passport',
+  'UMID Card',
+  'SSS ID',
+  'Postal ID',
+  'PRC Professional ID',
+  'Voter’s ID / COMELEC',
+  'TIN / BIR Card',
+  'Company / Agency ID',
+  'Other Valid PH Gov’t / Legal ID'
+];
+
 const PICKUP_PHOTO_SLOTS = [
   {
     key: 'driver_license_front',
     category: 'driver_license_front',
     stepNum: 1,
-    title: "Driver's License / ID — FRONT",
-    hint: 'AI will automatically read the Driver Name & License # from this photo!',
+    title: 'Driver Valid Gov’t / Legal ID — FRONT',
+    hint: 'Upload ANY valid PH gov’t/legal ID (Driver’s License, National ID, Passport, UMID, PRC, SSS, Postal, etc.). AI reads Name, ID Type & ID #!',
     ocrHighlight: true
   },
   {
     key: 'driver_license_back',
     category: 'driver_license_back',
     stepNum: 2,
-    title: "Driver's License / ID — BACK",
-    hint: 'Clear photo of the back of the driver ID / license card.',
+    title: 'Driver Valid Gov’t / Legal ID — BACK',
+    hint: 'Clear photo of the back of the representative’s valid PH government or legal ID card.',
     ocrHighlight: false
   },
   {
@@ -245,6 +259,7 @@ export default function SimpleSupplierRtvWizardModal({
   const [confirmUnifySupplier, setConfirmUnifySupplier] = useState(false);
   const [scrapNeedsReorder, setScrapNeedsReorder] = useState(true);
   const [driverName, setDriverName] = useState('');
+  const [driverIdType, setDriverIdType] = useState("Driver's License (LTO)");
   const [driverLicenseNo, setDriverLicenseNo] = useState('');
   const [truckPlate, setTruckPlate] = useState('');
   const [existingClaimNumber, setExistingClaimNumber] = useState(null);
@@ -350,6 +365,7 @@ export default function SimpleSupplierRtvWizardModal({
     setScrapNeedsReorder(getItemNeedsReorder(targetReport));
 
     setDriverName(pickup.driver_name || targetReport.driver_name || '');
+    setDriverIdType(pickup.driver_id_type || targetReport.driver_id_type || "Driver's License (LTO)");
     setDriverLicenseNo(pickup.driver_license_no || '');
     setTruckPlate(pickup.truck_plate || '');
 
@@ -484,12 +500,15 @@ export default function SimpleSupplierRtvWizardModal({
       [slotKey]: { file, previewUrl, existingUrl: '' }
     }));
 
-    // Auto-read Driver's License Front with Gemini AI Vision
+    // Auto-read Driver's Valid Gov't / Legal ID Front with Gemini AI Vision
     if (slotKey === 'driver_license_front') {
       setIsScanningId(true);
-      setOcrNotice({ type: 'info', text: 'Reading Driver Name & License # from photo...' });
+      setOcrNotice({ type: 'info', text: 'Reading Driver Name, Valid ID Type & ID # from photo...' });
       try {
         const res = await catalogService.inspectDriverLicense(file);
+        if (res?.id_type && res.id_type !== 'Unknown') {
+          setDriverIdType(String(res.id_type).trim());
+        }
         if (res?.driver_name) {
           setDriverName((prev) => prev.trim() || res.driver_name.trim());
         }
@@ -497,21 +516,22 @@ export default function SimpleSupplierRtvWizardModal({
           setDriverLicenseNo((prev) => prev.trim() || res.license_number.trim());
         }
         if (res?.driver_name || res?.license_number) {
+          const detectedLabel = res?.id_type && res.id_type !== 'Unknown' ? `${res.id_type}: ` : '';
           setOcrNotice({
             type: 'success',
-            text: `Auto-filled from ID: ${res.driver_name || 'Name n/a'}${res.license_number ? ` • ID # ${res.license_number}` : ''}`
+            text: `Auto-filled from ${detectedLabel}${res.driver_name || 'Name n/a'}${res.license_number ? ` • ID # ${res.license_number}` : ''}`
           });
         } else {
           setOcrNotice({
             type: 'warn',
-            text: res?.rejection_reason || 'Photo saved! Could not read ID text clearly — please type Driver Name & License # below.'
+            text: res?.rejection_reason || 'Photo saved! Could not read ID text clearly — please select ID Type and enter Name & ID # below.'
           });
         }
       } catch (err) {
-        console.warn('License OCR warning:', err);
+        console.warn('Valid ID OCR warning:', err);
         setOcrNotice({
           type: 'warn',
-          text: 'Photo saved! Auto-read unavailable right now — please type Driver Name & License # below.'
+          text: 'Photo saved! Auto-read unavailable right now — please select Valid ID Type and enter Name & ID # below.'
         });
       } finally {
         setIsScanningId(false);
@@ -683,7 +703,7 @@ export default function SimpleSupplierRtvWizardModal({
     }
 
     if (!driverName.trim()) {
-      setErrorMsg("Please enter the Driver's Full Name (from their license).");
+      setErrorMsg("Please enter the Driver's / Representative's Full Name (from their valid gov't/legal ID).");
       return;
     }
     if (!truckPlate.trim()) {
@@ -792,6 +812,7 @@ export default function SimpleSupplierRtvWizardModal({
           supplier_email_to: cleanEmailTo,
           supplier_email_cc: cleanEmailCc,
           driver_name: driverName.trim(),
+          driver_id_type: driverIdType.trim() || "Driver's License (LTO)",
           driver_license_no: driverLicenseNo.trim(),
           truck_plate: truckPlate.trim().toUpperCase(),
           photos: uploadedUrlMap,
@@ -1491,17 +1512,22 @@ export default function SimpleSupplierRtvWizardModal({
                   })}
                 </div>
 
-                {/* Auto-filled Driver Info & Truck Plate */}
+                {/* Auto-filled Driver Info, Valid Gov't ID & Truck Plate */}
                 <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
-                  <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
-                    <UserCheck className="w-4 h-4 text-emerald-600" />
-                    <span>Driver &amp; Truck Details (Printed on Letter Form)</span>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                      <UserCheck className="w-4 h-4 text-emerald-600" />
+                      <span>Driver / Representative &amp; Truck Details (Printed on Letter Form)</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
+                      Accepts ANY Valid PH Gov’t or Legal ID
+                    </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div>
                       <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                        Driver Full Name *
+                        Driver / Rep Full Name *
                       </label>
                       <input
                         type="text"
@@ -1513,13 +1539,30 @@ export default function SimpleSupplierRtvWizardModal({
                     </div>
                     <div>
                       <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                        Driver License / ID #
+                        Valid Gov’t / Legal ID Type
+                      </label>
+                      <select
+                        value={driverIdType}
+                        onChange={(e) => setDriverIdType(e.target.value)}
+                        className="w-full px-2.5 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white"
+                      >
+                        {!PH_LEGAL_ID_TYPES.includes(driverIdType) && driverIdType && (
+                          <option value={driverIdType}>{driverIdType}</option>
+                        )}
+                        {PH_LEGAL_ID_TYPES.map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                        Valid ID Number
                       </label>
                       <input
                         type="text"
                         value={driverLicenseNo}
                         onChange={(e) => setDriverLicenseNo(e.target.value)}
-                        placeholder="Auto-filled from ID photo"
+                        placeholder="ID # / License # from photo"
                         className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-mono font-bold text-slate-900 dark:text-white"
                       />
                     </div>

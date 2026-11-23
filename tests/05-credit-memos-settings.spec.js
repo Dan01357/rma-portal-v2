@@ -154,7 +154,8 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
 
       await cmRow1.locator('button[title="Void / Delete Credit Memo"]').click();
       await page.getByRole('button', { name: /Yes, Delete Permanently/i }).click();
-      await expect(cmRow1).toBeHidden({ timeout: 15_000 });
+      await expect(page.getByRole('button', { name: /Yes, Delete Permanently/i })).toBeHidden({ timeout: 35_000 });
+      await expect(cmRow1).toBeHidden({ timeout: 35_000 });
 
       // 4. Multi-RMA Consolidated Credit Memo flow + Financial Missing SKU Guard
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
@@ -270,7 +271,9 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await settingsTestToggle.click();
       await expect(settingsTestToggle).toContainText(wasTestOn ? /Test Mode:\s*ON/i : /Test Mode:\s*OFF/i);
 
-      await page.getByRole('button', { name: /Test Connection/i }).first().click();
+      const testConnBtn = page.getByRole('button', { name: /Test Connection/i }).first();
+      await expect(testConnBtn).toBeVisible({ timeout: 30_000 });
+      await testConnBtn.click();
       await page.waitForTimeout(800);
 
       const smtpBtn = page.getByRole('button', { name: /Test SMTP Credentials/i });
@@ -323,6 +326,7 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       // Verify /docs link visible in API Keys Management section & API Key Generate/Rotate/Revoke
       await expect(page.locator('a[href*="/docs"]').first()).toBeVisible();
       const refreshKeysBtn = page.getByRole('button', { name: 'Refresh', exact: true });
+      await expect(refreshKeysBtn).toBeEnabled({ timeout: 25_000 });
       await refreshKeysBtn.click();
 
       await page.getByRole('button', { name: /Generate New Key/i }).click();

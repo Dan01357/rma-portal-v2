@@ -552,25 +552,7 @@ export const creditMemoService = {
       localStorage.setItem(CREDIT_MEMOS_STORAGE_KEY, JSON.stringify(filtered));
     } catch (e) {}
 
-    await this.saveConsolidatedItemsEntry(cmNumber, null);
-
-    // 1. Delete from dedicated 'credit_memos' table
-    try {
-      const { error } = await supabase
-        .from('credit_memos')
-        .delete()
-        .eq('credit_memo_number', cmNumber);
-
-      if (error) {
-        console.warn('credit_memos table delete notice:', error.message || error);
-      } else {
-        console.log(`[Supabase DB] Credit memo ${cmNumber} deleted from credit_memos table.`);
-      }
-    } catch (e) {
-      console.warn('credit_memos delete catch:', e);
-    }
-
-    // 2. Reset ALL linked rma_reports status and clear notes
+    // Run consolidated items cleanup, credit_memos deletion, and linked RMA resets in parallel
     const linkedRmas = Array.from(new Set([
       ...(target ? getCreditMemoRmaNumbers(target) : [])
     ].filter(Boolean)));
@@ -580,28 +562,45 @@ export const creditMemoService = {
       reportId
     ].filter((id) => id !== null && id !== undefined && /^\d+$/.test(String(id))).map((id) => Number(id))));
 
+    const ops = [
+      this.saveConsolidatedItemsEntry(cmNumber, null),
+      supabase
+        .from('credit_memos')
+        .delete()
+        .eq('credit_memo_number', cmNumber)
+        .then(({ error }) => {
+          if (error) {
+            console.warn('credit_memos table delete notice:', error.message || error);
+          } else {
+            console.log(`[Supabase DB] Credit memo ${cmNumber} deleted from credit_memos table.`);
+          }
+        })
+    ];
+
     if (linkedRmas.length > 0) {
-      try {
-        await supabase
+      ops.push(
+        supabase
           .from('rma_reports')
           .update({
             notes: null,
             status: 'pending'
           })
-          .in('rma_number', linkedRmas);
-      } catch (e) {}
+          .in('rma_number', linkedRmas)
+      );
     }
     if (linkedIds.length > 0) {
-      try {
-        await supabase
+      ops.push(
+        supabase
           .from('rma_reports')
           .update({
             notes: null,
             status: 'pending'
           })
-          .in('id', linkedIds);
-      } catch (e) {}
+          .in('id', linkedIds)
+      );
     }
+
+    await Promise.allSettled(ops);
 
     return { success: true };
   },

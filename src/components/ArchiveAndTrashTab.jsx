@@ -19,7 +19,8 @@ import {
   getTrashDaysRemaining, 
   formatQuantityWithPackSize,
   normalizeWarehouseLocation,
-  formatDateYmd
+  formatDateYmd,
+  isManifestSubItem
 } from '../utils/rmaHelpers';
 import TablePagination from './TablePagination';
 
@@ -57,9 +58,10 @@ export default function ArchiveAndTrashTab({
   // Base list depending on active view
   const baseList = activeView === 'archive' ? effectiveArchived : effectiveTrashed;
 
-  // Filter list by environment and search query
+  // Filter list by environment and search query (collapse manifest sub-items under parent)
   const filteredList = useMemo(() => {
     return baseList.filter(item => {
+      if (isManifestSubItem(item, baseList)) return false;
       const isTest = isTestRecord(item);
       if (envFilter === 'live' && isTest) return false;
       if (envFilter === 'test' && !isTest) return false;

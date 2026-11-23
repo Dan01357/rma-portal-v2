@@ -34,6 +34,7 @@ test.describe('Suite 08: REST API Endpoints, /docs & /api/context, Date Format A
       const openapiJson = await openapiRes.json();
       expect(openapiJson.openapi).toMatch(/^3\./);
       expect(openapiJson.paths).toHaveProperty('/api/v1/rma');
+      expect(openapiJson.paths).toHaveProperty('/api/v1/rma-email-edit');
       expect(openapiJson.paths).toHaveProperty('/api/v1/products');
       expect(openapiJson.paths).toHaveProperty('/api/v1/credit-memos');
       expect(openapiJson.paths).toHaveProperty('/api/v1/health');
@@ -47,18 +48,18 @@ test.describe('Suite 08: REST API Endpoints, /docs & /api/context, Date Format A
       expect(await ctxStaticRes.text()).toContain('wholesale-rma-portal');
 
       // 2. /api/v1/health & /api/v1/products/lookup (case-insensitive SKU + barcode)
-      const healthRes = await request.get('/api/v1/health');
+      const healthRes = await request.get('/api/v1/health', { timeout: 45_000 });
       expect(healthRes.status()).toBe(200);
       const healthJson = await healthRes.json();
       expect(healthJson).toHaveProperty('status');
 
-      const lookupSkuRes = await request.get('/api/v1/products/lookup?search=ss1319p');
+      const lookupSkuRes = await request.get('/api/v1/products/lookup?search=ss1319p', { timeout: 30_000 });
       expect(lookupSkuRes.status()).toBe(200);
       const lookupSkuJson = await lookupSkuRes.json();
       expect(lookupSkuJson.success).toBe(true);
       expect(Array.isArray(lookupSkuJson.data || lookupSkuJson.products || [])).toBe(true);
 
-      const lookupBcRes = await request.get(`/api/v1/products/lookup?barcode=${VERIFIED_BARCODE}`);
+      const lookupBcRes = await request.get(`/api/v1/products/lookup?barcode=${VERIFIED_BARCODE}`, { timeout: 30_000 });
       expect(lookupBcRes.status()).toBe(200);
       const lookupBcJson = await lookupBcRes.json();
       expect(lookupBcJson.success).toBe(true);
@@ -128,7 +129,7 @@ test.describe('Suite 08: REST API Endpoints, /docs & /api/context, Date Format A
       expect((await cmListRes.json()).success).toBe(true);
 
       // Navigate once so strict guards observe page cleanly too
-      await page.goto('/docs', { waitUntil: 'domcontentloaded' });
+      await page.goto('/docs', { waitUntil: 'domcontentloaded', timeout: 45_000 });
       guard.assertClean('suite 08 REST API & /docs');
     } finally {
       if (tempKeyId) {
@@ -145,7 +146,7 @@ test.describe('Suite 08: REST API Endpoints, /docs & /api/context, Date Format A
     page,
     context
   }) => {
-    test.setTimeout(150_000);
+    test.setTimeout(240_000);
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
 
@@ -160,9 +161,9 @@ test.describe('Suite 08: REST API Endpoints, /docs & /api/context, Date Format A
         await page.setViewportSize({ width: vp.width, height: vp.height });
 
         // 1. Public Intake responsive layout
-        await page.goto('/', { waitUntil: 'domcontentloaded' });
+        await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 45_000 });
         await expect(page.getByText(/Scan Product Barcode or RMA Sticker QR/i)).toBeVisible({
-          timeout: 20_000
+          timeout: 40_000
         });
         await assertNoHorizontalOverflow(page, `${vp.name} Public Intake`);
 

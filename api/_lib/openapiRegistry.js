@@ -62,11 +62,13 @@ Pass your secret API key in all requests:
 - **🟢 Live Production Mode**:
   Requests made with live keys (\`sk_live_...\`) or without test flags operate directly on production books. Live returns appear in **Customer RMA Hub** or **Supplier Hub**.
 - **🧪 Test Mode Sandbox (Safe Isolation)**:
-  Coworkers can simulate inventory restocks, supplier re-orders, and debit memos safely without touching live financial ledgers or triggering customer/boss notification emails:
+  Coworkers can simulate inventory restocks, supplier re-orders, driver pickups, and consolidated credit memos safely without touching live financial ledgers or triggering live customer/boss emails (UI Test Mode emails route safely to \`mgan@a2z2go.net\` with \`[TEST_MODE]\` prefixes):
   1. **Query Param**: Add \`?test_mode=true\` (e.g. \`GET /api/v1/rma?test_mode=true\`)
   2. **HTTP Header**: Pass \`x-test-mode: true\`
   3. **POST Payload**: Include \`"is_test": true\`
   4. **API Keys**: Test keys prefixed with \`sk_test_...\` automatically route to the Test Sandbox.
+- **📅 Unambiguous ISO Date Standard**:
+  All portal views, emails, US Letter B&W printables, and \`.xlsx\` Matrix exports use unambiguous \`YYYY-MM-DD\` and \`YYYY-MM-DD HH:mm\` (Asia/Manila) formatting.
 - **🚀 Simulating Connections via Scalar Documentation (/docs)**:
   1. Click **"Authorize"** in the top right and paste your API key (\`sk_test_...\` or \`sk_live_...\`).
   2. Select an endpoint (e.g. \`GET /api/v1/rma\` or \`POST /api/v1/rma\`).
@@ -127,15 +129,17 @@ If you need to audit items marked for disposal without placing a replacement sup
    This marks the ticket as **7- Scrapped / Written Off**.
 
 #### 3. 🟣 Vendor Recovery / Outbound RTV Queue (?queue=rtv_debit):
-Send \`GET /api/v1/rma?queue=rtv_debit\` to retrieve merchandise queued for return to vendor recovery claims.
+Send \`GET /api/v1/rma?queue=rtv_debit\` to retrieve merchandise queued for return to vendor recovery claims (including single & multi-RMA consolidated \`RTV-\` / \`RTV-TEST-\` claims and \`picked_up\` driver handovers).
 
-#### 4. 🟡 On Hold / Quarantine Queue (?queue=quarantine):
-Send \`GET /api/v1/rma?queue=quarantine\` to retrieve items currently frozen on hold. Financial claims are locked until released.
+#### 4. 🟡 Legacy Hold / Quarantine Query Filter (?queue=quarantine):
+Retained for backwards-compatible REST API clients only; the streamlined portal UI routes returns directly through the **4-Choice Outcome & 5-Photo Driver Pickup Wizard** (Debit Claim, Replacement / Exchange, Scrap, or Good Stock Restock).
 
-#### 3. Dual Logistics Streams & Batch Manifests:
-- **\`rma_type: "customer_inbound"\`**: Customer / branch store returns awaiting warehouse triage, restock, or Credit Memo issuance.
-- **\`rma_type: "supplier_outbound"\`**: Defective merchandise batched for outbound Return to Vendor (RTV) recovery and supplier debit claims.
-- **Multi-Item Batch Manifests**: Batched returns are represented with \`is_parent: true\`, \`items\` (JSONB breakdown of line items), \`total_items\`, and \`total_quantity\`. Child records link via \`parent_rma_id\`. Parent containers never require individual product SKUs.
+#### 5. Dual Logistics Streams, Multi-RMA Consolidation & Batch Manifests:
+- **\`rma_type: "customer_inbound"\`**: Customer / branch store returns awaiting 4-Choice disposition, restock, or single/consolidated Credit Memo issuance.
+- **\`rma_type: "supplier_outbound"\`**: Defective merchandise batched for outbound Return to Vendor (RTV) recovery, 5-photo driver pickup verification with US Letter B&W PDF forms, and shared multi-RMA \`RTV-\` claims.
+- **Multi-Item Batch Manifests**: Batched returns are represented with \`is_parent: true\`, \`items\` (JSONB breakdown of line items), \`total_items\`, and \`total_quantity\`. Child records link via \`parent_rma_id\`.
+- **Printable Forms**: Standardized strictly on US Letter (\`8.5in x 11in\`, plain black-and-white ink) for Sticker Studio sheets, Credit Memo Vouchers, and Unified Debit Claim / Replacement & Pickup Forms (accepting any valid Philippine Government / Legal ID).
+- **Email-Bound RMA Editor (\`/api/v1/rma-email-edit\`)**: Scoped Google Identity Lock endpoint for authorized email recipients (routed cleanly without extra Vercel functions) to update supplier, product/SKU, pricing, expiry (\`YYYY-MM-DD\`), and SI/DR/PO documents.
 
 Click **Authorize** on the top right to test live endpoints directly from this interactive documentation.
       `,

@@ -100,7 +100,11 @@ export default function SupplierPickupFormModal({
   const supplierEmailCc = pickup.supplier_email_cc || '';
   const claimNumber = outcome.claimNumber || pickup.claim_number || '';
   const driverName = pickup.driver_name || primaryReport.driver_name || '';
+  const driverIdType = pickup.driver_id_type || '';
   const driverLicense = pickup.driver_license_no || '';
+  const formattedDriverIdDisplay = driverLicense
+    ? (driverIdType ? `${driverIdType}: ${driverLicense}` : driverLicense)
+    : (driverIdType ? `${driverIdType}: ___________________` : '__________________________');
   const truckPlate = pickup.truck_plate || '';
   const driveUrl = primaryReport.google_drive_folder_url || pickup.drive_folder_url || '';
   const photoCount = pickup.photos && typeof pickup.photos === 'object' ? Object.keys(pickup.photos).length : 0;
@@ -316,15 +320,15 @@ export default function SupplierPickupFormModal({
           </span>
         </div>
         <div className="col-span-6">
-          <span className="text-[8px] font-bold uppercase text-black block">Driver Name</span>
+          <span className="text-[8px] font-bold uppercase text-black block">Driver / Representative Name</span>
           <span className="font-bold text-black">
             {driverName || '_______________________________'}
           </span>
         </div>
         <div className="col-span-6">
-          <span className="text-[8px] font-bold uppercase text-black block">Driver License #</span>
+          <span className="text-[8px] font-bold uppercase text-black block">Valid PH Gov&apos;t / Legal ID #</span>
           <span className="font-mono font-bold text-black">
-            {driverLicense || '__________________________'}
+            {formattedDriverIdDisplay}
           </span>
         </div>
         {/* Handwritten blank lines for physical pickup */}

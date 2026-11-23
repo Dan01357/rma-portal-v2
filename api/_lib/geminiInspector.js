@@ -205,8 +205,8 @@ Return ONLY valid JSON matching this schema:
 }
 
 /**
- * Inspects a Driver's License or ID card using Gemini Flash to auto-populate pickup forms.
- * Extracts driver full name, license/ID number, and expiration date without fabricating missing fields.
+ * Inspects any Philippine Government / Legal ID card or Driver's License using Gemini Flash to auto-populate pickup forms.
+ * Extracts ID type, representative full name, ID number, and expiration date without fabricating missing fields.
  */
 export async function inspectDriverLicenseWithGemini({ fileData, imageUrl, mimeType = 'image/jpeg' }) {
   const apiKey = process.env.GEMINI_API_KEY ||
@@ -225,22 +225,23 @@ export async function inspectDriverLicenseWithGemini({ fileData, imageUrl, mimeT
       expiry_date: null,
       confidence: 0,
       error: 'MISSING_GEMINI_API_KEY',
-      rejection_reason: 'AI key is not configured. Please type Driver Name and License # manually.'
+      rejection_reason: 'AI key is not configured. Please type Driver Name and Valid ID # manually.'
     };
   }
 
   const promptText = `
-You are a Logistics Gate Security ID Reader specializing in Philippine LTO Driver's Licenses and Government/Company IDs.
+You are a Logistics Gate Security ID Reader specializing in Philippine Government, Regulatory, and Legal Identification Cards.
 Examine the uploaded ID photo and extract ONLY clearly legible fields:
-- "is_valid_id": true if the photo shows a physical or printed Driver's License, UMID, National ID, or Company ID card. False if it shows random objects, blurry text with no readable name/ID, or a product box.
-- "id_type": "Driver's License" | "Government ID" | "Company ID" | "Unknown"
+- "is_valid_id": true if the photo shows a physical or printed valid Philippine Government / Legal ID or Company ID (such as LTO Driver's License, PhilSys National ID / ePhilID, Philippine Passport, UMID, SSS ID, Postal ID, PRC ID, Voter's ID / COMELEC, TIN / BIR ID, Senior/PWD ID, or Company/Agency ID). False if it shows random objects, blurry text with no readable name/ID, or a product box.
+- "id_type": Match the closest standardized label from:
+  "Driver's License (LTO)" | "PhilSys National ID (PhilID / ePhilID)" | "Philippine Passport" | "UMID Card" | "SSS ID" | "Postal ID" | "PRC Professional ID" | "Voter’s ID / COMELEC" | "TIN / BIR Card" | "Company / Agency ID" | "Other Valid PH Gov’t / Legal ID" | "Unknown"
 - "driver_name": The cardholder's full name formatted cleanly in normal First Middle Last order if recognizable (e.g. from "DELA CRUZ, JUAN SANTOS" return "Juan Santos Dela Cruz" or exact printed full name), or null if unreadable.
-- "license_number": The exact License No. / ID No. printed on the card (e.g. "N01-23-456789"), or null if unreadable.
+- "license_number": The exact ID No. / License No. / CRN / Passport No. printed on the card (e.g. "N01-23-456789", "P1234567A", "1234-5678-9012-3456"), or null if unreadable.
 - "expiry_date": Expiration date on the ID in YYYY-MM-DD format if visible, else null.
 - "confidence": 0.0 to 1.0
 - "rejection_reason": Short explanation if is_valid_id is false, else null.
 
-NEVER guess or make up a name or license number. Return ONLY valid JSON:
+NEVER guess or make up a name or ID number. Return ONLY valid JSON:
 {
   "is_valid_id": boolean,
   "id_type": string,
@@ -256,12 +257,12 @@ NEVER guess or make up a name or license number. Return ONLY valid JSON:
   const isValid = Boolean(parsed.is_valid_id);
   return {
     is_valid_id: isValid,
-    id_type: parsed.id_type || (isValid ? "Driver's License" : 'Unknown'),
+    id_type: parsed.id_type || (isValid ? "Other Valid PH Gov’t / Legal ID" : 'Unknown'),
     driver_name: parsed.driver_name ? String(parsed.driver_name).trim() : null,
     license_number: parsed.license_number ? String(parsed.license_number).trim() : null,
     expiry_date: parsed.expiry_date || null,
     confidence: typeof parsed.confidence === 'number' ? parsed.confidence : (isValid ? 0.92 : 0),
-    rejection_reason: isValid ? null : (parsed.rejection_reason || 'Could not clearly read ID details. Please type Driver Name and License # manually.')
+    rejection_reason: isValid ? null : (parsed.rejection_reason || 'Could not clearly read valid ID details. Please type Driver Name and Valid ID # manually.')
   };
 }
 

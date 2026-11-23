@@ -96,6 +96,7 @@ import QuickRMAActionModal from './components/QuickRMAActionModal';
 import SimpleSupplierRtvWizardModal from './components/SimpleSupplierRtvWizardModal';
 import SupplierPickupFormModal from './components/SupplierPickupFormModal';
 import RMAMatrixExportModal from './components/RMAMatrixExportModal';
+import RmaEmailEditorView from './components/RmaEmailEditorView';
 import GatekeeperPinModal from './components/GatekeeperPinModal';
 import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
 import { inviteService, formatRemainingCountdown } from './services/inviteService';
@@ -420,9 +421,11 @@ export default function App() {
     if (gateSession?.authorized_email) {
       setReporterContact(gateSession.authorized_email);
     }
-    const resolvedEntity = inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch);
-    if (resolvedEntity) {
-      setStoreBranch(resolvedEntity);
+    if (gateSession?.stream_type !== 'rma_editor') {
+      const resolvedEntity = inviteService.normalizeEntityName(gateSession?.entity_name || gateSession?.store_branch);
+      if (resolvedEntity) {
+        setStoreBranch(resolvedEntity);
+      }
     }
   }, [gateSession]);
 
@@ -431,6 +434,7 @@ export default function App() {
       localStorage.removeItem('rma_portal_gate_session');
       localStorage.removeItem('rma_reporter_contact');
       localStorage.removeItem('rma_portal_verified_email');
+      sessionStorage.removeItem('rma_oauth_access_token');
     } catch { }
     supabase.auth.signOut({ scope: 'local' }).catch(() => { });
     const slug = gateSession?.slug || intakeSlug || 'dock';
@@ -851,7 +855,7 @@ export default function App() {
       );
 
       if (!matchedReport) {
-        const maxAttempts = hasOptimisticPending ? 12 : 4;
+        const maxAttempts = hasOptimisticPending ? 12 : 2;
         for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
           try {
             const dbRow = await fetchParentRmaFromDb();
@@ -1142,9 +1146,10 @@ export default function App() {
 
   const handleBulkArchiveReports = async (reportsList) => {
     try {
-      const matchSet = new Set(reportsList.map(r => r.id || r.rma_number));
+      const idSet = new Set(reportsList.map(r => r.id).filter(Boolean));
+      const rmaSet = new Set(reportsList.map(r => r.rma_number).filter(Boolean));
       setRecentReportsList(prev => prev.map(r => {
-        if (matchSet.has(r.id) || matchSet.has(r.rma_number)) {
+        if (idSet.has(r.id) || (r.rma_number && rmaSet.has(r.rma_number))) {
           return {
             ...r,
             ai_document_metadata: {
@@ -1171,6 +1176,7 @@ export default function App() {
   const handleRestoreFromTrashOrArchive = async (item) => {
     if (!item) return;
     try {
+      await catalogService.restoreReport(item.id, item.rma_number, currentUser?.name || 'Staff');
       setRecentReportsList(prev => prev.map(r => {
         if ((item.id && r.id === item.id) || (item.rma_number && r.rma_number === item.rma_number)) {
           const meta = { ...(r.ai_document_metadata || {}) };
@@ -1185,7 +1191,6 @@ export default function App() {
         }
         return r;
       }));
-      await catalogService.restoreReport(item.id, item.rma_number, currentUser?.name || 'Staff');
       showToast(`Restored RMA #${item.rma_number} back to active workspace.`, 'success');
       refreshAllData();
     } catch (e) {
@@ -1475,9 +1480,10 @@ export default function App() {
         refreshAllData();
       } else if (deleteModalState.type === 'bulk_reports') {
         const items = deleteModalState.items || [];
-        const matchSet = new Set(items.map(r => r.id || r.rma_number));
+        const idSet = new Set(items.map(r => r.id).filter(Boolean));
+        const rmaSet = new Set(items.map(r => r.rma_number).filter(Boolean));
         setRecentReportsList(prev => prev.map(r => {
-          if (matchSet.has(r.id) || matchSet.has(r.rma_number)) {
+          if (idSet.has(r.id) || (r.rma_number && rmaSet.has(r.rma_number))) {
             return {
               ...r,
               ai_document_metadata: {
@@ -2956,10 +2962,23 @@ export default function App() {
       <div id="app-main-view-container" className={`${isAdminView ? 'w-full max-w-7xl' : 'w-full max-w-2xl'} mx-auto space-y-4 sm:space-y-6 transition-all duration-300 min-w-0 box-border`}>
 
         {/* ================================================================= */}
-        {/* 1. PUBLIC REPORTER PORTAL (Accessible at '/' or default)          */}
+        {/* 1. PUBLIC REPORTER PORTAL / SCOPED EMAIL RMA EDITOR               */}
         {/* ================================================================= */}
         {!isAdminView && (
-          <div className="space-y-4 animate-in fade-in duration-200">
+          gateSession?.stream_type === 'rma_editor' ? (
+            <RmaEmailEditorView
+              gateSession={gateSession}
+              sessionCountdown={sessionCountdown}
+              allReports={recentReportsList}
+              catalogProducts={savedProductsList}
+              isDarkMode={isDarkMode}
+              onToggleTheme={toggleTheme}
+              onLockStation={handleLockStation}
+              onRefreshReports={refreshAllData}
+              onToast={showToast}
+            />
+          ) : (
+            <div className="space-y-4 animate-in fade-in duration-200">
 
             {/* Top Navigation Bar: Station Branding, Device Lock & Theme Control */}
             <div className="flex items-center justify-between gap-3 p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xs">
@@ -4388,6 +4407,7 @@ export default function App() {
             )}
 
           </div>
+          )
         )}
 
         {/* ================================================================= */}
@@ -5691,11 +5711,13 @@ export default function App() {
           if (session?.authorized_email) {
             setReporterContact(session.authorized_email);
           }
-          const entity = inviteService.normalizeEntityName(session?.entity_name || session?.store_branch);
-          if (entity) {
-            setStoreBranch(entity);
-          } else {
-            setStoreBranch('');
+          if (session?.stream_type !== 'rma_editor') {
+            const entity = inviteService.normalizeEntityName(session?.entity_name || session?.store_branch);
+            if (entity) {
+              setStoreBranch(entity);
+            } else {
+              setStoreBranch('');
+            }
           }
           showToast(`Portal Unlocked: ${session.profileName || session.authorized_email}`, 'success');
         }}

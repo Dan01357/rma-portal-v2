@@ -2423,14 +2423,21 @@ export const catalogService = {
       // unlink them first so deleting this parent report NEVER cascades to delete the split children!
       if (isNumericId) {
         try {
-          await supabase.from('rma_reports').update({ parent_rma_id: null }).eq('parent_rma_id', id);
+          await supabase
+            .from('rma_reports')
+            .update({ parent_rma_id: null })
+            .eq('parent_rma_id', id)
+            .neq('rma_number', rmaNumber || '');
         } catch (unlinkErr) {
           console.warn('[Unlink Split Children Before Delete]:', unlinkErr.message);
         }
       }
 
+      const deleteByExactRma = Boolean(rmaNumber && (!isNumericId || !explicitItemOrPhotos?.parent_rma_id));
       let query = supabase.from('rma_reports').delete();
-      if (isNumericId) {
+      if (deleteByExactRma) {
+        query = query.eq('rma_number', rmaNumber);
+      } else if (isNumericId) {
         query = query.eq('id', id);
       } else {
         query = query.eq('rma_number', rmaNumber);
@@ -2443,7 +2450,8 @@ export const catalogService = {
         let softQuery = supabase.from('rma_reports').update({
           status: 'deleted'
         });
-        if (isNumericId) softQuery = softQuery.eq('id', id);
+        if (deleteByExactRma) softQuery = softQuery.eq('rma_number', rmaNumber);
+        else if (isNumericId) softQuery = softQuery.eq('id', id);
         else softQuery = softQuery.eq('rma_number', rmaNumber);
         const { error: softErr } = await softQuery;
         if (softErr) {
@@ -2635,59 +2643,103 @@ export const catalogService = {
   },
 
   /**
+   * Shared lifecycle mutator for Trash / Archive / Restore.
+   * Cascades atomically to manifest sibling rows sharing the exact same non-split rma_number
+   * while leaving split children (e.g. -B, -C with distinct rma_number) untouched.
+   */
+  async _updateReportLifecycleState(id, rmaNumber, { buildMeta, auditAction, auditStage, auditNotes, eventName }) {
+    if (!id && !rmaNumber) return false;
+    const cleanId = id && /^\d+$/.test(String(id)) ? parseInt(id, 10) : null;
+
+    let seedRows = [];
+    if (cleanId) {
+      const { data } = await supabase
+        .from('rma_reports')
+        .select('id, rma_number, parent_rma_id, ai_document_metadata, audit_trail')
+        .eq('id', cleanId)
+        .limit(1);
+      if (Array.isArray(data)) seedRows = data;
+    }
+
+    const resolvedRma = rmaNumber || seedRows[0]?.rma_number || null;
+    const isManifestChildOnly = Boolean(seedRows[0]?.parent_rma_id && seedRows[0]?.rma_number === resolvedRma);
+    let targetRows = seedRows;
+    if (resolvedRma && !isManifestChildOnly) {
+      const { data: siblingRows } = await supabase
+        .from('rma_reports')
+        .select('id, rma_number, parent_rma_id, ai_document_metadata, audit_trail')
+        .eq('rma_number', resolvedRma)
+        .limit(25);
+      if (Array.isArray(siblingRows) && siblingRows.length > 0) {
+        targetRows = siblingRows;
+      }
+    }
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const auditEntry = {
+      timestamp: nowIso,
+      action: auditAction,
+      stage: auditStage,
+      actor: auditNotes?.actor || 'Staff',
+      notes: typeof auditNotes === 'string' ? auditNotes : auditNotes?.text || ''
+    };
+
+    for (const row of targetRows) {
+      const updatedMeta = buildMeta(row.ai_document_metadata || {}, now, nowIso);
+      const existingAudit = Array.isArray(row.audit_trail) ? row.audit_trail : [];
+      const { error } = await supabase
+        .from('rma_reports')
+        .update({
+          ai_document_metadata: updatedMeta,
+          audit_trail: [...existingAudit, auditEntry]
+        })
+        .eq('id', row.id);
+      if (error) throw error;
+    }
+
+    if (targetRows.length === 0 && resolvedRma) {
+      const { error } = await supabase
+        .from('rma_reports')
+        .update({
+          ai_document_metadata: buildMeta({}, now, nowIso),
+          audit_trail: [auditEntry]
+        })
+        .eq('rma_number', resolvedRma);
+      if (error) throw error;
+    }
+
+    this.notifyChange(eventName, { id: cleanId || targetRows[0]?.id, rmaNumber: resolvedRma });
+    return true;
+  },
+
+  /**
    * ENTERPRISE SOFT-DELETE: Move report to 30-Day Trash Bin (<100ms instant execution)
    */
   async moveReportToTrash(id, rmaNumber, actorName = 'Staff') {
-    if (!id && !rmaNumber) return false;
     try {
-      const cleanId = id ? parseInt(id, 10) : null;
-      let targetRow = null;
-      if (cleanId) {
-        const { data } = await supabase.from('rma_reports').select('id, rma_number, ai_document_metadata, audit_trail').eq('id', cleanId).maybeSingle();
-        targetRow = data;
-      } else if (rmaNumber) {
-        const { data } = await supabase.from('rma_reports').select('id, rma_number, ai_document_metadata, audit_trail').eq('rma_number', rmaNumber).maybeSingle();
-        targetRow = data;
-      }
-
-      const now = new Date();
-      const nowIso = now.toISOString();
-      const purgeAfter = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000)).toISOString();
-
-      const existingMeta = targetRow?.ai_document_metadata || {};
-      const updatedMeta = {
-        ...existingMeta,
-        is_trashed: true,
-        is_archived: false,
-        trashed_at: nowIso,
-        trashed_by: actorName,
-        purge_after: purgeAfter
-      };
-
-      const existingAudit = Array.isArray(targetRow?.audit_trail) ? targetRow.audit_trail : [];
-      const newAudit = [
-        ...existingAudit,
-        {
-          timestamp: nowIso,
-          action: 'MOVED_TO_TRASH',
-          stage: 'TRASH_BIN',
+      let scheduledPurge = '';
+      return await this._updateReportLifecycleState(id, rmaNumber, {
+        buildMeta: (existingMeta, now, nowIso) => {
+          const purgeAfter = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+          scheduledPurge = purgeAfter;
+          return {
+            ...existingMeta,
+            is_trashed: true,
+            is_archived: false,
+            trashed_at: nowIso,
+            trashed_by: actorName,
+            purge_after: purgeAfter
+          };
+        },
+        auditAction: 'MOVED_TO_TRASH',
+        auditStage: 'TRASH_BIN',
+        auditNotes: {
           actor: actorName,
-          notes: `Moved to 30-day Trash Bin by ${actorName}. Auto-purge scheduled for ${purgeAfter}`
-        }
-      ];
-
-      let query = supabase.from('rma_reports').update({
-        ai_document_metadata: updatedMeta,
-        audit_trail: newAudit
+          text: `Moved to 30-day Trash Bin by ${actorName}. Auto-purge scheduled (${scheduledPurge || '30 days'})`
+        },
+        eventName: 'report-trashed'
       });
-      if (cleanId) query = query.eq('id', cleanId);
-      else query = query.eq('rma_number', rmaNumber);
-
-      const { error } = await query;
-      if (error) throw error;
-
-      this.notifyChange('report-trashed', { id: cleanId || targetRow?.id, rmaNumber: rmaNumber || targetRow?.rma_number });
-      return true;
     } catch (e) {
       console.error('moveReportToTrash error:', e);
       throw e;
@@ -2698,54 +2750,20 @@ export const catalogService = {
    * ENTERPRISE ARCHIVE: Store report in Archive Vault indefinitely
    */
   async archiveReport(id, rmaNumber, actorName = 'Staff') {
-    if (!id && !rmaNumber) return false;
     try {
-      const cleanId = id ? parseInt(id, 10) : null;
-      let targetRow = null;
-      if (cleanId) {
-        const { data } = await supabase.from('rma_reports').select('id, rma_number, ai_document_metadata, audit_trail').eq('id', cleanId).maybeSingle();
-        targetRow = data;
-      } else if (rmaNumber) {
-        const { data } = await supabase.from('rma_reports').select('id, rma_number, ai_document_metadata, audit_trail').eq('rma_number', rmaNumber).maybeSingle();
-        targetRow = data;
-      }
-
-      const now = new Date();
-      const nowIso = now.toISOString();
-
-      const existingMeta = targetRow?.ai_document_metadata || {};
-      const updatedMeta = {
-        ...existingMeta,
-        is_archived: true,
-        is_trashed: false,
-        archived_at: nowIso,
-        archived_by: actorName
-      };
-
-      const existingAudit = Array.isArray(targetRow?.audit_trail) ? targetRow.audit_trail : [];
-      const newAudit = [
-        ...existingAudit,
-        {
-          timestamp: nowIso,
-          action: 'ARCHIVED',
-          stage: 'ARCHIVE_VAULT',
-          actor: actorName,
-          notes: `Archived into Enterprise Vault by ${actorName}`
-        }
-      ];
-
-      let query = supabase.from('rma_reports').update({
-        ai_document_metadata: updatedMeta,
-        audit_trail: newAudit
+      return await this._updateReportLifecycleState(id, rmaNumber, {
+        buildMeta: (existingMeta, _now, nowIso) => ({
+          ...existingMeta,
+          is_archived: true,
+          is_trashed: false,
+          archived_at: nowIso,
+          archived_by: actorName
+        }),
+        auditAction: 'ARCHIVED',
+        auditStage: 'ARCHIVE_VAULT',
+        auditNotes: { actor: actorName, text: `Archived into Enterprise Vault by ${actorName}` },
+        eventName: 'report-archived'
       });
-      if (cleanId) query = query.eq('id', cleanId);
-      else query = query.eq('rma_number', rmaNumber);
-
-      const { error } = await query;
-      if (error) throw error;
-
-      this.notifyChange('report-archived', { id: cleanId || targetRow?.id, rmaNumber: rmaNumber || targetRow?.rma_number });
-      return true;
     } catch (e) {
       console.error('archiveReport error:', e);
       throw e;
@@ -2756,55 +2774,24 @@ export const catalogService = {
    * RESTORE REPORT: Return record from Trash or Archive back to active hub
    */
   async restoreReport(id, rmaNumber, actorName = 'Staff') {
-    if (!id && !rmaNumber) return false;
     try {
-      const cleanId = id ? parseInt(id, 10) : null;
-      let targetRow = null;
-      if (cleanId) {
-        const { data } = await supabase.from('rma_reports').select('id, rma_number, ai_document_metadata, audit_trail').eq('id', cleanId).maybeSingle();
-        targetRow = data;
-      } else if (rmaNumber) {
-        const { data } = await supabase.from('rma_reports').select('id, rma_number, ai_document_metadata, audit_trail').eq('rma_number', rmaNumber).maybeSingle();
-        targetRow = data;
-      }
-
-      const now = new Date();
-      const nowIso = now.toISOString();
-
-      const existingMeta = targetRow?.ai_document_metadata || {};
-      const updatedMeta = { ...existingMeta };
-      delete updatedMeta.is_trashed;
-      delete updatedMeta.trashed_at;
-      delete updatedMeta.trashed_by;
-      delete updatedMeta.purge_after;
-      delete updatedMeta.is_archived;
-      delete updatedMeta.archived_at;
-      delete updatedMeta.archived_by;
-
-      const existingAudit = Array.isArray(targetRow?.audit_trail) ? targetRow.audit_trail : [];
-      const newAudit = [
-        ...existingAudit,
-        {
-          timestamp: nowIso,
-          action: 'RESTORED',
-          stage: 'ACTIVE_HUB',
-          actor: actorName,
-          notes: `Restored back to active hub by ${actorName}`
-        }
-      ];
-
-      let query = supabase.from('rma_reports').update({
-        ai_document_metadata: updatedMeta,
-        audit_trail: newAudit
+      return await this._updateReportLifecycleState(id, rmaNumber, {
+        buildMeta: (existingMeta) => {
+          const updatedMeta = { ...existingMeta };
+          delete updatedMeta.is_trashed;
+          delete updatedMeta.trashed_at;
+          delete updatedMeta.trashed_by;
+          delete updatedMeta.purge_after;
+          delete updatedMeta.is_archived;
+          delete updatedMeta.archived_at;
+          delete updatedMeta.archived_by;
+          return updatedMeta;
+        },
+        auditAction: 'RESTORED',
+        auditStage: 'ACTIVE_HUB',
+        auditNotes: { actor: actorName, text: `Restored back to active hub by ${actorName}` },
+        eventName: 'report-restored'
       });
-      if (cleanId) query = query.eq('id', cleanId);
-      else query = query.eq('rma_number', rmaNumber);
-
-      const { error } = await query;
-      if (error) throw error;
-
-      this.notifyChange('report-restored', { id: cleanId || targetRow?.id, rmaNumber: rmaNumber || targetRow?.rma_number });
-      return true;
     } catch (e) {
       console.error('restoreReport error:', e);
       throw e;

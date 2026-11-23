@@ -16,9 +16,10 @@ import {
   Truck,
   Store,
   Filter,
-  Ban
+  Ban,
+  FileEdit
 } from 'lucide-react';
-import { inviteService, formatRemainingCountdown } from '../services/inviteService';
+import { inviteService, formatRemainingCountdown, isRmaEditorInvite } from '../services/inviteService';
 import TablePagination from './TablePagination';
 import { copyTextSafe } from '../utils/clipboard';
 import { formatDateTimeYmdHm } from '../utils/rmaHelpers';
@@ -39,7 +40,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   const [invites, setInvites] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   
-  // Stream Type Toggle: 'customer_inbound' (Customer Return) vs 'supplier_outbound' (Supplier RTV)
+  // Stream Type Toggle: 'customer_inbound' | 'supplier_outbound' | 'rma_editor'
   const [streamType, setStreamType] = useState('customer_inbound');
   const [inviteIsTestMode, setInviteIsTestMode] = useState(() => {
     try {
@@ -50,6 +51,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   });
   const [authorizedEmail, setAuthorizedEmail] = useState('');
   const [entityName, setEntityName] = useState('');
+  const [targetRmaNumber, setTargetRmaNumber] = useState('');
   
   // Customizable expiration limit (input number + unit: minutes, hours, days)
   const [expiryNumber, setExpiryNumber] = useState(24);
@@ -109,9 +111,11 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     e.preventDefault();
     if (!authorizedEmail.trim()) {
       setErrorMessage(
-        streamType === 'supplier_outbound'
-          ? 'Please enter the authorized supplier / vendor representative email.'
-          : 'Please enter the authorized customer / reporter email.'
+        streamType === 'rma_editor'
+          ? 'Please enter the authorized Google email for the RMA Editor recipient.'
+          : streamType === 'supplier_outbound'
+            ? 'Please enter the authorized supplier / vendor representative email.'
+            : 'Please enter the authorized customer / reporter email.'
       );
       return;
     }
@@ -123,8 +127,9 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       const newInv = await inviteService.createInvite({
         streamType,
         authorizedEmail: authorizedEmail.trim(),
-        entityName: entityName.trim(),
-        storeBranch: entityName.trim(),
+        entityName: streamType === 'rma_editor' ? targetRmaNumber.trim() : entityName.trim(),
+        storeBranch: streamType === 'rma_editor' ? targetRmaNumber.trim() : entityName.trim(),
+        rmaNumber: streamType === 'rma_editor' ? targetRmaNumber.trim() : '',
         durationValue: Math.max(1, parseInt(expiryNumber, 10) || 1),
         durationUnit: expiryUnit,
         createdBy,
@@ -133,13 +138,18 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       setGeneratedInvite(newInv);
       setAuthorizedEmail('');
       setEntityName('');
+      setTargetRmaNumber('');
       setStreamFilter('all');
       setCurrentPage(1);
       setInvites((prev) => [newInv, ...(prev || []).filter((i) => i.token !== newInv.token)]);
       showToast(
-        `${inviteIsTestMode ? '🧪 TEST MODE ' : ''}${streamType === 'supplier_outbound'
-          ? 'Supplier RTV Invite generated successfully!'
-          : 'Customer RMA Return Invite generated successfully!'}`
+        `${inviteIsTestMode ? '🧪 TEST MODE ' : ''}${
+          streamType === 'rma_editor'
+            ? 'RMA Details Editor Link generated successfully!'
+            : streamType === 'supplier_outbound'
+              ? 'Supplier RTV Invite generated successfully!'
+              : 'Customer RMA Return Invite generated successfully!'
+        }`
       );
       loadInvites();
     } catch (err) {
@@ -149,12 +159,21 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     }
   };
 
-  const handleCopyLink = (token) => {
+  const buildInviteUrl = (invOrToken) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://rma-portal-pingconmarketing.vercel.app';
-    const isTestTok = String(token || '').startsWith('inv_test_');
-    const link = `${origin}/intake?token=${encodeURIComponent(token)}${isTestTok ? '&mode=test' : ''}`;
+    const tok = typeof invOrToken === 'string' ? invOrToken : invOrToken?.token;
+    const isTestTok = String(tok || '').startsWith('inv_test_');
+    const rmaParam = (typeof invOrToken === 'object' && isRmaEditorInvite(invOrToken) && invOrToken?.rma_number)
+      ? `&editRma=${encodeURIComponent(invOrToken.rma_number)}`
+      : '';
+    return `${origin}/intake?token=${encodeURIComponent(tok || '')}${rmaParam}${isTestTok ? '&mode=test' : ''}`;
+  };
+
+  const handleCopyLink = (invOrToken) => {
+    const tok = typeof invOrToken === 'string' ? invOrToken : invOrToken?.token;
+    const link = buildInviteUrl(invOrToken);
     copyTextSafe(link);
-    setCopiedToken(token);
+    setCopiedToken(tok);
     showToast('Secure link copied to clipboard!');
     setTimeout(() => setCopiedToken(null), 2500);
   };
@@ -216,6 +235,10 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
 
   const filteredInvites = useMemo(() => {
     if (streamFilter === 'all') return invites;
+    if (streamFilter === 'rma_editor') return invites.filter(i => isRmaEditorInvite(i));
+    if (streamFilter === 'customer_inbound') {
+      return invites.filter(i => !isRmaEditorInvite(i) && (i.stream_type || 'customer_inbound') === 'customer_inbound');
+    }
     return invites.filter(i => (i.stream_type || 'customer_inbound') === streamFilter);
   }, [invites, streamFilter]);
 
@@ -236,8 +259,12 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     return filteredInvites.slice(start, start + pageSize);
   }, [filteredInvites, currentPage, pageSize]);
 
+  const editorCount = useMemo(() => {
+    return invites.filter(i => isRmaEditorInvite(i)).length;
+  }, [invites]);
+
   const customerCount = useMemo(() => {
-    return invites.filter(i => (i.stream_type || 'customer_inbound') === 'customer_inbound').length;
+    return invites.filter(i => !isRmaEditorInvite(i) && (i.stream_type || 'customer_inbound') === 'customer_inbound').length;
   }, [invites]);
 
   const supplierCount = useMemo(() => {
@@ -266,7 +293,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Generate private return links for warehouse staff or customer branches tied strictly to authorized Google accounts.
+                Generate private return or RMA details editor links tied strictly to authorized Google accounts.
               </p>
             </div>
           </div>
@@ -299,14 +326,14 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
           )}
 
           {/* Stream Type Selector Toggle */}
-          <div className="flex p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl gap-2 border border-slate-200 dark:border-slate-700">
+          <div className="flex flex-wrap p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl gap-2 border border-slate-200 dark:border-slate-700">
             <button
               type="button"
               onClick={() => {
                 setStreamType('customer_inbound');
                 setErrorMessage(null);
               }}
-              className={`flex-1 py-3 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              className={`flex-1 min-w-[170px] py-3 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
                 streamType === 'customer_inbound'
                   ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-md border border-slate-200 dark:border-slate-700 scale-[1.01]'
                   : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
@@ -325,7 +352,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 setStreamType('supplier_outbound');
                 setErrorMessage(null);
               }}
-              className={`flex-1 py-3 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              className={`flex-1 min-w-[170px] py-3 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
                 streamType === 'supplier_outbound'
                   ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-md border border-slate-200 dark:border-slate-700 scale-[1.01]'
                   : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
@@ -337,21 +364,44 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 Outbound RTV
               </span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setStreamType('rma_editor');
+                setErrorMessage(null);
+              }}
+              className={`flex-1 min-w-[170px] py-3 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                streamType === 'rma_editor'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-md border border-slate-200 dark:border-slate-700 scale-[1.01]'
+                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <FileEdit className="w-4 h-4" />
+              <span>✏️ RMA Details Editor</span>
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300">
+                Scoped Edit
+              </span>
+            </button>
           </div>
 
           {/* Invite Generator Form Card */}
           <form onSubmit={handleGenerate} className={`p-4 sm:p-5 rounded-3xl space-y-4 shadow-xs border-2 ${
-            streamType === 'supplier_outbound'
-              ? 'bg-purple-50/40 dark:bg-purple-950/20 border-purple-200 dark:border-purple-900/60'
-              : 'bg-slate-50/80 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800'
+            streamType === 'rma_editor'
+              ? 'bg-indigo-50/40 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-900/60'
+              : streamType === 'supplier_outbound'
+                ? 'bg-purple-50/40 dark:bg-purple-950/20 border-purple-200 dark:border-purple-900/60'
+                : 'bg-slate-50/80 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800'
           }`}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <span className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                <Plus className={`w-4 h-4 ${streamType === 'supplier_outbound' ? 'text-purple-600' : 'text-blue-600'}`} />
+                <Plus className={`w-4 h-4 ${streamType === 'rma_editor' ? 'text-indigo-600' : streamType === 'supplier_outbound' ? 'text-purple-600' : 'text-blue-600'}`} />
                 <span>
-                  {streamType === 'supplier_outbound'
-                    ? 'Create New Supplier RTV Invite'
-                    : 'Create New Customer Return Invite'}
+                  {streamType === 'rma_editor'
+                    ? 'Create Scoped RMA Details Editor Link'
+                    : streamType === 'supplier_outbound'
+                      ? 'Create New Supplier RTV Invite'
+                      : 'Create New Customer Return Invite'}
                 </span>
               </span>
               <span className="text-[10px] text-slate-500 font-bold">
@@ -397,9 +447,11 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
               {/* Authorized Google Email */}
               <div className="sm:col-span-1 space-y-1">
                 <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                  {streamType === 'supplier_outbound'
-                    ? 'Authorized Supplier / Vendor Representative Email *'
-                    : 'Authorized Customer Google Email *'}
+                  {streamType === 'rma_editor'
+                    ? 'Authorized Editor Google Email *'
+                    : streamType === 'supplier_outbound'
+                      ? 'Authorized Supplier / Vendor Representative Email *'
+                      : 'Authorized Customer Google Email *'}
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -409,45 +461,59 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                     value={authorizedEmail}
                     onChange={(e) => setAuthorizedEmail(e.target.value)}
                     placeholder={
-                      streamType === 'supplier_outbound'
-                        ? 'e.g. vendor.qa@liwayway.com'
-                        : 'e.g. daniloalvaro031717@gmail.com'
+                      streamType === 'rma_editor'
+                        ? 'e.g. finance@pingconmarketing.com'
+                        : streamType === 'supplier_outbound'
+                          ? 'e.g. vendor.qa@liwayway.com'
+                          : 'e.g. daniloalvaro031717@gmail.com'
                     }
                     className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
                   />
                 </div>
                 <p className="text-[10px] text-slate-400">
-                  {streamType === 'supplier_outbound'
-                    ? 'Vendor QA or delivery lead Google account'
-                    : 'Store manager or receiving supervisor Google account'}
+                  {streamType === 'rma_editor'
+                    ? 'Only this Google account can edit details & commercial docs'
+                    : streamType === 'supplier_outbound'
+                      ? 'Vendor QA or delivery lead Google account'
+                      : 'Store manager or receiving supervisor Google account'}
                 </p>
               </div>
 
-              {/* Entity / Branch Name (Optional) */}
+              {/* Entity / Branch Name OR Target RMA # */}
               <div className="sm:col-span-1 space-y-1">
                 <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                  {streamType === 'supplier_outbound'
-                    ? 'Master Supplier / Vendor Name (Optional)'
-                    : 'Store / Supermarket Branch / Supplier (Optional)'}
+                  {streamType === 'rma_editor'
+                    ? 'Target RMA # (Optional Scope Lock)'
+                    : streamType === 'supplier_outbound'
+                      ? 'Master Supplier / Vendor Name (Optional)'
+                      : 'Store / Supermarket Branch / Supplier (Optional)'}
                 </label>
                 <div className="relative">
                   <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
                     type="text"
-                    value={entityName}
-                    onChange={(e) => setEntityName(e.target.value)}
+                    value={streamType === 'rma_editor' ? targetRmaNumber : entityName}
+                    onChange={(e) =>
+                      streamType === 'rma_editor'
+                        ? setTargetRmaNumber(e.target.value)
+                        : setEntityName(e.target.value)
+                    }
                     placeholder={
-                      streamType === 'supplier_outbound'
-                        ? 'Optional: e.g. Walter Mart, Liwayway, Mondelez'
-                        : 'Optional: e.g. Walter Mart, Savemore Taguig'
+                      streamType === 'rma_editor'
+                        ? (inviteIsTestMode ? 'Optional: RMA-TEST-2026-...' : 'Optional: RMA-2026-...')
+                        : streamType === 'supplier_outbound'
+                          ? 'Optional: e.g. Walter Mart, Liwayway, Mondelez'
+                          : 'Optional: e.g. Walter Mart, Savemore Taguig'
                     }
                     className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
                   />
                 </div>
                 <p className="text-[10px] text-slate-400">
-                  {streamType === 'supplier_outbound'
-                    ? 'If entered, auto-populates the Supplier field on the portal'
-                    : 'If entered (e.g. Walter Mart), auto-populates on the portal'}
+                  {streamType === 'rma_editor'
+                    ? 'If specified, recipient can strictly view & edit only that RMA ticket'
+                    : streamType === 'supplier_outbound'
+                      ? 'If entered, auto-populates the Supplier field on the portal'
+                      : 'If entered (e.g. Walter Mart), auto-populates on the portal'}
                 </p>
               </div>
 
@@ -537,9 +603,11 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                 type="submit"
                 disabled={isGenerating || !authorizedEmail.trim()}
                 className={`px-5 py-2.5 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer disabled:opacity-50 ${
-                  streamType === 'supplier_outbound'
-                    ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-600/20'
-                    : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
+                  streamType === 'rma_editor'
+                    ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'
+                    : streamType === 'supplier_outbound'
+                      ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-600/20'
+                      : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
                 }`}
               >
                 {isGenerating ? (
@@ -549,11 +617,13 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                   </>
                 ) : (
                   <>
-                    <Ticket className="w-3.5 h-3.5" />
+                    {streamType === 'rma_editor' ? <FileEdit className="w-3.5 h-3.5" /> : <Ticket className="w-3.5 h-3.5" />}
                     <span>
-                      {streamType === 'supplier_outbound'
-                        ? 'Generate Supplier RTV Invite'
-                        : 'Generate Customer Return Invite'}
+                      {streamType === 'rma_editor'
+                        ? 'Generate RMA Editor Link'
+                        : streamType === 'supplier_outbound'
+                          ? 'Generate Supplier RTV Invite'
+                          : 'Generate Customer Return Invite'}
                     </span>
                   </>
                 )}
@@ -564,42 +634,44 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
           {/* Generated Invite Link Banner */}
           {generatedInvite && (
             <div className={`p-4 sm:p-5 rounded-3xl space-y-3 animate-in fade-in border-2 ${
-              generatedInvite.stream_type === 'supplier_outbound'
-                ? 'bg-purple-50 dark:bg-purple-950/40 border-purple-300 dark:border-purple-800'
-                : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
+              isRmaEditorInvite(generatedInvite)
+                ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-800'
+                : generatedInvite.stream_type === 'supplier_outbound'
+                  ? 'bg-purple-50 dark:bg-purple-950/40 border-purple-300 dark:border-purple-800'
+                  : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
             }`}>
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className={`w-5 h-5 ${
-                    generatedInvite.stream_type === 'supplier_outbound'
-                      ? 'text-purple-600 dark:text-purple-400'
-                      : 'text-emerald-600 dark:text-emerald-400'
+                    isRmaEditorInvite(generatedInvite)
+                      ? 'text-indigo-600 dark:text-indigo-400'
+                      : generatedInvite.stream_type === 'supplier_outbound'
+                        ? 'text-purple-600 dark:text-purple-400'
+                        : 'text-emerald-600 dark:text-emerald-400'
                   }`} />
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
-                    Ready: {generatedInvite.stream_type === 'supplier_outbound' ? 'Supplier RTV Link' : 'Customer Return Link'} Generated!
+                    Ready: {isRmaEditorInvite(generatedInvite) ? 'RMA Details Editor Link' : generatedInvite.stream_type === 'supplier_outbound' ? 'Supplier RTV Link' : 'Customer Return Link'} Generated!
                   </h3>
                 </div>
                 <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
-                  generatedInvite.stream_type === 'supplier_outbound'
-                    ? 'text-purple-800 dark:text-purple-300 bg-purple-200/60 dark:bg-purple-900/60'
-                    : 'text-emerald-800 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/60'
+                  isRmaEditorInvite(generatedInvite)
+                    ? 'text-indigo-800 dark:text-indigo-300 bg-indigo-200/60 dark:bg-indigo-900/60'
+                    : generatedInvite.stream_type === 'supplier_outbound'
+                      ? 'text-purple-800 dark:text-purple-300 bg-purple-200/60 dark:bg-purple-900/60'
+                      : 'text-emerald-800 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/60'
                 }`}>
                   Validity: {generatedInvite.duration_display || 'Custom'} • Expires (YYYY-MM-DD HH:mm): {formatDateTimeYmdHm(generatedInvite.expires_at)}
                 </span>
               </div>
 
               <div className="p-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 font-mono text-xs text-slate-800 dark:text-slate-200 break-all select-all flex items-center justify-between gap-2">
-                <span>
-                  {typeof window !== 'undefined'
-                    ? `${window.location.origin}/intake?token=${generatedInvite.token}${(generatedInvite.is_test || String(generatedInvite.token || '').startsWith('inv_test_')) ? '&mode=test' : ''}`
-                    : generatedInvite.token}
-                </span>
+                <span>{buildInviteUrl(generatedInvite)}</span>
               </div>
 
               <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
                 <button
                   type="button"
-                  onClick={() => handleCopyLink(generatedInvite.token)}
+                  onClick={() => handleCopyLink(generatedInvite)}
                   className="px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
                 >
                   {copiedToken === generatedInvite.token ? (
@@ -620,9 +692,11 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                   onClick={() => handleSendEmail(generatedInvite)}
                   disabled={isSendingEmail}
                   className={`px-4 py-2 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer ${
-                    generatedInvite.stream_type === 'supplier_outbound'
-                      ? 'bg-purple-600 hover:bg-purple-700'
-                      : 'bg-blue-600 hover:bg-blue-700'
+                    isRmaEditorInvite(generatedInvite)
+                      ? 'bg-indigo-600 hover:bg-indigo-700'
+                      : generatedInvite.stream_type === 'supplier_outbound'
+                        ? 'bg-purple-600 hover:bg-purple-700'
+                        : 'bg-blue-600 hover:bg-blue-700'
                   }`}
                 >
                   {isSendingEmail ? (
@@ -644,13 +718,13 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
           {/* Active / Past Invites Management Table */}
           <div className="space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
                   Authorized Invites ({filteredInvites.length})
                 </h3>
 
                 {/* Filter Tabs */}
-                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl text-[10.5px]">
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl text-[10.5px] flex-wrap">
                   <button
                     type="button"
                     onClick={() => setStreamFilter('all')}
@@ -686,6 +760,18 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                     <span>📤 Supplier</span>
                     <span className="text-[9px] opacity-75">({supplierCount})</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setStreamFilter('rma_editor')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      streamFilter === 'rma_editor'
+                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <span>✏️ Editor</span>
+                    <span className="text-[9px] opacity-75">({editorCount})</span>
+                  </button>
                 </div>
               </div>
 
@@ -711,7 +797,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                     <tr>
                       <th className="p-3">Stream</th>
                       <th className="p-3">Authorized Email</th>
-                      <th className="p-3">Store Branch / Supplier</th>
+                      <th className="p-3">Branch / Supplier / Target RMA</th>
                       <th className="p-3">Duration</th>
                       <th className="p-3">Remaining</th>
                       <th className="p-3">Status</th>
@@ -724,12 +810,18 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                       const isRevoked = inv.status === 'revoked';
                       const isExpired = countdown.isExpired;
                       const isSupplier = inv.stream_type === 'supplier_outbound';
+                      const isEditor = isRmaEditorInvite(inv);
 
                       return (
                         <tr key={inv.token || inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
                           <td className="p-3">
                             <div className="flex items-center gap-1 flex-wrap">
-                              {isSupplier ? (
+                              {isEditor ? (
+                                <span className="px-2 py-0.5 rounded text-[9.5px] font-black uppercase bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800 inline-flex items-center gap-1">
+                                  <FileEdit className="w-3 h-3" />
+                                  <span>RMA Editor</span>
+                                </span>
+                              ) : isSupplier ? (
                                 <span className="px-2 py-0.5 rounded text-[9.5px] font-black uppercase bg-purple-100 dark:bg-purple-950/70 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800 inline-flex items-center gap-1">
                                   <Truck className="w-3 h-3" />
                                   <span>Supplier RTV</span>
@@ -751,7 +843,9 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                             {inv.authorized_email}
                           </td>
                           <td className="p-3 text-slate-700 dark:text-slate-300 font-semibold">
-                            {inviteService.normalizeEntityName(inv.entity_name || inv.store_branch) || <span className="text-slate-400 italic">Optional / Open</span>}
+                            {isEditor
+                              ? (inv.rma_number ? <span className="font-mono font-black text-indigo-700 dark:text-indigo-300">{inv.rma_number}</span> : <span className="text-slate-400 italic">Open RMA Lookup</span>)
+                              : (inviteService.normalizeEntityName(inv.entity_name || inv.store_branch) || <span className="text-slate-400 italic">Optional / Open</span>)}
                           </td>
                           <td className="p-3 text-slate-600 dark:text-slate-400 font-mono text-[11px]">
                             {inv.duration_display || '24 hour(s)'}
@@ -782,7 +876,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                                 <>
                                   <button
                                     type="button"
-                                    onClick={() => handleCopyLink(inv.token)}
+                                    onClick={() => handleCopyLink(inv)}
                                     className="p-1.5 text-blue-600 hover:text-blue-800 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-lg transition-colors cursor-pointer"
                                     title="Copy Invite Link"
                                   >

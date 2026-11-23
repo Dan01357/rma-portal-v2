@@ -1,5 +1,6 @@
 import { supabase } from '../../_lib/supabase.js';
 import { requireApiKey, sendJson, setCorsHeaders } from '../../_lib/auth.js';
+import { handleRmaEmailEdit } from '../../_lib/rmaEmailEditHandler.js';
 
 const getItemNeedsReorder = (item) => {
   if (item?.needs_reorder !== undefined && item?.needs_reorder !== null) {
@@ -75,6 +76,11 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
+  }
+
+  // Email-bound Google Identity RMA Editor route (enforces Supabase OAuth JWT + Invite Token)
+  if (req.query?.action === 'email-edit') {
+    return handleRmaEmailEdit(req, res);
   }
 
   // 1. Authenticate API Key

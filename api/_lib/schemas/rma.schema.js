@@ -4,6 +4,7 @@ export const RMAStatusEnum = z.enum([
   'draft',
   'received_at_dock',
   'under_inspection',
+  'picked_up',
   'pending_finance_approval',
   'credit_memo_issued',
   'restocked',
@@ -66,8 +67,7 @@ export const RMAReportSchema = z.object({
   si_number: z.string().nullable().optional().openapi({ example: 'SI-2026-9021' }),
   dr_number: z.string().nullable().optional().openapi({ example: 'DR-2026-8891' }),
   po_number: z.string().nullable().optional().openapi({ example: 'PO-2026-4401' }),
-  expiry_date: z.string().nullable().optional().openapi({ example: '2026-12-31' }),
-  batch_lot_number: z.string().nullable().optional().openapi({ example: 'LOT-B42' }),
+  expiry_date: z.string().nullable().optional().openapi({ example: '2026-12-31', description: 'ISO YYYY-MM-DD expiry date (required for Supplier RTV & Test Mode; optional for Live Customer Hub)' }),
   is_parent: z.boolean().default(false).openapi({ example: false, description: 'True if this report is a batch return manifest container' }),
   parent_rma_id: z.number().int().nullable().optional().openapi({ example: null, description: 'Parent report ID if this is a line item inside a batch return manifest' }),
   items: z.array(z.any()).default([]).openapi({ example: [], description: 'Line item breakdown objects for multi-item return manifests' }),
@@ -109,8 +109,7 @@ export const CreateRMAReportSchema = z.object({
   si_number: z.string().optional().openapi({ example: 'SI-2026-9021' }),
   dr_number: z.string().optional().openapi({ example: 'DR-2026-8891' }),
   po_number: z.string().optional().openapi({ example: 'PO-2026-4401' }),
-  expiry_date: z.string().min(1, 'Product expiration date is required').openapi({ example: '2026-12-31', description: 'Mandatory product expiration date across Customer Hub and Supplier RTV' }),
-  batch_lot_number: z.string().optional().openapi({ example: 'LOT-B42' }),
+  expiry_date: z.string().optional().openapi({ example: '2026-12-31', description: 'ISO YYYY-MM-DD product expiration date (required for Supplier RTV & Test Mode; optional for Live Customer Hub)' }),
   notes: z.string().optional().openapi({ example: 'Submitted via REST API' })
 }).openapi('CreateRMAReportRequest');
 
@@ -190,8 +189,8 @@ curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?queue=rtv
   -H "x-api-key: sk_live_rma_..."
 \`\`\`
 
-### 🟡 Queue 4: Hold / Quarantine (?queue=quarantine)
-To fetch all merchandise currently frozen on Hold / Quarantine awaiting investigation:
+### 🟡 Queue 4: Legacy Quarantine Query (?queue=quarantine)
+Retained for backwards-compatible REST API consumers; portal UI workflows now route items directly via the 4-Choice Outcome & Pickup Wizard (\`picked_up\`, \`restocked\`, \`scrapped\`, or \`credit_memo_issued\`).
 \`\`\`bash
 curl -X GET "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma?queue=quarantine" \\
   -H "x-api-key: sk_live_rma_..."
@@ -445,6 +444,72 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
           }
         }
       }
+    }
+  });
+
+  // GET /api/v1/rma-email-edit
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/rma-email-edit',
+    summary: 'Load Scoped RMA Record for Email-Bound Editor Link',
+    description: 'Verifies caller Supabase Google OAuth JWT against the email-bound rma_editor invite token, enforces Live vs Test isolation, and returns only the scoped RMA details.',
+    tags: ['RMA Reports'],
+    security: [{ BearerAuth: [] }],
+    request: {
+      query: z.object({
+        token: z.string().openapi({ example: 'inv_edit_m8x9k_abc123' }),
+        rma: z.string().optional().openapi({ example: 'RMA-2026-0001-6TYH' })
+      })
+    },
+    responses: {
+      200: { description: 'Scoped RMA record loaded cleanly' },
+      401: { description: 'Missing or invalid Google OAuth JWT', content: { 'application/json': { schema: StandardErrorSchema } } },
+      403: { description: 'Identity mismatch, revoked/expired invite, RMA scope mismatch, or Live/Test violation', content: { 'application/json': { schema: StandardErrorSchema } } },
+      404: { description: 'Invite or RMA record not found', content: { 'application/json': { schema: StandardErrorSchema } } }
+    }
+  });
+
+  // PATCH /api/v1/rma-email-edit
+  registry.registerPath({
+    method: 'patch',
+    path: '/api/v1/rma-email-edit',
+    summary: 'Save Email-Bound RMA Details & Commercial Documents Update',
+    description: 'Enforces Google Identity Lock JWT + invite token ownership + Live/Test isolation, updates editable RMA details/pricing/expiry/SI/DR/PO/manifest items, and appends an EMAIL_EDITOR_UPDATE audit trail entry.',
+    tags: ['RMA Reports'],
+    security: [{ BearerAuth: [] }],
+    request: {
+      body: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: z.object({
+              token: z.string().openapi({ example: 'inv_edit_m8x9k_abc123' }),
+              rma_number: z.string().openapi({ example: 'RMA-2026-0001-6TYH' }),
+              updates: z.object({
+                supplier_name: z.string().optional(),
+                name: z.string().optional(),
+                code: z.string().optional(),
+                quantity: z.number().int().min(1).optional(),
+                unit_name: z.string().optional(),
+                price: z.number().min(0).optional(),
+                price_with_vat: z.number().min(0).optional(),
+                expiry_date: z.string().optional(),
+                store_branch: z.string().optional(),
+                si_number: z.string().optional(),
+                dr_number: z.string().optional(),
+                po_number: z.string().optional(),
+                notes: z.string().optional(),
+                items: z.array(z.any()).optional()
+              })
+            })
+          }
+        }
+      }
+    },
+    responses: {
+      200: { description: 'RMA record updated cleanly with edited_by_email and updated_at' },
+      401: { description: 'Unauthorized session', content: { 'application/json': { schema: StandardErrorSchema } } },
+      403: { description: 'Identity mismatch, revoked/expired invite, or Live/Test isolation block', content: { 'application/json': { schema: StandardErrorSchema } } }
     }
   });
 }

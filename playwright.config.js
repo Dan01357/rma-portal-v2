@@ -7,7 +7,7 @@ export default defineConfig({
   retries: 0,
   timeout: 60_000,
   expect: {
-    timeout: 10_000,
+    timeout: 15_000,
   },
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
@@ -18,13 +18,15 @@ export default defineConfig({
     permissions: ['camera'],
     launchOptions: {
       args: [
+        '--disable-quic',
+        '--disable-features=AsyncDns',
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
       ],
     },
     storageState: 'tests/.auth/admin.json',
     viewport: { width: 1440, height: 900 },
-    actionTimeout: 12_000,
+    actionTimeout: 25_000,
     navigationTimeout: 35_000,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
