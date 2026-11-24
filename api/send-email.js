@@ -1,6 +1,10 @@
 import { handleDailyMatrixEmail } from './_lib/dailyMatrixEmailHandler.js';
+import { handleDailyFollowUp } from './_lib/dailyFollowUpHandler.js';
+import { supabase } from './_lib/supabase.js';
 import {
   createSmtpTransport,
+  DEFAULT_SANDBOX_EMAIL,
+  normalizeSandboxEmail,
   formatTestEmailSubject,
   getDiagnosticHelp
 } from './_lib/smtpMailer.js';
@@ -32,6 +36,9 @@ export default async function handler(req, res) {
     const requestedAction = String(req.query?.action || payload?.action || '').trim().toLowerCase();
     if (requestedAction === 'daily-matrix') {
       return await handleDailyMatrixEmail(req, res, payload);
+    }
+    if (requestedAction === 'daily-followup') {
+      return await handleDailyFollowUp(req, res, payload);
     }
 
     const smtp = createSmtpTransport();
@@ -89,12 +96,25 @@ export default async function handler(req, res) {
     const senderEmail = from || smtpUser;
     const formattedFrom = fromName ? `"${fromName}" <${senderEmail}>` : senderEmail;
 
-    // Filter valid CC addresses
-    const validCc = Array.isArray(cc)
-      ? cc.filter(e => typeof e === 'string' && e.includes('@') && e.trim() !== '' && !e.endsWith('.test'))
-      : (cc && typeof cc === 'string' && cc.includes('@') && !cc.endsWith('.test') ? [cc] : []);
+    const normalizeEmailArray = (raw) => {
+      if (!raw) return [];
+      const items = Array.isArray(raw) ? raw : String(raw).split(/[,;\s]+/);
+      const seen = new Set();
+      for (const entry of items) {
+        const clean = String(entry || '').trim();
+        if (clean && clean.includes('@') && clean.includes('.') && !clean.toLowerCase().endsWith('.test')) {
+          const lower = clean.toLowerCase();
+          if (!seen.has(lower)) seen.add(lower);
+        }
+      }
+      return Array.from(seen);
+    };
 
-    let finalTo = to;
+    const validToList = normalizeEmailArray(to);
+    const normalizedTo = validToList.length > 0 ? validToList.join(', ') : 'azgodev@gmail.com';
+    const validCc = normalizeEmailArray(cc).filter((e) => !validToList.includes(e));
+
+    let finalTo = normalizedTo;
     let finalCc = validCc;
     let finalSubject = subject || 'New RMA Return Submission Notification';
     let finalHtml = html || text || '';
@@ -102,19 +122,34 @@ export default async function handler(req, res) {
 
     // If Test Mode is active:
     // DO NOT send to actual recipients or customer AE!
-    // Instead, reroute delivery exclusively to mgan@a2z2go.net so sandbox testing never disturbs live stakeholders.
+    // Instead, reroute delivery exclusively to the configured sandbox email (default mgan@pingconmarketing.com).
     if (isTestMode) {
-      const originalTo = to;
+      const originalTo = normalizedTo;
       const originalCc = validCc.join(', ');
+      let resolvedSandboxEmail = DEFAULT_SANDBOX_EMAIL;
+      if (payload?.sandboxEmail) {
+        resolvedSandboxEmail = normalizeSandboxEmail(payload.sandboxEmail);
+      } else {
+        try {
+          const { data: sandboxRow } = await supabase
+            .from('rma_settings')
+            .select('value')
+            .eq('key', 'test_sandbox_email')
+            .maybeSingle();
+          if (sandboxRow?.value) {
+            resolvedSandboxEmail = normalizeSandboxEmail(sandboxRow.value);
+          }
+        } catch {}
+      }
 
-      finalTo = 'mgan@a2z2go.net';
+      finalTo = resolvedSandboxEmail;
       finalCc = []; // empty to prevent other recipients from receiving anything
       finalSubject = formatTestEmailSubject(finalSubject, true);
 
       const testBanner = `
         <div style="background-color: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 14px 18px; border-radius: 12px; margin-bottom: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px;">
           <div style="font-weight: 800; font-size: 14px; margin-bottom: 6px;">🧪 TEST MODE ACTIVE (Safe Sandbox Delivery)</div>
-          <div>This test email was safely routed exclusively to <strong>mgan@a2z2go.net</strong> so you can verify the layout, calculations, attachments, and photo embeds without notifying live stakeholders.</div>
+          <div>This test email was safely routed exclusively to <strong>${resolvedSandboxEmail}</strong> so you can verify the layout, calculations, attachments, and photo embeds without notifying live stakeholders.</div>
           <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #fde68a; font-size: 11px; color: #78350f;">
             <strong>Live Production Recipients (Bypassed in Test Mode):</strong><br/>
             • <strong>Target TO:</strong> ${originalTo}<br/>
@@ -124,7 +159,7 @@ export default async function handler(req, res) {
       `;
 
       finalHtml = testBanner + finalHtml;
-      finalText = `[TEST MODE ACTIVE - Safe Sandbox Delivery -> mgan@a2z2go.net]\nTarget TO: ${originalTo}\nTarget CC: ${originalCc}\n\n${finalText}`;
+      finalText = `[TEST MODE ACTIVE - Safe Sandbox Delivery -> ${resolvedSandboxEmail}]\nTarget TO: ${originalTo}\nTarget CC: ${originalCc}\n\n${finalText}`;
       console.log(`🧪 [TEST MODE] Dispatched safely via SMTP to ${finalTo} (Original TO: ${originalTo}, CC: ${originalCc})`);
     }
 
@@ -143,9 +178,24 @@ export default async function handler(req, res) {
       info = await transporter.sendMail(mailOptions);
     } catch (sendErr) {
       if (mailOptions.attachments && mailOptions.attachments.length > 0) {
-        console.warn('sendMail with attachments failed, retrying without attachments:', sendErr.message);
-        mailOptions.attachments = [];
-        info = await transporter.sendMail(mailOptions);
+        const pdfOnlyAttachments = mailOptions.attachments.filter(
+          (a) => a && (a.contentType === 'application/pdf' || String(a.filename || '').toLowerCase().endsWith('.pdf')) && !a.path
+        );
+        if (pdfOnlyAttachments.length > 0 && pdfOnlyAttachments.length < mailOptions.attachments.length) {
+          console.warn('sendMail with remote image attachments failed, retrying with PDF attachment only:', sendErr.message);
+          mailOptions.attachments = pdfOnlyAttachments;
+          try {
+            info = await transporter.sendMail(mailOptions);
+          } catch (pdfRetryErr) {
+            console.warn('sendMail with PDF attachment failed, retrying without attachments:', pdfRetryErr.message);
+            mailOptions.attachments = [];
+            info = await transporter.sendMail(mailOptions);
+          }
+        } else {
+          console.warn('sendMail with attachments failed, retrying without attachments:', sendErr.message);
+          mailOptions.attachments = [];
+          info = await transporter.sendMail(mailOptions);
+        }
       } else {
         throw sendErr;
       }

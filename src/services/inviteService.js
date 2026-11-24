@@ -448,17 +448,32 @@ export const inviteService = {
     };
 
     // 2. Always persist to rma_settings for universal sync across all admin sessions
+    // (When primary SQL insert into public.rma_invites already succeeded, cap blocking wait at 3s so 50KB mirror writes never stall email dispatch)
     try {
       const baseList = Array.isArray(existingSettingsList) ? existingSettingsList : getLocalInvites();
       const updated = [newInvite, ...baseList.filter(i => i.token !== token)];
-      await supabase
+      saveLocalInvites(updated);
+
+      const settingsMirrorWrite = supabase
         .from('rma_settings')
         .upsert({
           key: SETTINGS_KEY,
           value: updated,
           updated_at: new Date().toISOString()
-        });
-      saveLocalInvites(updated);
+        })
+        .then(
+          () => {},
+          (err) => console.warn('Failed to persist invite to rma_settings:', err?.message || err)
+        );
+
+      if (createdRecord) {
+        await Promise.race([
+          settingsMirrorWrite,
+          new Promise((resolve) => setTimeout(resolve, 3000))
+        ]);
+      } else {
+        await settingsMirrorWrite;
+      }
     } catch (e) {
       console.warn('Failed to persist invite to rma_settings:', e);
       const local = [newInvite, ...getLocalInvites().filter(i => i.token !== token)];
@@ -494,10 +509,15 @@ export const inviteService = {
       );
     };
 
-    // 1. Primary check against database table: public.rma_invites AND rma_settings
+    // 1. Primary check against database table: public.rma_invites AND rma_settings (time-boxed fallback)
+    const withTimeout = (promise, ms) => Promise.race([
+      promise,
+      new Promise((resolve) => setTimeout(() => resolve({ data: null, error: { message: 'timeout' } }), ms))
+    ]);
+
     const [tblCheck, settingsCheck] = await Promise.allSettled([
-      supabase.from('rma_invites').select('*').eq('token', cleanToken).maybeSingle(),
-      supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle()
+      withTimeout(supabase.from('rma_invites').select('*').eq('token', cleanToken).maybeSingle(), 6000),
+      withTimeout(supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle(), 5000)
     ]);
 
     let tblInvite = null;
@@ -556,8 +576,9 @@ export const inviteService = {
 
     // 3. If neither database check found the invite, check if it was a transient network failure
     if (!invite) {
-      const dbConfirmedMissing = settingsQuerySucceeded || (tableQuerySucceeded && !networkErrorDetected);
-      if (!dbConfirmedMissing) {
+      // If the canonical rma_invites SQL table query succeeded cleanly with no record, treat mirror timeout as confirmed missing
+      const dbConfirmedMissing = tableQuerySucceeded || settingsQuerySucceeded;
+      if (!dbConfirmedMissing && networkErrorDetected) {
         const cached = getLocalInvites().find(i => i.token === cleanToken);
         if (cached) {
           if (cached.status === 'revoked') {
@@ -650,32 +671,55 @@ export const inviteService = {
   async deleteInvite(tokenOrId) {
     if (!tokenOrId) return false;
 
-    // 1. Delete from rma_invites table
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tokenOrId).trim());
+    let tblDeleteQuery = supabase.from('rma_invites').delete();
+    tblDeleteQuery = isUUID ? tblDeleteQuery.eq('id', tokenOrId) : tblDeleteQuery.eq('token', tokenOrId);
+
+    let tableDeleted = false;
+    let existingSettingsList = null;
+
+    // 1. Delete from rma_invites table and read rma_settings mirror in parallel to halve latency
     try {
-      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tokenOrId).trim());
-      let query = supabase.from('rma_invites').delete();
-      if (isUUID) {
-        query = query.eq('id', tokenOrId);
-      } else {
-        query = query.eq('token', tokenOrId);
+      const [tblDelRes, settingsRes] = await Promise.allSettled([
+        tblDeleteQuery,
+        supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle()
+      ]);
+      if (tblDelRes.status === 'fulfilled' && !tblDelRes.value?.error) {
+        tableDeleted = true;
       }
-      await query;
+      if (settingsRes.status === 'fulfilled' && !settingsRes.value?.error && Array.isArray(settingsRes.value?.data?.value)) {
+        existingSettingsList = settingsRes.value.data.value;
+      }
     } catch (e) {
       console.warn('Failed to delete from rma_invites table:', e);
     }
 
-    // 2. Delete from rma_settings
+    // 2. Delete from rma_settings mirror & localStorage (time-boxed at 3s if primary SQL delete already succeeded)
     try {
-      const current = await this.getInvites();
-      const updated = current.filter(inv => inv.token !== tokenOrId && inv.id !== tokenOrId);
-      await supabase
+      const baseList = Array.isArray(existingSettingsList) ? existingSettingsList : getLocalInvites();
+      const updated = baseList.filter(inv => inv.token !== tokenOrId && inv.id !== tokenOrId);
+      saveLocalInvites(updated);
+
+      const settingsMirrorWrite = supabase
         .from('rma_settings')
         .upsert({
           key: SETTINGS_KEY,
           value: updated,
           updated_at: new Date().toISOString()
-        });
-      saveLocalInvites(updated);
+        })
+        .then(
+          () => {},
+          (err) => console.warn('Failed to delete invite from rma_settings:', err?.message || err)
+        );
+
+      if (tableDeleted) {
+        await Promise.race([
+          settingsMirrorWrite,
+          new Promise((resolve) => setTimeout(resolve, 3000))
+        ]);
+      } else {
+        await settingsMirrorWrite;
+      }
     } catch (e) {
       console.warn('Failed to delete invite from rma_settings:', e);
       const local = getLocalInvites().filter(inv => inv.token !== tokenOrId && inv.id !== tokenOrId);
@@ -699,7 +743,7 @@ export const inviteService = {
   /**
    * Send invite email via /api/send-email
    */
-  async sendInviteEmail(invite) {
+  async sendInviteEmail(invite, extraRecipients = null) {
     if (!invite?.authorized_email || !invite?.token) {
       throw new Error('Valid invite with customer email and token is required.');
     }
@@ -715,7 +759,33 @@ export const inviteService = {
       : (invite.entity_name || invite.store_branch || (isSupplierRtv ? 'Vendor Partner' : 'Store Partner'));
     const allowedList = getInviteAllowedEmails(invite);
     const primaryEmail = allowedList[0] || invite.authorized_email;
-    const ccEmails = allowedList.slice(1);
+
+    // Optional extra TO/CC configured under "invite_email" profile (or passed directly from Invites modal)
+    let profileExtras = [];
+    try {
+      let profile = extraRecipients;
+      if (!profile && typeof window !== 'undefined') {
+        const rawMap = localStorage.getItem('rma_portal_email_recipients_by_type');
+        if (rawMap) {
+          const parsedMap = JSON.parse(rawMap);
+          profile = parsedMap?.invite_email || null;
+        }
+      }
+      if (profile && typeof profile === 'object') {
+        const rawList = [
+          ...(Array.isArray(profile.toList) ? profile.toList : []),
+          ...(Array.isArray(profile.ccList) ? profile.ccList : [])
+        ];
+        profileExtras = rawList
+          .map((e) => String(e || '').trim().toLowerCase())
+          .filter((e) => e.includes('@') && !e.endsWith('.test'));
+      }
+    } catch {}
+
+    const ccEmails = Array.from(new Set([
+      ...allowedList.slice(1),
+      ...profileExtras
+    ])).filter((e) => e.toLowerCase() !== String(primaryEmail || '').trim().toLowerCase());
     const recipientsText = allowedList.join(', ');
     const permanent = isPermanentInvite(invite);
     const expDateStr = permanent

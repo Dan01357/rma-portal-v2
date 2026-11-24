@@ -55,7 +55,7 @@ async function seedTestModeManifestCustomerRma(page) {
     { timeout: 60_000 }
   );
   await page.getByRole('button', { name: /Submit Return Manifest/i }).click();
-  await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Printable QR Ready')).toBeVisible({ timeout: 20_000 });
   expect((await submitPostPromise).status()).toBeLessThan(400);
 
   const rmaText = await page
@@ -224,7 +224,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       const liveQrBtn = page.locator('button[title*="Quick-View & Print Box QR Sticker"]').first();
       if (await liveQrBtn.isVisible().catch(() => false)) {
         await liveQrBtn.click();
-        await expect(page.getByText('Print RMA Sticker Label')).toBeVisible();
+        await expect(page.getByText('Print RMA QR Code')).toBeVisible();
         await page.getByRole('button', { name: 'Done', exact: true }).click();
       }
       const livePhotoBtn = page.locator('button[title="Click to view full-size photo"]').first();
@@ -253,8 +253,56 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
         await page.getByRole('button', { name: /Hide cURL Guide/i }).click();
       }
 
-      // Sandbox Customer RMAs: Manifest Drawer, Lightbox Prev/Next, Restock via 4-Choice -> Confirm Restocked -> Reset to Pending -> Bulk Archive
+      // Sandbox Customer RMAs: Multi-Select Consolidated Batch QR Print Studio (2 QRs via Full Audit Log), Manifest Drawer, Lightbox Next/Prev, Bulk Archive
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
+
+      // Open Full Audit Log to multi-select BOTH Sandbox Customer + Supplier RMAs for Consolidated QR Print Studio QA
+      await page.getByRole('button', { name: /Full Audit Log/i }).first().click();
+      const reportsModal = page.locator('div.fixed', { hasText: 'Logged Sandbox Test RMA Reports' });
+      await expect(reportsModal).toBeVisible({ timeout: 10_000 });
+      const custModalRow = reportsModal.locator('tr', { hasText: seededManifestRma }).first();
+      const suppModalRow = reportsModal.locator('tr', { hasText: seededSupplierRma }).first();
+      await expect(custModalRow).toBeVisible({ timeout: 10_000 });
+      await expect(suppModalRow).toBeVisible({ timeout: 10_000 });
+      await custModalRow.locator('input[type="checkbox"]').first().check();
+      await suppModalRow.locator('input[type="checkbox"]').first().check();
+
+      await reportsModal.getByRole('button', { name: /Print \/ Save QRs \(2\)/i }).click();
+      const multiQrModal = page.locator('div.fixed', { hasText: 'Consolidated QR Print Studio (2 QRs)' });
+      await expect(multiQrModal).toBeVisible({ timeout: 10_000 });
+
+      const card1 = multiQrModal.locator(`[data-rma-qr-card="${seededManifestRma}"]`);
+      const card2 = multiQrModal.locator(`[data-rma-qr-card="${seededSupplierRma}"]`);
+      await expect(card1).toBeVisible();
+      await expect(card2).toBeVisible();
+      await expect(card1.getByText(/Qty:/i)).toBeVisible();
+      await expect(card2.getByText(/Qty:/i)).toBeVisible();
+
+      // Independent per-QR resize: select card 2 and shrink to Mini (50x58mm), card 1 stays 62x74mm
+      await card2.click();
+      await multiQrModal.getByRole('button', { name: /Mini/i }).click();
+      await expect(card2.getByText('50×58mm')).toBeVisible();
+      await expect(card1.getByText('62×74mm')).toBeVisible();
+
+      // Toggle Multiple Pages -> Auto-Fit All to 1 Page -> Save Consolidated Sheet PNG -> Print 2 QRs
+      await multiQrModal.getByRole('button', { name: /Multiple Pages/i }).click();
+      await multiQrModal.getByRole('button', { name: /Auto-Fit All to 1 Page/i }).click();
+
+      const [multiSheetPng] = await Promise.all([
+        page.waitForEvent('download'),
+        multiQrModal.getByRole('button', { name: /Save QR \(PNG\)/i }).click()
+      ]);
+      expect(multiSheetPng.suggestedFilename()).toMatch(/2-QRs-letter-Page-1\.png/i);
+
+      const multiPrintBefore = await page.evaluate(() => window.__pwPrintCount || 0);
+      await multiQrModal.getByRole('button', { name: /Print 2 QRs/i }).click();
+      await expect.poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 10_000 }).toBeGreaterThan(multiPrintBefore);
+
+      await multiQrModal.getByRole('button', { name: 'Done', exact: true }).click();
+      await expect(multiQrModal).toBeHidden();
+      await reportsModal.locator('button[aria-label="Close Reports Modal"]').click();
+      await expect(reportsModal).toBeHidden();
+
       const sbCustSearch = page.locator('input[placeholder*="Search" i]').first();
       await sbCustSearch.fill(seededManifestRma);
       const sbCustRow = page.locator('tr', { hasText: seededManifestRma }).first();
@@ -279,14 +327,15 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
 
       // QR Quick-View & Print
       await sbCustRow.locator('button[title*="View & Print Box QR Sticker"]').click();
-      await expect(page.getByText('Print RMA Sticker Label')).toBeVisible();
+      await expect(page.getByText('Print RMA QR Code')).toBeVisible();
       const sbQrBefore = await page.evaluate(() => window.__pwPrintCount || 0);
-      await page.getByRole('button', { name: /Print Sticker \(/i }).click();
+      await page.getByRole('button', { name: /Print QR \(/i }).click();
       await expect.poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 10_000 }).toBeGreaterThan(sbQrBefore);
       await page.getByRole('button', { name: 'Done', exact: true }).click();
 
       // Bulk select -> Archive Selected
       await sbCustRow.locator('input[type="checkbox"]').first().check();
+      await expect(page.getByRole('button', { name: /Print \/ Save QRs \(1\)/i })).toBeVisible();
       await page.getByRole('button', { name: /Archive Selected \(1\)/i }).click();
       await expect(sbCustRow).toBeHidden({ timeout: 30_000 });
 
@@ -296,12 +345,14 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       const sbSuppRow = page.locator('tr', { hasText: seededSupplierRma }).first();
       await expect(sbSuppRow).toBeVisible({ timeout: 10_000 });
 
-      // Open 4-Choice on Supplier RTV and save Restock -> test "✓ Confirm Restocked in WMS" & "↩️ Reset to Pending"
+      // Open 4-Choice on Supplier RTV, fill manual Processed By, and save Restock -> test "✓ Confirm Restocked in WMS" & "↩️ Reset to Pending"
       await sbSuppRow.locator('button[title*="Open 4-Choice" i]').first().click();
       await expect(page.getByText('What do you want to do with this item?')).toBeVisible();
+      await expect(page.locator('#wizard-processed-by-step1')).toHaveValue('');
+      await page.locator('#wizard-processed-by-step1').fill('Playwright Suite 03 Staff');
       await page.getByRole('button', { name: /Put Back on Good Shelf \(Restock\)|Return to Good Stock/i }).first().click();
       await page.getByRole('button', { name: /Confirm & Save/i }).first().click();
-      await expect(page.getByRole('button', { name: /^Done$/i })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole('button', { name: /^Done$/i })).toBeVisible({ timeout: 30_000 });
       await page.getByRole('button', { name: /^Done$/i }).click();
 
       const confirmRestockBtn = sbSuppRow.getByRole('button', { name: /Confirm Restocked in WMS/i });

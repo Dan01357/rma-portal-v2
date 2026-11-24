@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { setCorsHeaders } from './_lib/auth.js';
-import { inspectPaperworkWithGemini, inspectDriverLicenseWithGemini } from './_lib/geminiInspector.js';
+import { inspectPaperworkWithGemini, inspectDriverLicenseWithGemini, inspectTruckPlateWithGemini } from './_lib/geminiInspector.js';
 
 /**
  * Cache access token across warm lambda invocations
@@ -688,6 +688,28 @@ export default async function handler(req, res) {
         confidence: 0,
         error: err.message,
         rejection_reason: `AI ID reader error: ${err.message}`
+      });
+    }
+  }
+
+  // 1C. Handle Gemini Flash Delivery Truck Plate OCR Inspection
+  if (req.query?.action === 'inspect-plate' || parsedBody?.action === 'inspect-plate' || req.url?.includes('inspect-plate')) {
+    try {
+      const { fileData, imageUrl, mimeType } = parsedBody || {};
+      const result = await inspectTruckPlateWithGemini({
+        fileData: fileData || parsedBody?.image || parsedBody?.photo,
+        imageUrl: imageUrl || parsedBody?.url,
+        mimeType: mimeType || 'image/jpeg'
+      });
+      return res.status(200).json(result);
+    } catch (err) {
+      console.error('[Gemini Truck Plate OCR Error]:', err);
+      return res.status(500).json({
+        is_valid_plate: false,
+        plate_number: null,
+        confidence: 0,
+        error: err.message,
+        rejection_reason: `AI plate reader error: ${err.message}`
       });
     }
   }

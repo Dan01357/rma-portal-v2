@@ -6,8 +6,12 @@
   },
   "crons": [
     {
-      "path": "/api/send-email?action=daily-matrix",
+      "path": "/api/send-email?action=daily-matrix&respectSchedule=true",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/send-email?action=daily-followup&respectSchedule=true",
+      "schedule": "0 0 * * *"
     }
   ],
   "rewrites": [

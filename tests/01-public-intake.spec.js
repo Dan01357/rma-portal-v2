@@ -139,6 +139,8 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       const contactInput = page.locator('input[placeholder="Phone No. or Email *"]');
       await expect(contactInput).toHaveValue('pw-authorized@pingcon.local');
       await expect(contactInput).toHaveAttribute('readonly', '');
+      // Strictly hidden for external invited customers for security
+      await expect(page.locator('[data-email-recipients-editor="new_rma"]')).toHaveCount(0);
 
       // Simulate realtime admin revocation while external session is active
       inviteState = 'revoked';
@@ -255,9 +257,10 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       await expect(expiryInput).toHaveAttribute('required', '');
       await expect(page.getByText('Required *', { exact: true }).first()).toBeVisible();
 
-      // Switch to Test Mode & verify mgan@a2z2go.net + strict Required * expiration
+      // Switch to Test Mode & verify mgan@pingconmarketing.com + strict Required * expiration
       await setPublicPortalTestMode(page, true);
-      await expect(page.getByText(/mgan@a2z2go\.net/).first()).toBeVisible();
+      await expect(page.getByText(/mgan@pingconmarketing\.com/).first()).toBeVisible();
+      await expect(page.locator('#intake-supplier-input')).toBeVisible();
       await expect(expiryInput).toHaveAttribute('required', '');
 
       // 3. ScannerModal: Camera fallback, Unknown RMA QR warning banner, & Close
@@ -444,10 +447,14 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       expect(savedReporter.name).toBe('Playwright Public Tester');
       expect(savedReporter.contact).toBe('playwright-test@pingcon.local');
 
+      // Staff/Admin/Super Admin on / sees compact New RMA Email Recipients editor
+      await expect(page.locator('[data-email-recipients-editor="new_rma"]')).toBeVisible();
+
       await page.getByRole('button', { name: /Submit Return Manifest/i }).click();
 
       // 8. Success Screen & ReturnQRModal (Presets, W/H mm edit, Reset, Zero A4, Pure B&W Print)
-      await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText('Printable QR Ready')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText(/Qty:/i).first()).toBeVisible();
       const rmaText = await page
         .locator('.font-mono.font-black.text-slate-900, .font-mono.font-black.dark\\:text-white')
         .filter({ hasText: /^RMA-TEST-/ })
@@ -458,52 +465,58 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
 
       const [directPngDownload] = await Promise.all([
         page.waitForEvent('download'),
-        page.getByRole('button', { name: /Save Sticker \(PNG\)/i }).click()
+        page.getByRole('button', { name: /Save QR \(PNG\)/i }).click()
       ]);
-      expect(directPngDownload.suggestedFilename()).toContain('.png');
+      expect(directPngDownload.suggestedFilename()).toContain(`${createdRmaNumber}-QR.png`);
 
-      await page.getByRole('button', { name: /Resize \/ Print Sticker/i }).click();
-      await expect(page.getByText('Print RMA Sticker Label')).toBeVisible();
+      await page.getByRole('button', { name: /Resize \/ Print QR/i }).click();
+      const qrModal = page.locator('div.fixed', { hasText: 'Print RMA QR Code' });
+      await expect(qrModal).toBeVisible();
 
-      await page.getByRole('button', { name: /Small \(Tuna Can\)/i }).click();
-      await page.getByRole('button', { name: /Large \(Carton\)/i }).click();
-      await page.getByRole('button', { name: /Extra Large \(Half Letter\)/i }).click();
+      // Verify unified centered QR card shows Qty & Unit, US Letter default paper, and omits Supplier label
+      await expect(qrModal.getByText(/Qty:/i).first()).toBeVisible();
+      expect(await qrModal.innerText()).not.toMatch(/\bSupplier:/i);
+      const paperSelect = qrModal.locator('select[aria-label="Paper Size"]');
+      await expect(paperSelect).toHaveValue('letter');
 
-      // Test manual W/H numeric inputs + Reset back to Medium
-      const qrModal = page.locator('div.fixed', { hasText: 'Print RMA Sticker Label' });
-      const wInput = qrModal.locator('input[type="number"]').first();
-      const hInput = qrModal.locator('input[type="number"]').nth(1);
+      // Test dynamic paper presets (Thermal 4x6 + Custom + Portrait/Landscape), then reset to US Letter Portrait
+      await paperSelect.selectOption('thermal_4x6');
+      await expect(qrModal.getByText(/Thermal 4" × 6"/).first()).toBeVisible();
+      await paperSelect.selectOption('custom');
+      await qrModal.locator('input[aria-label="Custom Paper Width mm"]').fill('180');
+      await qrModal.locator('input[aria-label="Custom Paper Height mm"]').fill('240');
+      await paperSelect.selectOption('letter');
+
+      await qrModal.getByRole('button', { name: /Mini/i }).click();
+      await qrModal.getByRole('button', { name: /Small/i }).click();
+      await qrModal.getByRole('button', { name: /Large/i }).click();
+
+      // Test manual W/H numeric inputs + Reset back to default
+      const wInput = qrModal.locator('input[aria-label="QR Card Width mm"]');
+      const hInput = qrModal.locator('input[aria-label="QR Card Height mm"]');
       await wInput.fill('110');
       await hInput.fill('145');
       await expect(wInput).toHaveValue('110');
-      await qrModal.locator('button[title="Reset to Medium size"]').click();
+      await qrModal.locator('button[title="Reset sizes to default"]').click();
       await expect(wInput).not.toHaveValue('110');
-
-      const modalText = await qrModal.innerText();
-      expect(modalText).not.toMatch(/\bA4\b/);
 
       const [qrPngDownload] = await Promise.all([
         page.waitForEvent('download'),
-        page.getByRole('button', { name: /Save QR PNG/i }).click()
+        qrModal.getByRole('button', { name: /Save QR \(PNG\)/i }).click()
       ]);
-      expect(qrPngDownload.suggestedFilename()).toContain('.png');
-
-      const [stickerPngDownload] = await Promise.all([
-        page.waitForEvent('download'),
-        page.getByRole('button', { name: /Save Sticker PNG/i }).click()
-      ]);
-      expect(stickerPngDownload.suggestedFilename()).toContain('.png');
+      expect(qrPngDownload.suggestedFilename()).toContain(`${createdRmaNumber}-QR.png`);
 
       const printsBefore = await page.evaluate(() => window.__pwPrintCount || 0);
-      await page.getByRole('button', { name: /Print Sticker \(/i }).click();
+      await qrModal.getByRole('button', { name: /Print QR \(/i }).click();
       await page.waitForTimeout(350);
       expect(await page.evaluate(() => window.__pwPrintCount || 0)).toBeGreaterThan(printsBefore);
       const printedHtmls = await page.evaluate(() => window.__pwPrintHtmls || []);
       const lastPrint = printedHtmls[printedHtmls.length - 1] || '';
+      expect(lastPrint.toLowerCase()).toContain('215.9mm 279.4mm');
       expect(lastPrint.toLowerCase()).not.toContain('size: a4');
 
-      await page.getByRole('button', { name: 'Done', exact: true }).click();
-      await expect(page.getByText('Print RMA Sticker Label')).toBeHidden();
+      await qrModal.getByRole('button', { name: 'Done', exact: true }).click();
+      await expect(qrModal).toBeHidden();
 
       await page.getByRole('button', { name: /Report Another/i }).click();
       await expect(page.getByRole('button', { name: /Submit Return Report/i })).toBeVisible();

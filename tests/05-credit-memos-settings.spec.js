@@ -18,7 +18,7 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
     context
   }) => {
     test.setTimeout(210_000);
-    await context.grantPermissions(['camera']).catch(() => {});
+    await context.grantPermissions(['camera']).catch(() => { });
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
     await interceptAndCaptureEmails(page);
@@ -44,18 +44,23 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
         barcode: `NOLABEL-${String(Date.now()).slice(-6)}`
       });
 
-      // 1. Live Credit Memos tab renders cleanly (open/cancel without mutating Live DB)
+      // 1. Live Customer RMA Hub -> Credit Memos Ledger sub-tab renders cleanly (hiding WMS / ERP Sync bar)
       await gotoAdmin(page);
-      await page.getByRole('button', { name: /Credit Memos/i }).first().click();
+      await page.getByRole('button', { name: /Customer RMA Hub/i }).first().click();
+      await expect(page.getByText('WMS / ERP Sync').first()).toBeVisible();
+      await page.getByRole('button', { name: /Credit Memos Ledger \(/i }).first().click();
       await expect(page.getByText('Finance Credit Memorandum Section')).toBeVisible();
+      await expect(page.getByText('WMS / ERP Sync')).toHaveCount(0);
       await page.getByRole('button', { name: /Issue.*Credit Memo/i }).first().click();
       await expect(page.getByText(/Issue Finance Credit Memo/i)).toBeVisible({ timeout: 10_000 });
       await page.getByRole('button', { name: 'Cancel', exact: true }).last().click();
       await expect(page.getByText(/Issue Finance Credit Memo/i)).toBeHidden();
 
-      // 2. Test Mode Sandbox: apply qty 350 (> P10,000 governance check) on rmaA via QuickRMAActionModal
+      // 2. Test Mode Sandbox: 2 symmetrical hub tabs (no standalone Sandbox Credit Memos tab); apply qty 350 (> P10k)
       await page.getByRole('button', { name: /Test Mode Sandbox/i }).first().click();
+      await expect(page.getByRole('button', { name: /Sandbox Credit Memos/i })).toHaveCount(0);
       await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
+      await page.getByRole('button', { name: /Customer Returns \(/i }).first().click();
       await page.locator('input[placeholder*="Search" i]').first().fill(rmaA);
       const rmaRowA = page.locator('tr', { hasText: rmaA }).first();
       await expect(rmaRowA).toBeVisible({ timeout: 10_000 });
@@ -70,9 +75,10 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       });
       await page.getByRole('button', { name: /Done \/ Close/i }).click();
 
-      // 3. Single Credit Memo flow in Sandbox Credit Memos: Pull Out Date (YYYY-MM-DD), Analiza B. Benoza, POR, 90%, 100%, Letter B&W Voucher & VAT XLSX
-      await page.getByRole('button', { name: /Sandbox Credit Memos/i }).click();
+      // 3. Single Credit Memo flow inside Sandbox Customer RMAs -> Credit Memos Ledger sub-tab
+      await page.getByRole('button', { name: /Credit Memos Ledger \(/i }).first().click();
       await expect(page.getByText(/Finance Credit Memorandum Section/i)).toBeVisible();
+      await expect(page.getByText('WMS / ERP Sync')).toHaveCount(0);
 
       await page.getByRole('button', { name: /Issue.*Credit Memo/i }).first().click();
       await expect(page.getByRole('heading', { name: 'Issue Finance Credit Memo' })).toBeVisible();
@@ -115,7 +121,7 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await expect(porInput).not.toHaveValue(porBefore);
 
       await page.getByRole('button', { name: /Save & View Voucher/i }).click();
-      await expect(page.getByText('FINANCE CREDIT MEMORANDUM', { exact: true })).toBeVisible({
+      await expect(page.getByText('FINANCE CREDIT MEMORANDUM', { exact: true }).first()).toBeVisible({
         timeout: 20_000
       });
       await expect(page.getByText(/₱12,000\.00/).first()).toBeVisible();
@@ -154,11 +160,12 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
 
       await cmRow1.locator('button[title="Void / Delete Credit Memo"]').click();
       await page.getByRole('button', { name: /Yes, Delete Permanently/i }).click();
-      await expect(page.getByRole('button', { name: /Yes, Delete Permanently/i })).toBeHidden({ timeout: 35_000 });
+      await expect(page.getByText(/Confirm Deletion/i)).toBeHidden({ timeout: 35_000 });
       await expect(cmRow1).toBeHidden({ timeout: 35_000 });
 
       // 4. Multi-RMA Consolidated Credit Memo flow + Financial Missing SKU Guard
-      await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
+      await page.getByRole('button', { name: /Customer Returns \(/i }).first().click();
+      await expect(page.getByText('WMS / ERP Sync').first()).toBeVisible();
       await page.locator('input[placeholder*="Search" i]').first().fill('RMA-TEST-');
 
       for (const rma of [rmaA, rmaB, rmaNoSku]) {
@@ -189,22 +196,39 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await page.getByRole('button', { name: /Save & View Voucher/i }).click();
 
       // Verify Consolidated Voucher opens cleanly on B&W US Letter with BOTH rmaA & rmaB
-      await expect(page.getByText('FINANCE CREDIT MEMORANDUM', { exact: true })).toBeVisible({
+      await expect(page.getByText('FINANCE CREDIT MEMORANDUM', { exact: true }).first()).toBeVisible({
         timeout: 20_000
       });
-      await expect(page.getByText(/CONSOLIDATED \(2 RMAs\)/i)).toBeVisible();
+      await expect(page.getByText(/CONSOLIDATED \(2 RMAs\)/i).first()).toBeVisible();
       await expect(page.getByText(rmaA).first()).toBeVisible();
       await expect(page.getByText(rmaB).first()).toBeVisible();
-      await expect(page.getByText('Playwright Consolidated Settlement Note')).toBeVisible();
+      await expect(page.getByText('Playwright Consolidated Settlement Note').first()).toBeVisible();
+      await expect(page.getByText(/Separated Full Pages \(Dedicated Paper per Copy\)/i)).toBeVisible();
+
+      // Verify customizable copy counts & presets on Credit Memo Voucher
+      await page.getByRole('button', { name: '2 Ours + 1 Theirs (3 Papers)' }).click();
+      await expect(page.getByText('Total Output: 3 Papers')).toBeVisible();
+      await expect(page.locator('#credit-memo-voucher-print-root .voucher-sheet')).toHaveCount(3);
+      await expect(page.getByText(/^COPY 3 OF 3 — CUSTOMER COPY/i)).toBeVisible();
+
+      await page.locator('input[aria-label="Our Company Copies"]').fill('0');
+      await page.locator('input[aria-label="Customer Copies"]').fill('0');
+      await expect(page.getByText(/Total copy count is 0\./i)).toBeVisible();
+      const consolVoucherPrintBtn = page.getByRole('button', { name: /Print Letter Voucher \/ PDF/i });
+      await expect(consolVoucherPrintBtn).toBeDisabled();
+
+      await page.getByRole('button', { name: '1 + 1 (2 Papers)' }).click();
+      await expect(page.getByText('Total Output: 2 Papers')).toBeVisible();
+      await expect(consolVoucherPrintBtn).toBeEnabled();
 
       const consolPrintBefore = await page.evaluate(() => window.__pwPrintCount || 0);
-      await page.getByRole('button', { name: /Print Letter Voucher \/ PDF/i }).click();
+      await consolVoucherPrintBtn.click();
       await page.waitForTimeout(300);
       expect(await page.evaluate(() => window.__pwPrintCount || 0)).toBeGreaterThan(consolPrintBefore);
       await page.locator('#credit-memo-voucher-print-root button:has(svg.lucide-x)').first().click();
 
-      // Verify Sandbox Credit Memos shows "🔗 Consolidated (2 RMAs)" & clean notes (zero [CM_META:])
-      await page.getByRole('button', { name: /Sandbox Credit Memos/i }).click();
+      // Verify Credit Memos Ledger shows "🔗 Consolidated (2 RMAs)" & clean notes (zero [CM_META:])
+      await page.getByRole('button', { name: /Credit Memos Ledger \(/i }).first().click();
       await cmSearch.fill(rmaB);
       const cmRowConsol = page.locator('tr', { hasText: /Consolidated \(2 RMAs\)/i }).first();
       await expect(cmRowConsol).toBeVisible({ timeout: 15_000 });
@@ -213,19 +237,19 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       const cmMatch = cmText.match(/(CM-TEST-\d{4}-\d+-[A-Z0-9]+)/i);
       if (cmMatch) createdCms.push(cmMatch[1]);
 
-      // Verify BOTH rmaA and rmaB show CM status on Sandbox Customer RMAs before voiding
-      await page.getByRole('button', { name: /Sandbox Customer RMAs/i }).click();
+      // Verify BOTH rmaA and rmaB show CM status on Customer Returns before voiding
+      await page.getByRole('button', { name: /Customer Returns \(/i }).first().click();
       await page.locator('input[placeholder*="Search" i]').first().fill(rmaB);
       await expect(page.locator('tr', { hasText: rmaB }).first().getByText(/Credit Memo Issued/i)).toBeVisible({
         timeout: 10_000
       });
 
       // Void Consolidated CM -> verify BOTH RMAs revert cleanly and consolidated CM vanishes
-      await page.getByRole('button', { name: /Sandbox Credit Memos/i }).click();
+      await page.getByRole('button', { name: /Credit Memos Ledger \(/i }).first().click();
       await cmSearch.fill(rmaB);
       await cmRowConsol.locator('button[title="Void / Delete Credit Memo"]').click();
       await page.getByRole('button', { name: /Yes, Delete Permanently/i }).click();
-      await expect(page.getByRole('button', { name: /Yes, Delete Permanently/i })).toBeHidden({ timeout: 35_000 });
+      await expect(page.getByText(/Confirm Deletion/i)).toBeHidden({ timeout: 35_000 });
       await expect(cmRowConsol).toBeHidden({ timeout: 35_000 });
 
       guard.assertClean('suite 05 single & consolidated credit memos');
@@ -239,12 +263,12 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
     }
   });
 
-  test('Settings & SMTP tab: mgan@a2z2go.net Sandbox banner, Supabase/SMTP/Catalog tests, Email Recipients, Locations, Poster & API Keys + /docs link', async ({
+  test('Settings & SMTP tab: mgan@pingconmarketing.com Sandbox banner, Supabase/SMTP/Catalog tests, Email Recipients, Editable Schedules, Locations, Poster & API Keys + /docs link', async ({
     page,
     context
   }) => {
     test.setTimeout(150_000);
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => { });
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
 
@@ -258,7 +282,13 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await gotoAdmin(page);
       await page.getByRole('button', { name: /Settings & SMTP/i }).click();
       await expect(page.getByText('Simulation / Test Mode Toggle')).toBeVisible();
-      await expect(page.getByText(/mgan@a2z2go\.net/).first()).toBeVisible();
+      await expect(page.getByText(/mgan@pingconmarketing\.com/).first()).toBeVisible();
+      await expect(page.locator('input[aria-label="Test Mode Sandbox Email Override"]')).toHaveValue(/mgan@pingconmarketing\.com/i);
+      await expect(page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('13:00');
+      await expect(page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('08:00');
+      await expect(page.locator('input[aria-label="Auto Daily Matrix Email Enabled"]')).toBeVisible();
+      await expect(page.locator('input[aria-label="Auto Daily Follow-Up Enabled"]')).toBeVisible();
+      await expect(page.locator('input[aria-label="Customer Hub Default Follow-Up Enabled"]')).toBeVisible();
 
       const settingsTestToggle = page
         .locator('div:has(> div > h2:has-text("Simulation / Test Mode Toggle"))')
@@ -291,16 +321,30 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       const ccInput = page.locator('input[placeholder*="cc" i], input[placeholder*="Add CC" i]').first();
       if (await ccInput.isVisible().catch(() => false)) {
         await ccInput.fill('pw-temp-cc@pingcon.local');
-        await page.getByRole('button', { name: /Add CC/i }).click();
-        await expect(page.getByText('pw-temp-cc@pingcon.local', { exact: true })).toBeVisible();
+        await page.getByRole('button', { name: /Add CC/i }).first().click();
+        await expect(page.getByText('pw-temp-cc@pingcon.local', { exact: true }).first()).toBeVisible();
         const tempChip = page.locator('button[title="Remove pw-temp-cc@pingcon.local"]').first();
         if (await tempChip.isVisible().catch(() => false)) {
           await tempChip.click();
           await expect(page.getByText('pw-temp-cc@pingcon.local', { exact: true })).toBeHidden();
         }
-        await page.getByRole('button', { name: /Save Recipients/i }).click();
+        await page.getByRole('button', { name: /Save Recipients/i }).first().click();
         await page.waitForTimeout(400);
       }
+
+      // Per-Email Recipient Manager & Auto Daily Overall Matrix Config verification
+      await expect(page.getByText('Per-Email Recipient Manager')).toBeVisible();
+      await page.getByRole('button', { name: /Driver Pickup — Debit Claim/i }).first().click();
+      await expect(page.locator('[data-email-recipients-editor="pickup_debit_claim"]')).toBeVisible();
+      await page.getByRole('button', { name: /Manual Overall Matrix Email/i }).first().click();
+      await expect(page.locator('[data-email-recipients-editor="manual_matrix"]')).toBeVisible();
+      await page.getByRole('button', { name: /Sync Recipients Between Auto & Manual/i }).first().click();
+      await expect(page.getByText(/Synced TO & CC recipients between Auto Daily 1:00 PM Matrix and Manual Matrix/i)).toBeVisible();
+
+      await page.getByRole('button', { name: /Custom Date Range/i }).click();
+      await page.getByRole('button', { name: /Rolling Days/i }).click();
+      await page.getByRole('button', { name: /Save Matrix Config/i }).click();
+      await expect(page.getByText(/Overall Matrix schedule, date range & scope saved/i)).toBeVisible({ timeout: 10_000 });
 
       await page.getByRole('button', { name: /View & Download Poster/i }).click();
       await expect(page.getByRole('button', { name: 'Close', exact: true })).toBeVisible({ timeout: 10_000 });
@@ -375,9 +419,9 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
                   });
                 }
               }
-            } catch {}
+            } catch { }
           }, { masks: Array.from(trackedMaskedKeys), url: supaUrl, key: anonKey })
-          .catch(() => {});
+          .catch(() => { });
       }
       page.off('dialog', onDialog);
       guard.detach();

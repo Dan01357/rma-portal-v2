@@ -11,6 +11,7 @@ import {
   isTestRecord,
   getTrashDaysRemaining 
 } from '../utils/rmaHelpers';
+import { isPlaceholderSupplier } from '../utils/followUpWorkflow';
 
 /**
  * Safe test mode resolution:
@@ -330,9 +331,9 @@ export const catalogService = {
   },
 
   /**
-   * Inspect Driver's License / ID photo using Gemini Flash OCR via /api/upload-photo?action=inspect-license
+   * Shared image normalization and OCR dispatch helper for /api/upload-photo?action=...
    */
-  async inspectDriverLicense(fileOrBase64, signal) {
+  async _postImageToUploadAction(actionName, fileOrBase64, errorPrefix, signal) {
     let base64Data = '';
     let mimeType = 'image/jpeg';
 
@@ -346,14 +347,14 @@ export const catalogService = {
       mimeType = compressed.type || fileOrBase64.type || 'image/jpeg';
       base64Data = await this.fileToBase64(compressed);
     } else {
-      throw new Error('Invalid image provided for license OCR.');
+      throw new Error(`Invalid image provided for ${errorPrefix}.`);
     }
 
-    const res = await fetch('/api/upload-photo?action=inspect-license', {
+    const res = await fetch(`/api/upload-photo?action=${encodeURIComponent(actionName)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        action: 'inspect-license',
+        action: actionName,
         fileData: base64Data,
         mimeType
       }),
@@ -365,11 +366,25 @@ export const catalogService = {
       try {
         return JSON.parse(errText);
       } catch {
-        throw new Error(`License OCR error (${res.status}): ${errText}`);
+        throw new Error(`${errorPrefix} error (${res.status}): ${errText}`);
       }
     }
 
     return await res.json();
+  },
+
+  /**
+   * Inspect Driver's License / ID photo using Gemini Flash OCR via /api/upload-photo?action=inspect-license
+   */
+  async inspectDriverLicense(fileOrBase64, signal) {
+    return this._postImageToUploadAction('inspect-license', fileOrBase64, 'License OCR', signal);
+  },
+
+  /**
+   * Inspect delivery truck plate photo using Gemini Flash OCR via /api/upload-photo?action=inspect-plate
+   */
+  async inspectTruckPlate(fileOrBase64, signal) {
+    return this._postImageToUploadAction('inspect-plate', fileOrBase64, 'Truck Plate OCR', signal);
   },
 
   fileToBase64(file) {
@@ -1263,7 +1278,8 @@ export const catalogService = {
     is_parent = false,
     parent_rma_id = null,
     condition_grade = null,
-    notes = null
+    notes = null,
+    customRecipients = null
   }) {
     const hasItems = Array.isArray(items) && items.length > 0;
     const isBatch = hasItems && items.length > 1;
@@ -1342,9 +1358,46 @@ export const catalogService = {
     const effectiveRmaType = (rma_type === 'supplier_outbound' || (typeof rmaType !== 'undefined' && rmaType === 'supplier_outbound')) ? 'supplier_outbound' : 'customer_inbound';
     const effectiveGrade = condition_grade || mapReasonToConditionGrade(reason || (hasItems && items[0]?.reason));
 
+    const resolvedSupplierName = this._pickRealSupplier(
+      supplier_name,
+      supplier,
+      resolvedProduct?.supplier_name,
+      resolvedProduct?.supplierName,
+      resolvedProduct?.supplier,
+      hasItems ? items[0]?.supplier_name : null,
+      hasItems ? items[0]?.supplierName : null
+    );
+
+    const nowIso = new Date().toISOString();
+    const existingFollowUpMeta = (ai_document_metadata?.follow_up && typeof ai_document_metadata.follow_up === 'object')
+      ? { ...ai_document_metadata.follow_up }
+      : {};
+    let customerFollowUpDefault = false;
+    try {
+      customerFollowUpDefault = Boolean(notificationService.getDailyFollowUpConfig()?.customerFollowUpDefaultEnabled);
+    } catch {}
+
+    const shouldStartFollowUp =
+      existingFollowUpMeta.enabled !== false &&
+      (
+        existingFollowUpMeta.enabled === true ||
+        (effectiveRmaType === 'supplier_outbound' && !isPlaceholderSupplier(resolvedSupplierName)) ||
+        (effectiveRmaType === 'customer_inbound' && customerFollowUpDefault)
+      );
+
+    if (shouldStartFollowUp) {
+      existingFollowUpMeta.enabled = true;
+      if (!existingFollowUpMeta.started_at) {
+        existingFollowUpMeta.started_at = nowIso;
+      }
+    } else if (existingFollowUpMeta.enabled === undefined) {
+      existingFollowUpMeta.enabled = false;
+    }
+
     const mergedMetadata = {
       ...(ai_document_metadata || {}),
-      ...(isUnlabeled ? { is_unlabeled: true, provisional_barcode: finalBarcode } : {})
+      ...(isUnlabeled ? { is_unlabeled: true, provisional_barcode: finalBarcode } : {}),
+      follow_up: existingFollowUpMeta
     };
 
     const reportRow = {
@@ -1354,15 +1407,7 @@ export const catalogService = {
       code: isBatch ? null : (isKnown ? ((resolvedProduct.code && resolvedProduct.code !== finalBarcode) ? resolvedProduct.code : (resolvedProduct.sku && resolvedProduct.sku !== finalBarcode ? resolvedProduct.sku : null)) : (hasItems && items[0]?.code ? items[0].code : null)),
       name: effectiveName,
       quantity: calculatedTotalQuantity,
-      supplier_name: this._pickRealSupplier(
-        supplier_name,
-        supplier,
-        resolvedProduct?.supplier_name,
-        resolvedProduct?.supplierName,
-        resolvedProduct?.supplier,
-        hasItems ? items[0]?.supplier_name : null,
-        hasItems ? items[0]?.supplierName : null
-      ),
+      supplier_name: resolvedSupplierName,
       price: hasItems 
         ? items.reduce((acc, it) => acc + ((Number(it.price) || 0) * (Number(it.quantity) || 1)), 0)
         : (isKnown ? Number(resolvedProduct.price || 0) : 0),
@@ -1554,7 +1599,9 @@ export const catalogService = {
       reportRow?.ai_document_metadata?.is_test === true ||
       reportRow?.ai_document_metadata?.test_mode === true
     );
-    notificationService.sendRMANotification(finalReport, isTestActive).catch(err => {
+    notificationService.sendRMANotification(finalReport, isTestActive, {
+      customRecipients: customRecipients || null
+    }).catch(err => {
       console.warn('Background RMA report notification notice:', err.message);
     });
 
@@ -2315,7 +2362,7 @@ export const catalogService = {
   /**
    * Get all RMA reports (excluding deleted ones)
    */
-  async getRecentReports(limit = 100) {
+  async getRecentReports(limit = 500) {
     try {
       const { data, error } = await supabase
         .from('rma_reports')
@@ -2855,19 +2902,13 @@ export const catalogService = {
     }
   },
 
-  /**
-   * Saves Simple 4-Option Supplier RTV Choice & Pickup Verification Metadata
-   * Handles supplier name assignment, disposition/status/bin auto-sync,
-   * Drive folder sync, and automatic 'picked_up' tagging when A4 handover form is finalized.
-   */
-  async saveSimpleSupplierRtvDisposition(report, payload = {}) {
+  async _resolveLatestRmaParentRow(report) {
     const cleanId = (report?.id && /^\d+$/.test(String(report.id))) ? Number(report.id) : null;
     const rmaNumber = report?.rma_number || report?.rmaNumber || null;
     if (!cleanId && !rmaNumber) {
       throw new Error('Missing RMA identifier to update.');
     }
 
-    // Fetch latest parent/top-level row from Supabase (avoid .maybeSingle() on rma_number since batch manifests can have multiple rows)
     const fetchLatestParentRow = async () => {
       if (cleanId) {
         const { data } = await supabase.from('rma_reports').select('*').eq('id', cleanId).limit(1);
@@ -2894,7 +2935,6 @@ export const catalogService = {
     };
 
     let existing = await fetchLatestParentRow();
-    // If just submitted optimistically in background, briefly poll for DB row creation
     if (!existing && rmaNumber) {
       for (let attempt = 0; attempt < 6; attempt += 1) {
         await new Promise((r) => setTimeout(r, 450));
@@ -2911,10 +2951,22 @@ export const catalogService = {
       throw new Error(`RMA "${rmaNumber || ''}" is still syncing to the database. Please try again in a moment.`);
     }
 
+    return { existing, resolvedId, rmaNumber };
+  },
+
+  /**
+   * Saves Simple 4-Option Supplier RTV Choice & Pickup Verification Metadata
+   * Handles supplier name assignment, disposition/status/bin auto-sync,
+   * Drive folder sync, and automatic 'picked_up' tagging when A4 handover form is finalized.
+   */
+  async saveSimpleSupplierRtvDisposition(report, payload = {}) {
+    const { existing, resolvedId, rmaNumber } = await this._resolveLatestRmaParentRow(report);
+
     const existingMeta = (existing?.ai_document_metadata && typeof existing.ai_document_metadata === 'object')
       ? { ...existing.ai_document_metadata }
       : {};
     const recordIsTest = Boolean(isTestRecord(existing) || isTestRecord(report));
+    const nowIso = new Date().toISOString();
 
     const updatedMeta = {
       ...existingMeta,
@@ -2927,7 +2979,30 @@ export const catalogService = {
       delete updatedMeta.resolved_by;
     }
 
-    const nowIso = new Date().toISOString();
+    const prevFollowUp = (existingMeta.follow_up && typeof existingMeta.follow_up === 'object')
+      ? { ...existingMeta.follow_up }
+      : {};
+    const isPickupRecorded = payload.status === 'picked_up' || Boolean(payload.metadataPatch?.supplier_pickup?.picked_up_at);
+    const effectiveSup = payload.supplier_name || existing?.supplier_name;
+
+    if (isPickupRecorded) {
+      updatedMeta.follow_up = {
+        ...prevFollowUp,
+        enabled: false,
+        picked_up_at: payload.metadataPatch?.supplier_pickup?.picked_up_at || prevFollowUp.picked_up_at || nowIso,
+        case_closed_at: prevFollowUp.case_closed_at || nowIso,
+        case_status: 'picked_up_closed'
+      };
+    } else if (existing?.rma_type === 'supplier_outbound' && !isPlaceholderSupplier(effectiveSup)) {
+      if (prevFollowUp.enabled !== false) {
+        updatedMeta.follow_up = {
+          ...prevFollowUp,
+          enabled: true,
+          started_at: prevFollowUp.started_at || nowIso
+        };
+      }
+    }
+
     let baseNotes = String(existing?.notes || '').replace(/\s*\[REORDER:[^\]]*\]/gi, '').trim();
     const preservedNotes = recordIsTest
       ? (baseNotes.includes('[TEST_MODE]')
@@ -2939,7 +3014,7 @@ export const catalogService = {
       disposition: payload.disposition ?? existing?.disposition,
       status: payload.status ?? existing?.status,
       warehouse_location: payload.warehouse_location ?? existing?.warehouse_location,
-      inspected_by: payload.actorName || existing?.inspected_by || 'Staff',
+      inspected_by: payload.inspected_by || payload.actorName || existing?.inspected_by || 'Staff',
       inspected_at: nowIso,
       ai_document_metadata: updatedMeta,
       ...(preservedNotes !== undefined ? { notes: preservedNotes } : {})
@@ -3017,8 +3092,8 @@ export const catalogService = {
 
     const savedRow = Array.isArray(savedRows) && savedRows.length > 0 ? savedRows[0] : null;
 
-    // Sync child rows if any exist in rma_reports
-    if (resolvedId) {
+    // Sync child rows only if this record is a multi-item parent manifest
+    if (resolvedId && (existing?.is_parent === true || (Array.isArray(existing?.items) && existing.items.length > 0))) {
       try {
         await supabase.from('rma_reports').update({
           ...(updates.supplier_name ? { supplier_name: updates.supplier_name } : {}),
@@ -3030,6 +3105,201 @@ export const catalogService = {
     }
 
     this.notifyChange('triage-updated', { id: resolvedId, rmaNumber, status: savedRow?.status || updates.status });
+    return savedRow || { ...existing, ...updates, id: resolvedId };
+  },
+
+  /**
+   * Persist Supplier Name, Email (TO/CC), and 10-Calendar-Day Auto Follow-Up toggle for any RMA.
+   */
+  async saveSupplierAndFollowUpSettings(report, payload = {}) {
+    const { existing, resolvedId, rmaNumber } = await this._resolveLatestRmaParentRow(report);
+    const existingMeta = (existing?.ai_document_metadata && typeof existing.ai_document_metadata === 'object')
+      ? { ...existing.ai_document_metadata }
+      : {};
+    const prevFollowUp = (existingMeta.follow_up && typeof existingMeta.follow_up === 'object')
+      ? { ...existingMeta.follow_up }
+      : {};
+    const prevPickup = (existingMeta.supplier_pickup && typeof existingMeta.supplier_pickup === 'object')
+      ? { ...existingMeta.supplier_pickup }
+      : {};
+    const recordIsTest = Boolean(isTestRecord(existing) || isTestRecord(report));
+    const nowIso = new Date().toISOString();
+
+    const cleanSupplier = String(payload.supplier_name || '').trim();
+    const toEmailStr = String(payload.supplier_email_to ?? prevFollowUp.supplier_email_to ?? '').trim();
+    const ccEmailStr = String(payload.supplier_email_cc ?? prevFollowUp.supplier_email_cc ?? '').trim();
+    const followUpEnabled = payload.followUpEnabled !== undefined
+      ? Boolean(payload.followUpEnabled)
+      : (prevFollowUp.enabled ?? (!isPlaceholderSupplier(cleanSupplier || existing?.supplier_name)));
+
+    const nextFollowUp = {
+      ...prevFollowUp,
+      supplier_email_to: toEmailStr,
+      supplier_email_cc: ccEmailStr,
+      enabled: followUpEnabled,
+      updated_at: nowIso
+    };
+    if (followUpEnabled && (!nextFollowUp.started_at || payload.resetTimer)) {
+      nextFollowUp.started_at = nowIso;
+    }
+    if (payload.reopenCase) {
+      delete nextFollowUp.case_closed_at;
+      delete nextFollowUp.case_status;
+      delete nextFollowUp.auto_disposed_at;
+      delete nextFollowUp.close_reason;
+    }
+
+    const updatedMeta = {
+      ...existingMeta,
+      ...(recordIsTest ? { is_test: true, test_mode: true } : {}),
+      supplier_pickup: {
+        ...prevPickup,
+        ...(cleanSupplier ? { supplier_name: cleanSupplier } : {}),
+        supplier_email_to: toEmailStr,
+        supplier_email_cc: ccEmailStr
+      },
+      follow_up: nextFollowUp
+    };
+
+    const existingAudit = Array.isArray(existing?.audit_trail) ? existing.audit_trail : [];
+    const updates = {
+      ...(cleanSupplier ? { supplier_name: cleanSupplier } : {}),
+      ai_document_metadata: updatedMeta,
+      updated_at: nowIso,
+      audit_trail: [
+        ...existingAudit,
+        {
+          timestamp: nowIso,
+          action: 'SUPPLIER_FOLLOWUP_CONFIG_UPDATED',
+          stage: String(existing?.status || 'FOLLOW_UP').toUpperCase(),
+          actor: payload.actorName || 'Admin',
+          note: `Supplier: ${cleanSupplier || existing?.supplier_name || 'Pending'} | Email TO: ${toEmailStr || 'None'} | Auto Follow-Up: ${followUpEnabled ? 'ON (10-Day SLA)' : 'OFF'}`
+        }
+      ]
+    };
+
+    if (cleanSupplier && Array.isArray(existing?.items) && existing.items.length > 0) {
+      updates.items = existing.items.map((it) => ({
+        ...it,
+        supplier_name: cleanSupplier,
+        supplier: cleanSupplier
+      }));
+    }
+
+    let { data: savedRows, error: updateErr } = await supabase
+      .from('rma_reports')
+      .update(updates)
+      .eq('id', resolvedId)
+      .select();
+
+    if (updateErr) {
+      const fallback = { ...updates };
+      if (String(updateErr.message || '').includes('updated_at')) delete fallback.updated_at;
+      const retry = await supabase.from('rma_reports').update(fallback).eq('id', resolvedId).select();
+      if (retry.error) throw retry.error;
+      savedRows = retry.data;
+    }
+
+    if (cleanSupplier) {
+      try {
+        await supabase.from('rma_reports').update({ supplier_name: cleanSupplier }).eq('parent_rma_id', resolvedId);
+      } catch {}
+    }
+
+    const savedRow = Array.isArray(savedRows) && savedRows.length > 0 ? savedRows[0] : null;
+    this.notifyChange('triage-updated', { id: resolvedId, rmaNumber, status: savedRow?.status || existing?.status });
+    return savedRow || { ...existing, ...updates, id: resolvedId };
+  },
+
+  /**
+   * Explicitly close the 4-Step Follow-Up workflow (Picked Up / Handover Completed or Manual Case Close)
+   */
+  async closeFollowUpCase(report, { reason = 'Picked Up — Case Closed', markPickedUp = true, actorName = 'Admin' } = {}) {
+    const { existing, resolvedId, rmaNumber } = await this._resolveLatestRmaParentRow(report);
+    const existingMeta = (existing?.ai_document_metadata && typeof existing.ai_document_metadata === 'object')
+      ? { ...existing.ai_document_metadata }
+      : {};
+    const prevFollowUp = (existingMeta.follow_up && typeof existingMeta.follow_up === 'object')
+      ? { ...existingMeta.follow_up }
+      : {};
+    const prevPickup = (existingMeta.supplier_pickup && typeof existingMeta.supplier_pickup === 'object')
+      ? { ...existingMeta.supplier_pickup }
+      : {};
+    const recordIsTest = Boolean(isTestRecord(existing) || isTestRecord(report));
+    const nowIso = new Date().toISOString();
+
+    const pickedUpTimestamp = markPickedUp ? (prevPickup.picked_up_at || prevFollowUp.picked_up_at || nowIso) : prevFollowUp.picked_up_at;
+    const updatedMeta = {
+      ...existingMeta,
+      ...(recordIsTest ? { is_test: true, test_mode: true } : {}),
+      ...(markPickedUp ? {
+        supplier_pickup: {
+          ...prevPickup,
+          picked_up_at: pickedUpTimestamp
+        }
+      } : {}),
+      follow_up: {
+        ...prevFollowUp,
+        enabled: false,
+        ...(pickedUpTimestamp ? { picked_up_at: pickedUpTimestamp } : {}),
+        case_closed_at: nowIso,
+        case_status: markPickedUp ? 'picked_up_closed' : 'manual_closed',
+        close_reason: reason,
+        closed_by: actorName
+      }
+    };
+
+    const nextStatus = markPickedUp && existing?.rma_type === 'supplier_outbound' ? 'picked_up' : 'resolved';
+    const existingAudit = Array.isArray(existing?.audit_trail) ? existing.audit_trail : [];
+    const updates = {
+      status: nextStatus,
+      ai_document_metadata: updatedMeta,
+      updated_at: nowIso,
+      audit_trail: [
+        ...existingAudit,
+        {
+          timestamp: nowIso,
+          action: 'FOLLOWUP_CASE_CLOSED',
+          stage: String(nextStatus).toUpperCase(),
+          actor: actorName,
+          note: reason
+        }
+      ]
+    };
+
+    let { data: savedRows, error: updateErr } = await supabase
+      .from('rma_reports')
+      .update(updates)
+      .eq('id', resolvedId)
+      .select();
+
+    if (updateErr) {
+      const fallback = { ...updates };
+      if (String(updateErr.message || '').includes('rma_reports_status_check')) {
+        fallback.status = 'resolved';
+      }
+      if (String(updateErr.message || '').includes('updated_at')) delete fallback.updated_at;
+      const retry = await supabase.from('rma_reports').update(fallback).eq('id', resolvedId).select();
+      if (retry.error) {
+        if (String(retry.error.message || '').includes('rma_reports_status_check')) {
+          fallback.status = 'under_inspection';
+          const retry2 = await supabase.from('rma_reports').update(fallback).eq('id', resolvedId).select();
+          if (retry2.error) throw retry2.error;
+          savedRows = retry2.data;
+        } else {
+          throw retry.error;
+        }
+      } else {
+        savedRows = retry.data;
+      }
+    }
+
+    try {
+      await supabase.from('rma_reports').update({ status: savedRows?.[0]?.status || nextStatus }).eq('parent_rma_id', resolvedId);
+    } catch {}
+
+    const savedRow = Array.isArray(savedRows) && savedRows.length > 0 ? savedRows[0] : null;
+    this.notifyChange('triage-updated', { id: resolvedId, rmaNumber, status: savedRow?.status || nextStatus });
     return savedRow || { ...existing, ...updates, id: resolvedId };
   }
 };

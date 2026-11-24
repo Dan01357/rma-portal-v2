@@ -62,7 +62,7 @@ Pass your secret API key in all requests:
 - **🟢 Live Production Mode**:
   Requests made with live keys (\`sk_live_...\`) or without test flags operate directly on production books. Live returns appear in **Customer RMA Hub** or **Supplier Hub**.
 - **🧪 Test Mode Sandbox (Safe Isolation)**:
-  Coworkers can simulate inventory restocks, supplier re-orders, driver pickups, and consolidated credit memos safely without touching live financial ledgers or triggering live customer/boss emails (UI Test Mode emails route safely to \`mgan@a2z2go.net\` with \`[TEST_MODE]\` prefixes):
+  Coworkers can simulate inventory restocks, supplier re-orders, driver pickups, and consolidated credit memos safely without touching live financial ledgers or triggering live customer/boss emails (UI Test Mode emails route safely to \`mgan@pingconmarketing.com\` with \`[TEST]\` prefixes):
   1. **Query Param**: Add \`?test_mode=true\` (e.g. \`GET /api/v1/rma?test_mode=true\`)
   2. **HTTP Header**: Pass \`x-test-mode: true\`
   3. **POST Payload**: Include \`"is_test": true\`
@@ -140,7 +140,7 @@ Retained for backwards-compatible REST API clients only; the streamlined portal 
 - **Multi-Item Batch Manifests**: Batched returns are represented with \`is_parent: true\`, \`items\` (JSONB breakdown of line items), \`total_items\`, and \`total_quantity\`. Child records link via \`parent_rma_id\`.
 - **Printable Forms**: Standardized strictly on US Letter (\`8.5in x 11in\`, plain black-and-white ink) for Sticker Studio sheets, Credit Memo Vouchers, and Unified Debit Claim / Replacement & Pickup Forms (accepting any valid Philippine Government / Legal ID).
 - **Email-Bound RMA Editor (\`/api/v1/rma-email-edit\`)**: Scoped Google Identity Lock endpoint allowing all authorized **To + CC recipients** (\`No Expiry • Revocable by Admin\`, routed cleanly without extra Vercel functions) to update supplier, product/SKU, pricing, expiry (\`YYYY-MM-DD\`), and SI/DR/PO documents.
-- **Automated Daily Overall RMA Matrix (\`/api/send-email?action=daily-matrix\`)**: Scheduled via Vercel Cron daily at **1:00 PM PHT (\`05:00 UTC\`)** (and manually triggerable from Settings) to generate and email the combined Live Overall RMA Matrix (\`.xlsx\`) workbook to configured \`To\` + \`CC\` recipients; all Test Mode emails enforce \`[TEST]\` as the very first word in the subject line.
+- **Per-Email Recipient Profiles, Editable Schedule & 10-Day Pickup Follow-Up (\`/api/send-email?action=daily-matrix\`, \`?action=daily-followup\`)**: Supports per-type **To** (single or multi-recipient) and **CC** profiles via \`rma_settings.email_recipients_by_type\` (including \`supplier_followup\` CCs), configurable Rolling/Custom \`YYYY-MM-DD\` date ranges, scope (\`overall\`, \`customer_inbound\`, \`supplier_outbound\`), \`includeZeroCatalogSkus\`, and adjustable \`HH:mm Asia/Manila\` auto-send schedules for both Daily Matrix (default \`13:00\`) and 10-Calendar-Day Pickup Follow-Up / Auto-Dispose (default \`08:00\`). Scheduled via GitHub Actions + Vercel Cron + Admin browser scheduler and manually triggerable; all Test Mode emails enforce \`[TEST]\` as the very first word in the subject line and isolate delivery to the configured Sandbox email (default \`mgan@pingconmarketing.com\`).
 
 Click **Authorize** on the top right to test live endpoints directly from this interactive documentation.
       `,

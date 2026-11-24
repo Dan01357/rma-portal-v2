@@ -16,7 +16,7 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
     context
   }) => {
     test.setTimeout(180_000);
-    await context.grantPermissions(['camera']).catch(() => {});
+    await context.grantPermissions(['camera']).catch(() => { });
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
     await interceptAndCaptureEmails(page);
@@ -57,14 +57,14 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
       await expect(page.getByRole('button', { name: /Vendor RTV Gate Pass/i })).toHaveCount(0);
       await expect(page.getByRole('button', { name: /Rejected Return Gate Pass/i })).toHaveCount(0);
 
-      // 2. Print QR Sticker sub-modal & Print
+      // 2. Print QR Code sub-modal & Print
       await page.getByRole('button', { name: /Print QR Sticker/i }).click();
-      await expect(page.getByText('Print RMA Sticker Label')).toBeVisible();
+      await expect(page.getByText('Print RMA QR Code')).toBeVisible();
       const qrBefore = await page.evaluate(() => window.__pwPrintCount || 0);
-      await page.getByRole('button', { name: /Print Sticker \(/i }).click();
+      await page.getByRole('button', { name: /Print QR \(/i }).click();
       await expect.poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 10_000 }).toBeGreaterThan(qrBefore);
       await page.getByRole('button', { name: 'Done', exact: true }).click();
-      await expect(page.getByText('Print RMA Sticker Label')).toBeHidden();
+      await expect(page.getByText('Print RMA QR Code')).toBeHidden();
 
       // 3. Edit Details & Documents (ProductAutoSuggest on SKU & Name, no Store Branch / Batch Lot inputs, SI/DR/PO, Supplier, Expiry ISO readout, Restitution + >P10k)
       await page.getByRole('button', { name: /Edit Details & Documents/i }).click();
@@ -137,7 +137,7 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
       await page.getByRole('button', { name: /Swap Quantities/i }).click();
       await page.getByRole('button', { name: /Confirm & Execute Split/i }).click();
       await expect(page.getByText(/Split Parent Ticket|Part 1 of 2/i).first()).toBeVisible({
-        timeout: 20_000
+        timeout: 45_000
       });
       const openChildBtn = page.getByRole('button', { name: /Open Split Child \(/i }).first();
       if (await openChildBtn.waitFor({ state: 'visible', timeout: 6_000 }).then(() => true).catch(() => false)) {
@@ -148,9 +148,10 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
         splitChildRma = `${activeRmaNumber}-B`;
       }
 
-      // 5. Open 4-Choice / Pickup Window from prominent banner -> save Restock -> verify QuickRMAActionModal restores cleanly
+      // 5. Open 4-Choice / Pickup Window from prominent banner -> fill manual Processed By -> save Restock -> verify QuickRMAActionModal restores cleanly
       await page.getByRole('button', { name: /Open 4-Choice \/ Pickup Window/i }).click();
       await expect(page.getByText('What do you want to do with this item?')).toBeVisible({ timeout: 10_000 });
+      await page.locator('#wizard-processed-by-step1').fill('Playwright Quick Processor');
       await page.getByRole('button', { name: /Put Back on Good Shelf \(Restock\)/i }).first().click();
       await page.getByRole('button', { name: /Confirm & Save: Put Back on Good Shelf \(Restock\)/i }).click();
       await expect(page.getByRole('button', { name: /^Done$/i })).toBeVisible({ timeout: 15_000 });

@@ -10,11 +10,18 @@
  * 2. A2Z2GO / Keysys Products:
  *    - Sender: finance2@a2z2go.net
  *    - TO: azgodev@gmail.com
- *    - CC: [Customer AE Company Email, mgan@a2z2go.net, marketing@a2z2go.net, azgan@a2z2go.net, jaezelle.benito@pingconmarketing.com]
+ *    - CC: [Customer AE Company Email, mgan@pingconmarketing.com, marketing@a2z2go.net, azgan@a2z2go.net, jaezelle.benito@pingconmarketing.com]
  */
 import { supabase } from '../supabaseClient';
 import { authService } from './authService';
 import { inviteService } from './inviteService';
+import {
+  DEFAULT_SANDBOX_EMAIL,
+  DEFAULT_FOLLOWUP_CONFIG,
+  DEFAULT_MATRIX_SEND_TIME_PHT,
+  normalizeSandboxEmail,
+  normalizeTimeHhmm
+} from '../utils/followUpWorkflow';
 import {
   isTestRecord,
   formatDateYmd,
@@ -22,15 +29,43 @@ import {
   formatTestEmailSubject,
   getRealPhotos,
   getConsolidatedPickupItems,
-  formatPeso
+  formatPeso,
+  cleanExplanationText,
+  normalizePhotoUrlArray
 } from '../utils/rmaHelpers';
 import { generatePickupFormPdfAttachment } from '../utils/pickupFormPdf';
 
 const splitEmailList = (raw) => {
   if (!raw) return [];
   const arr = Array.isArray(raw) ? raw : String(raw).split(/[,;\s]+/);
-  return Array.from(new Set(arr.map((e) => String(e || '').trim()).filter((e) => e.includes('@') && !e.endsWith('.test'))));
+  const seen = new Set();
+  for (const entry of arr) {
+    const clean = String(entry || '').trim().toLowerCase();
+    if (clean && clean.includes('@') && clean.includes('.') && !clean.endsWith('.test')) {
+      seen.add(clean);
+    }
+  }
+  return Array.from(seen);
 };
+
+export const EMAIL_PROFILE_TYPES = [
+  { id: 'new_rma', label: 'New RMA Return Report Alert', badge: 'Intake', description: 'Dispatched immediately when any new Customer or Supplier RMA report is filed.' },
+  { id: 'pickup_debit_claim', label: 'Driver Pickup — Debit Claim', badge: 'Pickup + PDF', description: 'Vendor pickup verification with signed Debit Claim PDF attachment & photos.' },
+  { id: 'pickup_replacement', label: 'Driver Pickup — Replacement', badge: 'Pickup + PDF', description: 'Vendor exchange verification with signed Replacement Form PDF & photos.' },
+  { id: 'rma_scrapped', label: 'RMA Scrapped / Disposed', badge: 'Lifecycle', description: 'Triggered when an item is marked Scrapped / Disposed (with Re-Order YES/NO).' },
+  { id: 'rma_restocked', label: 'RMA Restocked to Good Stock', badge: 'Lifecycle', description: 'Triggered when an item is returned undamaged to Good Stock Shelf.' },
+  { id: 'daily_matrix_auto', label: 'Auto Daily PHT Overall Matrix', badge: 'Cron (.xlsx)', description: 'Scheduled daily Asia/Manila (.xlsx) report recipients, window & HH:mm time (default 1:00 PM PHT).' },
+  { id: 'manual_matrix', label: 'Manual Overall Matrix Email', badge: 'Manual (.xlsx)', description: 'On-demand Overall/Hub Matrix (.xlsx) email dispatch recipients.' },
+  { id: 'supplier_followup', label: 'Daily 10-Day Pickup Follow-Up Extra CCs', badge: '10-Day SLA', description: 'Optional internal CCs added on daily supplier/customer pickup follow-up emails (default 8:00 AM PHT).' },
+  { id: 'product_update', label: 'Catalog Product Update', badge: 'Catalog', description: 'Dispatched when verified catalog product details or pricing are updated.' },
+  { id: 'invite_email', label: 'Portal / RMA Editor Invite Extra CCs', badge: 'Invites', description: 'Optional extra recipients CC’d automatically on generated portal/editor invites.' }
+];
+
+const EMAIL_PROFILES_STORAGE_KEY = 'rma_portal_email_recipients_by_type';
+const MATRIX_CONFIG_STORAGE_KEY = 'rma_portal_daily_matrix_config';
+const FOLLOWUP_CONFIG_STORAGE_KEY = 'rma_portal_daily_followup_config';
+const SANDBOX_EMAIL_STORAGE_KEY = 'rma_portal_test_sandbox_email';
+const EMAIL_RECIPIENTS_STORAGE_KEY = 'rma_portal_email_recipients';
 
 const escapeEmailHtml = (val) => String(val ?? '')
   .replace(/&/g, '&amp;')
@@ -40,6 +75,7 @@ const escapeEmailHtml = (val) => String(val ?? '')
 
 const DEFAULT_RECIPIENTS = {
   toEmail: 'azgodev@gmail.com',
+  toList: ['azgodev@gmail.com'],
   baseCcList: [
     'mgan@pingconmarketing.com',
     'marketing@pingconmarketing.com',
@@ -48,6 +84,120 @@ const DEFAULT_RECIPIENTS = {
   ]
 };
 
+function resolveEmailProfileKey(emailType) {
+  const key = String(emailType || '').trim();
+  if (key === 'scrapped') return 'rma_scrapped';
+  if (key === 'restocked') return 'rma_restocked';
+  return key || 'new_rma';
+}
+
+function getDefaultMatrixDates(rollingDays = 14) {
+  const end = formatDateYmd(new Date()) || new Date().toISOString().slice(0, 10);
+  const days = Math.max(1, Math.min(365, parseInt(rollingDays, 10) || 14));
+  const [y, m, d] = end.split('-').map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d));
+  utc.setUTCDate(utc.getUTCDate() - (days - 1));
+  return {
+    startDate: utc.toISOString().slice(0, 10),
+    endDate: end
+  };
+}
+
+function broadcastSettingsSync(payload = {}) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('rma-settings-changed', { detail: payload }));
+  window.dispatchEvent(new Event('storage'));
+  try {
+    if (window.BroadcastChannel) {
+      const ch = new BroadcastChannel('rma_portal_sync_bus');
+      ch.postMessage({ type: 'email-settings-updated', ...payload });
+    }
+  } catch {}
+}
+
+const MAX_REMOTE_IMAGE_ATTACHMENTS = 15;
+
+const PICKUP_PHOTO_CATEGORY_SLOTS = [
+  { keys: ['driver_license_front', 'id_license'], label: 'Driver Valid Gov’t / Legal ID — FRONT' },
+  { keys: ['driver_license_back'], label: 'Driver Valid Gov’t / Legal ID — BACK' },
+  { keys: ['truck_plate'], label: 'Delivery Truck Plate Number' },
+  { keys: ['driver_handover', 'driver_face'], label: 'Driver / Co-Worker Photo' },
+  { keys: ['pickup_items', 'loaded_items', 'signed_form'], label: 'Damaged Item(s) Picked Up' }
+];
+
+function collectUniqueExplanations(effectiveReports = [], itemsTable = []) {
+  const seen = new Set();
+  const pushClean = (raw) => {
+    const cleaned = cleanExplanationText(raw);
+    if (cleaned) seen.add(cleaned);
+  };
+  (effectiveReports || []).forEach((r) => {
+    pushClean(r?.explanation);
+    pushClean(r?.ai_document_metadata?.explanation);
+  });
+  (itemsTable || []).forEach((it) => {
+    const cleaned = cleanExplanationText(it?.explanation);
+    if (cleaned) {
+      cleaned.split(/\s*\|\s*/).forEach(pushClean);
+    }
+  });
+  return Array.from(seen).join(' | ') || 'No explanation provided';
+}
+
+function collectPickupPhotoGroupsFromReports(effectiveReports = []) {
+  const groupMap = new Map();
+  PICKUP_PHOTO_CATEGORY_SLOTS.forEach((slot) => {
+    groupMap.set(slot.label, { key: slot.keys[0], label: slot.label, urls: [], urlSet: new Set() });
+  });
+
+  (effectiveReports || []).forEach((r) => {
+    const pObj = r?.ai_document_metadata?.supplier_pickup?.photos;
+    if (!pObj || typeof pObj !== 'object') return;
+    PICKUP_PHOTO_CATEGORY_SLOTS.forEach((slot) => {
+      const grp = groupMap.get(slot.label);
+      slot.keys.forEach((k) => {
+        normalizePhotoUrlArray(pObj[k]).forEach((url) => {
+          if (!grp.urlSet.has(url)) {
+            grp.urlSet.add(url);
+            grp.urls.push(url);
+          }
+        });
+      });
+    });
+  });
+
+  return Array.from(groupMap.values())
+    .filter((g) => g.urls.length > 0)
+    .map(({ key, label, urls }) => ({ key, label, urls }));
+}
+
+function normalizePickupPhotoGroupsInput(pickupPhotoGroups = [], pickupPhotoEntries = []) {
+  const map = new Map();
+  const addUrl = (label, url) => {
+    const cleanLabel = String(label || 'Pickup Verification Photo').trim();
+    if (!map.has(cleanLabel)) {
+      map.set(cleanLabel, { label: cleanLabel, urls: [], urlSet: new Set() });
+    }
+    const grp = map.get(cleanLabel);
+    if (!grp.urlSet.has(url)) {
+      grp.urlSet.add(url);
+      grp.urls.push(url);
+    }
+  };
+
+  if (Array.isArray(pickupPhotoGroups) && pickupPhotoGroups.length > 0) {
+    pickupPhotoGroups.forEach((g) => {
+      normalizePhotoUrlArray(g?.urls ?? g?.url).forEach((u) => addUrl(g?.label, u));
+    });
+  } else if (Array.isArray(pickupPhotoEntries) && pickupPhotoEntries.length > 0) {
+    pickupPhotoEntries.forEach((e) => {
+      normalizePhotoUrlArray(e?.urls ?? e?.url).forEach((u) => addUrl(e?.label, u));
+    });
+  }
+
+  return Array.from(map.values()).map(({ label, urls }) => ({ label, urls }));
+}
+
 export const notificationService = {
   /**
    * Get configured RMA email recipients (with local storage and corporate defaults)
@@ -55,19 +205,25 @@ export const notificationService = {
   getEmailSettings() {
     try {
       if (typeof window !== 'undefined') {
-        const saved = localStorage.getItem('rma_portal_email_recipients');
+        const saved = localStorage.getItem(EMAIL_RECIPIENTS_STORAGE_KEY);
         if (saved) {
           const parsed = JSON.parse(saved);
-          if (parsed && parsed.toEmail) {
+          const toList = splitEmailList(parsed?.toList ?? parsed?.toEmail);
+          if (toList.length > 0) {
             return {
-              toEmail: String(parsed.toEmail).trim(),
-              baseCcList: Array.isArray(parsed.baseCcList) ? parsed.baseCcList : DEFAULT_RECIPIENTS.baseCcList
+              toEmail: toList.join(', '),
+              toList,
+              baseCcList: Array.isArray(parsed.baseCcList) ? splitEmailList(parsed.baseCcList) : [...DEFAULT_RECIPIENTS.baseCcList]
             };
           }
         }
       }
     } catch (e) {}
-    return { ...DEFAULT_RECIPIENTS };
+    return {
+      toEmail: DEFAULT_RECIPIENTS.toEmail,
+      toList: [...DEFAULT_RECIPIENTS.toList],
+      baseCcList: [...DEFAULT_RECIPIENTS.baseCcList]
+    };
   },
 
   /**
@@ -75,59 +231,34 @@ export const notificationService = {
    */
   async loadEmailSettingsFromDb() {
     try {
-      const { data, error } = await supabase
-        .from('rma_settings')
-        .select('*')
-        .eq('key', 'email_recipients')
-        .maybeSingle();
-
-      if (!error && data?.value?.toEmail) {
-        const settings = {
-          toEmail: String(data.value.toEmail).trim(),
-          baseCcList: Array.isArray(data.value.baseCcList) ? data.value.baseCcList : DEFAULT_RECIPIENTS.baseCcList
-        };
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('rma_portal_email_recipients', JSON.stringify(settings));
-        }
-        return settings;
-      }
+      const { globalSettings } = await this.loadAllEmailProfilesFromDb();
+      return globalSettings || this.getEmailSettings();
     } catch (e) {
-      // Supabase rma_settings table might not be created yet; fallback silently
+      return this.getEmailSettings();
     }
-    return this.getEmailSettings();
   },
 
   /**
-   * Super Admin action: Save updated TO and CC recipients for RMA notifications
+   * Super Admin action: Save updated Global Corporate Fallback TO and CC recipients
    */
-  async saveEmailSettings({ toEmail, baseCcList }) {
-    const cleanTo = String(toEmail || '').trim();
-    if (!cleanTo || !cleanTo.includes('@')) {
-      throw new Error('A valid Primary TO recipient email is required.');
+  async saveEmailSettings({ toEmail, toList, baseCcList }) {
+    const cleanToList = splitEmailList(toList ?? toEmail);
+    if (cleanToList.length === 0) {
+      throw new Error('At least one valid Primary TO recipient email is required.');
     }
 
-    const cleanCcList = Array.isArray(baseCcList)
-      ? Array.from(new Set(baseCcList.map(e => String(e).trim()).filter(e => e.includes('@'))))
-      : [];
-
+    const cleanCcList = splitEmailList(baseCcList);
     const newSettings = {
-      toEmail: cleanTo,
+      toEmail: cleanToList.join(', '),
+      toList: cleanToList,
       baseCcList: cleanCcList
     };
 
     if (typeof window !== 'undefined') {
-      localStorage.setItem('rma_portal_email_recipients', JSON.stringify(newSettings));
-      window.dispatchEvent(new CustomEvent('rma-settings-changed', { detail: newSettings }));
-      window.dispatchEvent(new Event('storage'));
-      try {
-        if (window.BroadcastChannel) {
-          const ch = new BroadcastChannel('rma_portal_sync_bus');
-          ch.postMessage({ type: 'email-settings-updated', settings: newSettings });
-        }
-      } catch (e) {}
+      localStorage.setItem(EMAIL_RECIPIENTS_STORAGE_KEY, JSON.stringify(newSettings));
+      broadcastSettingsSync({ settings: newSettings });
     }
 
-    // Try persisting to Supabase rma_settings table
     try {
       await supabase
         .from('rma_settings')
@@ -144,18 +275,471 @@ export const notificationService = {
   },
 
   /**
+   * Read raw saved per-type profile overrides map from localStorage
+   */
+  _readSavedProfilesMap() {
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = localStorage.getItem(EMAIL_PROFILES_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            return parsed;
+          }
+        }
+      }
+    } catch {}
+    return {};
+  },
+
+  /**
+   * Get effective recipient profile for a specific emailType, falling back to Global Corporate Defaults
+   * (except invite_email which defaults to empty optional extras).
+   */
+  getEmailProfile(emailType = 'new_rma') {
+    const key = resolveEmailProfileKey(emailType);
+    const global = this.getEmailSettings();
+    const map = this._readSavedProfilesMap();
+    const saved = map[key];
+
+    const allowEmptyTo = key === 'invite_email' || key === 'supplier_followup';
+    if (saved && typeof saved === 'object') {
+      const savedToList = splitEmailList(saved.toList ?? saved.toEmail);
+      const savedCcList = splitEmailList(saved.ccList);
+      if (allowEmptyTo || savedToList.length > 0 || saved.allowCustom === true) {
+        const finalToList = savedToList.length > 0
+          ? savedToList
+          : (allowEmptyTo ? [] : [...global.toList]);
+        return {
+          emailType: key,
+          toList: finalToList,
+          toEmail: finalToList.join(', '),
+          ccList: savedCcList,
+          isCustom: true
+        };
+      }
+    }
+
+    if (allowEmptyTo) {
+      return {
+        emailType: key,
+        toList: [],
+        toEmail: '',
+        ccList: [],
+        isCustom: false
+      };
+    }
+
+    const fallbackTo = [...(global.toList || [DEFAULT_RECIPIENTS.toEmail])];
+    return {
+      emailType: key,
+      toList: fallbackTo,
+      toEmail: fallbackTo.join(', '),
+      ccList: [...(global.baseCcList || DEFAULT_RECIPIENTS.baseCcList)],
+      isCustom: false
+    };
+  },
+
+  /**
+   * Return map of all configured profiles keyed by emailType id
+   */
+  getAllEmailProfiles() {
+    const result = {};
+    EMAIL_PROFILE_TYPES.forEach(({ id }) => {
+      result[id] = this.getEmailProfile(id);
+    });
+    return result;
+  },
+
+  /**
+   * Persist per-email-type recipient configuration under rma_settings.email_recipients_by_type
+   */
+  async saveEmailProfile(emailType, { toList, toEmail, ccList } = {}) {
+    const key = resolveEmailProfileKey(emailType);
+    const cleanTo = splitEmailList(toList ?? toEmail);
+    const allowEmptyTo = key === 'invite_email' || key === 'supplier_followup';
+    if (!allowEmptyTo && cleanTo.length === 0) {
+      throw new Error('At least one valid Primary TO recipient email is required.');
+    }
+    const cleanToSet = new Set(cleanTo);
+    const cleanCc = splitEmailList(ccList).filter((e) => !cleanToSet.has(e));
+
+    const currentMap = { ...this._readSavedProfilesMap() };
+    currentMap[key] = {
+      toList: cleanTo,
+      toEmail: cleanTo.join(', '),
+      ccList: cleanCc,
+      allowCustom: true,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(EMAIL_PROFILES_STORAGE_KEY, JSON.stringify(currentMap));
+      broadcastSettingsSync({ emailType: key, profilesByType: currentMap });
+    }
+
+    try {
+      await supabase
+        .from('rma_settings')
+        .upsert({
+          key: 'email_recipients_by_type',
+          value: currentMap,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'key' });
+    } catch (e) {
+      console.warn('Notice saving email_recipients_by_type:', e?.message || e);
+    }
+
+    // Keep daily_matrix_config recipients synced when auto matrix profile is explicitly saved
+    if (key === 'daily_matrix_auto') {
+      const cfg = this.getDailyMatrixConfig();
+      await this.saveDailyMatrixConfig({ ...cfg, toList: cleanTo, ccList: cleanCc }, { skipProfileSync: true }).catch(() => {});
+    }
+
+    return {
+      emailType: key,
+      toList: cleanTo,
+      toEmail: cleanTo.join(', '),
+      ccList: cleanCc,
+      isCustom: true
+    };
+  },
+
+  /**
+   * Reset a single emailType back to Global Corporate Defaults
+   */
+  async resetEmailProfileToDefaults(emailType) {
+    const key = resolveEmailProfileKey(emailType);
+    const currentMap = { ...this._readSavedProfilesMap() };
+    delete currentMap[key];
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(EMAIL_PROFILES_STORAGE_KEY, JSON.stringify(currentMap));
+      broadcastSettingsSync({ emailType: key, profilesByType: currentMap });
+    }
+
+    try {
+      await supabase
+        .from('rma_settings')
+        .upsert({
+          key: 'email_recipients_by_type',
+          value: currentMap,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'key' });
+    } catch (e) {
+      console.warn('Notice resetting email_recipients_by_type:', e?.message || e);
+    }
+
+    return this.getEmailProfile(key);
+  },
+
+  /**
+   * Read Overall Matrix cron schedule & default window config
+   */
+  getDailyMatrixConfig() {
+    const defaultsWindow = getDefaultMatrixDates(14);
+    const autoProfile = this.getEmailProfile('daily_matrix_auto');
+    let saved = null;
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = localStorage.getItem(MATRIX_CONFIG_STORAGE_KEY);
+        if (raw) saved = JSON.parse(raw);
+      }
+    } catch {}
+
+    const rollingDays = Math.max(1, Math.min(365, parseInt(saved?.rollingDays, 10) || 14));
+    const rangeDates = getDefaultMatrixDates(rollingDays);
+    const toList = autoProfile.isCustom
+      ? autoProfile.toList
+      : (splitEmailList(saved?.toList ?? saved?.toEmail).length > 0
+        ? splitEmailList(saved?.toList ?? saved?.toEmail)
+        : autoProfile.toList);
+    const ccList = autoProfile.isCustom
+      ? autoProfile.ccList
+      : (Array.isArray(saved?.ccList) ? splitEmailList(saved.ccList) : autoProfile.ccList);
+
+    const validStream = ['overall', 'customer_inbound', 'supplier_outbound'].includes(saved?.stream)
+      ? saved.stream
+      : 'overall';
+
+    return {
+      toList,
+      ccList,
+      rangeMode: saved?.rangeMode === 'custom' ? 'custom' : 'rolling',
+      rollingDays,
+      startDate: saved?.rangeMode === 'custom' && /^\d{4}-\d{2}-\d{2}$/.test(String(saved?.startDate || ''))
+        ? saved.startDate
+        : (rangeDates.startDate || defaultsWindow.startDate),
+      endDate: saved?.rangeMode === 'custom' && /^\d{4}-\d{2}-\d{2}$/.test(String(saved?.endDate || ''))
+        ? saved.endDate
+        : (rangeDates.endDate || defaultsWindow.endDate),
+      stream: validStream,
+      includeZeroCatalogSkus: Boolean(saved?.includeZeroCatalogSkus),
+      autoEnabled: saved?.autoEnabled !== false,
+      autoSendTimePht: normalizeTimeHhmm(saved?.autoSendTimePht, DEFAULT_MATRIX_SEND_TIME_PHT)
+    };
+  },
+
+  /**
+   * Persist Overall Matrix cron schedule & default range under rma_settings.daily_matrix_config
+   */
+  async saveDailyMatrixConfig(cfg = {}, { skipProfileSync = false } = {}) {
+    const prev = this.getDailyMatrixConfig();
+    const rollingDays = Math.max(1, Math.min(365, parseInt(cfg.rollingDays ?? prev.rollingDays, 10) || 14));
+    const rollingWindow = getDefaultMatrixDates(rollingDays);
+    const rangeMode = cfg.rangeMode === 'custom' ? 'custom' : 'rolling';
+    const startDate = rangeMode === 'custom' && /^\d{4}-\d{2}-\d{2}$/.test(String(cfg.startDate || ''))
+      ? cfg.startDate
+      : (cfg.startDate && rangeMode === 'custom' ? cfg.startDate : rollingWindow.startDate);
+    const endDate = rangeMode === 'custom' && /^\d{4}-\d{2}-\d{2}$/.test(String(cfg.endDate || ''))
+      ? cfg.endDate
+      : (cfg.endDate && rangeMode === 'custom' ? cfg.endDate : rollingWindow.endDate);
+    const stream = ['overall', 'customer_inbound', 'supplier_outbound'].includes(cfg.stream)
+      ? cfg.stream
+      : prev.stream;
+    const toList = splitEmailList(cfg.toList ?? cfg.toEmail ?? prev.toList);
+    const finalTo = toList.length > 0 ? toList : [...DEFAULT_RECIPIENTS.toList];
+    const finalToSet = new Set(finalTo);
+    const ccList = splitEmailList(cfg.ccList !== undefined ? cfg.ccList : prev.ccList).filter((e) => !finalToSet.has(e));
+
+    const nextCfg = {
+      toList: finalTo,
+      ccList,
+      rangeMode,
+      rollingDays,
+      startDate,
+      endDate,
+      stream,
+      includeZeroCatalogSkus: cfg.includeZeroCatalogSkus !== undefined
+        ? Boolean(cfg.includeZeroCatalogSkus)
+        : Boolean(prev.includeZeroCatalogSkus),
+      autoEnabled: cfg.autoEnabled !== undefined ? Boolean(cfg.autoEnabled) : prev.autoEnabled !== false,
+      autoSendTimePht: normalizeTimeHhmm(cfg.autoSendTimePht ?? prev.autoSendTimePht, DEFAULT_MATRIX_SEND_TIME_PHT),
+      updatedAt: new Date().toISOString()
+    };
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(MATRIX_CONFIG_STORAGE_KEY, JSON.stringify(nextCfg));
+      broadcastSettingsSync({ dailyMatrixConfig: nextCfg });
+    }
+
+    try {
+      await supabase
+        .from('rma_settings')
+        .upsert({
+          key: 'daily_matrix_config',
+          value: nextCfg,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'key' });
+    } catch (e) {
+      console.warn('Notice saving daily_matrix_config:', e?.message || e);
+    }
+
+    if (!skipProfileSync) {
+      const autoProfile = this.getEmailProfile('daily_matrix_auto');
+      if (autoProfile.isCustom || cfg.toList || cfg.ccList) {
+        const currentMap = { ...this._readSavedProfilesMap() };
+        currentMap.daily_matrix_auto = {
+          toList: finalTo,
+          toEmail: finalTo.join(', '),
+          ccList,
+          allowCustom: true,
+          updatedAt: new Date().toISOString()
+        };
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(EMAIL_PROFILES_STORAGE_KEY, JSON.stringify(currentMap));
+        }
+        try {
+          await supabase
+            .from('rma_settings')
+            .upsert({
+              key: 'email_recipients_by_type',
+              value: currentMap,
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'key' });
+        } catch {}
+      }
+    }
+
+    return nextCfg;
+  },
+
+  /**
+   * Read configured Test Mode Sandbox Override email (default mgan@pingconmarketing.com)
+   */
+  getTestSandboxEmail() {
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = localStorage.getItem(SANDBOX_EMAIL_STORAGE_KEY);
+        if (raw) {
+          const parsed = raw.startsWith('"') ? JSON.parse(raw) : raw;
+          return normalizeSandboxEmail(parsed);
+        }
+      }
+    } catch {}
+    return DEFAULT_SANDBOX_EMAIL;
+  },
+
+  async saveTestSandboxEmail(rawEmail) {
+    const clean = normalizeSandboxEmail(rawEmail);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(SANDBOX_EMAIL_STORAGE_KEY, clean);
+      broadcastSettingsSync({ testSandboxEmail: clean });
+    }
+    try {
+      await supabase
+        .from('rma_settings')
+        .upsert({
+          key: 'test_sandbox_email',
+          value: clean,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'key' });
+    } catch (e) {
+      console.warn('Notice saving test_sandbox_email:', e?.message || e);
+    }
+    return clean;
+  },
+
+  /**
+   * Read 10-Calendar-Day Pickup Follow-Up schedule & Customer Hub default toggle
+   */
+  getDailyFollowUpConfig() {
+    let saved = null;
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = localStorage.getItem(FOLLOWUP_CONFIG_STORAGE_KEY);
+        if (raw) saved = JSON.parse(raw);
+      }
+    } catch {}
+    return {
+      autoEnabled: saved?.autoEnabled !== false,
+      autoSendTimePht: normalizeTimeHhmm(saved?.autoSendTimePht, DEFAULT_FOLLOWUP_CONFIG.autoSendTimePht),
+      customerFollowUpDefaultEnabled: Boolean(saved?.customerFollowUpDefaultEnabled)
+    };
+  },
+
+  async saveDailyFollowUpConfig(cfg = {}) {
+    const prev = this.getDailyFollowUpConfig();
+    const nextCfg = {
+      autoEnabled: cfg.autoEnabled !== undefined ? Boolean(cfg.autoEnabled) : prev.autoEnabled !== false,
+      autoSendTimePht: normalizeTimeHhmm(cfg.autoSendTimePht ?? prev.autoSendTimePht, DEFAULT_FOLLOWUP_CONFIG.autoSendTimePht),
+      customerFollowUpDefaultEnabled: cfg.customerFollowUpDefaultEnabled !== undefined
+        ? Boolean(cfg.customerFollowUpDefaultEnabled)
+        : Boolean(prev.customerFollowUpDefaultEnabled),
+      updatedAt: new Date().toISOString()
+    };
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(FOLLOWUP_CONFIG_STORAGE_KEY, JSON.stringify(nextCfg));
+      broadcastSettingsSync({ dailyFollowUpConfig: nextCfg });
+    }
+    try {
+      await supabase
+        .from('rma_settings')
+        .upsert({
+          key: 'daily_followup_config',
+          value: nextCfg,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'key' });
+    } catch (e) {
+      console.warn('Notice saving daily_followup_config:', e?.message || e);
+    }
+    return nextCfg;
+  },
+
+  /**
+   * Load Global recipients, per-email profiles, Daily Matrix, Follow-Up & Sandbox config from Supabase
+   */
+  async loadAllEmailProfilesFromDb() {
+    try {
+      const { data, error } = await supabase
+        .from('rma_settings')
+        .select('key, value')
+        .in('key', [
+          'email_recipients',
+          'email_recipients_by_type',
+          'daily_matrix_config',
+          'daily_followup_config',
+          'test_sandbox_email'
+        ]);
+
+      if (!error && Array.isArray(data)) {
+        const map = new Map(data.map((r) => [r.key, r.value]));
+
+        const globalRaw = map.get('email_recipients');
+        if (globalRaw && (globalRaw.toEmail || Array.isArray(globalRaw.toList))) {
+          const toList = splitEmailList(globalRaw.toList ?? globalRaw.toEmail);
+          const normalizedGlobal = {
+            toEmail: (toList.length > 0 ? toList : DEFAULT_RECIPIENTS.toList).join(', '),
+            toList: toList.length > 0 ? toList : [...DEFAULT_RECIPIENTS.toList],
+            baseCcList: Array.isArray(globalRaw.baseCcList)
+              ? splitEmailList(globalRaw.baseCcList)
+              : [...DEFAULT_RECIPIENTS.baseCcList]
+          };
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(EMAIL_RECIPIENTS_STORAGE_KEY, JSON.stringify(normalizedGlobal));
+          }
+        }
+
+        const byTypeRaw = map.get('email_recipients_by_type');
+        if (byTypeRaw && typeof byTypeRaw === 'object' && !Array.isArray(byTypeRaw)) {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(EMAIL_PROFILES_STORAGE_KEY, JSON.stringify(byTypeRaw));
+          }
+        }
+
+        const matrixRaw = map.get('daily_matrix_config');
+        if (matrixRaw && typeof matrixRaw === 'object') {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(MATRIX_CONFIG_STORAGE_KEY, JSON.stringify(matrixRaw));
+          }
+        }
+
+        const followUpRaw = map.get('daily_followup_config');
+        if (followUpRaw && typeof followUpRaw === 'object') {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(FOLLOWUP_CONFIG_STORAGE_KEY, JSON.stringify(followUpRaw));
+          }
+        }
+
+        const sandboxRaw = map.get('test_sandbox_email');
+        if (sandboxRaw) {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(SANDBOX_EMAIL_STORAGE_KEY, normalizeSandboxEmail(sandboxRaw));
+          }
+        }
+
+        if (typeof window !== 'undefined') {
+          broadcastSettingsSync({ loadedFromDb: true });
+        }
+      }
+    } catch (e) {
+      // rma_settings may be temporarily unavailable; fallback cleanly to localStorage
+    }
+
+    return {
+      globalSettings: this.getEmailSettings(),
+      profilesByType: this.getAllEmailProfiles(),
+      dailyMatrixConfig: this.getDailyMatrixConfig(),
+      dailyFollowUpConfig: this.getDailyFollowUpConfig(),
+      testSandboxEmail: this.getTestSandboxEmail()
+    };
+  },
+
+  /**
    * Determine company configuration with user-configurable recipients
    */
-  resolveCompanyConfig(report) {
-    const settings = this.getEmailSettings();
+  resolveCompanyConfig(report, emailType = null) {
+    const settings = emailType ? this.getEmailProfile(emailType) : this.getEmailSettings();
+    const toList = splitEmailList(settings.toList ?? settings.toEmail);
+    const finalToList = toList.length > 0 ? toList : [...DEFAULT_RECIPIENTS.toList];
+    const rawCc = emailType ? settings.ccList : settings.baseCcList;
     return {
       companyName: 'Pingcon RMA Returns',
       senderEmail: 'finance2@keysysincorporated.com',
       senderName: 'Pingcon RMA Finance Portal',
-      toEmail: settings.toEmail || DEFAULT_RECIPIENTS.toEmail,
-      baseCcList: Array.isArray(settings.baseCcList) && settings.baseCcList.length > 0 
-        ? settings.baseCcList 
-        : DEFAULT_RECIPIENTS.baseCcList
+      toList: finalToList,
+      toEmail: finalToList.join(', '),
+      baseCcList: Array.isArray(rawCc) ? rawCc : [...DEFAULT_RECIPIENTS.baseCcList]
     };
   },
 
@@ -412,7 +996,7 @@ export const notificationService = {
   /**
    * Dispatch email notification for a newly submitted RMA report
    */
-  async sendRMANotification(report, isTestMode = false) {
+  async sendRMANotification(report, isTestMode = false, options = {}) {
     if (!report) return { success: false, error: 'No report data provided' };
 
     const currentUser = typeof window !== 'undefined' ? authService.getCurrentUser() : null;
@@ -438,23 +1022,35 @@ export const notificationService = {
     );
 
     try {
-      const config = this.resolveCompanyConfig(report);
+      const config = this.resolveCompanyConfig(report, 'new_rma');
+      const customRecipients = options?.customRecipients || report?.customRecipients || null;
 
-      // Assemble CC list: base company recipients + Customer AE email
-      const ccSet = new Set(config.baseCcList);
+      const resolvedToList = customRecipients && (Array.isArray(customRecipients.toList) || customRecipients.toEmail)
+        ? splitEmailList(customRecipients.toList ?? customRecipients.toEmail)
+        : config.toList;
+      const toList = resolvedToList.length > 0 ? resolvedToList : [...DEFAULT_RECIPIENTS.toList];
+      const toEmail = toList.join(', ');
+
+      const resolvedBaseCc = customRecipients && Array.isArray(customRecipients.ccList)
+        ? splitEmailList(customRecipients.ccList)
+        : config.baseCcList;
+
+      // Assemble CC list: base profile CC list + Customer AE email
+      const ccSet = new Set(resolvedBaseCc);
       if (report.ae_email && report.ae_email.includes('@')) {
-        ccSet.add(report.ae_email.trim());
+        ccSet.add(report.ae_email.trim().toLowerCase());
       }
       const finalCcList = Array.from(ccSet);
-      const toEmail = config.toEmail;
+
+      const sandboxEmail = this.getTestSandboxEmail();
       const editorAuthorizedEmails = testActive
-        ? ['mgan@a2z2go.net']
+        ? [sandboxEmail]
         : Array.from(new Set(
-            [toEmail, ...finalCcList]
+            [...toList, ...finalCcList]
               .map((e) => String(e || '').trim().toLowerCase())
               .filter((e) => e.includes('@'))
           ));
-      const editorAuthorizedEmail = editorAuthorizedEmails[0] || (testActive ? 'mgan@a2z2go.net' : toEmail);
+      const editorAuthorizedEmail = editorAuthorizedEmails[0] || (testActive ? sandboxEmail : toList[0]);
 
       let editUrl = '';
       if (report.rma_number && editorAuthorizedEmails.length > 0) {
@@ -511,6 +1107,7 @@ export const notificationService = {
           subject,
           html: htmlBody,
           isTestMode: testActive,
+          sandboxEmail,
           attachments,
           text: `${testActive ? '[TEST] ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Expiry Date (YYYY-MM-DD): ${expiryInfo.text}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}${editUrl ? `\n\nEdit RMA Details & Documents (${editorAuthorizedEmails.join(', ')} • No Expiry): ${editUrl}` : ''}`
         })
@@ -638,7 +1235,7 @@ export const notificationService = {
   /**
    * Dispatch email notification after a product is edited, created, or verified
    */
-  async sendProductUpdateNotification({ product, isNew = false, editorName = 'Admin' }, isTestMode = false) {
+  async sendProductUpdateNotification({ product, isNew = false, editorName = 'Admin', customRecipients = null }, isTestMode = false) {
     if (!product) return { success: false, error: 'No product data' };
 
     const currentUser = typeof window !== 'undefined' ? authService.getCurrentUser() : null;
@@ -664,16 +1261,24 @@ export const notificationService = {
     );
 
     try {
-      const config = this.resolveCompanyConfig(product);
+      const config = this.resolveCompanyConfig(product, 'product_update');
+      const resolvedToList = customRecipients && (Array.isArray(customRecipients.toList) || customRecipients.toEmail)
+        ? splitEmailList(customRecipients.toList ?? customRecipients.toEmail)
+        : config.toList;
+      const toList = resolvedToList.length > 0 ? resolvedToList : [...DEFAULT_RECIPIENTS.toList];
+      const toEmail = toList.join(', ');
+
+      const resolvedBaseCc = customRecipients && Array.isArray(customRecipients.ccList)
+        ? splitEmailList(customRecipients.ccList)
+        : config.baseCcList;
 
       // Assemble CC list: base company recipients + Customer AE email
-      const ccSet = new Set(config.baseCcList);
+      const ccSet = new Set(resolvedBaseCc);
       const aeEmail = product.aeEmail || product.ae_email;
       if (aeEmail && aeEmail.includes('@')) {
-        ccSet.add(aeEmail.trim());
+        ccSet.add(aeEmail.trim().toLowerCase());
       }
       const finalCcList = Array.from(ccSet);
-      const toEmail = config.toEmail;
 
       const rawSubject = `[Product Catalog] ${isNew ? 'New Product Added' : 'Product Details Updated'}: ${product.name} (${product.barcode})`;
       const subject = formatTestEmailSubject(rawSubject, testActive);
@@ -693,6 +1298,7 @@ export const notificationService = {
           subject,
           html: htmlBody,
           isTestMode: testActive,
+          sandboxEmail: this.getTestSandboxEmail(),
           text: `${testActive ? '[TEST] ' : ''}Product ${isNew ? 'Added' : 'Updated'}: ${product.name} (${product.barcode}). SKU: ${product.code || 'N/A'}. AE: ${product.aeName || product.ae_name || 'N/A'}`
         })
       });
@@ -722,8 +1328,9 @@ export const notificationService = {
     allReports = [],
     catalogProducts = [],
     config,
-    actorName = 'Warehouse Staff',
+    actorName = '',
     isTestMode = false,
+    pickupPhotoGroups = [],
     pickupPhotoEntries = [],
     intakePhotos = [],
     pdfAttachedFilename = null
@@ -731,6 +1338,8 @@ export const notificationService = {
     const effectiveReports = Array.isArray(reports) && reports.length > 0 ? reports : (report ? [report] : []);
     const primaryReport = report || effectiveReports[0] || {};
     const isBatch = effectiveReports.length > 1;
+    const isDebitClaimEvent = eventType === 'pickup_debit_claim';
+    const isCustomerStream = primaryReport.rma_type !== 'supplier_outbound';
     const rmaNumbersList = Array.from(new Set(
       effectiveReports.map((r) => r.rma_number || r.rmaNumber || String(r.id || '')).filter(Boolean)
     ));
@@ -741,7 +1350,8 @@ export const notificationService = {
     const pickup = (meta.supplier_pickup && typeof meta.supplier_pickup === 'object')
       ? meta.supplier_pickup
       : {};
-    const claimNo = pickup.claim_number || (String(primaryReport.notes || '').match(/\[RTV:\s*([^\]]+)\]/i)?.[1]?.trim()) || '';
+    const effectiveActor = String(actorName || pickup.processed_by || meta.simple_rtv_updated_by || '').trim();
+    const claimNo = pickup.claim_number || (String(primaryReport.notes || '').match(/\[(?:RTV|BUF):\s*([^\]]+)\]/i)?.[1]?.trim()) || '';
     const refHeadline = isBatch
       ? `${effectiveReports.length} Consolidated RMAs (${claimNo || rmaNumber})`
       : rmaNumber;
@@ -760,16 +1370,24 @@ export const notificationService = {
         subtitle: 'Good Stock Restock & ERP Inventory Verification'
       },
       pickup_debit_claim: {
-        badge: isBatch ? `CONSOLIDATED DRIVER PICKUP — DEBIT CLAIM (${effectiveReports.length} RMAs)` : 'DRIVER PICKUP — DEBIT CLAIM',
+        badge: isCustomerStream
+          ? (isBatch ? `CONSOLIDATED CUSTOMER HANDOVER — CREDIT / RETURN (${effectiveReports.length} RMAs)` : 'CUSTOMER HANDOVER — CREDIT / RETURN')
+          : (isBatch ? `CONSOLIDATED DRIVER PICKUP — DEBIT CLAIM (${effectiveReports.length} RMAs)` : 'DRIVER PICKUP — DEBIT CLAIM'),
         title: `Driver Picked Up for Debit Claim: ${refHeadline}`,
         headerBg: '#1e3a8a',
-        subtitle: 'Supplier Return Picked Up • Debit Claim Form PDF Attached'
+        subtitle: isCustomerStream
+          ? 'Customer Return Handover • Credit Return Form PDF Attached'
+          : 'Supplier Return Picked Up • Debit Claim Form PDF Attached'
       },
       pickup_replacement: {
-        badge: isBatch ? `CONSOLIDATED DRIVER PICKUP — REPLACEMENT (${effectiveReports.length} RMAs)` : 'DRIVER PICKUP — REPLACEMENT / EXCHANGE',
+        badge: isCustomerStream
+          ? (isBatch ? `CONSOLIDATED CUSTOMER BUFFER REPLACEMENT (${effectiveReports.length} RMAs)` : 'CUSTOMER BUFFER REPLACEMENT / EXCHANGE')
+          : (isBatch ? `CONSOLIDATED DRIVER PICKUP — REPLACEMENT (${effectiveReports.length} RMAs)` : 'DRIVER PICKUP — REPLACEMENT / EXCHANGE'),
         title: `Driver Picked Up for Replacement: ${refHeadline}`,
         headerBg: '#4338ca',
-        subtitle: 'Supplier Replacement / Exchange Picked Up • Replacement Form PDF Attached'
+        subtitle: isCustomerStream
+          ? 'Customer Buffer Replacement Completed • Buffer Replacement Form PDF Attached'
+          : 'Supplier Replacement / Exchange Picked Up • Replacement Form PDF Attached'
       }
     };
     const ev = eventMetaMap[eventType] || eventMetaMap.scrapped;
@@ -785,8 +1403,13 @@ export const notificationService = {
 
     const grandPieces = itemsTable.reduce((s, it) => s + it.totalPieces, 0);
     const grandValue = itemsTable.reduce((s, it) => s + it.lineTotal, 0);
+    const explanationSummary = collectUniqueExplanations(effectiveReports, itemsTable);
+    const normalizedPhotoGroups = normalizePickupPhotoGroupsInput(pickupPhotoGroups, pickupPhotoEntries);
+    const totalPickupPhotosCount = normalizedPhotoGroups.reduce((sum, grp) => sum + grp.urls.length, 0);
 
-    const supplierName = pickup.supplier_name || primaryReport.supplier_name || primaryReport.supplierName || 'Pending Assignment';
+    const partyDisplayName = isCustomerStream
+      ? (pickup.customer_name || pickup.supplier_name || primaryReport.store_branch || primaryReport.reporter_name || 'Wholesale Customer')
+      : (pickup.supplier_name || primaryReport.supplier_name || primaryReport.supplierName || 'Pending Assignment');
     const eventTimeStr = formatDateTimeYmdHm(
       (isPickupEvent && pickup.picked_up_at) ||
       meta.resolved_at ||
@@ -856,25 +1479,31 @@ export const notificationService = {
                 </div>
                 ${claimNo ? `
                 <div class="row">
-                  <div class="col-label">${eventType === 'pickup_replacement' ? 'Replacement Ref #:' : 'Debit Claim #:'}</div>
+                  <div class="col-label">${eventType === 'pickup_replacement' ? (isCustomerStream ? 'Buffer Ref #:' : 'Replacement Ref #:') : (isCustomerStream ? 'Ref / CM #:' : 'Debit Claim #:')}</div>
                   <div class="col-val" style="font-family: monospace; color: #4338ca;">${escapeEmailHtml(claimNo)}</div>
                 </div>` : ''}
                 <div class="row">
-                  <div class="col-label">Supplier / Vendor:</div>
-                  <div class="col-val">${escapeEmailHtml(supplierName)}</div>
+                  <div class="col-label">${isCustomerStream && isPickupEvent ? 'Customer / Outlet:' : 'Supplier / Vendor:'}</div>
+                  <div class="col-val">${escapeEmailHtml(partyDisplayName)}</div>
                 </div>
+                ${!isDebitClaimEvent ? `
                 <div class="row">
                   <div class="col-label">Store / Branch:</div>
                   <div class="col-val">${escapeEmailHtml(branchSummary)}</div>
-                </div>
+                </div>` : ''}
                 <div class="row">
                   <div class="col-label">Defect / Return Reason:</div>
                   <div class="col-val">${escapeEmailHtml(primaryReport.reason || 'Damaged / Defective')}</div>
                 </div>
+                ${isDebitClaimEvent ? `
+                <div class="row">
+                  <div class="col-label">Explanation / Defect Notes:</div>
+                  <div class="col-val">${escapeEmailHtml(explanationSummary)}</div>
+                </div>` : `
                 <div class="row">
                   <div class="col-label">Warehouse Location:</div>
                   <div class="col-val">${escapeEmailHtml(primaryReport.warehouse_location || 'Receiving / Warehouse')}</div>
-                </div>
+                </div>`}
                 ${eventType === 'scrapped' ? `
                 <div class="row">
                   <div class="col-label">Re-Order Requested?:</div>
@@ -886,7 +1515,7 @@ export const notificationService = {
                 </div>
                 <div class="row">
                   <div class="col-label">Processed By:</div>
-                  <div class="col-val">${escapeEmailHtml(actorName || pickup.processed_by || 'Warehouse Staff')}</div>
+                  <div class="col-val">${escapeEmailHtml(effectiveActor || 'Not specified')}</div>
                 </div>
                 ${aeSummary ? `
                 <div class="row">
@@ -902,7 +1531,7 @@ export const notificationService = {
             </div>
 
             ${isPickupEvent ? `
-            <div class="section-title">Supplier Driver &amp; Pickup Details</div>
+            <div class="section-title">${isCustomerStream ? 'Customer / Receiving Driver &amp; Pickup Details' : 'Supplier Driver &amp; Pickup Details'}</div>
             <div class="card">
               <div class="grid">
                 <div class="row">
@@ -919,12 +1548,12 @@ export const notificationService = {
                 </div>
                 ${pickup.supplier_email_to ? `
                 <div class="row">
-                  <div class="col-label">Supplier Email TO:</div>
+                  <div class="col-label">${isCustomerStream ? 'Customer Email TO:' : 'Supplier Email TO:'}</div>
                   <div class="col-val" style="font-family: monospace;">${escapeEmailHtml(pickup.supplier_email_to)}</div>
                 </div>` : ''}
                 ${pickup.supplier_email_cc ? `
                 <div class="row">
-                  <div class="col-label">Supplier Email CC:</div>
+                  <div class="col-label">${isCustomerStream ? 'Customer Email CC:' : 'Supplier Email CC:'}</div>
                   <div class="col-val" style="font-family: monospace;">${escapeEmailHtml(pickup.supplier_email_cc)}</div>
                 </div>` : ''}
               </div>
@@ -949,6 +1578,7 @@ export const notificationService = {
                   <td>
                     <strong>${escapeEmailHtml(it.name)}</strong><br/>
                     <span style="font-size: 11px; color: #64748b; font-family: monospace;">SKU: ${escapeEmailHtml(it.sku)}</span>
+                    ${isDebitClaimEvent && it.explanation ? `<br/><span style="font-size: 11px; color: #334155;">Explanation: ${escapeEmailHtml(it.explanation)}</span>` : ''}
                     ${(isBatch || (it.rmaNumbers && it.rmaNumbers.length > 1)) ? `<br/><span style="font-size: 10px; color: #1e3a8a; font-family: monospace; font-weight: 700;">RMAs: ${escapeEmailHtml(it.rmaNumbers.join(', '))}</span>` : ''}
                   </td>
                   <td style="font-family: monospace; white-space: nowrap;">${escapeEmailHtml(it.expiry)}</td>
@@ -969,13 +1599,19 @@ export const notificationService = {
               </tbody>
             </table>
 
-            ${pickupPhotoEntries.length > 0 ? `
-            <div class="section-title">Driver Pickup Verification Photos (${pickupPhotoEntries.length}/5)</div>
+            ${normalizedPhotoGroups.length > 0 ? `
+            <div class="section-title">Driver Pickup Verification Photos (${normalizedPhotoGroups.length}/5 categories • ${totalPickupPhotosCount} photo${totalPickupPhotosCount === 1 ? '' : 's'})</div>
             <div style="margin-top: 12px;">
-              ${pickupPhotoEntries.map((entry, idx) => `
-              <div style="margin-bottom: 16px; text-align: center;">
-                <div style="font-size: 12px; font-weight: 800; color: #1e293b; margin-bottom: 6px;">${idx + 1}. ${escapeEmailHtml(entry.label)}</div>
-                <img src="${escapeEmailHtml(entry.url)}" alt="${escapeEmailHtml(entry.label)}" style="max-width: 100%; max-height: 360px; width: auto; height: auto; border-radius: 10px; border: 1px solid #cbd5e1;" />
+              ${normalizedPhotoGroups.map((grp, grpIdx) => `
+              <div style="margin-bottom: 16px; padding: 12px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px;">
+                <div style="font-size: 12px; font-weight: 800; color: #0f172a; margin-bottom: 8px;">
+                  ${grpIdx + 1}. ${escapeEmailHtml(grp.label)} (${grp.urls.length} photo${grp.urls.length === 1 ? '' : 's'})
+                </div>
+                ${grp.urls.map((imgUrl, photoIdx) => `
+                <div style="margin-bottom: 10px; text-align: center;">
+                  ${grp.urls.length > 1 ? `<div style="font-size: 11px; font-weight: 700; color: #64748b; margin-bottom: 4px;">Photo ${photoIdx + 1} of ${grp.urls.length}</div>` : ''}
+                  <img src="${escapeEmailHtml(imgUrl)}" alt="${escapeEmailHtml(grp.label)} #${photoIdx + 1}" style="max-width: 100%; max-height: 360px; width: auto; height: auto; border-radius: 10px; border: 1px solid #cbd5e1;" />
+                </div>`).join('')}
               </div>`).join('')}
             </div>` : ''}
 
@@ -1010,8 +1646,9 @@ export const notificationService = {
     reports = [],
     allReports = [],
     catalogProducts = [],
-    actorName = 'Warehouse Staff',
-    isTestMode = false
+    actorName = '',
+    isTestMode = false,
+    customRecipients = null
   }) {
     const effectiveReports = Array.isArray(reports) && reports.length > 0
       ? reports
@@ -1025,8 +1662,11 @@ export const notificationService = {
     );
 
     try {
-      const config = this.resolveCompanyConfig(primaryReport);
+      const profileKey = resolveEmailProfileKey(eventType);
+      const config = this.resolveCompanyConfig(primaryReport, profileKey);
       const isBatch = effectiveReports.length > 1;
+      const isDebitClaimEvent = eventType === 'pickup_debit_claim';
+      const isCustomerStream = primaryReport.rma_type !== 'supplier_outbound';
       const rmaNumber = primaryReport.rma_number || primaryReport.rmaNumber || primaryReport.id || 'RMA';
       const meta = (primaryReport.ai_document_metadata && typeof primaryReport.ai_document_metadata === 'object')
         ? primaryReport.ai_document_metadata
@@ -1034,25 +1674,33 @@ export const notificationService = {
       const pickup = (meta.supplier_pickup && typeof meta.supplier_pickup === 'object')
         ? meta.supplier_pickup
         : {};
-      const claimNo = pickup.claim_number || (String(primaryReport.notes || '').match(/\[RTV:\s*([^\]]+)\]/i)?.[1]?.trim()) || '';
+      const effectiveActor = String(actorName || pickup.processed_by || meta.simple_rtv_updated_by || '').trim();
+      const claimNo = pickup.claim_number || (String(primaryReport.notes || '').match(/\[(?:RTV|BUF):\s*([^\]]+)\]/i)?.[1]?.trim()) || '';
 
-      const isPickupEvent = eventType === 'pickup_debit_claim' || eventType === 'pickup_replacement';
+      const isPickupEvent = isDebitClaimEvent || eventType === 'pickup_replacement';
       const supplierToList = isPickupEvent ? splitEmailList(pickup.supplier_email_to) : [];
       const supplierCcList = isPickupEvent ? splitEmailList(pickup.supplier_email_cc) : [];
 
+      const baseToList = customRecipients && (Array.isArray(customRecipients.toList) || customRecipients.toEmail)
+        ? splitEmailList(customRecipients.toList ?? customRecipients.toEmail)
+        : config.toList;
+      const baseCcList = customRecipients && Array.isArray(customRecipients.ccList)
+        ? splitEmailList(customRecipients.ccList)
+        : config.baseCcList;
+
       const toList = Array.from(new Set([
-        ...splitEmailList(config.toEmail),
+        ...baseToList,
         ...supplierToList
       ]));
       const toEmail = toList.join(', ') || config.toEmail;
 
       const ccSet = new Set([
-        ...(Array.isArray(config.baseCcList) ? config.baseCcList : []),
+        ...baseCcList,
         ...supplierCcList
       ]);
       effectiveReports.forEach((r) => {
         if (r?.ae_email && String(r.ae_email).includes('@')) {
-          ccSet.add(String(r.ae_email).trim());
+          ccSet.add(String(r.ae_email).trim().toLowerCase());
         }
       });
       const finalCcList = Array.from(ccSet);
@@ -1067,21 +1715,11 @@ export const notificationService = {
       const baseSubject = subjectLabelMap[eventType] || `[RMA Update] ${batchTag}${rmaNumber}`;
       const subject = formatTestEmailSubject(baseSubject, testActive);
 
-      // Collect pickup verification photos + RMA intake photos across all bundled RMAs
-      const pickupPhotoLabels = [
-        { keys: ['driver_license_front', 'id_license'], label: 'Driver Valid Gov’t / Legal ID — FRONT' },
-        { keys: ['driver_license_back'], label: 'Driver Valid Gov’t / Legal ID — BACK' },
-        { keys: ['truck_plate'], label: 'Delivery Truck Plate Number' },
-        { keys: ['driver_handover', 'driver_face'], label: 'Driver / Co-Worker Photo' },
-        { keys: ['pickup_items', 'loaded_items', 'signed_form'], label: 'Damaged Item(s) Picked Up' }
-      ];
-      const pickupPhotoObj = (pickup.photos && typeof pickup.photos === 'object') ? pickup.photos : {};
-      const pickupPhotoEntries = pickupPhotoLabels
-        .map((slot) => ({
-          label: slot.label,
-          url: slot.keys.map((k) => pickupPhotoObj[k]).find((u) => Boolean(u))
-        }))
-        .filter((e) => Boolean(e.url));
+      // Collect pickup verification photos (normalizing string | string[]) + RMA intake photos across all bundled RMAs
+      const pickupPhotoGroups = collectPickupPhotoGroupsFromReports(effectiveReports);
+      const pickupPhotoEntries = pickupPhotoGroups.flatMap((grp) =>
+        grp.urls.map((url) => ({ label: grp.label, url }))
+      );
 
       const pickupUrlSet = new Set(pickupPhotoEntries.map((e) => e.url));
       const intakePhotoSet = new Set();
@@ -1100,7 +1738,7 @@ export const notificationService = {
           reports: effectiveReports,
           allReports,
           catalogProducts,
-          preparedByOverride: actorName,
+          preparedByOverride: pickup.processed_by || effectiveActor || '',
           combineIdentical: true
         });
         if (pdfAttachment) {
@@ -1114,26 +1752,46 @@ export const notificationService = {
         }
       }
 
-      // Attach remote HTTPS image links (so Nodemailer fetches without bloating POST payload)
+      // Attach remote HTTPS image links up to safe Gmail/Vercel cap (first cover at least 1 photo per pickup category,
+      // then remaining pickup photos, then intake photos; all photos remain embedded in HTML).
       const attachedUrls = new Set();
-      pickupPhotoEntries.forEach((entry, idx) => {
-        if (/^https?:\/\//i.test(entry.url) && !attachedUrls.has(entry.url)) {
-          attachedUrls.add(entry.url);
-          attachments.push({
-            filename: `pickup_photo_${idx + 1}.jpg`,
-            path: entry.url
+      let remoteImgCount = 0;
+      const tryPushRemoteImage = (url, filename) => {
+        if (remoteImgCount >= MAX_REMOTE_IMAGE_ATTACHMENTS) return;
+        const cleanUrl = String(url || '').trim();
+        if (!/^https?:\/\//i.test(cleanUrl) || attachedUrls.has(cleanUrl)) return;
+        attachedUrls.add(cleanUrl);
+        remoteImgCount += 1;
+        attachments.push({ filename, path: cleanUrl });
+      };
+
+      if (isPickupEvent) {
+        // Pass 1: 1 representative photo per category
+        pickupPhotoGroups.forEach((grp) => {
+          if (grp.urls[0]) {
+            tryPushRemoteImage(grp.urls[0], `${grp.key || 'pickup'}_1.jpg`);
+          }
+        });
+        // Pass 2: remaining multi-photo uploads per category up to cap
+        pickupPhotoGroups.forEach((grp) => {
+          grp.urls.slice(1).forEach((url, idx) => {
+            tryPushRemoteImage(url, `${grp.key || 'pickup'}_${idx + 2}.jpg`);
           });
-        }
+        });
+        // Pass 3: intake photos up to cap
+        allIntakePhotos.forEach((url, idx) => {
+          tryPushRemoteImage(url, `rma_intake_photo_${idx + 1}.jpg`);
+        });
+      }
+
+      const { items: itemsTable } = getConsolidatedPickupItems({
+        report: primaryReport,
+        reports: effectiveReports,
+        allReports,
+        catalogProducts,
+        combineIdentical: isPickupEvent
       });
-      allIntakePhotos.forEach((url, idx) => {
-        if (/^https?:\/\//i.test(url) && !attachedUrls.has(url)) {
-          attachedUrls.add(url);
-          attachments.push({
-            filename: `rma_intake_photo_${idx + 1}.jpg`,
-            path: url
-          });
-        }
-      });
+      const explanationSummary = collectUniqueExplanations(effectiveReports, itemsTable);
 
       const htmlBody = this.generateLifecycleEmailHtml({
         eventType,
@@ -1142,14 +1800,48 @@ export const notificationService = {
         allReports,
         catalogProducts,
         config,
-        actorName,
+        actorName: effectiveActor,
         isTestMode: testActive,
+        pickupPhotoGroups: isPickupEvent ? pickupPhotoGroups : [],
         pickupPhotoEntries: isPickupEvent ? pickupPhotoEntries : [],
         intakePhotos: isPickupEvent ? allIntakePhotos : [],
         pdfAttachedFilename
       });
 
       const eventTimeStr = formatDateTimeYmdHm(new Date());
+      const partyDisplay = isCustomerStream && isPickupEvent
+        ? (pickup.customer_name || pickup.supplier_name || primaryReport.store_branch || primaryReport.reporter_name || 'Wholesale Customer')
+        : (pickup.supplier_name || primaryReport.supplier_name || primaryReport.supplierName || 'Pending Assignment');
+      const branchSummaryText = Array.from(new Set(
+        effectiveReports.map((r) => String(r.store_branch || '').trim()).filter(Boolean)
+      )).join(', ') || 'Warehouse / N/A';
+
+      const plainTextLines = [
+        `${testActive ? '[TEST] ' : ''}${baseSubject}`,
+        `${isCustomerStream && isPickupEvent ? 'Customer / Outlet' : 'Supplier / Vendor'}: ${partyDisplay}`,
+        ...(isDebitClaimEvent
+          ? [
+              `Defect / Return Reason: ${primaryReport.reason || 'Damaged / Defective'}`,
+              `Explanation / Defect Notes: ${explanationSummary}`
+            ]
+          : [
+              `Store / Branch: ${branchSummaryText}`,
+              `Defect / Return Reason: ${primaryReport.reason || 'Damaged / Defective'}`,
+              `Warehouse Location: ${primaryReport.warehouse_location || 'Receiving / Warehouse'}`
+            ]),
+        ...(itemsTable.length > 0
+          ? [
+              `Items (${itemsTable.length} line${itemsTable.length > 1 ? 's' : ''}):`,
+              ...itemsTable.map((it) => {
+                const expSuffix = isDebitClaimEvent && it.explanation ? ` | Explanation: ${it.explanation}` : '';
+                return `- ${it.name} (SKU: ${it.sku}) • Qty: ${it.totalPieces} pcs${expSuffix}`;
+              })
+            ]
+          : []),
+        `Processed By: ${effectiveActor || 'Not specified'}`,
+        `Event Time (YYYY-MM-DD HH:mm): ${eventTimeStr}`
+      ];
+
       const res = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1161,8 +1853,9 @@ export const notificationService = {
           subject,
           html: htmlBody,
           isTestMode: testActive,
+          sandboxEmail: this.getTestSandboxEmail(),
           attachments,
-          text: `${testActive ? '[TEST] ' : ''}${baseSubject} • Processed by ${actorName} at ${eventTimeStr} (YYYY-MM-DD HH:mm).`
+          text: plainTextLines.join('\n')
         })
       });
 
@@ -1180,9 +1873,22 @@ export const notificationService = {
   },
 
   /**
-   * Manually trigger the Daily Overall RMA Matrix (.xlsx) email dispatch
+   * Manually trigger the Overall RMA Matrix (.xlsx) email dispatch
    */
-  async sendDailyMatrixEmailNow({ isTestMode = false, force = true, dryRun = false } = {}) {
+  async sendDailyMatrixEmailNow({
+    startDate,
+    endDate,
+    stream,
+    includeZeroCatalogSkus,
+    to,
+    toList,
+    cc,
+    ccList,
+    isTestMode = false,
+    force = true,
+    dryRun = false,
+    respectSchedule = false
+  } = {}) {
     try {
       let accessToken = '';
       try {
@@ -1195,15 +1901,89 @@ export const notificationService = {
         headers.Authorization = `Bearer ${accessToken}`;
       }
 
+      const payload = {
+        action: 'daily-matrix',
+        isTestMode: Boolean(isTestMode),
+        sandboxEmail: this.getTestSandboxEmail(),
+        force: Boolean(force),
+        dryRun: Boolean(dryRun),
+        ...(respectSchedule ? { respectSchedule: true } : {})
+      };
+      if (startDate) payload.startDate = startDate;
+      if (endDate) payload.endDate = endDate;
+      if (stream) payload.stream = stream;
+      if (includeZeroCatalogSkus !== undefined) {
+        payload.includeZeroCatalogSkus = Boolean(includeZeroCatalogSkus);
+      }
+      if (toList !== undefined || to !== undefined) {
+        payload.to = to ?? toList;
+        payload.toList = Array.isArray(toList) ? toList : splitEmailList(to);
+      }
+      if (ccList !== undefined || cc !== undefined) {
+        payload.cc = ccList ?? cc;
+        payload.ccList = Array.isArray(ccList) ? ccList : splitEmailList(cc);
+      }
+
       const res = await fetch('/api/send-email?action=daily-matrix', {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          action: 'daily-matrix',
-          isTestMode: Boolean(isTestMode),
-          force: Boolean(force),
-          dryRun: Boolean(dryRun)
-        })
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return {
+          success: false,
+          status: res.status,
+          error: data?.message || data?.error || `HTTP ${res.status}`
+        };
+      }
+      return data || { success: false, error: 'Empty response from server.' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Manually trigger or dry-run the 10-Calendar-Day Pickup Follow-Up & Auto-Dispose Check
+   */
+  async runDailyFollowUpNow({
+    isTestMode = false,
+    force = false,
+    dryRun = false,
+    rmaNumber = '',
+    operation = 'run_all',
+    respectSchedule = false,
+    overrideToEmail = ''
+  } = {}) {
+    try {
+      let accessToken = '';
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        accessToken = session?.access_token || '';
+      } catch {}
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
+
+      const payload = {
+        action: 'daily-followup',
+        operation,
+        isTestMode: Boolean(isTestMode),
+        sandboxEmail: this.getTestSandboxEmail(),
+        force: Boolean(force),
+        dryRun: Boolean(dryRun),
+        respectSchedule: Boolean(respectSchedule),
+        ...(rmaNumber ? { rmaNumber } : {}),
+        ...(overrideToEmail ? { overrideToEmail } : {})
+      };
+
+      const res = await fetch('/api/send-email?action=daily-followup', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload)
       });
 
       const data = await res.json().catch(() => null);

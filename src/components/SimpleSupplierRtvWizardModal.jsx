@@ -18,9 +18,11 @@ import {
   formatPeso,
   getConsolidatedPickupItems,
   isTestRecord,
-  formatDateYmd
+  formatDateYmd,
+  normalizePhotoUrlArray
 } from '../utils/rmaHelpers';
 import SupplierPickupFormModal from './SupplierPickupFormModal';
+import EmailRecipientsEditor from './EmailRecipientsEditor';
 
 function getFourOptions(isSupplierStream) {
   if (isSupplierStream) {
@@ -67,18 +69,18 @@ function getFourOptions(isSupplierStream) {
   return [
     {
       id: 'customer_credit',
-      title: 'Driver Picked Up / Accepted for Debit / Credit',
-      subtitle: 'Returned items accepted for customer debit / credit processing with pickup verification.',
-      badge: 'Debit / Credit',
+      title: 'Customer Credit Memo / Return Handover',
+      subtitle: 'Returned items accepted from customer for Credit Memo or account deduction with verification.',
+      badge: 'Credit / Return',
       icon: DollarSign,
       needsPickupForm: true,
       formType: 'debit'
     },
     {
       id: 'customer_exchange',
-      title: 'Driver Picked Up / Replaced with Good Stock',
-      subtitle: 'Returned items swapped / replaced with good stock with driver handover verification.',
-      badge: 'Replaced w/ Good Stock',
+      title: 'Customer Buffer Replacement / Good Stock Exchange',
+      subtitle: 'Returned items swapped / replaced with good buffer stock for customer with handover verification.',
+      badge: 'Buffer Replacement',
       icon: RefreshCw,
       needsPickupForm: true,
       formType: 'replacement'
@@ -118,9 +120,13 @@ const PH_LEGAL_ID_TYPES = [
   'Other Valid PH Gov’t / Legal ID'
 ];
 
+const MAX_PHOTOS_PER_SLOT = 10;
+const MAX_TOTAL_PICKUP_PHOTOS = 50;
+
 const PICKUP_PHOTO_SLOTS = [
   {
     key: 'driver_license_front',
+    legacyKeys: ['driver_license_front', 'id_license'],
     category: 'driver_license_front',
     stepNum: 1,
     title: 'Driver Valid Gov’t / Legal ID — FRONT',
@@ -129,6 +135,7 @@ const PICKUP_PHOTO_SLOTS = [
   },
   {
     key: 'driver_license_back',
+    legacyKeys: ['driver_license_back'],
     category: 'driver_license_back',
     stepNum: 2,
     title: 'Driver Valid Gov’t / Legal ID — BACK',
@@ -137,14 +144,16 @@ const PICKUP_PHOTO_SLOTS = [
   },
   {
     key: 'truck_plate',
+    legacyKeys: ['truck_plate'],
     category: 'truck_license_plate',
     stepNum: 3,
     title: 'Delivery Truck Plate Number',
-    hint: 'Photo clearly showing the delivery truck or van plate number.',
-    ocrHighlight: false
+    hint: 'Photo clearly showing the delivery truck or van plate number. AI auto-fills Truck Plate #!',
+    ocrHighlight: true
   },
   {
     key: 'driver_handover',
+    legacyKeys: ['driver_handover', 'driver_face'],
     category: 'driver_coworker_handover',
     stepNum: 4,
     title: 'Driver / Co-Worker Photo',
@@ -153,6 +162,7 @@ const PICKUP_PHOTO_SLOTS = [
   },
   {
     key: 'pickup_items',
+    legacyKeys: ['pickup_items', 'loaded_items', 'signed_form'],
     category: 'delivered_items_pickup',
     stepNum: 5,
     title: 'Damaged Item(s) Picked Up',
@@ -211,11 +221,12 @@ function extractExistingClaimIdFromReport(report) {
   if (!report) return null;
   const pickup = report.ai_document_metadata?.supplier_pickup || {};
   if (pickup.claim_number) return String(pickup.claim_number).trim();
-  const noteMatch = String(report.notes || '').match(/\[RTV:\s*([^\]]+)\]/i);
+  const noteMatch = String(report.notes || '').match(/\[(?:RTV|BUF):\s*([^\]]+)\]/i);
   if (noteMatch && noteMatch[1]) return noteMatch[1].trim();
   if (Array.isArray(report.audit_trail)) {
-    const entry = report.audit_trail.find((a) => a?.rtv_number);
+    const entry = report.audit_trail.find((a) => a?.rtv_number || a?.buf_number);
     if (entry?.rtv_number) return String(entry.rtv_number).trim();
+    if (entry?.buf_number) return String(entry.buf_number).trim();
   }
   return null;
 }
@@ -262,13 +273,15 @@ export default function SimpleSupplierRtvWizardModal({
   const [driverIdType, setDriverIdType] = useState("Driver's License (LTO)");
   const [driverLicenseNo, setDriverLicenseNo] = useState('');
   const [truckPlate, setTruckPlate] = useState('');
+  const [processedBy, setProcessedBy] = useState('');
   const [existingClaimNumber, setExistingClaimNumber] = useState(null);
 
-  // Photo slots: { [slotKey]: { file, previewUrl, existingUrl } }
+  // Photo slots: { [slotKey]: Array<{ id, file, previewUrl, existingUrl }> }
   const [photoSlots, setPhotoSlots] = useState({});
   const objectUrlsRef = useRef([]);
 
   const [isScanningId, setIsScanningId] = useState(false);
+  const [isScanningPlate, setIsScanningPlate] = useState(false);
   const [ocrNotice, setOcrNotice] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
@@ -277,7 +290,7 @@ export default function SimpleSupplierRtvWizardModal({
   const [savedBatchReports, setSavedBatchReports] = useState(null);
   const [showA4Form, setShowA4Form] = useState(false);
 
-  // Known suppliers list for autocomplete datalist
+  // Known suppliers list & customer/store branch list for autocomplete datalists
   const supplierSuggestions = useMemo(() => {
     const set = new Set();
     catalogProducts.forEach((p) => {
@@ -290,6 +303,22 @@ export default function SimpleSupplierRtvWizardModal({
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [catalogProducts, allReports]);
+
+  const customerBranchSuggestions = useMemo(() => {
+    const set = new Set();
+    allReports.forEach((r) => {
+      [
+        r?.ai_document_metadata?.supplier_pickup?.customer_name,
+        r?.store_branch,
+        r?.customer_name,
+        r?.reporter_name
+      ].forEach((cand) => {
+        const s = String(cand || '').trim();
+        if (s && !isPendingSupplierName(s)) set.add(s);
+      });
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [allReports]);
 
   // Revoke temporary preview URLs on unmount/reset
   const clearObjectUrls = () => {
@@ -341,20 +370,28 @@ export default function SimpleSupplierRtvWizardModal({
       return (sameParent || sameBc || sameSku) && !isPendingSupplierName(r.supplier_name || r.supplierName || r.supplier);
     });
 
-    const supplierCandidates = [
-      pickup.supplier_name,
-      targetReport.supplier_name,
-      targetReport.supplierName,
-      targetReport.supplier,
-      matchedProd?.supplier_name,
-      matchedProd?.supplierName,
-      matchedProd?.supplier,
-      manifestFirstItem?.supplier_name,
-      manifestFirstItem?.supplierName,
-      relatedReport?.supplier_name,
-      relatedReport?.supplierName
-    ];
-    const initialSupplier = supplierCandidates.find((s) => !isPendingSupplierName(s)) || '';
+    const partyCandidates = reportIsSupplier
+      ? [
+          pickup.supplier_name,
+          targetReport.supplier_name,
+          targetReport.supplierName,
+          targetReport.supplier,
+          matchedProd?.supplier_name,
+          matchedProd?.supplierName,
+          matchedProd?.supplier,
+          manifestFirstItem?.supplier_name,
+          manifestFirstItem?.supplierName,
+          relatedReport?.supplier_name,
+          relatedReport?.supplierName
+        ]
+      : [
+          pickup.customer_name,
+          !isPendingSupplierName(pickup.supplier_name) ? pickup.supplier_name : '',
+          targetReport.store_branch,
+          targetReport.customer_name,
+          targetReport.reporter_name
+        ];
+    const initialSupplier = partyCandidates.find((s) => !isPendingSupplierName(s)) || '';
     setSupplierName(String(initialSupplier).trim());
     setSupplierEmailTo(pickup.supplier_email_to || '');
     setSupplierEmailCc(pickup.supplier_email_cc || '');
@@ -370,13 +407,30 @@ export default function SimpleSupplierRtvWizardModal({
     setTruckPlate(pickup.truck_plate || '');
 
     const activeBatchSnapshot = rawBatchReportsRef.current || [];
+    const savedProcessor = String(
+      pickup.processed_by ||
+      meta.simple_rtv_updated_by ||
+      activeBatchSnapshot
+        .map((r) => r?.ai_document_metadata?.supplier_pickup?.processed_by || r?.ai_document_metadata?.simple_rtv_updated_by)
+        .find((v) => String(v || '').trim()) ||
+      ''
+    ).trim();
+    setProcessedBy(savedProcessor);
+
     const hydratedPhotos = activeBatchSnapshot.find((r) => r?.ai_document_metadata?.supplier_pickup?.photos)?.ai_document_metadata?.supplier_pickup?.photos || pickup.photos || {};
     const hydratedSlots = {};
     PICKUP_PHOTO_SLOTS.forEach((slot) => {
-      const url = hydratedPhotos[slot.key] || '';
-      if (url) {
-        hydratedSlots[slot.key] = { file: null, previewUrl: url, existingUrl: url };
-      }
+      const urlSet = new Set();
+      const keysToCheck = Array.isArray(slot.legacyKeys) ? slot.legacyKeys : [slot.key];
+      keysToCheck.forEach((k) => {
+        normalizePhotoUrlArray(hydratedPhotos[k]).forEach((u) => urlSet.add(u));
+      });
+      hydratedSlots[slot.key] = Array.from(urlSet).slice(0, MAX_PHOTOS_PER_SLOT).map((url, idx) => ({
+        id: `${slot.key}-existing-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+        file: null,
+        previewUrl: url,
+        existingUrl: url
+      }));
     });
     setPhotoSlots(hydratedSlots);
 
@@ -444,6 +498,23 @@ export default function SimpleSupplierRtvWizardModal({
     return Array.from(map.values());
   }, [rawBatchReports]);
 
+  const activeWizardEmailType = useMemo(() => {
+    if (selectedOption === 'scrap') return 'rma_scrapped';
+    if (selectedOption === 'restock_good') return 'rma_restocked';
+    if (selectedOption === 'supplier_exchange' || selectedOption === 'customer_exchange') {
+      return 'pickup_replacement';
+    }
+    return 'pickup_debit_claim';
+  }, [selectedOption]);
+
+  const [wizardCustomRecipients, setWizardCustomRecipients] = useState(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const prof = notificationService.getEmailProfile(activeWizardEmailType);
+    setWizardCustomRecipients({ toList: prof.toList || [], ccList: prof.ccList || [] });
+  }, [isOpen, activeWizardEmailType]);
+
   if (!isOpen || !primaryInputReport) return null;
 
   const activeBatchReports = (Array.isArray(savedBatchReports) && savedBatchReports.length > 0)
@@ -480,32 +551,77 @@ export default function SimpleSupplierRtvWizardModal({
     activeBatchReports.map((r) => extractExistingClaimIdFromReport(r)).find(Boolean) ||
     null;
 
-  const actorName =
-    activeUser?.user_name ||
-    activeUser?.full_name ||
-    activeUser?.name ||
-    activeUser?.email ||
-    activeUser?.authorized_email ||
-    activeUser?.profileName ||
-    'Warehouse Staff';
+  const handleSelectPhotos = async (slotKey, filesInput) => {
+    const incomingFiles = filesInput instanceof File
+      ? [filesInput]
+      : Array.from(filesInput || []).filter((f) => Boolean(f));
+    if (incomingFiles.length === 0) return;
 
-  const handleSelectPhoto = async (slotKey, file) => {
-    if (!file) return;
-    setErrorMsg('');
-    const previewUrl = URL.createObjectURL(file);
-    objectUrlsRef.current.push(previewUrl);
+    const slotObj = PICKUP_PHOTO_SLOTS.find((s) => s.key === slotKey);
+    const currentSlotList = Array.isArray(photoSlots[slotKey]) ? photoSlots[slotKey] : [];
+    const currentTotalCount = PICKUP_PHOTO_SLOTS.reduce(
+      (sum, s) => sum + (Array.isArray(photoSlots[s.key]) ? photoSlots[s.key].length : 0),
+      0
+    );
 
-    setPhotoSlots((prev) => ({
-      ...prev,
-      [slotKey]: { file, previewUrl, existingUrl: '' }
-    }));
+    const slotRemaining = Math.max(0, MAX_PHOTOS_PER_SLOT - currentSlotList.length);
+    const totalRemaining = Math.max(0, MAX_TOTAL_PICKUP_PHOTOS - currentTotalCount);
+    const allowedCount = Math.min(slotRemaining, totalRemaining);
 
-    // Auto-read Driver's Valid Gov't / Legal ID Front with Gemini AI Vision
-    if (slotKey === 'driver_license_front') {
+    if (slotRemaining <= 0) {
+      setErrorMsg(`Maximum ${MAX_PHOTOS_PER_SLOT} photos allowed for "${slotObj?.title || slotKey}". Remove a photo to add another.`);
+      return;
+    }
+    if (totalRemaining <= 0) {
+      setErrorMsg(`Maximum ${MAX_TOTAL_PICKUP_PHOTOS} total pickup photos reached across all 5 categories. Remove a photo first.`);
+      return;
+    }
+
+    const acceptedFiles = incomingFiles.slice(0, allowedCount);
+    if (incomingFiles.length > allowedCount) {
+      setErrorMsg(
+        `Maximum ${MAX_PHOTOS_PER_SLOT} photos per slot (${MAX_TOTAL_PICKUP_PHOTOS} total). Added ${acceptedFiles.length} photo(s); ${incomingFiles.length - acceptedFiles.length} extra photo(s) were skipped.`
+      );
+    } else {
+      setErrorMsg('');
+    }
+
+    const newEntries = acceptedFiles.map((file, idx) => {
+      const previewUrl = URL.createObjectURL(file);
+      objectUrlsRef.current.push(previewUrl);
+      return {
+        id: `${slotKey}-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+        file,
+        previewUrl,
+        existingUrl: ''
+      };
+    });
+
+    setPhotoSlots((prev) => {
+      const prevList = Array.isArray(prev[slotKey]) ? prev[slotKey] : [];
+      const prevTotal = PICKUP_PHOTO_SLOTS.reduce(
+        (sum, s) => sum + (Array.isArray(prev[s.key]) ? prev[s.key].length : 0),
+        0
+      );
+      const room = Math.max(0, Math.min(MAX_PHOTOS_PER_SLOT - prevList.length, MAX_TOTAL_PICKUP_PHOTOS - prevTotal));
+      if (room <= 0) return prev;
+      return {
+        ...prev,
+        [slotKey]: [...prevList, ...newEntries.slice(0, room)]
+      };
+    });
+
+    // Auto-read Driver's Valid Gov't / Legal ID Front with Gemini AI Vision on first ID photo when Driver Name & ID # are empty
+    if (
+      slotKey === 'driver_license_front' &&
+      currentSlotList.length === 0 &&
+      !driverName.trim() &&
+      !driverLicenseNo.trim()
+    ) {
       setIsScanningId(true);
       setOcrNotice({ type: 'info', text: 'Reading Driver Name, Valid ID Type & ID # from photo...' });
       try {
-        const res = await catalogService.inspectDriverLicense(file);
+        const res = await catalogService.inspectDriverLicense(acceptedFiles[0]);
         if (res?.id_type && res.id_type !== 'Unknown') {
           setDriverIdType(String(res.id_type).trim());
         }
@@ -537,6 +653,55 @@ export default function SimpleSupplierRtvWizardModal({
         setIsScanningId(false);
       }
     }
+
+    // Auto-read Delivery Truck Plate Number with Gemini AI Vision on first Slot 3 photo when Truck Plate is empty
+    if (
+      slotKey === 'truck_plate' &&
+      currentSlotList.length === 0 &&
+      !truckPlate.trim()
+    ) {
+      setIsScanningPlate(true);
+      setOcrNotice({ type: 'info', text: 'Reading Delivery Truck Plate Number from photo...' });
+      try {
+        const res = await catalogService.inspectTruckPlate(acceptedFiles[0]);
+        if (res?.is_valid_plate !== false && res?.plate_number) {
+          const cleanPlate = String(res.plate_number).trim().toUpperCase();
+          setTruckPlate((prev) => prev.trim() || cleanPlate);
+          setOcrNotice({
+            type: 'success',
+            text: `Auto-filled Truck Plate #: ${cleanPlate}${res?.vehicle_type && res.vehicle_type !== 'Unknown' ? ` (${res.vehicle_type})` : ''}`
+          });
+        } else {
+          setOcrNotice({
+            type: 'warn',
+            text: res?.rejection_reason || 'Photo saved! Could not read truck plate clearly — please enter Truck Plate Number manually below.'
+          });
+        }
+      } catch (err) {
+        console.warn('Truck Plate OCR warning:', err);
+        setOcrNotice({
+          type: 'warn',
+          text: 'Photo saved! Truck plate auto-read unavailable right now — please enter Truck Plate Number manually below.'
+        });
+      } finally {
+        setIsScanningPlate(false);
+      }
+    }
+  };
+
+  const handleRemovePhoto = (slotKey, photoId) => {
+    setErrorMsg('');
+    setPhotoSlots((prev) => {
+      const prevList = Array.isArray(prev[slotKey]) ? prev[slotKey] : [];
+      const target = prevList.find((item) => item.id === photoId);
+      if (target?.previewUrl && !target?.existingUrl) {
+        try { URL.revokeObjectURL(target.previewUrl); } catch {}
+      }
+      return {
+        ...prev,
+        [slotKey]: prevList.filter((item) => item.id !== photoId)
+      };
+    });
   };
 
   const handleSaveSimpleDecision = async (optionId, waitOnly = false) => {
@@ -546,7 +711,11 @@ export default function SimpleSupplierRtvWizardModal({
 
     const cleanSupplier = supplierName.trim();
     if (opt.needsPickupForm && !cleanSupplier) {
-      setErrorMsg('Please type or choose the Supplier Company Name first.');
+      setErrorMsg(
+        isSupplierStream
+          ? 'Please type or choose the Supplier Company Name first.'
+          : 'Please type or enter the Customer / Store Branch Name first.'
+      );
       return;
     }
 
@@ -561,6 +730,12 @@ export default function SimpleSupplierRtvWizardModal({
     if (opt.needsPickupForm && !waitOnly) {
       setSelectedOption(optionId);
       setStep('pickup');
+      return;
+    }
+
+    const cleanProcessedBy = processedBy.trim();
+    if (!cleanProcessedBy) {
+      setErrorMsg('Please enter "Processed By (Staff Full Name)" before saving this decision.');
       return;
     }
 
@@ -602,17 +777,19 @@ export default function SimpleSupplierRtvWizardModal({
           ? repMeta.supplier_pickup
           : {};
 
-        const updatedPickup = (Object.keys(repPickup).length > 0 || supplierEmailTo.trim() || supplierEmailCc.trim() || isConsolidatedBatch)
+        const updatedPickup = (Object.keys(repPickup).length > 0 || supplierEmailTo.trim() || supplierEmailCc.trim() || isConsolidatedBatch || (!isSupplierStream && cleanSupplier))
           ? {
               ...repPickup,
               disposition: optionId,
               disposition_label: opt.title,
               supplier_name: effectiveSupplier,
+              ...(isSupplierStream ? {} : { customer_name: cleanSupplier || repPickup.customer_name || rep.store_branch || '' }),
               supplier_email_to: supplierEmailTo.trim(),
               supplier_email_cc: supplierEmailCc.trim(),
               ...(isConsolidatedBatch ? { consolidated_rma_numbers: batchRmaNumbers } : {}),
               picked_up_at: null,
-              updated_at: nowIso
+              updated_at: nowIso,
+              processed_by: cleanProcessedBy
             }
           : undefined;
 
@@ -620,7 +797,7 @@ export default function SimpleSupplierRtvWizardModal({
           simple_rtv_disposition: optionId,
           simple_rtv_label: opt.title,
           simple_rtv_updated_at: nowIso,
-          simple_rtv_updated_by: actorName,
+          simple_rtv_updated_by: cleanProcessedBy,
           needs_reorder: optionId === 'scrap' ? Boolean(scrapNeedsReorder) : false
         };
         if (updatedPickup) {
@@ -631,8 +808,9 @@ export default function SimpleSupplierRtvWizardModal({
           disposition: optionId,
           status: nextStatus,
           warehouse_location: nextLocation,
-          supplier_name: effectiveSupplier,
-          actorName,
+          supplier_name: isSupplierStream ? effectiveSupplier : (rep.supplier_name || effectiveSupplier),
+          actorName: cleanProcessedBy,
+          inspected_by: cleanProcessedBy,
           clearWorkflowResolution: true,
           auditAction: isConsolidatedBatch ? 'CONSOLIDATED_4CHOICE_DECISION' : 'SIMPLE_4CHOICE_DECISION',
           auditNote: `Staff selected "${opt.title}"${auditDetail}${isConsolidatedBatch ? ` [Batch of ${activeBatchReports.length} RMAs]` : ''}`,
@@ -654,8 +832,9 @@ export default function SimpleSupplierRtvWizardModal({
             reports: updatedBatchList,
             allReports,
             catalogProducts,
-            actorName,
-            isTestMode: isTest
+            actorName: cleanProcessedBy,
+            isTestMode: isTest,
+            customRecipients: wizardCustomRecipients
           });
         } catch (mailErr) {
           console.warn('Non-blocking error sending 4-Choice lifecycle email:', mailErr);
@@ -677,9 +856,19 @@ export default function SimpleSupplierRtvWizardModal({
 
   const handleCompletePickupAndGenerateForm = async () => {
     setErrorMsg('');
+    const cleanProcessedBy = processedBy.trim();
+    if (!cleanProcessedBy) {
+      setErrorMsg('Please enter "Processed By (Staff Full Name)" before completing pickup verification.');
+      return;
+    }
+
     const cleanSupplier = supplierName.trim();
     if (!cleanSupplier) {
-      setErrorMsg('Please type or select the Supplier Company Name.');
+      setErrorMsg(
+        isSupplierStream
+          ? 'Please type or select the Supplier Company Name.'
+          : 'Please type or enter the Customer / Store Branch Name.'
+      );
       return;
     }
 
@@ -694,11 +883,26 @@ export default function SimpleSupplierRtvWizardModal({
     const cleanEmailCc = supplierEmailCc.trim();
 
     const missingSlots = PICKUP_PHOTO_SLOTS.filter((slot) => {
-      const s = photoSlots[slot.key];
-      return !s || (!s.file && !s.existingUrl);
+      const list = Array.isArray(photoSlots[slot.key]) ? photoSlots[slot.key] : [];
+      return !list.some((item) => Boolean(item?.file || item?.existingUrl));
     });
     if (missingSlots.length > 0) {
-      setErrorMsg(`Please upload all 5 required pickup photos (missing: ${missingSlots.map((m) => m.title).join(', ')}).`);
+      setErrorMsg(`Please upload at least 1 photo for each of the 5 required categories (missing: ${missingSlots.map((m) => m.title).join(', ')}).`);
+      return;
+    }
+
+    const oversizedSlots = PICKUP_PHOTO_SLOTS.filter((slot) => (photoSlots[slot.key] || []).length > MAX_PHOTOS_PER_SLOT);
+    if (oversizedSlots.length > 0) {
+      setErrorMsg(`Maximum ${MAX_PHOTOS_PER_SLOT} photos allowed per category (${oversizedSlots.map((s) => s.title).join(', ')}).`);
+      return;
+    }
+
+    const totalPhotosSelected = PICKUP_PHOTO_SLOTS.reduce(
+      (sum, slot) => sum + (Array.isArray(photoSlots[slot.key]) ? photoSlots[slot.key].length : 0),
+      0
+    );
+    if (totalPhotosSelected > MAX_TOTAL_PICKUP_PHOTOS) {
+      setErrorMsg(`Maximum ${MAX_TOTAL_PICKUP_PHOTOS} total pickup photos allowed across all 5 categories.`);
       return;
     }
 
@@ -719,37 +923,90 @@ export default function SimpleSupplierRtvWizardModal({
       let currentFolderUrl = activeReport.google_drive_folder_url || '';
 
       const uploadedUrlMap = {};
+      const pendingUploads = [];
+      PICKUP_PHOTO_SLOTS.forEach((slot) => {
+        const entries = Array.isArray(photoSlots[slot.key]) ? photoSlots[slot.key] : [];
+        uploadedUrlMap[slot.key] = new Array(entries.length).fill('');
+        entries.forEach((entry, idx) => {
+          if (entry?.file) {
+            pendingUploads.push({ slot, idx, entry });
+          } else if (entry?.existingUrl) {
+            uploadedUrlMap[slot.key][idx] = entry.existingUrl;
+          }
+        });
+      });
+
       const newPhotoUrls = [];
+      const totalToUpload = pendingUploads.length;
+      if (totalToUpload > 0) {
+        let completedUploads = 0;
 
-      for (let i = 0; i < PICKUP_PHOTO_SLOTS.length; i++) {
-        const slot = PICKUP_PHOTO_SLOTS[i];
-        const entry = photoSlots[slot.key];
-
-        if (entry?.file) {
-          setUploadProgress(`Uploading photo ${i + 1} of 5 to RMA Drive folder (${slot.title})...`);
-          const res = await catalogService.uploadPhotoWithDetails(entry.file, rmaNumber, slot.category, {
+        // Upload the first new photo sequentially to obtain/reuse currentFolderId before batch concurrency
+        const firstTask = pendingUploads[0];
+        setUploadProgress(`Uploading 1 of ${totalToUpload} photos (${firstTask.slot.title})...`);
+        const firstRes = await catalogService.uploadPhotoWithDetails(
+          firstTask.entry.file,
+          rmaNumber,
+          firstTask.slot.category,
+          {
             targetFolderId: currentFolderId || null,
             driverName: driverName.trim(),
             truckPlate: truckPlate.trim(),
             supplierName: cleanSupplier
+          }
+        );
+        if (!firstRes?.url) {
+          throw new Error(`Photo upload failed for "${firstTask.slot.title}". Please check connection and retry.`);
+        }
+        uploadedUrlMap[firstTask.slot.key][firstTask.idx] = firstRes.url;
+        newPhotoUrls.push(firstRes.url);
+        completedUploads = 1;
+        if (!currentFolderId && firstRes.rmaFolderId) currentFolderId = firstRes.rmaFolderId;
+        if (!currentFolderUrl && firstRes.rmaFolderUrl) currentFolderUrl = firstRes.rmaFolderUrl;
+
+        // Upload remaining new photos in controlled batches of 4
+        const UPLOAD_BATCH_SIZE = 4;
+        const remainingTasks = pendingUploads.slice(1);
+        for (let b = 0; b < remainingTasks.length; b += UPLOAD_BATCH_SIZE) {
+          const chunk = remainingTasks.slice(b, b + UPLOAD_BATCH_SIZE);
+          setUploadProgress(`Uploading ${completedUploads + 1} of ${totalToUpload} photos...`);
+          const chunkResults = await Promise.all(
+            chunk.map(async (task) => {
+              const res = await catalogService.uploadPhotoWithDetails(
+                task.entry.file,
+                rmaNumber,
+                task.slot.category,
+                {
+                  targetFolderId: currentFolderId || null,
+                  driverName: driverName.trim(),
+                  truckPlate: truckPlate.trim(),
+                  supplierName: cleanSupplier
+                }
+              );
+              if (!res?.url) {
+                throw new Error(`Photo upload failed for "${task.slot.title}". Please check connection and retry.`);
+              }
+              completedUploads += 1;
+              setUploadProgress(`Uploading ${completedUploads} of ${totalToUpload} photos...`);
+              if (!currentFolderId && res.rmaFolderId) currentFolderId = res.rmaFolderId;
+              if (!currentFolderUrl && res.rmaFolderUrl) currentFolderUrl = res.rmaFolderUrl;
+              return { task, res };
+            })
+          );
+          chunkResults.forEach(({ task, res }) => {
+            uploadedUrlMap[task.slot.key][task.idx] = res.url;
+            newPhotoUrls.push(res.url);
           });
-
-          if (!res?.url) {
-            throw new Error(`Photo upload failed for "${slot.title}". Please check connection and retry.`);
-          }
-          uploadedUrlMap[slot.key] = res.url;
-          newPhotoUrls.push(res.url);
-
-          if (!currentFolderId && res.rmaFolderId) {
-            currentFolderId = res.rmaFolderId;
-          }
-          if (!currentFolderUrl && res.rmaFolderUrl) {
-            currentFolderUrl = res.rmaFolderUrl;
-          }
-        } else if (entry?.existingUrl) {
-          uploadedUrlMap[slot.key] = entry.existingUrl;
         }
       }
+
+      PICKUP_PHOTO_SLOTS.forEach((slot) => {
+        uploadedUrlMap[slot.key] = (uploadedUrlMap[slot.key] || []).filter(Boolean);
+      });
+      const totalSavedPhotosCount = PICKUP_PHOTO_SLOTS.reduce(
+        (sum, slot) => sum + (uploadedUrlMap[slot.key]?.length || 0),
+        0
+      );
 
       const activeOpt = optionsList.find((o) => o.id === selectedOption) || optionsList[0];
       const existingMeta = (activeReport.ai_document_metadata && typeof activeReport.ai_document_metadata === 'object')
@@ -759,12 +1016,14 @@ export default function SimpleSupplierRtvWizardModal({
         ? existingMeta.supplier_pickup
         : {};
 
-      // Reuse existing RTV- claim ID if present across any bundled RMA; only generate ONE shared ID
+      // Reuse existing RTV- / BUF- ref if present across any bundled RMA; only generate ONE shared ID
       let resolvedClaimNumber = effectiveClaimNumber || existingPickup.claim_number || null;
       const shouldPersistSupplierClaim =
-        (isSupplierStream && activeOpt.id === 'supplier_credit') ||
-        isConsolidatedBatch ||
-        activeOpt.id === 'supplier_exchange';
+        isSupplierStream && (
+          activeOpt.id === 'supplier_credit' ||
+          activeOpt.id === 'supplier_exchange' ||
+          isConsolidatedBatch
+        );
 
       let existingClaimsList = null;
       if (shouldPersistSupplierClaim && !resolvedClaimNumber) {
@@ -778,6 +1037,8 @@ export default function SimpleSupplierRtvWizardModal({
         } else {
           resolvedClaimNumber = supplierClaimService.generateRtvId(existingClaimsList || [], isTest);
         }
+      } else if (!isSupplierStream && activeOpt.id === 'customer_exchange' && !resolvedClaimNumber) {
+        resolvedClaimNumber = supplierClaimService.generateBufferId([...allReports, ...activeBatchReports], isTest);
       }
 
       if (resolvedClaimNumber) {
@@ -809,6 +1070,7 @@ export default function SimpleSupplierRtvWizardModal({
           claim_number: resolvedClaimNumber || null,
           consolidated_rma_numbers: batchRmaNumbers,
           supplier_name: cleanSupplier,
+          ...(isSupplierStream ? {} : { customer_name: cleanSupplier }),
           supplier_email_to: cleanEmailTo,
           supplier_email_cc: cleanEmailCc,
           driver_name: driverName.trim(),
@@ -820,7 +1082,7 @@ export default function SimpleSupplierRtvWizardModal({
           drive_folder_url: currentFolderUrl || null,
           picked_up_at: repPickup.picked_up_at || pickedUpAtIso,
           updated_at: nowIso,
-          processed_by: actorName
+          processed_by: cleanProcessedBy
         };
 
         const nextLocation = isSupplierStream ? 'Supplier Return Area (RTV)' : 'Customer Return Area';
@@ -828,19 +1090,20 @@ export default function SimpleSupplierRtvWizardModal({
           disposition: activeOpt.id,
           status: 'picked_up',
           warehouse_location: nextLocation,
-          supplier_name: cleanSupplier,
-          actorName,
+          supplier_name: isSupplierStream ? cleanSupplier : (rep.supplier_name || cleanSupplier),
+          actorName: cleanProcessedBy,
+          inspected_by: cleanProcessedBy,
           clearWorkflowResolution: true,
           google_drive_folder_id: currentFolderId || null,
           google_drive_folder_url: currentFolderUrl || null,
           appendPhotoUrls: newPhotoUrls,
           auditAction: repPickup.picked_up_at ? 'PICKUP_DETAILS_UPDATED' : 'SUPPLIER_DRIVER_PICKUP_VERIFIED',
-          auditNote: `${repPickup.picked_up_at ? 'Updated' : 'Picked up by'} ${driverName.trim()} (Plate ${truckPlate.trim().toUpperCase()}) for "${activeOpt.title}"${resolvedClaimNumber ? ` [${resolvedClaimNumber}]` : ''}${isConsolidatedBatch ? ` (Consolidated Batch: ${batchRmaNumbers.length} RMAs)` : ''} with 5 Drive photos archived.`,
+          auditNote: `${repPickup.picked_up_at ? 'Updated' : 'Picked up by'} ${driverName.trim()} (Plate ${truckPlate.trim().toUpperCase()}) for "${activeOpt.title}"${resolvedClaimNumber ? ` [${resolvedClaimNumber}]` : ''}${isConsolidatedBatch ? ` (Consolidated Batch: ${batchRmaNumbers.length} RMAs)` : ''} with ${totalSavedPhotosCount} Drive photo(s) archived.`,
           metadataPatch: {
             simple_rtv_disposition: activeOpt.id,
             simple_rtv_label: activeOpt.title,
             simple_rtv_updated_at: pickupPayload.picked_up_at,
-            simple_rtv_updated_by: actorName,
+            simple_rtv_updated_by: cleanProcessedBy,
             needs_reorder: false,
             supplier_pickup: pickupPayload
           }
@@ -876,7 +1139,7 @@ export default function SimpleSupplierRtvWizardModal({
         await supplierClaimService.saveClaim({
           claimNumber: resolvedClaimNumber,
           supplierName: cleanSupplier,
-          generatedBy: actorName,
+          generatedBy: cleanProcessedBy,
           items: claimItems,
           totalQuantity: totalUnits,
           totalClaimAmount: totalClaimAmt,
@@ -914,8 +1177,9 @@ export default function SimpleSupplierRtvWizardModal({
           reports: updatedBatchList,
           allReports,
           catalogProducts,
-          actorName,
-          isTestMode: isTest
+          actorName: cleanProcessedBy,
+          isTestMode: isTest,
+          customRecipients: wizardCustomRecipients
         });
       } catch (mailErr) {
         console.warn('Non-blocking error sending pickup notification email:', mailErr);
@@ -935,9 +1199,21 @@ export default function SimpleSupplierRtvWizardModal({
     }
   };
 
-  const completedPhotoCount = PICKUP_PHOTO_SLOTS.filter((s) => photoSlots[s.key]?.previewUrl).length;
+  const completedPhotoCount = PICKUP_PHOTO_SLOTS.filter((s) => Array.isArray(photoSlots[s.key]) && photoSlots[s.key].length > 0).length;
+  const totalPhotoCount = PICKUP_PHOTO_SLOTS.reduce(
+    (sum, s) => sum + (Array.isArray(photoSlots[s.key]) ? photoSlots[s.key].length : 0),
+    0
+  );
+  const newPendingPhotoCount = PICKUP_PHOTO_SLOTS.reduce(
+    (sum, s) => sum + (Array.isArray(photoSlots[s.key]) ? photoSlots[s.key].filter((p) => p?.file).length : 0),
+    0
+  );
+  const processedByMissing = !processedBy.trim();
   const chosenOptionObj = optionsList.find((o) => o.id === selectedOption);
-  const existingFormLabel = currentOutcome.formType === 'replacement' ? 'Replacement Form' : 'Debit Claim Form';
+  const existingFormLabel = !isSupplierStream
+    ? (currentOutcome.formType === 'replacement' ? 'Buffer Replacement Form' : 'Credit Return Form')
+    : (currentOutcome.formType === 'replacement' ? 'Replacement Form' : 'Debit Claim Form');
+  const activePartySuggestions = isSupplierStream ? supplierSuggestions : customerBranchSuggestions;
 
   return (
     <>
@@ -975,8 +1251,12 @@ export default function SimpleSupplierRtvWizardModal({
                 {step === 'choose'
                   ? 'Step 1 of 2: Choose 4-Choice Outcome (Edit or Update Anytime)'
                   : step === 'pickup'
-                    ? 'Step 2 of 2: Driver Pickup Verification, Supplier Emails & 5 Drive Photos'
-                    : 'Decision Saved — Ready for Warehouse & Supplier Records'}
+                    ? (isSupplierStream
+                      ? 'Step 2 of 2: Driver Pickup Verification, Supplier Emails & Drive Photos (Max 10/Slot)'
+                      : 'Step 2 of 2: Customer Handover Verification, Customer Emails & Drive Photos (Max 10/Slot)')
+                    : (isSupplierStream
+                      ? 'Decision Saved — Ready for Warehouse & Supplier Records'
+                      : 'Decision Saved — Ready for Warehouse & Customer Records')}
               </p>
             </div>
             <button
@@ -1136,35 +1416,71 @@ export default function SimpleSupplierRtvWizardModal({
               )}
             </div>
 
-            {/* Step 1: Supplier Company Name * field */}
+            {/* Step 1: Party Name (Supplier OR Customer / Store Branch) * & Manual Processed By * fields */}
             {step === 'choose' && (
-              <div className={`p-4 rounded-xl border-2 transition-colors ${
-                supplierMissing
-                  ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-400 dark:border-amber-600'
-                  : 'bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700'
-              }`}>
-                <label className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 mb-1.5">
-                  <Building2 className={`w-4 h-4 ${supplierMissing ? 'text-amber-600' : 'text-slate-500'}`} />
-                  <span>Supplier Company Name *</span>
-                  {supplierMissing && (
-                    <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 text-[10px]">
-                      Required for Claim / Replacement
-                    </span>
-                  )}
-                </label>
-                <input
-                  type="text"
-                  list="supplier-rtv-company-list"
-                  value={supplierName}
-                  onChange={(e) => setSupplierName(e.target.value)}
-                  placeholder="Type or pick the Supplier Company Name (e.g. Century Pacific Food, Nestle)..."
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
-                />
-                <datalist id="supplier-rtv-company-list">
-                  {supplierSuggestions.map((sup) => (
-                    <option key={sup} value={sup} />
-                  ))}
-                </datalist>
+              <div className="space-y-3">
+                <div className={`p-4 rounded-xl border-2 transition-colors ${
+                  supplierMissing
+                    ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-400 dark:border-amber-600'
+                    : 'bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700'
+                }`}>
+                  <label className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 mb-1.5">
+                    <Building2 className={`w-4 h-4 ${supplierMissing ? 'text-amber-600' : 'text-slate-500'}`} />
+                    <span>{isSupplierStream ? 'Supplier Company Name *' : 'Customer / Store Branch Name *'}</span>
+                    {supplierMissing && (
+                      <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 text-[10px]">
+                        {isSupplierStream ? 'Required for Claim / Replacement' : 'Required for Credit / Replacement'}
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    type="text"
+                    list="supplier-rtv-company-list"
+                    value={supplierName}
+                    onChange={(e) => setSupplierName(e.target.value)}
+                    placeholder={
+                      isSupplierStream
+                        ? 'Type or pick the Supplier Company Name (e.g. Century Pacific Food, Nestle)...'
+                        : 'Type or pick Customer / Store Branch Name...'
+                    }
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+                  />
+                  <datalist id="supplier-rtv-company-list">
+                    {activePartySuggestions.map((sup) => (
+                      <option key={sup} value={sup} />
+                    ))}
+                  </datalist>
+                </div>
+
+                <div className={`p-4 rounded-xl border-2 transition-colors ${
+                  processedByMissing
+                    ? 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700'
+                    : 'bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700'
+                }`}>
+                  <label
+                    htmlFor="wizard-processed-by-step1"
+                    className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 mb-1.5"
+                  >
+                    <UserCheck className={`w-4 h-4 ${processedByMissing ? 'text-amber-600' : 'text-emerald-600'}`} />
+                    <span>Processed By (Staff Full Name) *</span>
+                    {processedByMissing && (
+                      <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 text-[10px]">
+                        Required
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    id="wizard-processed-by-step1"
+                    type="text"
+                    value={processedBy}
+                    onChange={(e) => {
+                      setProcessedBy(e.target.value);
+                      if (errorMsg) setErrorMsg('');
+                    }}
+                    placeholder="Type staff full name processing this RMA (required for Scrap, Restock & Waiting)"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
+                  />
+                </div>
               </div>
             )}
 
@@ -1261,7 +1577,7 @@ export default function SimpleSupplierRtvWizardModal({
                           <Truck className="w-4 h-4 shrink-0" />
                           <span>
                             {isAlreadyPickedUp
-                              ? 'Edit Pickup Details, Emails & 5 Photos →'
+                              ? 'Edit Pickup Details, Emails & Photos →'
                               : 'Driver Is Here — Upload Photos & Print Letter →'}
                           </span>
                         </button>
@@ -1310,6 +1626,20 @@ export default function SimpleSupplierRtvWizardModal({
                           </div>
                         )}
 
+                        {/* Editable Lifecycle Email Recipients before Confirm & Save */}
+                        <div className="text-left">
+                          <EmailRecipientsEditor
+                            emailType={chosenOptionObj.id === 'scrap' ? 'rma_scrapped' : 'rma_restocked'}
+                            value={wizardCustomRecipients}
+                            onChange={setWizardCustomRecipients}
+                            compact={true}
+                            defaultExpanded={false}
+                            isTestMode={isTest}
+                            title="Lifecycle Email Recipients"
+                            extraHint="Customer AE email is appended automatically to CC if present."
+                          />
+                        </div>
+
                         <button
                           type="button"
                           disabled={isSaving}
@@ -1326,17 +1656,22 @@ export default function SimpleSupplierRtvWizardModal({
               </div>
             )}
 
-            {/* STEP 2: Supplier & Email Recipients + 5 Mandatory Photos + AI Driver ID Fill + Generate A4 Form */}
+            {/* STEP 2: Supplier & Email Recipients + 5 Multi-Photo Categories + AI Driver ID Fill + Generate Letter Form */}
             {step === 'pickup' && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
-                    <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                      <Truck className="w-5 h-5 text-amber-600" />
-                      <span>Driver Pickup Verification ({completedPhotoCount}/5 Photos)</span>
-                    </h3>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                        <Truck className="w-5 h-5 text-amber-600" />
+                        <span>Driver Pickup Verification ({completedPhotoCount}/5 Slots)</span>
+                      </h3>
+                      <span className="px-2.5 py-0.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white text-[11px] font-mono font-black">
+                        Total: {totalPhotoCount}/{MAX_TOTAL_PICKUP_PHOTOS} photos
+                      </span>
+                    </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Purpose: <strong className="text-slate-800 dark:text-slate-200">{chosenOptionObj?.title}</strong> • All photos auto-save into this RMA&apos;s Google Drive folder.
+                      Purpose: <strong className="text-slate-800 dark:text-slate-200">{chosenOptionObj?.title}</strong> • Max {MAX_PHOTOS_PER_SLOT} photos per slot ({MAX_TOTAL_PICKUP_PHOTOS} max total) — all auto-save into this RMA&apos;s Google Drive folder.
                     </p>
                   </div>
                   <button
@@ -1348,7 +1683,7 @@ export default function SimpleSupplierRtvWizardModal({
                   </button>
                 </div>
 
-                {/* Supplier Company Name * + Supplier Email To + CC(s) */}
+                {/* Party Name * + Party Email To + CC(s) */}
                 <div className={`p-4 rounded-xl border-2 space-y-3 ${
                   supplierMissing
                     ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-400 dark:border-amber-600'
@@ -1357,29 +1692,37 @@ export default function SimpleSupplierRtvWizardModal({
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
                       <Building2 className="w-4 h-4 text-amber-600" />
-                      <span>Supplier &amp; Claim Email Recipients</span>
+                      <span>
+                        {isSupplierStream
+                          ? 'Supplier & Claim Email Recipients'
+                          : 'Customer / Store & Handover Email Recipients'}
+                      </span>
                     </div>
                     {effectiveClaimNumber && (
                       <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 font-mono text-[10px] font-black">
-                        Claim ID Kept: {effectiveClaimNumber}
+                        {isSupplierStream ? `Claim ID Kept: ${effectiveClaimNumber}` : `Ref Kept: ${effectiveClaimNumber}`}
                       </span>
                     )}
                   </div>
 
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Supplier Company Name *
+                      {isSupplierStream ? 'Supplier Company Name *' : 'Customer / Store Branch Name *'}
                     </label>
                     <input
                       type="text"
                       list="supplier-rtv-company-list-step2"
                       value={supplierName}
                       onChange={(e) => setSupplierName(e.target.value)}
-                      placeholder="Type or pick the Supplier Company Name..."
+                      placeholder={
+                        isSupplierStream
+                          ? 'Type or pick the Supplier Company Name...'
+                          : 'Type or pick Customer / Store Branch Name...'
+                      }
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs sm:text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none"
                     />
                     <datalist id="supplier-rtv-company-list-step2">
-                      {supplierSuggestions.map((sup) => (
+                      {activePartySuggestions.map((sup) => (
                         <option key={sup} value={sup} />
                       ))}
                     </datalist>
@@ -1389,29 +1732,55 @@ export default function SimpleSupplierRtvWizardModal({
                     <div>
                       <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                         <Mail className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Supplier Email — Main Recipient (To)</span>
+                        <span>
+                          {isSupplierStream
+                            ? 'Supplier Email — Main Recipient (To)'
+                            : 'Customer / Store Email — Main Recipient (To)'}
+                        </span>
                       </label>
                       <input
                         type="email"
                         value={supplierEmailTo}
                         onChange={(e) => setSupplierEmailTo(e.target.value)}
-                        placeholder="e.g. claims@supplier.com"
+                        placeholder={isSupplierStream ? 'e.g. claims@supplier.com' : 'e.g. branch.manager@customer.com'}
                         className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none"
                       />
                     </div>
                     <div>
                       <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                         <Mail className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Supplier Email — CC(s)</span>
+                        <span>{isSupplierStream ? 'Supplier Email — CC(s)' : 'Customer / Store Email — CC(s)'}</span>
                       </label>
                       <input
                         type="text"
                         value={supplierEmailCc}
                         onChange={(e) => setSupplierEmailCc(e.target.value)}
-                        placeholder="comma-separated (e.g. rep@supplier.com, billing@supplier.com)"
+                        placeholder={
+                          isSupplierStream
+                            ? 'comma-separated (e.g. rep@supplier.com, billing@supplier.com)'
+                            : 'comma-separated (e.g. accounting@customer.com)'
+                        }
                         className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none"
                       />
                     </div>
+                  </div>
+
+                  {/* Base Internal / Finance Recipients for Pickup Email */}
+                  <div className="pt-1">
+                    <EmailRecipientsEditor
+                      emailType={(selectedOption === 'supplier_exchange' || selectedOption === 'customer_exchange') ? 'pickup_replacement' : 'pickup_debit_claim'}
+                      value={wizardCustomRecipients}
+                      onChange={setWizardCustomRecipients}
+                      compact={true}
+                      defaultExpanded={false}
+                      isTestMode={isTest}
+                      title="Base Internal / Finance Email Recipients"
+                      extraHint={
+                        isSupplierStream
+                          ? 'Any Supplier Email To / CC entered above merges cleanly with these base recipients.'
+                          : 'Any Customer / Store Email To / CC entered above merges cleanly with these base recipients.'
+                      }
+                    />
                   </div>
                 </div>
 
@@ -1424,16 +1793,17 @@ export default function SimpleSupplierRtvWizardModal({
                         ? 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/40 dark:border-amber-700 dark:text-amber-200'
                         : 'bg-sky-50 border-sky-200 text-sky-800 dark:bg-sky-950/40 dark:border-sky-700 dark:text-sky-200'
                   }`}>
-                    {isScanningId ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <Sparkles className="w-4 h-4 shrink-0" />}
+                    {(isScanningId || isScanningPlate) ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <Sparkles className="w-4 h-4 shrink-0" />}
                     <span>{ocrNotice.text}</span>
                   </div>
                 )}
 
-                {/* 5 Photo Checklist Grid */}
+                {/* 5 Photo Checklist Grid (Max 10 photos per category / 50 total) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {PICKUP_PHOTO_SLOTS.map((slot) => {
-                    const current = photoSlots[slot.key];
-                    const hasImage = Boolean(current?.previewUrl);
+                    const slotPhotos = Array.isArray(photoSlots[slot.key]) ? photoSlots[slot.key] : [];
+                    const hasImage = slotPhotos.length > 0;
+                    const atSlotLimit = slotPhotos.length >= MAX_PHOTOS_PER_SLOT || totalPhotoCount >= MAX_TOTAL_PICKUP_PHOTOS;
                     return (
                       <div
                         key={slot.key}
@@ -1447,7 +1817,7 @@ export default function SimpleSupplierRtvWizardModal({
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="w-5 h-5 rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-[10px] font-black flex items-center justify-center shrink-0">
                                 {slot.stepNum}
                               </span>
@@ -1459,26 +1829,55 @@ export default function SimpleSupplierRtvWizardModal({
                               {slot.hint}
                             </p>
                           </div>
-                          {hasImage && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-black ${
+                              hasImage
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                            }`}>
+                              ({slotPhotos.length}/{MAX_PHOTOS_PER_SLOT})
+                            </span>
+                            {hasImage && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
+                          </div>
                         </div>
 
                         {hasImage && (
-                          <div className="relative h-28 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100">
-                            <img
-                              src={current.previewUrl}
-                              alt={slot.title}
-                              className="w-full h-full object-cover"
-                            />
-                            {current.existingUrl && !current.file && (
-                              <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-slate-900/80 text-white text-[9px] font-bold">
-                                Saved in Drive
-                              </span>
-                            )}
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {slotPhotos.map((entry, idx) => (
+                              <div
+                                key={entry.id || `${slot.key}-${idx}`}
+                                className="relative h-20 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 group"
+                              >
+                                <img
+                                  src={entry.previewUrl}
+                                  alt={`${slot.title} #${idx + 1}`}
+                                  className="w-full h-full object-cover"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemovePhoto(slot.key, entry.id)}
+                                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-slate-950/85 hover:bg-rose-600 text-white flex items-center justify-center shadow transition-colors cursor-pointer"
+                                  aria-label={`Remove photo ${idx + 1} from ${slot.title}`}
+                                  title="Remove photo"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                                {entry.existingUrl && !entry.file && (
+                                  <span className="absolute bottom-0.5 left-0.5 px-1 py-0.5 rounded bg-slate-900/80 text-white text-[8px] font-bold">
+                                    Drive
+                                  </span>
+                                )}
+                              </div>
+                            ))}
                           </div>
                         )}
 
                         <div className="grid grid-cols-2 gap-2 mt-auto">
-                          <label className="cursor-pointer px-2.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors">
+                          <label className={`px-2.5 py-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                            atSlotLimit
+                              ? 'cursor-not-allowed bg-slate-300 dark:bg-slate-800 text-slate-500 opacity-60'
+                              : 'cursor-pointer bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white'
+                          }`}>
                             <Camera className="w-3.5 h-3.5" />
                             <span>Take Photo</span>
                             <input
@@ -1487,21 +1886,26 @@ export default function SimpleSupplierRtvWizardModal({
                               capture="environment"
                               className="hidden"
                               onChange={(e) => {
-                                handleSelectPhoto(slot.key, e.target.files?.[0]);
+                                handleSelectPhotos(slot.key, e.target.files);
                                 e.target.value = '';
                               }}
                             />
                           </label>
 
-                          <label className="cursor-pointer px-2.5 py-2 rounded-lg bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors">
+                          <label className={`px-2.5 py-2 rounded-lg border text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                            atSlotLimit
+                              ? 'cursor-not-allowed bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 opacity-60'
+                              : 'cursor-pointer bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200'
+                          }`}>
                             <Upload className="w-3.5 h-3.5" />
-                            <span>Choose File</span>
+                            <span>Choose Files</span>
                             <input
                               type="file"
                               accept="image/*"
+                              multiple
                               className="hidden"
                               onChange={(e) => {
-                                handleSelectPhoto(slot.key, e.target.files?.[0]);
+                                handleSelectPhotos(slot.key, e.target.files);
                                 e.target.value = '';
                               }}
                             />
@@ -1512,12 +1916,12 @@ export default function SimpleSupplierRtvWizardModal({
                   })}
                 </div>
 
-                {/* Auto-filled Driver Info, Valid Gov't ID & Truck Plate */}
+                {/* Auto-filled Driver Info, Valid Gov't ID, Truck Plate & Manual Processed By */}
                 <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
                       <UserCheck className="w-4 h-4 text-emerald-600" />
-                      <span>Driver / Representative &amp; Truck Details (Printed on Letter Form)</span>
+                      <span>Driver / Representative, Truck &amp; Staff Details (Printed on Letter Form)</span>
                     </div>
                     <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
                       Accepts ANY Valid PH Gov’t or Legal ID
@@ -1580,15 +1984,44 @@ export default function SimpleSupplierRtvWizardModal({
                     </div>
                   </div>
 
+                  <div className={`p-3 rounded-xl border ${
+                    processedByMissing
+                      ? 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
+                  }`}>
+                    <label
+                      htmlFor="wizard-processed-by-step2"
+                      className="flex items-center gap-1.5 text-[11px] font-black text-slate-700 dark:text-slate-200 mb-1"
+                    >
+                      <span>Processed By (Staff Full Name) *</span>
+                      {processedByMissing && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 text-[9px]">
+                          Required
+                        </span>
+                      )}
+                    </label>
+                    <input
+                      id="wizard-processed-by-step2"
+                      type="text"
+                      value={processedBy}
+                      onChange={(e) => {
+                        setProcessedBy(e.target.value);
+                        if (errorMsg) setErrorMsg('');
+                      }}
+                      placeholder="Type staff full name preparing & releasing this pickup"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                    />
+                  </div>
+
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Note: Pickup Date &amp; Time, Driver Contact #, Driver Signature, and Staff Name &amp; Signature stay blank on the printed Letter sheet so both parties can sign &amp; fill physically at handover.
+                    Note: Pickup Date &amp; Time, Driver Contact #, Driver Signature, and Releasing Staff&apos;s Signature stay blank on the printed Letter sheet so both parties can sign &amp; fill physically at handover.
                   </p>
                 </div>
 
                 {/* Final Confirm Button */}
                 <button
                   type="button"
-                  disabled={isSaving || isScanningId}
+                  disabled={isSaving || isScanningId || isScanningPlate}
                   onClick={handleCompletePickupAndGenerateForm}
                   className="w-full px-5 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-black flex items-center justify-center gap-2 shadow-md transition-colors disabled:opacity-50 cursor-pointer"
                 >
@@ -1597,8 +2030,10 @@ export default function SimpleSupplierRtvWizardModal({
                     {isSaving
                       ? (uploadProgress || 'Saving & uploading photos...')
                       : isAlreadyPickedUp
-                        ? 'Save Updates & Open Letter Form (No Duplicate Claim ID)'
-                        : 'Upload 5 Photos to RMA Drive, Mark PICKED UP & Print Letter Form'}
+                        ? (newPendingPhotoCount > 0
+                          ? `Upload ${newPendingPhotoCount} New Photo${newPendingPhotoCount === 1 ? '' : 's'}, Save Updates & Open Letter Form`
+                          : 'Save Updates & Open Letter Form (No Duplicate Claim ID)')
+                        : `Upload ${totalPhotoCount} Photo${totalPhotoCount === 1 ? '' : 's'} to RMA Drive, Mark PICKED UP & Print Letter Form`}
                   </span>
                 </button>
               </div>

@@ -1,11 +1,14 @@
 import { supabase } from './supabase.js';
 import { sendJson, setCorsHeaders } from './auth.js';
+import { authorizeCronOrAdmin } from './cronAuth.js';
 import {
   createSmtpTransport,
   formatTestEmailSubject,
   escapeEmailHtml,
   getDiagnosticHelp,
-  DEFAULT_EMAIL_RECIPIENTS
+  DEFAULT_EMAIL_RECIPIENTS,
+  DEFAULT_SANDBOX_EMAIL,
+  normalizeSandboxEmail
 } from './smtpMailer.js';
 import {
   buildRmaMatrixXlsxBytes,
@@ -14,20 +17,18 @@ import {
   formatManilaTimestampDisplay
 } from '../../src/utils/exportMatrixXlsx.js';
 import { isTestRecord } from '../../src/utils/rmaHelpers.js';
+import {
+  normalizeTimeHhmm,
+  formatTime12hFromHhmm,
+  hasReachedManilaSchedule,
+  getManilaTimeHhmm
+} from '../../src/utils/followUpWorkflow.js';
 
 const EMAIL_RECIPIENTS_KEY = 'email_recipients';
+const EMAIL_RECIPIENTS_BY_TYPE_KEY = 'email_recipients_by_type';
+const DAILY_MATRIX_CONFIG_KEY = 'daily_matrix_config';
 const LAST_SENT_PHT_KEY = 'daily_matrix_last_sent_pht_date';
-
-const KNOWN_ADMIN_EMAILS = new Map([
-  ['finance2@keysysincorporated.com', 'super_admin'],
-  ['alleli.almaida@ph.keysys.com', 'admin'],
-  ['finance@a2z2go.net', 'admin'],
-  ['accountspayable@keysysincorporated.com', 'admin'],
-  ['finance4@keysysincorporated.com', 'admin'],
-  ['mark.aquino@a2z2go.net', 'admin'],
-  ['ralph.alido@a2z2go.net', 'admin'],
-  ['mgan@pingconmarketing.com', 'admin']
-]);
+const TEST_SANDBOX_EMAIL_KEY = 'test_sandbox_email';
 
 function splitEmailList(raw) {
   if (!raw) return [];
@@ -54,66 +55,6 @@ function subtractCalendarDaysYmd(ymd, days) {
   return utc.toISOString().slice(0, 10);
 }
 
-async function authorizeDailyMatrixCaller(req) {
-  const cronSecret = String(process.env.CRON_SECRET || '').trim();
-  const authHeader = String(req.headers['authorization'] || req.headers['Authorization'] || '').trim();
-  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-  const xCronSecret = String(req.headers['x-cron-secret'] || '').trim();
-
-  if (cronSecret && (xCronSecret === cronSecret || bearerToken === cronSecret)) {
-    return { authorized: true, callerType: 'cron', actor: 'Vercel Cron Scheduler', role: 'cron' };
-  }
-
-  // When CRON_SECRET env var is unset on Vercel, trust Vercel's internal edge-stripped cron header
-  if (!cronSecret && req.headers['x-vercel-cron'] === '1' && process.env.VERCEL === '1') {
-    return { authorized: true, callerType: 'cron', actor: 'Vercel Cron Scheduler', role: 'cron' };
-  }
-
-  if (!bearerToken) {
-    return {
-      authorized: false,
-      status: 401,
-      error: 'UNAUTHORIZED',
-      message: 'Authentication required. Provide valid CRON_SECRET or Admin Bearer JWT.'
-    };
-  }
-
-  const { data: userData, error: userErr } = await supabase.auth.getUser(bearerToken);
-  const userEmail = String(userData?.user?.email || '').trim().toLowerCase();
-  if (userErr || !userEmail) {
-    return {
-      authorized: false,
-      status: 401,
-      error: 'INVALID_SESSION',
-      message: 'Session token is invalid or expired. Please sign in again.'
-    };
-  }
-
-  let empRow = null;
-  try {
-    const { data } = await supabase
-      .from('admin_users')
-      .select('email, role, is_active')
-      .eq('email', userEmail)
-      .maybeSingle();
-    empRow = data || null;
-  } catch {}
-
-  const role = empRow?.role || KNOWN_ADMIN_EMAILS.get(userEmail) || '';
-  const isActive = empRow ? empRow.is_active !== false : KNOWN_ADMIN_EMAILS.has(userEmail);
-
-  if (!isActive || !['super_admin', 'admin'].includes(role)) {
-    return {
-      authorized: false,
-      status: 403,
-      error: 'FORBIDDEN',
-      message: `Admin or Super Admin privileges required. Account (${userEmail}) has role "${role || 'none'}".`
-    };
-  }
-
-  return { authorized: true, callerType: 'admin', actor: userEmail, role };
-}
-
 function buildDailyMatrixEmailHtml({
   dataset,
   startDate,
@@ -123,7 +64,9 @@ function buildDailyMatrixEmailHtml({
   toEmail,
   ccList,
   isTestMode,
-  triggeredBy
+  triggeredBy,
+  sandboxEmail = DEFAULT_SANDBOX_EMAIL,
+  targetTimePht = '13:00'
 }) {
   const {
     lineCount,
@@ -157,7 +100,7 @@ function buildDailyMatrixEmailHtml({
     <body>
       <div class="container">
         <div class="header">
-          <span class="badge">${isTestMode ? '[TEST] DAILY MATRIX SANDBOX' : 'DAILY 1:00 PM PHT REPORT'}</span>
+          <span class="badge">${isTestMode ? '[TEST] DAILY MATRIX SANDBOX' : `DAILY ${escapeEmailHtml(formatTime12hFromHhmm(targetTimePht))} PHT REPORT`}</span>
           <h1 class="title">${isTestMode ? '[TEST] ' : ''}Daily Overall RMA Matrix Report</h1>
           <div style="font-size: 12px; opacity: 0.9; margin-top: 4px;">
             Customer Hub + Supplier RTV Combined Rolling Summary
@@ -166,7 +109,7 @@ function buildDailyMatrixEmailHtml({
         <div class="content">
           ${isTestMode ? `
           <div style="background: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; font-weight: 700; font-size: 12px;">
-            [TEST] Sandbox Simulation Run — Redirected exclusively to mgan@a2z2go.net. Live recipients bypassed.
+            [TEST] Sandbox Simulation Run — Redirected exclusively to ${escapeEmailHtml(sandboxEmail)}. Live recipients bypassed.
           </div>` : ''}
 
           <div style="background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 12px 16px; border-radius: 10px; margin-bottom: 16px; font-size: 13px; font-weight: 700;">
@@ -229,7 +172,7 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
     }, req);
   }
 
-  const caller = await authorizeDailyMatrixCaller(req);
+  const caller = await authorizeCronOrAdmin(req);
   if (!caller.authorized) {
     return sendJson(res, caller.status, {
       success: false,
@@ -241,6 +184,7 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
   const body = (payload && typeof payload === 'object') ? payload : {};
   const force = req.query?.force === 'true' || req.query?.force === '1' || body.force === true;
   const dryRun = req.query?.dryRun === 'true' || req.query?.dryRun === '1' || body.dryRun === true;
+  const respectSchedule = req.query?.respectSchedule === 'true' || req.query?.respectSchedule === '1' || body.respectSchedule === true;
   const includeAttachmentBase64 =
     req.query?.includeAttachmentBase64 === 'true' ||
     req.query?.includeAttachmentBase64 === '1' ||
@@ -252,15 +196,22 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
     Boolean(body.isTestMode === true || req.query?.isTestMode === 'true' || req.query?.mode === 'test');
 
   const todayManila = toManilaDateKey(new Date());
-  const endDate = sanitizeYmd(body.endDate || req.query?.endDate) || todayManila;
-  const startDate = sanitizeYmd(body.startDate || req.query?.startDate) || subtractCalendarDaysYmd(endDate, 13);
+  const requestedStartDate = sanitizeYmd(body.startDate || req.query?.startDate);
+  const requestedEndDate = sanitizeYmd(body.endDate || req.query?.endDate);
+  const requestedStreamRaw = String(body.stream || req.query?.stream || '').trim();
 
   try {
-    // 1. Read email recipients & last daily cron marker from rma_settings
+    // 1. Read global recipients, per-type email profiles, matrix schedule config, and last daily cron marker from rma_settings
     const { data: settingsRows, error: settingsErr } = await supabase
       .from('rma_settings')
       .select('key, value')
-      .in('key', [EMAIL_RECIPIENTS_KEY, LAST_SENT_PHT_KEY]);
+      .in('key', [
+        EMAIL_RECIPIENTS_KEY,
+        EMAIL_RECIPIENTS_BY_TYPE_KEY,
+        DAILY_MATRIX_CONFIG_KEY,
+        LAST_SENT_PHT_KEY,
+        TEST_SANDBOX_EMAIL_KEY
+      ]);
 
     if (settingsErr) {
       return sendJson(res, 500, {
@@ -272,7 +223,42 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
 
     const settingsMap = new Map((settingsRows || []).map((row) => [row.key, row.value]));
     const savedRecipients = settingsMap.get(EMAIL_RECIPIENTS_KEY);
+    const profilesByType = (settingsMap.get(EMAIL_RECIPIENTS_BY_TYPE_KEY) && typeof settingsMap.get(EMAIL_RECIPIENTS_BY_TYPE_KEY) === 'object')
+      ? settingsMap.get(EMAIL_RECIPIENTS_BY_TYPE_KEY)
+      : {};
+    const matrixConfig = (settingsMap.get(DAILY_MATRIX_CONFIG_KEY) && typeof settingsMap.get(DAILY_MATRIX_CONFIG_KEY) === 'object')
+      ? settingsMap.get(DAILY_MATRIX_CONFIG_KEY)
+      : {};
+    const sandboxEmail = normalizeSandboxEmail(
+      body.sandboxEmail || settingsMap.get(TEST_SANDBOX_EMAIL_KEY) || DEFAULT_SANDBOX_EMAIL
+    );
+    const autoEnabled = matrixConfig.autoEnabled !== false;
+    const targetTimePht = normalizeTimeHhmm(matrixConfig.autoSendTimePht, '13:00');
     const lastSentPhtDate = String(settingsMap.get(LAST_SENT_PHT_KEY) || '').trim();
+
+    if (respectSchedule && !force && !dryRun && !requestedTestMode) {
+      const currentPhtTime = getManilaTimeHhmm(new Date());
+      if (!autoEnabled) {
+        return sendJson(res, 200, {
+          success: true,
+          skipped: true,
+          reason: 'AUTO_DISABLED',
+          phtDate: todayManila,
+          phtTime: currentPhtTime,
+          targetTimePht
+        }, req);
+      }
+      if (!hasReachedManilaSchedule(targetTimePht, new Date())) {
+        return sendJson(res, 200, {
+          success: true,
+          skipped: true,
+          reason: 'BEFORE_SCHEDULED_TIME',
+          phtDate: todayManila,
+          phtTime: currentPhtTime,
+          targetTimePht
+        }, req);
+      }
+    }
 
     if (!force && !dryRun && !requestedTestMode && lastSentPhtDate === todayManila) {
       return sendJson(res, 200, {
@@ -283,6 +269,32 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
         message: `Daily Overall RMA Matrix already dispatched for Manila date ${todayManila}.`
       }, req);
     }
+
+    // Resolve date window: explicit request override -> saved matrixConfig (custom or rollingDays) -> default 14 days
+    let endDate = requestedEndDate;
+    let startDate = requestedStartDate;
+    if (!startDate || !endDate) {
+      if (matrixConfig.rangeMode === 'custom' && sanitizeYmd(matrixConfig.startDate) && sanitizeYmd(matrixConfig.endDate)) {
+        startDate = startDate || sanitizeYmd(matrixConfig.startDate);
+        endDate = endDate || sanitizeYmd(matrixConfig.endDate);
+      } else {
+        const rollingDays = Math.max(1, Math.min(365, parseInt(matrixConfig.rollingDays, 10) || 14));
+        endDate = endDate || todayManila;
+        startDate = startDate || subtractCalendarDaysYmd(endDate, rollingDays - 1);
+      }
+    }
+
+    const validStreams = ['overall', 'customer_inbound', 'supplier_outbound'];
+    const resolvedStream = validStreams.includes(requestedStreamRaw)
+      ? requestedStreamRaw
+      : (validStreams.includes(matrixConfig.stream) ? matrixConfig.stream : 'overall');
+
+    const explicitZeroFlag = body.includeZeroCatalogSkus !== undefined
+      ? body.includeZeroCatalogSkus
+      : (req.query?.includeZeroCatalogSkus !== undefined ? req.query.includeZeroCatalogSkus === 'true' : undefined);
+    const resolvedIncludeZero = explicitZeroFlag !== undefined
+      ? Boolean(explicitZeroFlag)
+      : Boolean(matrixConfig.includeZeroCatalogSkus);
 
     // 2. Query Live or Test records in parallel (strictly isolated via isTestRecord)
     const [reportsRes, productsRes, memosRes] = await Promise.all([
@@ -309,28 +321,70 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
     // 3. Build identical Microsoft Excel-valid OOXML .xlsx buffer used in browser download
     const { bytes, dataset } = buildRmaMatrixXlsxBytes({
       reports: scopedReports,
-      products: allProducts,
+      catalogProducts: allProducts,
       creditMemos: scopedMemos,
       startDate,
       endDate,
-      activeStream: 'all',
-      isTestMode: requestedTestMode
+      stream: resolvedStream,
+      isTestMode: requestedTestMode,
+      includeZeroCatalogSkus: resolvedIncludeZero
     });
 
-    const configuredToList = splitEmailList(savedRecipients?.toEmail);
-    const configuredTo = configuredToList[0] || DEFAULT_EMAIL_RECIPIENTS.toEmail;
-    const configuredCc = Array.isArray(savedRecipients?.baseCcList)
-      ? splitEmailList(savedRecipients.baseCcList).filter((e) => e !== configuredTo)
-      : DEFAULT_EMAIL_RECIPIENTS.baseCcList.filter((e) => e !== configuredTo);
+    // Resolve recipients strictly honoring overrides -> per-type matrix profile -> matrixConfig -> global email_recipients -> defaults
+    const autoProfile = profilesByType?.daily_matrix_auto;
+    const manualProfile = profilesByType?.manual_matrix;
+    const activeProfile = caller.callerType === 'cron'
+      ? (autoProfile || manualProfile)
+      : (manualProfile || autoProfile);
 
-    const finalTo = requestedTestMode ? 'mgan@a2z2go.net' : configuredTo;
+    const reqToOverride = caller.callerType !== 'cron' ? splitEmailList(body.toList ?? body.to) : [];
+    const profileToList = splitEmailList(activeProfile?.toList ?? activeProfile?.toEmail);
+    const matrixCfgToList = splitEmailList(matrixConfig?.toList ?? matrixConfig?.toEmail);
+    const globalToList = splitEmailList(savedRecipients?.toList ?? savedRecipients?.toEmail);
+
+    const configuredToList = reqToOverride.length > 0
+      ? reqToOverride
+      : profileToList.length > 0
+        ? profileToList
+        : matrixCfgToList.length > 0
+          ? matrixCfgToList
+          : globalToList.length > 0
+            ? globalToList
+            : [DEFAULT_EMAIL_RECIPIENTS.toEmail];
+
+    const hasExplicitCcOverride = caller.callerType !== 'cron' && (body.cc !== undefined || body.ccList !== undefined);
+    const rawCcSource = hasExplicitCcOverride
+      ? (body.ccList ?? body.cc)
+      : (activeProfile && Array.isArray(activeProfile.ccList))
+        ? activeProfile.ccList
+        : Array.isArray(matrixConfig?.ccList)
+          ? matrixConfig.ccList
+          : Array.isArray(savedRecipients?.baseCcList)
+            ? savedRecipients.baseCcList
+            : DEFAULT_EMAIL_RECIPIENTS.baseCcList;
+
+    const configuredToSet = new Set(configuredToList);
+    const configuredCc = splitEmailList(rawCcSource).filter((e) => !configuredToSet.has(e));
+    const configuredTo = configuredToList.join(', ');
+
+    const finalTo = requestedTestMode ? sandboxEmail : configuredTo;
     const finalCc = requestedTestMode ? [] : configuredCc;
 
     const hhmm = formatManilaHhmm(new Date());
     const generatedManila = formatManilaTimestampDisplay(new Date());
-    const filename = `${requestedTestMode ? 'TEST_' : ''}Overall_RMA_Matrix_Report_${startDate}_to_${endDate} ${hhmm}.xlsx`;
+    const streamSlug = resolvedStream === 'supplier_outbound'
+      ? 'Supplier_RTV_Matrix_Report'
+      : resolvedStream === 'customer_inbound'
+        ? 'Customer_Hub_Matrix_Report'
+        : 'Overall_RMA_Matrix_Report';
+    const streamTitle = resolvedStream === 'supplier_outbound'
+      ? 'Supplier RTV Matrix Report'
+      : resolvedStream === 'customer_inbound'
+        ? 'Customer Hub Matrix Report'
+        : 'Overall RMA Matrix Report';
+    const filename = `${requestedTestMode ? 'TEST_' : ''}${streamSlug}_${startDate}_to_${endDate} ${hhmm}.xlsx`;
 
-    const baseSubject = `[Daily RMA Matrix Report] Overall RMA Matrix (${startDate} to ${endDate}) — ${dataset.grandTotalPcs} pcs`;
+    const baseSubject = `[Daily RMA Matrix Report] ${streamTitle} (${startDate} to ${endDate}) — ${dataset.grandTotalPcs} pcs`;
     const finalSubject = formatTestEmailSubject(baseSubject, requestedTestMode);
     const finalFromName = requestedTestMode
       ? '[TEST] Pingcon RMA Operations Portal'
@@ -345,7 +399,9 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
       toEmail: finalTo,
       ccList: finalCc,
       isTestMode: requestedTestMode,
-      triggeredBy: caller.actor
+      triggeredBy: caller.actor,
+      sandboxEmail,
+      targetTimePht
     });
 
     const textBody = `${requestedTestMode ? '[TEST] ' : ''}Daily Overall RMA Matrix Report (${startDate} to ${endDate})\nLine Items: ${dataset.lineCount}, SKUs: ${dataset.monitoredSkuCount}, Total Pcs: ${dataset.grandTotalPcs}, Total Value: PHP ${dataset.grandTotalValue.toFixed(2)}\nGenerated (PHT): ${generatedManila}\nTo: ${finalTo}${finalCc.length ? `\nCC: ${finalCc.join(', ')}` : ''}`;
@@ -406,10 +462,16 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
       success: true,
       dryRun,
       isTestMode: requestedTestMode,
+      stream: resolvedStream,
+      includeZeroCatalogSkus: resolvedIncludeZero,
       phtDate: todayManila,
       startDate,
       endDate,
       to: finalTo,
+      toList: requestedTestMode ? [sandboxEmail] : configuredToList,
+      sandboxEmail,
+      targetTimePht,
+      autoEnabled,
       cc: finalCc,
       subject: finalSubject,
       fromName: finalFromName,

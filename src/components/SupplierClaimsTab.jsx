@@ -16,14 +16,22 @@ import {
   ChevronDown,
   Unlock,
   FileSpreadsheet,
-  QrCode
+  QrCode,
+  Send,
+  Clock,
+  ShieldCheck
 } from 'lucide-react';
 import { exportSupplierOutboundClaimsToXlsx } from '../utils/exportCsv';
 import { catalogService } from '../services/catalogService';
 import { notificationService } from '../services/notificationService';
 import TablePagination from './TablePagination';
 import ImageLightboxModal from './ImageLightboxModal';
+import SupplierFollowUpModal from './SupplierFollowUpModal';
 import { supplierClaimService } from '../services/supplierClaimService';
+import {
+  getCleanHumanWorkflowStatus,
+  isPlaceholderSupplier
+} from '../utils/followUpWorkflow';
 import { 
   isBatchManifest, 
   getReportManifestItems, 
@@ -77,6 +85,99 @@ export default function SupplierClaimsTab({
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState('created_at');
   const [updatingQueueId, setUpdatingQueueId] = useState(null);
+  const [followUpModalReport, setFollowUpModalReport] = useState(null);
+  const [isRunningFollowUpBatch, setIsRunningFollowUpBatch] = useState(false);
+  const [followUpBanner, setFollowUpBanner] = useState(null);
+
+  const handleRunAllFollowUps = async () => {
+    setIsRunningFollowUpBatch(true);
+    setFollowUpBanner(null);
+    try {
+      const res = await notificationService.runDailyFollowUpNow({
+        isTestMode: Boolean(isTestMode),
+        operation: 'run_all',
+        force: false
+      });
+      if (res?.success) {
+        const s = res.summary || {};
+        setFollowUpBanner({
+          type: 'success',
+          text: `SLA Follow-Up Check complete: ${s.followUpsSent || 0} reminder(s) dispatched, ${s.autoDisposed || 0} overdue (>10d) auto-disposed.`
+        });
+        if (onRefresh) onRefresh();
+      } else {
+        setFollowUpBanner({
+          type: 'error',
+          text: res?.error || res?.errors?.[0]?.message || 'Could not complete follow-up check.'
+        });
+      }
+    } catch (err) {
+      setFollowUpBanner({ type: 'error', text: err?.message || 'Follow-up check failed.' });
+    } finally {
+      setIsRunningFollowUpBatch(false);
+    }
+  };
+
+  const handleRowSendFollowUp = async (report) => {
+    const statusInfo = getCleanHumanWorkflowStatus(report, savedProductsList);
+    const wf = statusInfo.workflow;
+    if (wf.isClosed) return;
+    if (!wf.party.hasValidSupplier || (!isTestMode && !isTestRecord(report) && wf.party.toEmails.length === 0)) {
+      setFollowUpModalReport(report);
+      return;
+    }
+    const rowKey = report.id || report.rma_number;
+    setUpdatingQueueId(rowKey);
+    setFollowUpBanner(null);
+    try {
+      const res = await notificationService.runDailyFollowUpNow({
+        isTestMode: Boolean(isTestMode || isTestRecord(report)),
+        force: true,
+        rmaNumber: report.rma_number,
+        operation: 'send_single'
+      });
+      if (res?.success) {
+        const disposed = (res?.summary?.autoDisposed || 0) > 0;
+        setFollowUpBanner({
+          type: 'success',
+          text: disposed
+            ? `${report.rma_number} exceeded Day 10 and was auto-disposed & closed.`
+            : `Sent Day ${wf.calendarDay} of 10 follow-up for ${report.rma_number}.`
+        });
+        if (onRefresh) onRefresh();
+      } else {
+        setFollowUpBanner({
+          type: 'error',
+          text: res?.error || res?.errors?.[0]?.message || `Could not send follow-up for ${report.rma_number}.`
+        });
+      }
+    } finally {
+      setUpdatingQueueId(null);
+    }
+  };
+
+  const handleRowCloseCase = async (report) => {
+    const rowKey = report.id || report.rma_number;
+    setUpdatingQueueId(rowKey);
+    setFollowUpBanner(null);
+    try {
+      await catalogService.closeFollowUpCase(report, {
+        markPickedUp: true,
+        reason: 'Picked Up — Case Closed',
+        actorName: currentUser?.name || currentUser?.email || 'Admin'
+      });
+      setFollowUpBanner({
+        type: 'success',
+        text: `${report.rma_number} marked Picked Up — Case Closed (countdown stopped).`
+      });
+      if (onRefresh) onRefresh();
+      window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'followup-closed', rmaNumber: report.rma_number } }));
+    } catch (err) {
+      setFollowUpBanner({ type: 'error', text: err?.message || 'Failed closing case.' });
+    } finally {
+      setUpdatingQueueId(null);
+    }
+  };
 
   const handleConfirmCoworkerAction = async (item, targetStatus) => {
     if (!item || updatingQueueId) return;
@@ -876,6 +977,19 @@ export default function SupplierClaimsTab({
                   </button>
                 )}
 
+                {/* Consolidated Multi-Select QR Print / Save */}
+                {onViewQR && (
+                  <button
+                    type="button"
+                    onClick={() => onViewQR(selectedItems.length === 1 ? selectedItems[0] : selectedItems)}
+                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-black flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                    title="Open Consolidated QR Print & PNG Studio for all selected Supplier RTVs"
+                  >
+                    <QrCode className="w-3.5 h-3.5 shrink-0" />
+                    <span>🖨️ Print / Save QRs ({selectedRmaIds.size})</span>
+                  </button>
+                )}
+
                 {/* 3. Delete Selected */}
                 {canDeleteReports && onRequestBulkDeleteReports && (
                   <button
@@ -901,6 +1015,17 @@ export default function SupplierClaimsTab({
           </div>
 
           <div className="flex items-center gap-2 ml-auto flex-wrap">
+            <button
+              type="button"
+              onClick={handleRunAllFollowUps}
+              disabled={isRunningFollowUpBatch}
+              className="text-xs text-amber-900 dark:text-amber-200 hover:bg-amber-200/70 dark:hover:bg-amber-900/50 flex items-center gap-1.5 font-black cursor-pointer bg-amber-100 dark:bg-amber-950/70 border border-amber-300 dark:border-amber-700 px-3 py-1.5 rounded-xl shadow-2xs transition-all disabled:opacity-50"
+              title="Run 10-Calendar-Day Pickup Follow-Up Emails & Auto-Dispose Check Now"
+            >
+              <Clock className="w-3.5 h-3.5 text-amber-700 dark:text-amber-300" />
+              <span>{isRunningFollowUpBatch ? 'Running Follow-Ups...' : 'Run Follow-Ups & 10-Day Check Now'}</span>
+            </button>
+
             {onOpenMatrixExport && (
               <button
                 type="button"
@@ -925,6 +1050,22 @@ export default function SupplierClaimsTab({
           </div>
         </div>
       </div>
+
+      {followUpBanner && (
+        <div className={`px-4 py-2.5 rounded-2xl border text-xs font-bold flex items-center justify-between gap-2 ${
+          followUpBanner.type === 'success'
+            ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+            : 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-700 text-rose-900 dark:text-rose-200'
+        }`}>
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 shrink-0" />
+            <span>{followUpBanner.text}</span>
+          </div>
+          <button type="button" onClick={() => setFollowUpBanner(null)} className="opacity-70 hover:opacity-100 cursor-pointer">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* RTV Items Table */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
@@ -1084,6 +1225,8 @@ export default function SupplierClaimsTab({
                   const photos = getPhotos(r);
                   const existingClaim = getClaimForReport(r);
                   const outcome = formatFourChoiceOutcome(r);
+                  const statusInfo = getCleanHumanWorkflowStatus(r, savedProductsList);
+                  const wf = statusInfo.workflow;
                   const isManifest = !r.is_unpacked_manifest_item && isBatchManifest(r, reportsList);
                   const manifestChildren = isManifest ? getReportManifestItems(r, reportsList) : [];
                   const manifestKey = r.id || r.rma_number;
@@ -1270,9 +1413,30 @@ export default function SupplierClaimsTab({
                         </td>
 
                         {/* Vendor / Supplier & Warehouse Bin */}
-                        <td className="p-3">
-                          <div className={`font-bold ${res.supplier === 'Pending Assignment' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`}>
-                            {res.supplier}
+                        <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`font-bold ${isPlaceholderSupplier(res.supplier) ? 'text-amber-600 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                              {res.supplier}
+                            </span>
+                            {(isPlaceholderSupplier(res.supplier) || wf.party.toEmails.length === 0) ? (
+                              <button
+                                type="button"
+                                onClick={() => setFollowUpModalReport(r)}
+                                className="px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[10px] font-black cursor-pointer whitespace-nowrap"
+                                title="Set Supplier Name, Follow-Up Emails (TO/CC), and 10-Day Countdown SLA"
+                              >
+                                + Set Supplier &amp; Email
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setFollowUpModalReport(r)}
+                                className="px-1.5 py-0.2 rounded-md bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9.5px] font-mono cursor-pointer truncate max-w-[155px]"
+                                title="Configure Supplier Name, Follow-Up Emails & 10-Day Countdown SLA"
+                              >
+                                📧 {wf.party.toEmails[0]}
+                              </button>
+                            )}
                           </div>
                           <div className="text-[10px] text-slate-400 font-mono mt-0.5">
                             Bin: <strong className="text-slate-600 dark:text-slate-300">{normalizeWarehouseLocation(r.warehouse_location, r)}</strong>
@@ -1318,6 +1482,12 @@ export default function SupplierClaimsTab({
                             <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
                               {outcome.label}
                             </span>
+                            <div className="flex items-center gap-1 flex-wrap">
+                              <span className={`px-2 py-0.5 rounded-full text-[9.5px] font-black border inline-flex items-center gap-1 whitespace-nowrap ${statusInfo.badgeColor}`}>
+                                <Clock className="w-2.5 h-2.5 shrink-0" />
+                                <span>{wf.isCountdownActive ? wf.step2.text : statusInfo.label}</span>
+                              </span>
+                            </div>
                             {outcome.choiceKey === 'scrap' && (
                               <div className="text-[10px] font-bold">
                                 <span className={`px-1.5 py-0.5 rounded border inline-block ${
@@ -1420,6 +1590,31 @@ export default function SupplierClaimsTab({
                               >
                                 {outcome.hasDecision ? '✏️ Edit Claim / 4-Choice' : '⚡ 4-Choice / Pickup'}
                               </button>
+                            )}
+
+                            {/* 1B. Daily 10-Day Pickup Follow-Up & Case Close Controls */}
+                            {!wf.isClosed && (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={updatingQueueId === (r.id || r.rma_number)}
+                                  onClick={() => handleRowSendFollowUp(r)}
+                                  className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                  title="Send 10-Calendar-Day Pickup Follow-Up Email now"
+                                >
+                                  <Send className="w-2.5 h-2.5" />
+                                  <span>📧 Send Follow-Up</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={updatingQueueId === (r.id || r.rma_number)}
+                                  onClick={() => handleRowCloseCase(r)}
+                                  className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                  title="Mark Picked Up & Close 4-Step Workflow Case (stops 10-day countdown)"
+                                >
+                                  <span>✓ Case Close</span>
+                                </button>
+                              </>
                             )}
 
                             {/* 2. View / Print Debit Claim or Replacement Form when generated */}
@@ -1758,6 +1953,20 @@ export default function SupplierClaimsTab({
           onClose={() => setLocalLightboxPhoto(null)}
         />
       )}
+
+      {/* Supplier, Email & 10-Day SLA Follow-Up Modal */}
+      <SupplierFollowUpModal
+        isOpen={Boolean(followUpModalReport)}
+        onClose={() => setFollowUpModalReport(null)}
+        report={followUpModalReport}
+        catalogProducts={savedProductsList}
+        isTestMode={isTestMode}
+        currentUser={currentUser}
+        onUpdated={() => {
+          if (onRefresh) onRefresh();
+          window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'followup-updated' } }));
+        }}
+      />
 
     </div>
   );

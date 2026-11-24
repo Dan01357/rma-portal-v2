@@ -3,6 +3,7 @@
  * Client-side high-resolution PNG & SVG generation for mobile and desktop devices.
  */
 import { formatQuantityWithPackSize, formatManifestBreakdown, formatDateYmd, formatDateTimeYmdHm } from './rmaHelpers';
+import { drawUnifiedRmaQrCard, normalizeRmaQrCardData } from './customStickerCanvas';
 
 /**
  * Convert an SVG element to an HTMLImageElement
@@ -131,14 +132,35 @@ function drawWrappedTextCentered(ctx, text, centerX, y, maxWidth, lineHeight, ma
  * Download High-Resolution QR Code (PNG)
  * Generates an ultra-crisp card with the QR code and RMA Ticket info.
  */
+/**
+ * Generate and download a high-resolution Printable RMA QR Card PNG.
+ * Uses the unified centered B&W QR card layout so quantity, unit, expiry,
+ * supplier/branch, reporter & signature are consistently included everywhere.
+ */
 export async function downloadQrCodePng({
   svgElementOrId,
   rmaNumber = 'RMA-TICKET',
   productName = '',
   barcode = '',
+  sku = '',
+  quantity = 1,
+  unit = 'pc',
+  piecesPerCase = 1,
+  expiryDate = '',
+  supplier = '',
+  storeBranch = '',
+  streamType = 'customer_inbound',
+  isTestMode = false,
+  reason = '',
   reporter = '',
   reporterContact = '',
   dateFormatted = '',
+  dateTimeFormatted = '',
+  items = [],
+  totalItems = 1,
+  totalQuantity = 1,
+  widthMm = 95,
+  heightMm = 112,
   filename
 }) {
   const svgEl = typeof svgElementOrId === 'string'
@@ -152,114 +174,46 @@ export async function downloadQrCodePng({
   const { img, blobUrl } = await svgToImage(svgEl);
 
   try {
-    // Canvas dimensions (high-res 1200 x 1420)
+    const clampedW = Math.max(40, Math.min(220, Number(widthMm) || 95));
+    const clampedH = Math.max(45, Math.min(280, Number(heightMm) || 112));
+    const pxPerMm = 12;
     const canvas = document.createElement('canvas');
-    const width = 1200;
-    const height = 1420;
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = Math.round(clampedW * pxPerMm);
+    canvas.height = Math.round(clampedH * pxPerMm);
 
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Could not initialize 2D canvas context.');
 
-    // 1. Clean White Background
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, width, height);
+    const normalized = normalizeRmaQrCardData({
+      rmaNumber,
+      productName,
+      barcode,
+      sku,
+      quantity,
+      unit,
+      piecesPerCase,
+      expiryDate,
+      supplier,
+      storeBranch,
+      streamType,
+      isTestMode,
+      reason,
+      reporter,
+      reporterContact,
+      dateTimeFormatted: dateTimeFormatted || dateFormatted,
+      items,
+      totalItems,
+      totalQuantity
+    });
 
-    // 2. Crisp black outer border
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 10;
-    ctx.strokeRect(30, 30, width - 60, height - 60);
+    drawUnifiedRmaQrCard(
+      ctx,
+      { x: 0, y: 0, width: canvas.width, height: canvas.height },
+      normalized,
+      img,
+      { widthMm: clampedW, heightMm: clampedH }
+    );
 
-    // 3. Header outline strip (Plain B&W — zero dark fill)
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(30, 30, width - 60, 90);
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 6;
-    ctx.beginPath();
-    ctx.moveTo(30, 120);
-    ctx.lineTo(width - 30, 120);
-    ctx.stroke();
-
-    ctx.fillStyle = '#000000';
-    ctx.font = 'bold 32px "Inter", system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('WHOLESALE RMA RETURN AUTHORIZATION', width / 2, 90);
-
-    // 4. Draw QR Code centered (high contrast)
-    const qrSize = 780;
-    const qrX = (width - qrSize) / 2;
-    const qrY = 160;
-
-    // White backing box for QR with crisp black border
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(qrX - 20, qrY - 20, qrSize + 40, qrSize + 40);
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(qrX - 20, qrY - 20, qrSize + 40, qrSize + 40);
-
-    ctx.drawImage(img, qrX, qrY, qrSize, qrSize);
-
-    // 5. Instruction below QR
-    ctx.fillStyle = '#000000';
-    ctx.font = 'bold 24px "JetBrains Mono", Consolas, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('▲ SCAN QR CODE FOR INSTANT WAREHOUSE INTAKE ▲', width / 2, 1000);
-
-    // 6. RMA Ticket Number (Big Monospace)
-    ctx.fillStyle = '#000000';
-    let rmaFontSize = 64;
-    ctx.font = `900 ${rmaFontSize}px "JetBrains Mono", Consolas, monospace`;
-    while (ctx.measureText(rmaNumber).width > 1050 && rmaFontSize > 34) {
-      rmaFontSize -= 2;
-      ctx.font = `900 ${rmaFontSize}px "JetBrains Mono", Consolas, monospace`;
-    }
-    ctx.fillText(rmaNumber, width / 2, 1085);
-
-    // 7. Product & Barcode Subtitle (Wrapped cleanly across up to 2 lines)
-    let nextY = 1150;
-    if (productName || barcode) {
-      ctx.fillStyle = '#000000';
-      ctx.font = 'bold 36px "Inter", system-ui, sans-serif';
-      nextY = drawWrappedTextCentered(ctx, productName || 'Returned Merchandise', width / 2, nextY, 1040, 44, 2);
-
-      if (barcode) {
-        ctx.fillStyle = '#000000';
-        ctx.font = 'bold 28px "JetBrains Mono", Consolas, monospace';
-        ctx.fillText(`Barcode: ${barcode}`, width / 2, nextY + 10);
-        nextY += 45;
-      }
-      if (reporter || reporterContact || dateFormatted) {
-        ctx.fillStyle = '#000000';
-        ctx.font = 'bold 24px "Inter", sans-serif';
-        const repInfo = reporter ? (reporterContact && reporterContact !== 'N/A' ? `${reporter} (${reporterContact})` : reporter) : '';
-        const metaLine = [repInfo, dateFormatted].filter(Boolean).join('  •  ');
-        if (metaLine) {
-          ctx.fillText(metaLine, width / 2, nextY + 10);
-          nextY += 40;
-        }
-      }
-
-      // Reporter Signature Line
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(width / 2 - 240, nextY + 30);
-      ctx.lineTo(width / 2 + 240, nextY + 30);
-      ctx.stroke();
-
-      ctx.fillStyle = '#000000';
-      ctx.font = 'bold 20px "Inter", sans-serif';
-      ctx.fillText(`Reporter Signature: ${reporter || 'Staff'}`, width / 2, nextY + 60);
-    }
-
-    // 8. Footer timestamp / system notice
-    ctx.fillStyle = '#000000';
-    ctx.font = '500 22px "Inter", system-ui, sans-serif';
-    const dateStr = formatDateYmd(new Date());
-    ctx.fillText(`RMA Portal Verification • Generated ${dateStr} (YYYY-MM-DD)`, width / 2, 1365);
-
-    // Convert to PNG and download
     const finalFilename = filename || `${rmaNumber}-QR.png`;
     canvas.toBlob((blob) => {
       if (blob) {

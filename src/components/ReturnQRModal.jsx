@@ -1,58 +1,186 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   X, Printer, QrCode, ShieldCheck, CheckCircle2, AlertTriangle,
-  Download, FileImage, Lock, Move, RotateCcw, ArrowRight
+  Download, Lock, Move, RotateCcw, ArrowRight, Maximize2, Layers, CopyCheck
 } from 'lucide-react';
-import { downloadQrCodePng } from '../utils/qrDownload';
-import { downloadCustomSizedStickerPng } from '../utils/customStickerCanvas';
-import { printIsolatedElement } from '../utils/printIsolatedElement';
 import {
-  formatQuantityWithPackSize,
-  formatManifestBreakdown,
-  buildPortalQrPayload,
-  isTestRecord,
-  formatDateYmd,
-  formatDateTimeYmdHm
-} from '../utils/rmaHelpers';
+  PAPER_PRESETS,
+  QR_SIZE_PRESETS,
+  normalizeRmaQrCardData,
+  packQrCardsIntoPages,
+  autoFitGridCardSize,
+  downloadCustomSizedStickerPng,
+  downloadConsolidatedQrPagesPng
+} from '../utils/customStickerCanvas';
+import { printIsolatedElement } from '../utils/printIsolatedElement';
+import { buildPortalQrPayload } from '../utils/rmaHelpers';
 
-const STICKER_PRESETS = [
-  { id: 'small', label: 'Small (Tuna Can)', sub: '58 × 52 mm', widthMm: 58, heightMm: 52 },
-  { id: 'medium', label: 'Medium (Inner Box)', sub: '90 × 105 mm', widthMm: 90, heightMm: 105 },
-  { id: 'large', label: 'Large (Carton)', sub: '115 × 148 mm', widthMm: 115, heightMm: 148 },
-  { id: 'xlarge', label: 'Extra Large (Half Letter)', sub: '140 × 195 mm', widthMm: 140, heightMm: 195 }
-];
+const clampNum = (val, min, max, fallback) => {
+  const n = Number(val);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+};
 
-const MM_TO_SCREEN_PX = 3.55;
+export default function ReturnQRModal({
+  isOpen,
+  onClose,
+  report,
+  reports = [],
+  onOpenQuickAction
+}) {
+  // Normalize incoming single `report` or multi-select `reports` into a deduped array BEFORE hooks
+  const inputReports = useMemo(() => {
+    const rawList = Array.isArray(reports) && reports.length > 0
+      ? reports
+      : report
+        ? [report]
+        : [];
+    const seen = new Set();
+    const deduped = [];
+    rawList.forEach((item, idx) => {
+      if (!item || typeof item !== 'object') return;
+      const key = String(item.id || item.rma_number || item.rmaNumber || `row-${idx}`);
+      if (seen.has(key)) return;
+      seen.add(key);
+      deduped.push({ key, report: item });
+    });
+    return deduped;
+  }, [reports, report]);
 
-export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickAction }) {
-  const [downloadingType, setDownloadingType] = useState(null); // 'qr' | 'label' | null
+  const batchSignature = useMemo(
+    () => inputReports.map((entry) => entry.key).join('|'),
+    [inputReports]
+  );
+
+  // ALL state hooks strictly declared BEFORE any conditional return (prevents React Error #310)
+  const [removedKeys, setRemovedKeys] = useState(() => new Set());
+  const [paperPresetId, setPaperPresetId] = useState('letter');
+  const [customPaperMm, setCustomPaperMm] = useState({ widthMm: 215.9, heightMm: 279.4 });
+  const [orientation, setOrientation] = useState('portrait');
+  const [marginMm, setMarginMm] = useState(8);
+  const [layoutMode, setLayoutMode] = useState('one_page');
+  const [sizesByKey, setSizesByKey] = useState({});
+  const [activeKey, setActiveKey] = useState(null);
+
+  const [downloadingType, setDownloadingType] = useState(null);
   const [downloadNotice, setDownloadNotice] = useState(null);
   const [isPrinting, setIsPrinting] = useState(false);
 
-  // Dynamic size in physical millimeters (freely resizable via presets, drag handles, or inputs)
-  const [sizeMm, setSizeMm] = useState({ widthMm: 90, heightMm: 105 });
-  const [activePreset, setActivePreset] = useState('medium');
   const dragStateRef = useRef(null);
 
+  // Reset per-batch ephemeral state when opening or switching batch selection
+  useEffect(() => {
+    if (!isOpen) return;
+    setRemovedKeys(new Set());
+    setSizesByKey({});
+    setActiveKey(inputReports[0]?.key || null);
+    setDownloadNotice(null);
+    setLayoutMode('one_page');
+  }, [isOpen, batchSignature]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const visibleEntries = useMemo(
+    () => inputReports.filter((entry) => !removedKeys.has(entry.key)),
+    [inputReports, removedKeys]
+  );
+
+  // Default card size: Medium 90x105mm for single QR, balanced 62x74mm for multi-select consolidated QRs
+  const defaultCardSize = useMemo(
+    () => (visibleEntries.length <= 1 ? { widthMm: 90, heightMm: 105 } : { widthMm: 62, heightMm: 74 }),
+    [visibleEntries.length]
+  );
+
+  // Compute physical page dimensions based on Paper Preset + Orientation + Margins
+  const effectivePaper = useMemo(() => {
+    const preset = PAPER_PRESETS.find((p) => p.id === paperPresetId) || PAPER_PRESETS[0];
+    const baseW = paperPresetId === 'custom'
+      ? clampNum(customPaperMm.widthMm, 50, 450, 215.9)
+      : preset.widthMm;
+    const baseH = paperPresetId === 'custom'
+      ? clampNum(customPaperMm.heightMm, 50, 500, 279.4)
+      : preset.heightMm;
+
+    const widthMm = orientation === 'landscape' ? baseH : baseW;
+    const heightMm = orientation === 'landscape' ? baseW : baseH;
+    const safeMargin = clampNum(marginMm, 2, 30, 8);
+    const printableW = Math.max(25, Number((widthMm - safeMargin * 2).toFixed(1)));
+    const printableH = Math.max(25, Number((heightMm - safeMargin * 2).toFixed(1)));
+
+    return {
+      presetId: preset.id,
+      label: preset.label,
+      slug: preset.id.replace(/_/g, '-'),
+      widthMm: Number(widthMm.toFixed(1)),
+      heightMm: Number(heightMm.toFixed(1)),
+      marginMm: safeMargin,
+      printableW,
+      printableH
+    };
+  }, [paperPresetId, customPaperMm, orientation, marginMm]);
+
+  // Screen preview scale so any paper sheet fits neatly inside the modal without horizontal cropping
+  const previewPxPerMm = useMemo(() => {
+    const maxModalSheetPx = 640;
+    return Math.min(3.35, Math.max(1.5, maxModalSheetPx / Math.max(effectivePaper.widthMm, 1)));
+  }, [effectivePaper.widthMm]);
+
+  // Build normalized cards list with stable SVG DOM IDs and per-card mm dimensions
+  const cards = useMemo(() => {
+    return visibleEntries.map((entry, idx) => {
+      const cardData = normalizeRmaQrCardData(entry.report);
+      const custom = sizesByKey[entry.key] || defaultCardSize;
+      const safeSvgSlug = entry.key.replace(/[^a-zA-Z0-9_-]/g, '_');
+      return {
+        key: entry.key,
+        index: idx,
+        report: entry.report,
+        cardData,
+        qrPayload: buildPortalQrPayload(cardData.rmaNumber, cardData.isTest),
+        svgId: `rma-qr-code-svg-${safeSvgSlug}`,
+        widthMm: clampNum(custom.widthMm, 34, 220, defaultCardSize.widthMm),
+        heightMm: clampNum(custom.heightMm, 40, 280, defaultCardSize.heightMm)
+      };
+    });
+  }, [visibleEntries, sizesByKey, defaultCardSize]);
+
+  const activeCard = useMemo(
+    () => cards.find((c) => c.key === activeKey) || cards[0] || null,
+    [cards, activeKey]
+  );
+
+  // Shelf-pack cards onto 1 or multiple physical sheets
+  const packedLayout = useMemo(() => {
+    return packQrCardsIntoPages({
+      cards,
+      printableW: effectivePaper.printableW,
+      printableH: effectivePaper.printableH,
+      gapMm: 4,
+      layoutMode,
+      centerSingleCard: cards.length === 1
+    });
+  }, [cards, effectivePaper.printableW, effectivePaper.printableH, layoutMode]);
+
+  // Pointer drag resizing for individual cards
   useEffect(() => {
     const handlePointerMove = (e) => {
       const drag = dragStateRef.current;
       if (!drag) return;
       e.preventDefault();
-      const dxMm = (e.clientX - drag.startX) / MM_TO_SCREEN_PX;
-      const dyMm = (e.clientY - drag.startY) / MM_TO_SCREEN_PX;
+      const pxScale = drag.pxPerMm || 3.0;
+      const dxMm = (e.clientX - drag.startX) / pxScale;
+      const dyMm = (e.clientY - drag.startY) / pxScale;
 
-      setSizeMm(() => {
-        const nextW = drag.axis === 'y'
-          ? drag.startW
-          : Math.round(Math.max(42, Math.min(185, drag.startW + dxMm)));
-        const nextH = drag.axis === 'x'
-          ? drag.startH
-          : Math.round(Math.max(40, Math.min(240, drag.startH + dyMm)));
-        return { widthMm: nextW, heightMm: nextH };
-      });
-      setActivePreset('custom');
+      const nextW = drag.axis === 'y'
+        ? drag.startW
+        : Math.round(clampNum(drag.startW + dxMm, 34, 220, drag.startW));
+      const nextH = drag.axis === 'x'
+        ? drag.startH
+        : Math.round(clampNum(drag.startH + dyMm, 40, 280, drag.startH));
+
+      setSizesByKey((prev) => ({
+        ...prev,
+        [drag.key]: { widthMm: nextW, heightMm: nextH }
+      }));
     };
 
     const handlePointerUp = () => {
@@ -72,460 +200,746 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
     };
   }, []);
 
-  const startDrag = useCallback((axis, e) => {
+  const startDrag = useCallback((cardKey, axis, startW, startH, pxPerMm, e) => {
     e.preventDefault();
     e.stopPropagation();
     document.body.style.userSelect = 'none';
+    setActiveKey(cardKey);
     dragStateRef.current = {
-      axis, // 'x' | 'y' | 'xy'
+      key: cardKey,
+      axis,
       startX: e.clientX,
       startY: e.clientY,
-      startW: sizeMm.widthMm,
-      startH: sizeMm.heightMm
+      startW,
+      startH,
+      pxPerMm
     };
-  }, [sizeMm]);
+  }, []);
 
-  if (!isOpen || !report) return null;
+  // Safe conditional return AFTER all hooks
+  if (!isOpen || cards.length === 0) return null;
 
-  const rmaNumber = report.rma_number || report.rmaNumber || report.id || 'N/A';
-  const barcode = report.barcode || 'N/A';
-  const sku = report.code || report.sku || '';
-  const itemName = report.name || report.product_name || report.productName || `Barcode ${barcode}`;
-  const quantity = report.quantity || 1;
-  const unit = report.unit_name || report.unit || 'pc';
-  const piecesPerCase = Number(report.pieces_per_case) || 1;
-  const supplier = report.supplier_name || report.supplier || '';
-  const storeBranch = report.store_branch || report.store || '';
-  const streamType = report.rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
-  const reason = report.reason || report.defect_category || 'Damaged / Return';
-  const reporter = report.reporter_name || report.reported_by || 'Staff';
-  const reporterContact =
-    report.reporter_contact ||
-    report.reporter_phone ||
-    report.phone ||
-    (report.reported_by && report.reported_by.includes('(')
-      ? report.reported_by.replace(/.*\((.*)\).*/, '$1')
-      : '') ||
-    'N/A';
+  const isMulti = cards.length > 1;
+  const activeWidthMm = activeCard?.widthMm || defaultCardSize.widthMm;
+  const activeHeightMm = activeCard?.heightMm || defaultCardSize.heightMm;
 
-  const manifestItems = Array.isArray(report.items) ? report.items : [];
-  const isManifest = manifestItems.length > 1 || (report.total_items && report.total_items > 1);
-  const totalItems = report.total_items || (manifestItems.length > 0 ? manifestItems.length : 1);
-  const totalQuantity = report.total_quantity || (
-    manifestItems.length > 0
-      ? manifestItems.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0)
-      : quantity
-  );
-  const expiryDate = report.expiry_date || report.ai_document_metadata?.expiry_date || (manifestItems[0]?.expiry_date) || '';
-  const isTest = isTestRecord(report);
-
-  const dateTimeFormatted = formatDateTimeYmdHm(report.created_at || Date.now());
-
-  // Private non-URL payload: external phone cameras & Google Lens cannot open it!
-  const qrPayload = buildPortalQrPayload(rmaNumber, isTest);
-
-  // Responsive layout tiers based on user-selected mm box
-  const isCompact = sizeMm.widthMm < 76 || sizeMm.heightMm < 78;
-  const isSpacious = sizeMm.widthMm >= 122 && sizeMm.heightMm >= 148;
-  const screenWidthPx = Math.round(sizeMm.widthMm * MM_TO_SCREEN_PX);
-  const screenMinHeightPx = Math.round(sizeMm.heightMm * MM_TO_SCREEN_PX);
-  const qrDisplayPx = isCompact
-    ? Math.max(66, Math.min(92, Math.round(sizeMm.widthMm * 1.35)))
-    : isSpacious
-      ? Math.min(185, Math.round(sizeMm.widthMm * 1.15))
-      : Math.max(95, Math.min(140, Math.round(sizeMm.widthMm * 1.25)));
-
-  const handleSelectPreset = (preset) => {
-    setActivePreset(preset.id);
-    setSizeMm({ widthMm: preset.widthMm, heightMm: preset.heightMm });
+  const updateActiveCardSize = (nextW, nextH) => {
+    if (!activeCard) return;
+    setSizesByKey((prev) => ({
+      ...prev,
+      [activeCard.key]: {
+        widthMm: clampNum(nextW, 34, 220, activeCard.widthMm),
+        heightMm: clampNum(nextH, 40, 280, activeCard.heightMm)
+      }
+    }));
   };
 
-  const handlePrint = async () => {
+  const applyPresetToActive = (preset) => {
+    updateActiveCardSize(preset.widthMm, preset.heightMm);
+  };
+
+  const handleApplyActiveSizeToAll = () => {
+    const next = {};
+    cards.forEach((c) => {
+      next[c.key] = { widthMm: activeWidthMm, heightMm: activeHeightMm };
+    });
+    setSizesByKey(next);
+    setDownloadNotice({
+      type: 'success',
+      msg: `Applied ${activeWidthMm}×${activeHeightMm}mm to all ${cards.length} QR cards.`
+    });
+    setTimeout(() => setDownloadNotice(null), 3000);
+  };
+
+  const handleResetAllSizes = () => {
+    setSizesByKey({});
+    setDownloadNotice({ type: 'success', msg: `Reset QR sizes to default (${defaultCardSize.widthMm}×${defaultCardSize.heightMm}mm).` });
+    setTimeout(() => setDownloadNotice(null), 3000);
+  };
+
+  const handleAutoFitOnePage = () => {
+    const fit = autoFitGridCardSize(
+      cards.length,
+      effectivePaper.printableW,
+      effectivePaper.printableH,
+      4,
+      1.18
+    );
+    const next = {};
+    cards.forEach((c) => {
+      next[c.key] = { widthMm: fit.widthMm, heightMm: fit.heightMm };
+    });
+    setSizesByKey(next);
+    setLayoutMode('one_page');
+    setDownloadNotice({
+      type: 'success',
+      msg: `Auto-fit all ${cards.length} QRs to 1 ${effectivePaper.label} page (${fit.widthMm}×${fit.heightMm}mm each).`
+    });
+    setTimeout(() => setDownloadNotice(null), 3500);
+  };
+
+  const handleRemoveCard = (key) => {
+    if (cards.length <= 1) return;
+    setRemovedKeys((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+    if (activeKey === key) {
+      const remaining = cards.find((c) => c.key !== key);
+      if (remaining) setActiveKey(remaining.key);
+    }
+  };
+
+  const handleSaveQrPng = async () => {
+    setDownloadingType('qr');
+    setDownloadNotice(null);
+    try {
+      if (!isMulti && cards.length === 1) {
+        const single = cards[0];
+        const savedName = await downloadCustomSizedStickerPng({
+          ...single.cardData,
+          svgElementOrId: single.svgId,
+          widthMm: single.widthMm,
+          heightMm: single.heightMm,
+          filename: `${single.cardData.rmaNumber}-QR.png`
+        });
+        setDownloadNotice({ type: 'success', msg: `Saved ${savedName}` });
+      } else {
+        const savedFiles = await downloadConsolidatedQrPagesPng({
+          pages: packedLayout.pages,
+          paperWidthMm: effectivePaper.widthMm,
+          paperHeightMm: effectivePaper.heightMm,
+          marginMm: effectivePaper.marginMm,
+          paperSlug: effectivePaper.slug,
+          totalQrCount: cards.length
+        });
+        setDownloadNotice({
+          type: 'success',
+          msg: `Saved ${savedFiles.length} consolidated sheet PNG(s): ${savedFiles[0]}${savedFiles.length > 1 ? ` (+${savedFiles.length - 1} more)` : ''}`
+        });
+      }
+    } catch (err) {
+      console.error('Failed to export QR PNG:', err);
+      setDownloadNotice({ type: 'error', msg: 'Could not generate QR PNG.' });
+    } finally {
+      setDownloadingType(null);
+      setTimeout(() => setDownloadNotice(null), 4500);
+    }
+  };
+
+  const handlePrint = () => {
     setIsPrinting(true);
     try {
-      const targetEl = document.getElementById('rma-qr-box-sticker');
-      if (!targetEl) {
-        setDownloadNotice({ type: 'error', msg: 'Sticker preview not ready.' });
+      const rootEl = document.getElementById('rma-qr-print-root');
+      if (!rootEl) {
+        setDownloadNotice({ type: 'error', msg: 'QR print canvas not ready.' });
         return;
       }
+
+      const pageSizeCss = `${effectivePaper.widthMm}mm ${effectivePaper.heightMm}mm`;
+      const docTitle = isMulti
+        ? `${cards.length}-RMA-QRs-${effectivePaper.slug}`
+        : `RMA-QR-${cards[0].cardData.rmaNumber}-${cards[0].widthMm}x${cards[0].heightMm}mm`;
+
       printIsolatedElement({
-        elementId: 'rma-qr-box-sticker',
-        documentTitle: `RMA-Sticker-${rmaNumber}-${sizeMm.widthMm}x${sizeMm.heightMm}mm`,
-        pageSize: 'letter portrait',
-        pageMargin: '0.25in',
+        elementId: 'rma-qr-print-root',
+        documentTitle: docTitle,
+        pageSize: pageSizeCss,
+        pageMargin: '0',
+        allowMultiPage: layoutMode === 'multi_page' || packedLayout.pages.length > 1,
         customStyles: `
-          @media print {
-            #rma-qr-box-sticker, #rma-qr-box-sticker * {
-              color: #000000 !important;
-              box-shadow: none !important;
-            }
-            #rma-qr-box-sticker {
-              width: ${sizeMm.widthMm}mm !important;
-              min-height: ${sizeMm.heightMm}mm !important;
-              max-width: ${sizeMm.widthMm}mm !important;
-              border: 1.8px solid #000000 !important;
-              border-radius: 6px !important;
-              padding: ${isCompact ? '2.5mm' : '4mm'} !important;
-              box-shadow: none !important;
-              margin: 0 auto !important;
-              background: #ffffff !important;
-              color: #000000 !important;
-              box-sizing: border-box !important;
-            }
+          :root, #rma-qr-print-root {
+            --u: 1mm !important;
+          }
+          .no-print-qr {
+            display: none !important;
+          }
+          .rma-print-page {
+            position: relative !important;
+            width: ${effectivePaper.widthMm}mm !important;
+            height: ${Math.max(10, Number((effectivePaper.heightMm - 0.5).toFixed(2)))}mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            border: none !important;
+            box-shadow: none !important;
+            overflow: hidden !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          .rma-print-page:not(:last-child) {
+            page-break-after: always !important;
+            break-after: page !important;
+          }
+          .rma-print-page:last-child {
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+          }
+          .rma-qr-card, .rma-qr-card * {
+            color: #000000 !important;
+            box-shadow: none !important;
+          }
+          .rma-qr-card {
+            outline: none !important;
+            ring: 0 !important;
+            background: #ffffff !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
         `
       });
     } catch (err) {
-      console.error('Print sticker failed:', err);
+      console.error('Print QR failed:', err);
       setDownloadNotice({ type: 'error', msg: 'Could not open print dialog.' });
     } finally {
       setTimeout(() => setIsPrinting(false), 600);
     }
   };
 
-  const handleDownloadQrOnly = async () => {
-    setDownloadingType('qr');
-    setDownloadNotice(null);
-    try {
-      await downloadQrCodePng({
-        svgElementOrId: 'rma-qr-code-svg',
-        rmaNumber,
-        productName: isManifest ? `BATCH MANIFEST (${totalItems} SKUs)` : itemName,
-        barcode: isManifest ? 'MULTI-ITEM' : barcode,
-        reporter,
-        reporterContact,
-        dateFormatted: dateTimeFormatted,
-        filename: `${rmaNumber}-QR.png`
-      });
-      setDownloadNotice({ type: 'success', msg: `Saved ${rmaNumber}-QR.png` });
-    } catch (err) {
-      console.error('Failed to download QR image:', err);
-      setDownloadNotice({ type: 'error', msg: 'Could not generate QR PNG.' });
-    } finally {
-      setDownloadingType(null);
-      setTimeout(() => setDownloadNotice(null), 4000);
-    }
-  };
-
-  const handleDownloadFullLabel = async () => {
-    setDownloadingType('label');
-    setDownloadNotice(null);
-    try {
-      await downloadCustomSizedStickerPng({
-        svgElementOrId: 'rma-qr-code-svg',
-        widthMm: sizeMm.widthMm,
-        heightMm: sizeMm.heightMm,
-        rmaNumber,
-        isTestMode: isTest,
-        streamType,
-        supplier,
-        storeBranch,
-        itemName,
-        barcode,
-        sku,
-        quantity,
-        unit,
-        piecesPerCase,
-        expiryDate,
-        reason,
-        reporter,
-        reporterContact,
-        dateTimeFormatted,
-        items: manifestItems,
-        totalItems,
-        totalQuantity
-      });
-      setDownloadNotice({
-        type: 'success',
-        msg: `Saved ${rmaNumber}-Sticker-${sizeMm.widthMm}x${sizeMm.heightMm}mm.png`
-      });
-    } catch (err) {
-      console.error('Failed to download Box Sticker:', err);
-      setDownloadNotice({ type: 'error', msg: 'Could not generate sticker PNG.' });
-    } finally {
-      setDownloadingType(null);
-      setTimeout(() => setDownloadNotice(null), 4000);
-    }
-  };
-
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4 bg-slate-900/75 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-4xl max-h-[94dvh] flex flex-col rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200 print:static print:bg-white print:p-0">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[96vh] print:max-h-none print:border-0 print:shadow-none">
 
-        {/* Modal Top Header */}
-        <div className="shrink-0 bg-slate-900 text-white px-4 sm:px-6 py-3.5 flex items-center justify-between border-b border-slate-800">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="p-2 bg-amber-500/20 rounded-xl shrink-0">
-              <QrCode className="w-5 h-5 text-amber-400" />
+        {/* Modal Header */}
+        <div className="shrink-0 bg-slate-900 text-white px-4 py-3 sm:px-5 sm:py-3.5 flex items-center justify-between gap-2 print:hidden">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center shrink-0">
+              <QrCode className="w-4 h-4 text-blue-400" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-sm sm:text-base font-bold tracking-tight truncate">
-                  Print RMA Sticker Label
-                </h2>
-                {isTest && (
-                  <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 text-[10px] font-black uppercase tracking-wider">
-                    🧪 Test Mode
+              <h3 className="text-sm font-black tracking-tight flex items-center gap-1.5 flex-wrap">
+                <span>
+                  {isMulti ? `Consolidated QR Print Studio (${cards.length} QRs)` : 'Print RMA QR Code'}
+                </span>
+                {cards.some((c) => c.cardData.isTest) && (
+                  <span className="px-1.5 py-0.5 rounded bg-violet-500/30 border border-violet-400 text-violet-200 text-[10px] font-black uppercase">
+                    TEST SANDBOX
                   </span>
                 )}
-              </div>
-              <p className="text-[11px] sm:text-xs text-slate-400 truncate">
-                Choose preset or drag edges to fit cans, boxes, or pallets • In-app portal scan only
+              </h3>
+              <p className="text-[11px] text-slate-300 truncate">
+                {isMulti
+                  ? `${packedLayout.pages.length} ${effectivePaper.label} Page${packedLayout.pages.length > 1 ? 's' : ''} (${effectivePaper.widthMm}×${effectivePaper.heightMm}mm) • Drag any QR corner to resize individually`
+                  : `${cards[0].cardData.rmaNumber} • Unified B&W QR Card on ${effectivePaper.label}`}
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors shrink-0"
-            aria-label="Close modal"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
 
-        {/* Preset & Size Controls Bar */}
-        <div className="shrink-0 px-4 sm:px-6 py-2.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2.5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {STICKER_PRESETS.map((preset) => (
+          <div className="flex items-center gap-2 shrink-0">
+            {!isMulti && onOpenQuickAction && (
               <button
-                key={preset.id}
                 type="button"
-                onClick={() => handleSelectPreset(preset)}
-                className={`px-2.5 py-1.5 rounded-lg text-left transition-all border text-xs font-bold ${
-                  activePreset === preset.id
-                    ? 'bg-slate-900 text-white border-slate-900 dark:bg-amber-500 dark:text-slate-950 dark:border-amber-500 shadow-sm'
-                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600 hover:border-amber-500'
-                }`}
+                onClick={() => onOpenQuickAction(cards[0].report)}
+                className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
+                title="Open Admin Quick Processing Actions"
               >
-                <span className="block leading-tight">{preset.label}</span>
-                <span className={`block text-[10px] font-mono ${activePreset === preset.id ? 'opacity-80' : 'text-slate-400'}`}>
-                  {preset.sub}
-                </span>
+                <span>Process Item</span>
+                <ArrowRight className="w-3 h-3" />
               </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-2.5 py-1">
-            <Move className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-            <label className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">W:</label>
-            <input
-              type="number"
-              min={42}
-              max={185}
-              value={sizeMm.widthMm}
-              onChange={(e) => {
-                setActivePreset('custom');
-                setSizeMm((prev) => ({
-                  ...prev,
-                  widthMm: Math.max(42, Math.min(185, Number(e.target.value) || 42))
-                }));
-              }}
-              className="w-12 text-xs font-mono font-bold text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1 py-0.5 text-center"
-            />
-            <span className="text-[11px] text-slate-400">×</span>
-            <label className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">H:</label>
-            <input
-              type="number"
-              min={40}
-              max={240}
-              value={sizeMm.heightMm}
-              onChange={(e) => {
-                setActivePreset('custom');
-                setSizeMm((prev) => ({
-                  ...prev,
-                  heightMm: Math.max(40, Math.min(240, Number(e.target.value) || 40))
-                }));
-              }}
-              className="w-12 text-xs font-mono font-bold text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1 py-0.5 text-center"
-            />
-            <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-              mm ({(sizeMm.widthMm / 25.4).toFixed(1)}×{(sizeMm.heightMm / 25.4).toFixed(1)}&quot;)
-            </span>
+            )}
             <button
               type="button"
-              onClick={() => handleSelectPreset(STICKER_PRESETS[1])}
-              title="Reset to Medium size"
-              className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded"
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              aria-label="Close modal"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Scrollable Workspace: Drag-Resizable Physical Sticker */}
-        <div className="flex-1 overflow-auto overscroll-contain p-4 sm:p-8 bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-start">
-          <div className="mb-3 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full px-3 py-1 shadow-xs">
-            <Lock className="w-3.5 h-3.5 text-emerald-600" />
-            <span>
-              <strong>Private Portal QR:</strong> Google Lens / phone cameras cannot read this. Use the portal&apos;s{' '}
-              <strong>Barcode / QR Scanner</strong> button.
-            </span>
+        {/* Private Portal Scan Security Notice */}
+        <div className="shrink-0 bg-emerald-50 dark:bg-emerald-950/30 border-b border-emerald-200 dark:border-emerald-900/60 px-4 py-1.5 flex items-center justify-between gap-2 text-[11px] text-emerald-800 dark:text-emerald-300 print:hidden">
+          <div className="flex items-center gap-1.5 font-semibold">
+            <Lock className="w-3.5 h-3.5 shrink-0" />
+            <span>Private Portal QR: Standard cameras/Google Lens cannot open links — scan inside RMA Admin Scanner.</span>
           </div>
+          <span className="font-mono font-black shrink-0 hidden sm:inline">B&amp;W Ink-Saver</span>
+        </div>
 
-          {/* Drag Resizable Container */}
-          <div className="relative inline-block my-auto shrink-0 select-none pb-5 pr-5">
-            <div
-              id="rma-qr-box-sticker"
-              style={{
-                width: `${screenWidthPx}px`,
-                minHeight: `${screenMinHeightPx}px`
-              }}
-              className={`bg-white border-2 border-black rounded-xl text-black flex flex-col justify-between transition-[box-shadow] ${
-                isCompact ? 'p-2.5 gap-1.5' : isSpacious ? 'p-6 gap-4' : 'p-4 gap-2.5'
-              }`}
-            >
-              {/* Sticker Header Bar (Plain B&W outline — zero colored/dark fill) */}
-              <div
-                className={`flex items-center justify-between rounded-lg bg-white text-black border-[1.5px] border-black ${
-                  isCompact ? 'px-2 py-1' : 'px-3 py-1.5'
-                }`}
+        {/* Dynamic Paper Size, Page Packing & Per-QR Resize Toolbar */}
+        <div className="shrink-0 px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 space-y-2 print:hidden">
+
+          {/* Row 1: Dynamic Paper Size + Orientation + Margins + Sheet Layout */}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-200">
+              <span>Paper:</span>
+              <select
+                aria-label="Paper Size"
+                value={paperPresetId}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  setPaperPresetId(nextId);
+                  const found = PAPER_PRESETS.find((p) => p.id === nextId);
+                  if (found && nextId !== 'custom') {
+                    setCustomPaperMm({ widthMm: found.widthMm, heightMm: found.heightMm });
+                  }
+                }}
+                className="px-2 py-1 text-[11px] font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white cursor-pointer"
               >
-                <span className={`font-black uppercase tracking-wider truncate ${isCompact ? 'text-[8px]' : isSpacious ? 'text-xs' : 'text-[10px]'}`}>
-                  {isTest
-                    ? 'TEST SANDBOX LABEL'
-                    : streamType === 'supplier_outbound'
-                      ? 'PINGCON • SUPPLIER RTV'
-                      : 'PINGCON • CUSTOMER RMA'}
-                </span>
-                <span className={`font-mono font-bold text-black shrink-0 ml-2 ${isCompact ? 'text-[8px]' : 'text-[10px]'}`}>
-                  {sizeMm.widthMm}×{sizeMm.heightMm}mm
-                </span>
+                {PAPER_PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label} ({p.sub})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {paperPresetId === 'custom' && (
+              <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1 text-[11px] font-mono">
+                <span className="text-slate-500 font-bold">Page W</span>
+                <input
+                  type="number"
+                  aria-label="Custom Paper Width mm"
+                  min={50}
+                  max={450}
+                  step="0.5"
+                  value={customPaperMm.widthMm}
+                  onChange={(e) => setCustomPaperMm((prev) => ({ ...prev, widthMm: e.target.value }))}
+                  className="w-14 text-center font-black text-slate-900 dark:text-white bg-transparent border-b border-slate-300 dark:border-slate-600 outline-none"
+                />
+                <span className="text-slate-400">× H</span>
+                <input
+                  type="number"
+                  aria-label="Custom Paper Height mm"
+                  min={50}
+                  max={500}
+                  step="0.5"
+                  value={customPaperMm.heightMm}
+                  onChange={(e) => setCustomPaperMm((prev) => ({ ...prev, heightMm: e.target.value }))}
+                  className="w-14 text-center font-black text-slate-900 dark:text-white bg-transparent border-b border-slate-300 dark:border-slate-600 outline-none"
+                />
+                <span className="text-slate-400">mm</span>
               </div>
+            )}
 
-              {/* RMA ID + Supplier + QR Row */}
-              <div className={`flex items-start justify-between ${isCompact ? 'gap-2' : 'gap-3'}`}>
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className={`font-bold uppercase tracking-wider text-black ${isCompact ? 'text-[7px]' : 'text-[9px]'}`}>
-                    RMA Reference ID
-                  </div>
-                  <div className={`font-mono font-black text-black tracking-tight break-all leading-none ${
-                    isCompact ? 'text-xs' : isSpacious ? 'text-2xl' : 'text-lg'
-                  }`}>
-                    {rmaNumber}
-                  </div>
-                  <div className="pt-0.5">
-                    <div className={`font-bold uppercase text-black ${isCompact ? 'text-[7px]' : 'text-[9px]'}`}>
-                      {streamType === 'supplier_outbound' ? 'Supplier' : 'Branch / Hub'}
-                    </div>
-                    <div className={`font-bold text-black leading-tight break-words ${
-                      isCompact ? 'text-[9px]' : isSpacious ? 'text-base' : 'text-xs'
-                    }`}>
-                      {streamType === 'supplier_outbound'
-                        ? (supplier || 'Pending Assignment')
-                        : (storeBranch || supplier || 'Warehouse')}
-                    </div>
-                  </div>
-                  {expiryDate && (
-                    <div className={`inline-block font-mono font-bold text-black bg-white border border-black rounded px-1.5 py-0.5 ${
-                      isCompact ? 'text-[8px]' : 'text-[10px]'
-                    }`}>
-                      Expiry Date (YYYY-MM-DD): {formatDateYmd(expiryDate) || expiryDate}
-                    </div>
-                  )}
-                </div>
-
-                <div className="shrink-0 flex flex-col items-center">
-                  <div className={`bg-white border-2 border-black rounded-lg ${isCompact ? 'p-1' : 'p-1.5'}`}>
-                    <QRCodeSVG
-                      id="rma-qr-code-svg"
-                      value={qrPayload}
-                      size={qrDisplayPx}
-                      level="M"
-                      includeMargin={false}
-                    />
-                  </div>
-                  <div className={`mt-1 px-1.5 py-0.5 rounded bg-white text-black border border-black font-mono font-bold tracking-wider uppercase ${
-                    isCompact ? 'text-[6.5px]' : 'text-[8px]'
-                  }`}>
-                    PORTAL SCAN
-                  </div>
-                </div>
-              </div>
-
-              {/* Product & Defect Block */}
-              <div className={`border-t border-b border-black ${isCompact ? 'py-1 space-y-0.5' : 'py-2 space-y-1'}`}>
-                <div className={`font-bold text-black leading-snug break-words ${
-                  isCompact ? 'text-[9px]' : isSpacious ? 'text-sm' : 'text-xs'
-                }`}>
-                  {isManifest ? `Batch Manifest (${totalItems} SKUs): ${itemName}` : itemName}
-                </div>
-                <div className={`font-mono text-black flex flex-wrap gap-x-2 gap-y-0.5 ${
-                  isCompact ? 'text-[8px]' : isSpacious ? 'text-xs' : 'text-[10px]'
-                }`}>
-                  {!isManifest && <span>SKU/BC: {sku || barcode}</span>}
-                  <span>
-                    Qty:{' '}
-                    <strong>
-                      {isManifest
-                        ? `${totalQuantity} pcs total (${formatManifestBreakdown(manifestItems, quantity, unit, true)})`
-                        : formatQuantityWithPackSize(quantity, unit, piecesPerCase)}
-                    </strong>
-                  </span>
-                </div>
-                <div className={`font-semibold text-black leading-tight break-words ${
-                  isCompact ? 'text-[8px]' : isSpacious ? 'text-xs' : 'text-[10px]'
-                }`}>
-                  Defect / Reason: {reason}
-                </div>
-              </div>
-
-              {/* Reporter Metadata + Physical Signature Box */}
-              <div className={`space-y-1.5 ${isCompact ? 'text-[8px]' : 'text-[10px]'}`}>
-                <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-black">
-                  <span className="font-semibold">
-                    By: <strong className="text-black">{reporter}</strong> ({reporterContact})
-                  </span>
-                  <span className="font-mono text-black">{dateTimeFormatted}</span>
-                </div>
-
-                {/* Signable handwritten line for physical attachment */}
-                <div className={`border border-black rounded-md bg-white ${isCompact ? 'p-1.5' : 'p-2.5'}`}>
-                  <div className={`font-bold uppercase tracking-wider text-black ${isCompact ? 'text-[6.5px]' : 'text-[8px]'}`}>
-                    Staff Signature (Sign after printing &amp; attach to item)
-                  </div>
-                  <div className={`flex items-end gap-2 ${isCompact ? 'mt-3' : isSpacious ? 'mt-7' : 'mt-5'}`}>
-                    <div className="flex-1 border-b border-black" />
-                    <span className={`font-bold text-black shrink-0 ${isCompact ? 'text-[6.5px]' : 'text-[8px]'}`}>
-                      Date: ______
-                    </span>
-                  </div>
-                </div>
-              </div>
+            {/* Portrait / Landscape */}
+            <div className="flex items-center rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 p-0.5 text-[11px] font-bold">
+              {['portrait', 'landscape'].map((dir) => (
+                <button
+                  key={dir}
+                  type="button"
+                  onClick={() => setOrientation(dir)}
+                  className={`px-2 py-0.5 rounded-md capitalize transition-colors cursor-pointer ${
+                    orientation === dir
+                      ? 'bg-slate-900 text-white dark:bg-blue-600'
+                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {dir}
+                </button>
+              ))}
             </div>
 
-            {/* Right Edge Drag Handle (Width) */}
-            <button
-              type="button"
-              onPointerDown={(e) => startDrag('x', e)}
-              title="Drag horizontally to resize sticker width"
-              aria-label="Drag to resize width"
-              className="absolute top-2 bottom-7 -right-1 w-4 flex items-center justify-center cursor-ew-resize group print:hidden"
-            >
-              <span className="w-1.5 h-12 rounded-full bg-amber-500/70 group-hover:bg-amber-600 shadow transition-colors" />
-            </button>
+            {/* Adjustable Page Margin */}
+            <label className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1 text-[11px] font-mono">
+              <span className="font-sans font-bold text-slate-500 dark:text-slate-400">Margin:</span>
+              <input
+                type="number"
+                aria-label="Page Margin mm"
+                min={2}
+                max={30}
+                value={marginMm}
+                onChange={(e) => setMarginMm(clampNum(e.target.value, 2, 30, 8))}
+                className="w-9 text-center font-black text-slate-900 dark:text-white bg-transparent border-b border-slate-300 dark:border-slate-600 outline-none"
+              />
+              <span className="text-slate-400">mm</span>
+            </label>
 
-            {/* Bottom Edge Drag Handle (Height) */}
-            <button
-              type="button"
-              onPointerDown={(e) => startDrag('y', e)}
-              title="Drag vertically to resize sticker height"
-              aria-label="Drag to resize height"
-              className="absolute left-2 right-7 -bottom-1 h-4 flex items-center justify-center cursor-ns-resize group print:hidden"
-            >
-              <span className="h-1.5 w-12 rounded-full bg-amber-500/70 group-hover:bg-amber-600 shadow transition-colors" />
-            </button>
+            {/* Sheet Packing Mode (1 Page Consolidated vs Multiple Pages Multi-Up) */}
+            <div className="flex items-center rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 p-0.5 text-[11px] font-bold">
+              <button
+                type="button"
+                onClick={() => setLayoutMode('one_page')}
+                className={`px-2.5 py-0.5 rounded-md flex items-center gap-1 transition-colors cursor-pointer ${
+                  layoutMode === 'one_page'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Maximize2 className="w-3 h-3" />
+                <span>1 Page (Consolidated)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setLayoutMode('multi_page')}
+                className={`px-2.5 py-0.5 rounded-md flex items-center gap-1 transition-colors cursor-pointer ${
+                  layoutMode === 'multi_page'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Layers className="w-3 h-3" />
+                <span>Multiple Pages ({packedLayout.pages.length})</span>
+              </button>
+            </div>
 
-            {/* Bottom-Right Corner Drag Handle (Width + Height) */}
-            <button
-              type="button"
-              onPointerDown={(e) => startDrag('xy', e)}
-              title="Drag corner to resize width & height freely"
-              aria-label="Drag corner to resize"
-              className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-amber-500 hover:bg-amber-600 text-slate-950 shadow-md flex items-center justify-center cursor-nwse-resize print:hidden"
-            >
-              <Move className="w-3.5 h-3.5" />
-            </button>
+            {isMulti && (
+              <button
+                type="button"
+                onClick={handleAutoFitOnePage}
+                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black shadow-2xs transition-colors cursor-pointer"
+                title="Automatically resize all selected QR cards proportionally to fit cleanly onto 1 page"
+              >
+                ⚡ Auto-Fit All to 1 Page
+              </button>
+            )}
+          </div>
+
+          {/* Row 2: Active QR Card Sizing Presets & Manual W × H mm Inputs */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-slate-200/80 dark:border-slate-700/80">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300 mr-0.5">
+                {isMulti && activeCard ? `Selected (${activeCard.cardData.rmaNumber}):` : 'QR Card Size:'}
+              </span>
+              {QR_SIZE_PRESETS.map((preset) => {
+                const isSelected = activeWidthMm === preset.widthMm && activeHeightMm === preset.heightMm;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => applyPresetToActive(preset)}
+                    className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-slate-900 text-white border-slate-900 dark:bg-blue-600 dark:border-blue-500 shadow-xs'
+                        : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600 hover:border-blue-400'
+                    }`}
+                  >
+                    {preset.label} <span className="font-mono text-[10px] opacity-75">({preset.widthMm}×{preset.heightMm})</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1 text-[11px] font-mono">
+                <span className="text-slate-500 font-bold">W</span>
+                <input
+                  type="number"
+                  aria-label="QR Card Width mm"
+                  min={34}
+                  max={220}
+                  value={activeWidthMm}
+                  onChange={(e) => updateActiveCardSize(e.target.value, activeHeightMm)}
+                  className="w-11 text-center font-black text-slate-900 dark:text-white bg-transparent border-b border-slate-300 dark:border-slate-600 focus:border-blue-500 outline-none"
+                />
+                <span className="text-slate-400">× H</span>
+                <input
+                  type="number"
+                  aria-label="QR Card Height mm"
+                  min={40}
+                  max={280}
+                  value={activeHeightMm}
+                  onChange={(e) => updateActiveCardSize(activeWidthMm, e.target.value)}
+                  className="w-11 text-center font-black text-slate-900 dark:text-white bg-transparent border-b border-slate-300 dark:border-slate-600 focus:border-blue-500 outline-none"
+                />
+                <span className="text-slate-400">mm</span>
+              </div>
+
+              {isMulti && (
+                <button
+                  type="button"
+                  onClick={handleApplyActiveSizeToAll}
+                  className="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                  title="Apply active card width & height to every QR card in this batch"
+                >
+                  <CopyCheck className="w-3 h-3" />
+                  <span>Apply Active Size to All</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handleResetAllSizes}
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer flex items-center gap-1 text-[11px] font-bold"
+                title="Reset sizes to default"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                {isMulti && <span>Reset Sizes</span>}
+              </button>
+            </div>
+          </div>
+
+          {/* Overflow Warning Banner when 1-page mode exceeds printable page bounds */}
+          {layoutMode === 'one_page' && packedLayout.hasOverflow && (
+            <div className="px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-[11px] font-bold flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>
+                  1-Page Overflow: {cards.length} QRs require {Math.ceil(packedLayout.neededHeightMm)}mm height (printable height is {effectivePaper.printableH}mm).
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleAutoFitOnePage}
+                  className="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black cursor-pointer"
+                >
+                  Auto-Fit All to 1 Page
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLayoutMode('multi_page')}
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-white text-[10px] font-black cursor-pointer"
+                >
+                  Switch to Multiple Pages
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Live WYSIWYG Consolidated Paper Sheet(s) Canvas Area */}
+        <div className="flex-1 overflow-auto p-4 sm:p-6 bg-slate-200/80 dark:bg-slate-950/90 print:p-0 print:bg-white print:overflow-visible">
+          <div
+            id="rma-qr-print-root"
+            style={{ '--u': `${previewPxPerMm}px` }}
+            className="flex flex-col items-center gap-6 print:block print:gap-0"
+          >
+            {packedLayout.pages.map((pageCards, pageIndex) => {
+              const displayPageHeightMm = layoutMode === 'one_page' && packedLayout.hasOverflow
+                ? Math.max(effectivePaper.heightMm, packedLayout.neededHeightMm + effectivePaper.marginMm * 2 + 4)
+                : effectivePaper.heightMm;
+
+              return (
+                <div
+                  key={`qr-page-${pageIndex}`}
+                  data-page-index={pageIndex + 1}
+                  style={{
+                    width: `calc(${effectivePaper.widthMm} * var(--u))`,
+                    height: `calc(${displayPageHeightMm} * var(--u))`
+                  }}
+                  className="rma-print-page relative bg-white border border-slate-300 shadow-lg shrink-0 select-none print:border-0 print:shadow-none"
+                >
+                  {/* Screen-only page badge & printable margin frame */}
+                  <div className="no-print-qr absolute top-1 left-2 text-[9px] font-mono font-bold text-slate-400 pointer-events-none">
+                    Page {pageIndex + 1} / {packedLayout.pages.length} • {effectivePaper.label} ({effectivePaper.widthMm}×{effectivePaper.heightMm}mm)
+                  </div>
+
+                  {/* Screen-only dashed printable margin boundary */}
+                  <div
+                    className="no-print-qr absolute border border-dashed border-slate-200 pointer-events-none"
+                    style={{
+                      left: `calc(${effectivePaper.marginMm} * var(--u))`,
+                      top: `calc(${effectivePaper.marginMm} * var(--u))`,
+                      width: `calc(${effectivePaper.printableW} * var(--u))`,
+                      height: `calc(${effectivePaper.printableH} * var(--u))`
+                    }}
+                  />
+
+                  {/* Placed Printable QR Cards on this page */}
+                  {pageCards.map((placed) => {
+                    const { cardData, svgId, qrPayload, wMm, hMm, xMm, yMm, key } = placed;
+                    const isSelectedCard = isMulti && activeCard?.key === key;
+                    // Smooth proportional scaling relative to 90x105mm baseline
+                    const s = Math.min(wMm / 90, hMm / 105);
+                    const qrMm = Math.max(18, Math.min(wMm * 0.56, hMm * 0.36));
+
+                    return (
+                      <div
+                        key={key}
+                        data-rma-qr-card={cardData.rmaNumber}
+                        onClick={() => isMulti && setActiveKey(key)}
+                        style={{
+                          left: `calc(${effectivePaper.marginMm + xMm} * var(--u))`,
+                          top: `calc(${effectivePaper.marginMm + yMm} * var(--u))`,
+                          width: `calc(${wMm} * var(--u))`,
+                          height: `calc(${hMm} * var(--u))`,
+                          padding: `calc(${Math.max(2, 3 * s)} * var(--u))`,
+                          borderWidth: `calc(${Math.max(0.4, 0.55 * s)} * var(--u))`
+                        }}
+                        className={`rma-qr-card absolute bg-white text-black border border-black flex flex-col justify-between box-border overflow-hidden transition-shadow ${
+                          isSelectedCard ? 'ring-2 ring-blue-500 ring-offset-1' : ''
+                        }`}
+                      >
+                        {/* Screen-only Remove Item button when multiple QRs are open */}
+                        {isMulti && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveCard(key);
+                            }}
+                            title={`Remove ${cardData.rmaNumber} from print sheet`}
+                            aria-label={`Remove ${cardData.rmaNumber}`}
+                            className="no-print-qr absolute top-0.5 right-0.5 z-10 w-4 h-4 rounded-full bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center shadow cursor-pointer print:hidden"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        )}
+
+                        {/* 1. Unified Pure B&W Header Strip */}
+                        <div
+                          className="w-full border-b border-black flex items-center justify-between gap-1 shrink-0"
+                          style={{ paddingBottom: `calc(${Math.max(1, 1.5 * s)} * var(--u))` }}
+                        >
+                          <span
+                            className="font-black uppercase tracking-wide text-black truncate"
+                            style={{ fontSize: `calc(${Math.max(1.8, 2.5 * s)} * var(--u))`, lineHeight: 1.1 }}
+                          >
+                            {cardData.headerTitle}
+                          </span>
+                          <span
+                            className="font-mono font-bold text-black shrink-0 pr-3 sm:pr-0"
+                            style={{ fontSize: `calc(${Math.max(1.6, 2.1 * s)} * var(--u))`, lineHeight: 1.1 }}
+                          >
+                            {Math.round(wMm)}×{Math.round(hMm)}mm
+                          </span>
+                        </div>
+
+                        {/* 2. Centered Body: Private Portal QR + RMA # + Product + Qty & Unit + Metadata */}
+                        <div className="flex-1 flex flex-col items-center justify-center text-center min-h-0 py-0.5">
+                          {/* High-Contrast Private Portal QR */}
+                          <div
+                            className="bg-white border border-black flex items-center justify-center shrink-0"
+                            style={{
+                              width: `calc(${qrMm} * var(--u))`,
+                              height: `calc(${qrMm} * var(--u))`,
+                              padding: `calc(${Math.max(1, 1.5 * s)} * var(--u))`
+                            }}
+                          >
+                            <QRCodeSVG
+                              id={svgId}
+                              value={qrPayload || cardData.rmaNumber}
+                              size={256}
+                              level="H"
+                              includeMargin={false}
+                              bgColor="#ffffff"
+                              fgColor="#000000"
+                              style={{ width: '100%', height: '100%', display: 'block' }}
+                            />
+                          </div>
+
+                          <div
+                            className="font-mono font-black uppercase tracking-wider text-black shrink-0"
+                            style={{
+                              fontSize: `calc(${Math.max(1.4, 1.8 * s)} * var(--u))`,
+                              marginTop: `calc(${0.8 * s} * var(--u))`,
+                              lineHeight: 1.05
+                            }}
+                          >
+                            PORTAL SCAN ONLY
+                          </div>
+
+                          {/* Bold RMA Number */}
+                          <div
+                            className="font-mono font-black text-black tracking-tight w-full truncate shrink-0"
+                            style={{
+                              fontSize: `calc(${Math.max(2.6, 4.1 * s)} * var(--u))`,
+                              marginTop: `calc(${0.8 * s} * var(--u))`,
+                              lineHeight: 1.1
+                            }}
+                          >
+                            {cardData.rmaNumber}
+                          </div>
+
+                          {/* Product Name or Batch Manifest */}
+                          <div
+                            className="font-extrabold text-black w-full line-clamp-2 shrink-0"
+                            style={{
+                              fontSize: `calc(${Math.max(1.9, 2.6 * s)} * var(--u))`,
+                              marginTop: `calc(${0.6 * s} * var(--u))`,
+                              lineHeight: 1.15
+                            }}
+                          >
+                            {cardData.displayTitle}
+                          </div>
+
+                          {/* Quantity & Unit Badge (Always prominently visible) */}
+                          <div
+                            className="w-full border border-black font-black text-black shrink-0 truncate"
+                            style={{
+                              fontSize: `calc(${Math.max(1.85, 2.5 * s)} * var(--u))`,
+                              marginTop: `calc(${1 * s} * var(--u))`,
+                              padding: `calc(${0.6 * s} * var(--u)) calc(${1.2 * s} * var(--u))`,
+                              lineHeight: 1.15
+                            }}
+                          >
+                            Qty: {cardData.qtyFormatted}
+                          </div>
+
+                          {/* Structured Meta: Barcode/SKU, Optional Expiry (Supplier Name omitted by design) */}
+                          <div
+                            className="w-full font-mono font-bold text-black space-y-0.5 shrink-0"
+                            style={{
+                              fontSize: `calc(${Math.max(1.5, 2.0 * s)} * var(--u))`,
+                              marginTop: `calc(${0.8 * s} * var(--u))`,
+                              lineHeight: 1.15
+                            }}
+                          >
+                            {!cardData.isManifest && (
+                              <div className="truncate">
+                                BC: {cardData.barcode}{cardData.sku ? ` • SKU: ${cardData.sku}` : ''}
+                              </div>
+                            )}
+                            {cardData.expiryYmd && (
+                              <div className="truncate">Exp (YYYY-MM-DD): {cardData.expiryYmd}</div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 3. Pinned Footer: Reporter & Contact + Date/Time + Reporter Signature */}
+                        <div className="w-full shrink-0 border-t border-black pt-0.5 space-y-0.5">
+                          <div
+                            className="flex items-center justify-between gap-1 text-black font-semibold truncate"
+                            style={{ fontSize: `calc(${Math.max(1.45, 1.95 * s)} * var(--u))`, lineHeight: 1.15 }}
+                          >
+                            <span className="truncate">
+                              By: <strong>{cardData.reporter || 'Staff'}</strong>
+                              {cardData.reporterContact && cardData.reporterContact !== 'N/A' ? ` (${cardData.reporterContact})` : ''}
+                            </span>
+                            <span className="font-mono shrink-0">{cardData.dateTimeFormatted}</span>
+                          </div>
+
+                          <div
+                            className="border border-black bg-white flex flex-col justify-end"
+                            style={{
+                              padding: `calc(${0.8 * s} * var(--u)) calc(${1.2 * s} * var(--u))`,
+                              minHeight: `calc(${Math.max(5.5, 7.8 * s)} * var(--u))`
+                            }}
+                          >
+                            <div
+                              className="flex items-end justify-between gap-1 text-black font-bold"
+                              style={{ fontSize: `calc(${Math.max(1.35, 1.75 * s)} * var(--u))`, lineHeight: 1 }}
+                            >
+                              <span className="shrink-0">Reporter Signature:</span>
+                              <span className="flex-1 border-b border-black mx-1" />
+                              <span className="shrink-0">Date: _____</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Screen-only Right, Bottom & Corner Drag Resize Handles */}
+                        <button
+                          type="button"
+                          onPointerDown={(e) => startDrag(key, 'x', wMm, hMm, previewPxPerMm, e)}
+                          title={`Drag horizontally to resize ${cardData.rmaNumber} width`}
+                          aria-label={`Resize ${cardData.rmaNumber} width`}
+                          className="no-print-qr absolute top-2 bottom-4 right-0 w-2 cursor-ew-resize print:hidden opacity-0 hover:opacity-100 bg-amber-500/60 transition-opacity"
+                        />
+                        <button
+                          type="button"
+                          onPointerDown={(e) => startDrag(key, 'y', wMm, hMm, previewPxPerMm, e)}
+                          title={`Drag vertically to resize ${cardData.rmaNumber} height`}
+                          aria-label={`Resize ${cardData.rmaNumber} height`}
+                          className="no-print-qr absolute left-2 right-4 bottom-0 h-2 cursor-ns-resize print:hidden opacity-0 hover:opacity-100 bg-amber-500/60 transition-opacity"
+                        />
+                        <button
+                          type="button"
+                          onPointerDown={(e) => startDrag(key, 'xy', wMm, hMm, previewPxPerMm, e)}
+                          title={`Drag corner to resize ${cardData.rmaNumber} (${wMm}×${hMm}mm)`}
+                          aria-label={`Drag corner to resize ${cardData.rmaNumber}`}
+                          className="no-print-qr absolute bottom-0 right-0 w-4 h-4 bg-amber-500 hover:bg-amber-600 text-slate-950 flex items-center justify-center cursor-nwse-resize print:hidden rounded-tl"
+                        >
+                          <Move className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -541,60 +955,46 @@ export default function ReturnQRModal({ isOpen, onClose, report, onOpenQuickActi
           </div>
         )}
 
-        {/* Modal Action Footer */}
-        <div className="shrink-0 p-3.5 sm:px-6 sm:py-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2.5">
+        {/* Unified Action Footer: Strictly "Save QR (PNG)" and "Print QR" / "Print N QRs" */}
+        <div className="shrink-0 p-3.5 sm:px-6 sm:py-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2.5 print:hidden">
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={handleDownloadQrOnly}
+              onClick={handleSaveQrPng}
               disabled={downloadingType !== null}
-              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 border border-slate-300 dark:border-slate-600 disabled:opacity-50"
+              className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+              title={isMulti ? 'Download consolidated multi-up QR sheet PNG(s)' : `Download ${cards[0].cardData.rmaNumber}-QR.png`}
             >
-              <Download className="w-3.5 h-3.5" />
-              {downloadingType === 'qr' ? 'Saving...' : 'Save QR PNG'}
-            </button>
-
-            <button
-              type="button"
-              onClick={handleDownloadFullLabel}
-              disabled={downloadingType !== null}
-              className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50"
-            >
-              <FileImage className="w-3.5 h-3.5" />
-              {downloadingType === 'label' ? 'Generating...' : `Save Sticker PNG (${sizeMm.widthMm}×${sizeMm.heightMm})`}
+              <Download className="w-4 h-4 text-emerald-400" />
+              <span>{downloadingType === 'qr' ? 'Generating...' : 'Save QR (PNG)'}</span>
             </button>
 
             <button
               type="button"
               onClick={handlePrint}
               disabled={isPrinting}
-              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-900 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+              className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shadow-md shadow-blue-600/20 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+              title={`Print on ${effectivePaper.label} (${effectivePaper.widthMm}×${effectivePaper.heightMm}mm)`}
             >
-              <Printer className="w-3.5 h-3.5" />
-              {isPrinting ? 'Printing...' : `Print Sticker (${sizeMm.widthMm}×${sizeMm.heightMm}mm)`}
+              <Printer className="w-4 h-4" />
+              <span>
+                {isPrinting
+                  ? 'Printing...'
+                  : isMulti
+                    ? `Print ${cards.length} QRs (${packedLayout.pages.length} ${effectivePaper.label} Page${packedLayout.pages.length > 1 ? 's' : ''})`
+                    : `Print QR (${activeWidthMm}×${activeHeightMm}mm • ${effectivePaper.label})`}
+              </span>
             </button>
           </div>
 
-          <div className="flex items-center gap-2 ml-auto">
-            {onOpenQuickAction && (
-              <button
-                type="button"
-                onClick={() => onOpenQuickAction(report)}
-                className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
-              >
-                <ShieldCheck className="w-4 h-4" />
-                {streamType === 'supplier_outbound' ? 'Choose Disposition / Driver Pickup' : 'Quick Action'}
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-xl transition-colors"
-            >
-              Done
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>Done</span>
+          </button>
         </div>
       </div>
     </div>

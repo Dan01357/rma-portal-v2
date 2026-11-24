@@ -23,6 +23,7 @@ import { notificationService } from '../services/notificationService';
 import ImageLightboxModal from './ImageLightboxModal';
 import SupplierInput from './SupplierInput';
 import ProductAutoSuggest from './ProductAutoSuggest';
+import EmailRecipientsEditor from './EmailRecipientsEditor';
 
 export default function ProductEditModal({ isOpen, onClose, product, onSaved, onDeleted, currentUser }) {
   const isEditing = Boolean(product && product.id && (typeof product.id === 'number' || (/^\d+$/.test(String(product.id).trim()) && !String(product.id).startsWith('prod_'))));
@@ -55,6 +56,11 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   const [errorNotice, setErrorNotice] = useState(null);
   const [skuError, setSkuError] = useState(null);
   const [nameError, setNameError] = useState(null);
+  const [notifyOnSave, setNotifyOnSave] = useState(false);
+  const [productRecipients, setProductRecipients] = useState(() => {
+    const prof = notificationService.getEmailProfile('product_update');
+    return { toList: prof.toList || [], ccList: prof.ccList || [] };
+  });
 
 
   // Fetch employees from authService directory on open
@@ -144,6 +150,9 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
       setErrorNotice(null);
       setSkuError(null);
       setNameError(null);
+      setNotifyOnSave(false);
+      const prof = notificationService.getEmailProfile('product_update');
+      setProductRecipients({ toList: prof.toList || [], ccList: prof.ccList || [] });
     }
   }, [isOpen, product]);
 
@@ -302,6 +311,21 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
       } else {
         const res = await catalogService.createProduct(payload);
         savedProductData = res?.product || payload;
+      }
+
+      if (notifyOnSave) {
+        const isTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true' && currentUser?.role === 'super_admin';
+        notificationService.sendProductUpdateNotification(
+          {
+            product: savedProductData,
+            isNew: !isEditing,
+            editorName: currentUser?.name || currentUser?.email || 'Admin',
+            customRecipients: productRecipients
+          },
+          isTestActive
+        ).catch((mailErr) => {
+          console.warn('Non-blocking error sending product update email:', mailErr);
+        });
       }
 
       if (onSaved) onSaved({
@@ -696,6 +720,29 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                 onChange={(val) => setSupplierName(val)}
                 placeholder="e.g. Savemore / Mondelez / Bonita"
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 focus:bg-white dark:focus:bg-slate-800"
+              />
+            </div>
+
+            {/* Catalog Update Email Recipients & Optional Notification Toggle */}
+            <div className="space-y-2 pt-1">
+              <label className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 cursor-pointer text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={notifyOnSave}
+                  onChange={(e) => setNotifyOnSave(e.target.checked)}
+                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span>📧 Dispatch Product Catalog Update Email Notification on Save</span>
+              </label>
+
+              <EmailRecipientsEditor
+                emailType="product_update"
+                value={productRecipients}
+                onChange={setProductRecipients}
+                compact={true}
+                defaultExpanded={false}
+                isTestMode={typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true' && currentUser?.role === 'super_admin'}
+                extraHint="Assigned Customer AE email is also CC’d when notified."
               />
             </div>
 

@@ -1,5 +1,12 @@
 import nodemailer from 'nodemailer';
 
+export const DEFAULT_SANDBOX_EMAIL = 'mgan@pingconmarketing.com';
+
+export function normalizeSandboxEmail(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) ? s : DEFAULT_SANDBOX_EMAIL;
+}
+
 export const DEFAULT_EMAIL_RECIPIENTS = {
   toEmail: 'azgodev@gmail.com',
   baseCcList: [

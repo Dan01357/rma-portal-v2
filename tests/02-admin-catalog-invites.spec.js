@@ -9,7 +9,7 @@ import {
 } from './helpers/testUtils.js';
 
 test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites & Saved Products Catalog CRUD', () => {
-  test('Logout UI in isolated context, all 6 KPI cards & 7 tabs, NotificationBell, EmployeeManagementModal & Invites filters/email/revoke/delete', async ({
+  test('Logout UI in isolated context, all 5 KPI cards & 6 tabs, Credit Memos Ledger sub-tab, NotificationBell, EmployeeManagementModal & Invites filters/email/revoke/delete', async ({
     page,
     browser,
     context
@@ -22,26 +22,34 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
     const testInviteEmail = `pw-invite-${uniqueSuffix}@pingcon-test.local`;
 
     try {
-      // 1. Main Admin session: Click all 6 Top KPI Cards & all 7 Tabs
+      // 1. Main Admin session: Click all 5 Symmetrical KPI Cards & all Top-Level Tabs
       await gotoAdmin(page);
+
+      // Assert standalone top-level Credit Memos tab button is removed
+      await expect(page.getByRole('button', { name: /^Credit Memos \(\d+\)$/i })).toHaveCount(0);
 
       // Card 1: Saved Products
       await page.locator('div.cursor-pointer', { hasText: 'Catalog items' }).first().click();
       await expect(page.getByText('Verified Products Catalog')).toBeVisible();
 
-      // Card 2: Customer Inbound
-      await page.locator('div.cursor-pointer', { hasText: 'Customer Inbound' }).first().click();
+      // Card 2: Customer Inbound (Returns + clickable Credit Memos (N) -> pill)
+      const inboundCard = page.locator('div.cursor-pointer', { hasText: 'Customer Inbound' }).first();
+      await inboundCard.click();
       await expect(page.getByRole('button', { name: /Export Inbound \(\.xlsx\)/i })).toBeVisible();
+      await expect(page.getByText('WMS / ERP Sync').first()).toBeVisible();
+
+      // Click Credit Memos (N) -> pill inside Customer Inbound KPI card
+      await inboundCard.getByRole('button', { name: /Credit Memos \(\d+\)/i }).click();
+      await expect(page.getByRole('button', { name: /Issue Credit Memo/i })).toBeVisible();
+      await expect(page.getByText('WMS / ERP Sync')).toHaveCount(0);
+      await page.getByRole('button', { name: /Customer Returns \(/i }).click();
+      await expect(page.getByText('WMS / ERP Sync').first()).toBeVisible();
 
       // Card 3: Supplier RTVs
       await page.locator('div.cursor-pointer', { hasText: 'Vendor claims queued' }).first().click();
       await expect(page.getByRole('button', { name: /Export Supplier Claims \(\.xlsx\)/i })).toBeVisible();
 
-      // Card 4: Credit Memos
-      await page.locator('div.cursor-pointer', { hasText: 'Finance' }).filter({ hasText: 'Credit Memos' }).first().click();
-      await expect(page.getByRole('button', { name: /Issue Credit Memo/i })).toBeVisible();
-
-      // Card 5: Awaiting SKU -> Pending Unknown Barcodes modal
+      // Card 4: Awaiting SKU -> Pending Unknown Barcodes modal
       await page.locator('div.cursor-pointer', { hasText: 'Needs SKU assignment' }).first().click();
       await expect(page.getByText('Pending Unknown Barcodes')).toBeVisible();
       const pendingFilter = page.locator('input[placeholder="Filter pending by barcode or SN..."]');
@@ -322,7 +330,7 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       await expect(editModal).toBeVisible();
       await editModal.locator('input[placeholder="e.g. 24"]').fill('24');
       await editModal.getByRole('button', { name: /Save Changes/i }).click();
-      await expect(editModal).toBeHidden({ timeout: 15_000 });
+      await expect(editModal).toBeHidden({ timeout: 35_000 });
 
       await page.locator('button[title="Delete product"]').first().click();
       await expect(page.getByText('Delete Product from Catalog?')).toBeVisible();

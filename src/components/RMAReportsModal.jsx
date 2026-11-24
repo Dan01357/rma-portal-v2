@@ -348,8 +348,10 @@ export default function RMAReportsModal({
             </button>
 
             <button
+              type="button"
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              aria-label="Close Reports Modal"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -829,7 +831,18 @@ export default function RMAReportsModal({
                   )}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {onViewReportQR && (
+                    <button
+                      type="button"
+                      onClick={() => onViewReportQR(selectedReportsList.length === 1 ? selectedReportsList[0] : selectedReportsList)}
+                      className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                      title="Open Consolidated QR Print & PNG Studio for all selected RMAs"
+                    >
+                      <QrCode className="w-3.5 h-3.5 shrink-0" />
+                      <span>🖨️ Print / Save QRs ({selectedReportIds.size})</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={clearSelection}
@@ -1079,7 +1092,18 @@ export default function RMAReportsModal({
                   )}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {onViewReportQR && (
+                    <button
+                      type="button"
+                      onClick={() => onViewReportQR(selectedReportsList.length === 1 ? selectedReportsList[0] : selectedReportsList)}
+                      className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                      title="Open Consolidated QR Print & PNG Studio for all selected RMAs"
+                    >
+                      <QrCode className="w-3.5 h-3.5 shrink-0" />
+                      <span>🖨️ Print / Save QRs ({selectedReportIds.size})</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={clearSelection}

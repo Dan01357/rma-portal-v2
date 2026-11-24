@@ -2,7 +2,8 @@ import {
   formatPeso,
   formatFourChoiceOutcome,
   isTestRecord,
-  getConsolidatedPickupItems
+  getConsolidatedPickupItems,
+  getPickupPhotosSummary
 } from './rmaHelpers.js';
 
 const PAGE_W = 1700; // 8.5 in * 200 dpi
@@ -20,6 +21,61 @@ const isPlaceholderSupplier = (val) => {
 
 function sanitizeFilenamePart(val) {
   return String(val || 'RMA').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'RMA';
+}
+
+/**
+ * Builds the exact ordered list of labeled printable copies (`1..N`) for
+ * both Customer Hub and Supplier RTV forms (and Credit Memo Vouchers).
+ */
+export function buildPickupFormCopiesList({
+  ourCopyCount = 1,
+  otherCopyCount = 1,
+  isCustomerStream = false
+} = {}) {
+  const safeOurs = Math.max(0, Math.min(10, parseInt(ourCopyCount, 10) || 0));
+  const safeOther = Math.max(0, Math.min(10, parseInt(otherCopyCount, 10) || 0));
+  const totalCopies = safeOurs + safeOther;
+  if (totalCopies === 0) return [];
+
+  const copies = [];
+  let seq = 0;
+
+  for (let i = 0; i < safeOurs; i++) {
+    seq += 1;
+    const roleLabel = i === 0
+      ? 'OUR COMPANY COPY (PINGCON RETAIN)'
+      : 'OUR COMPANY COPY (DUPLICATE)';
+    copies.push({
+      key: `ours-${i}`,
+      index: seq,
+      total: totalCopies,
+      kind: 'ours',
+      title: `COPY ${seq} OF ${totalCopies} — ${roleLabel}`,
+      shortTitle: i === 0 ? 'OUR COMPANY COPY' : 'OUR COMPANY COPY (DUPLICATE)'
+    });
+  }
+
+  for (let j = 0; j < safeOther; j++) {
+    seq += 1;
+    const baseRole = isCustomerStream
+      ? 'CUSTOMER COPY (HAND TO CUSTOMER / DRIVER)'
+      : 'SUPPLIER COPY (HAND TO DRIVER)';
+    const roleLabel = j === 0
+      ? baseRole
+      : (isCustomerStream ? 'CUSTOMER COPY (DUPLICATE)' : 'SUPPLIER COPY (DUPLICATE)');
+    copies.push({
+      key: `other-${j}`,
+      index: seq,
+      total: totalCopies,
+      kind: 'other',
+      title: `COPY ${seq} OF ${totalCopies} — ${roleLabel}`,
+      shortTitle: j === 0
+        ? (isCustomerStream ? 'CUSTOMER COPY' : "SUPPLIER DRIVER'S COPY")
+        : (isCustomerStream ? 'CUSTOMER COPY (DUPLICATE)' : 'SUPPLIER COPY (DUPLICATE)')
+    });
+  }
+
+  return copies;
 }
 
 function uint8ToBase64(bytes) {
@@ -237,7 +293,12 @@ function drawCopyHeaderAndMeta(ctx, startX, startY, width, copyTitle, info, comp
     y + (compact ? 22 : 26)
   );
   ctx.font = `600 ${compact ? 14 : 15}px Arial, Helvetica, sans-serif`;
-  const statusLine = `${info.formattedTime ? `${info.formattedTime} • ` : ''}${info.photoCount}/5 Drive Photos Verified`;
+  const slotCount = info.photoSlotCount ?? info.photoCount ?? 0;
+  const totalPhotos = info.photoTotalCount ?? slotCount;
+  const photoSummaryLabel = totalPhotos > 0 && totalPhotos !== slotCount
+    ? `${slotCount}/5 Cats (${totalPhotos} Photos) Verified`
+    : `${slotCount}/5 Drive Photos Verified`;
+  const statusLine = `${info.formattedTime ? `${info.formattedTime} • ` : ''}${photoSummaryLabel}`;
   ctx.fillText(statusLine, innerX + innerW, y + (compact ? 47 : 54), innerW * 0.42);
 
   // Title on left
@@ -280,11 +341,11 @@ function drawCopyHeaderAndMeta(ctx, startX, startY, width, copyTitle, info, comp
   ctx.lineWidth = 1.6;
   ctx.strokeRect(boxX, y, boxW, metaBoxH);
 
-  // Row 1: Supplier Company Name | Truck Plate #
+  // Row 1: Party Name (Supplier OR Customer / Store Branch) | Truck Plate #
   ctx.fillStyle = '#000000';
   ctx.textBaseline = 'top';
   ctx.font = `700 ${compact ? 13 : 14}px Arial, Helvetica, sans-serif`;
-  ctx.fillText('SUPPLIER COMPANY NAME', boxX + 12, y + 8);
+  ctx.fillText(info.partyFieldLabel || 'SUPPLIER COMPANY NAME', boxX + 12, y + 8);
   ctx.fillText('TRUCK PLATE #', boxX + colHalf + 12, y + 8);
 
   ctx.font = `900 ${compact ? 19 : 22}px Arial, Helvetica, sans-serif`;
@@ -493,14 +554,18 @@ function drawTotalRow(ctx, tableX, y, tableW, cols, info, compact = false) {
   return y + h;
 }
 
-function drawSignatures(ctx, innerX, y, innerW, preparedBy, compact = false) {
+function drawSignatures(ctx, innerX, y, innerW, preparedBy, compact = false, isCustomerStream = false) {
   const gap = 20;
   const boxW = (innerW - gap * 2) / 3;
   const boxH = compact ? 102 : 124;
 
   const boxes = [
     { title: 'PREPARED BY (LOGISTICS / WAREHOUSE)', name: preparedBy, footer: 'Printed Name & Date' },
-    { title: "SUPPLIER DRIVER'S SIGNATURE", name: '', footer: 'Signature Over Printed Name & Date' },
+    {
+      title: isCustomerStream ? "CUSTOMER / RECEIVING DRIVER'S SIGNATURE" : "SUPPLIER DRIVER'S SIGNATURE",
+      name: '',
+      footer: 'Signature Over Printed Name & Date'
+    },
     { title: "RELEASING STAFF'S SIGNATURE", name: '', footer: 'Verified & Released (Sign & Date)' }
   ];
 
@@ -534,15 +599,22 @@ function drawSignatures(ctx, innerX, y, innerW, preparedBy, compact = false) {
   return y + boxH;
 }
 
-function renderCompactDualCopyPage(info) {
+function renderCompactDualCopyPage(info, copiesList = []) {
   const { canvas, ctx } = createBlankPageCanvas();
   const topBoxY = 64;
   const boxH = 950;
   const bottomBoxY = 1186;
 
+  const copy1Title = copiesList[0]?.title || 'COPY 1 OF 2 — OUR COMPANY COPY (PINGCON RETAIN)';
+  const copy2Title = copiesList[1]?.title || (
+    info.isCustomerStream
+      ? 'COPY 2 OF 2 — CUSTOMER COPY (HAND TO CUSTOMER / DRIVER)'
+      : 'COPY 2 OF 2 — SUPPLIER COPY (HAND TO DRIVER)'
+  );
+
   [
-    { title: 'OUR COMPANY COPY', y: topBoxY },
-    { title: "SUPPLIER DRIVER'S COPY", y: bottomBoxY }
+    { title: copy1Title, y: topBoxY },
+    { title: copy2Title, y: bottomBoxY }
   ].forEach(({ title, y }) => {
     ctx.lineWidth = 3;
     ctx.strokeStyle = '#000000';
@@ -562,7 +634,7 @@ function renderCompactDualCopyPage(info) {
     }
     drawTotalRow(ctx, innerX, curY, innerW, cols, info, true);
 
-    drawSignatures(ctx, innerX, y + boxH - pad - 102, innerW, info.preparedBy, true);
+    drawSignatures(ctx, innerX, y + boxH - pad - 102, innerW, info.preparedBy, true, info.isCustomerStream);
   });
 
   // Dead-center cut line
@@ -646,7 +718,7 @@ function renderFullPageCopy(info, copyTitle) {
   }
 
   curY = drawTotalRow(ctx, innerX, curY, innerW, cols, info, false);
-  drawSignatures(ctx, innerX, curY + 18, innerW, info.preparedBy, false);
+  drawSignatures(ctx, innerX, curY + 18, innerW, info.preparedBy, false, info.isCustomerStream);
 
   return canvases;
 }
@@ -661,7 +733,10 @@ export function generatePickupFormPdfAttachment({
   allReports = [],
   catalogProducts = [],
   preparedByOverride = null,
-  combineIdentical = true
+  combineIdentical = true,
+  ourCopyCount = 1,
+  otherCopyCount = 1,
+  layoutMode = 'auto'
 }) {
   const effectiveReports = Array.isArray(reports) && reports.length > 0
     ? reports
@@ -679,6 +754,7 @@ export function generatePickupFormPdfAttachment({
       effectiveReports.map((r) => r.rma_number || r.rmaNumber || String(r.id || '')).filter(Boolean)
     ));
     const isTest = effectiveReports.some((r) => isTestRecord(r));
+    const isCustomerStream = primaryReport.rma_type !== 'supplier_outbound';
     const bc = String(primaryReport.barcode || '').trim();
     const skuCode = String(primaryReport.code || primaryReport.sku || '').trim();
     const matchedCatalogProd = (catalogProducts || []).find((p) =>
@@ -686,14 +762,24 @@ export function generatePickupFormPdfAttachment({
       (skuCode && (String(p.code || '').trim() === skuCode || String(p.sku || '').trim() === skuCode))
     );
 
-    const supplierName = [
-      pickup.supplier_name,
-      primaryReport.supplier_name,
-      primaryReport.supplierName,
-      primaryReport.supplier,
-      matchedCatalogProd?.supplier_name,
-      matchedCatalogProd?.supplierName
-    ].find((cand) => !isPlaceholderSupplier(cand)) || 'Pending Assignment';
+    const partyCandidates = isCustomerStream
+      ? [
+          pickup.customer_name,
+          !isPlaceholderSupplier(pickup.supplier_name) ? pickup.supplier_name : '',
+          primaryReport.store_branch,
+          primaryReport.customer_name,
+          primaryReport.reporter_name
+        ]
+      : [
+          pickup.supplier_name,
+          primaryReport.supplier_name,
+          primaryReport.supplierName,
+          primaryReport.supplier,
+          matchedCatalogProd?.supplier_name,
+          matchedCatalogProd?.supplierName
+        ];
+    const supplierName = partyCandidates.find((cand) => !isPlaceholderSupplier(cand))
+      || (isCustomerStream ? 'Wholesale Customer' : 'Pending Assignment');
 
     const dispositionCode = String(pickup.disposition || meta.simple_rtv_disposition || primaryReport.disposition || '').toLowerCase();
     const isReplacementForm =
@@ -702,15 +788,25 @@ export function generatePickupFormPdfAttachment({
       outcome.choiceKey === 'replacement';
 
     const claimNumber = outcome.claimNumber || pickup.claim_number || '';
-    const formHeaderTitle = isReplacementForm
-      ? 'SUPPLIER REPLACEMENT / EXCHANGE & PICKUP FORM'
-      : 'SUPPLIER DEBIT CLAIM & PICKUP VALIDATION FORM';
-    const claimPurposeLabel = isReplacementForm
-      ? 'Return to Supplier for Replacement / Exchange'
-      : 'Return to Supplier for Debit Claim / AP Deduction';
-    const refLineLabel = isReplacementForm
-      ? `Replacement Ref #: ${claimNumber || rmaNumber}`
-      : `Claim #: ${claimNumber || rmaNumber}`;
+    const formHeaderTitle = isCustomerStream
+      ? (isReplacementForm
+        ? 'CUSTOMER BUFFER REPLACEMENT & HANDOVER FORM'
+        : 'CUSTOMER CREDIT MEMO / RETURN HANDOVER FORM')
+      : (isReplacementForm
+        ? 'SUPPLIER REPLACEMENT / EXCHANGE & PICKUP FORM'
+        : 'SUPPLIER DEBIT CLAIM & PICKUP VALIDATION FORM');
+
+    const claimPurposeLabel = isCustomerStream
+      ? (isReplacementForm
+        ? '1-to-1 Buffer Replacement / Good Stock Exchange with Customer'
+        : 'Customer Return Accepted for Credit Memo / Account Deduction')
+      : (isReplacementForm
+        ? 'Return to Supplier for Replacement / Exchange'
+        : 'Return to Supplier for Debit Claim / AP Deduction');
+
+    const refLineLabel = isCustomerStream
+      ? (isReplacementForm ? `Buffer Ref #: ${claimNumber || rmaNumber}` : `Ref / CM #: ${claimNumber || rmaNumber}`)
+      : (isReplacementForm ? `Replacement Ref #: ${claimNumber || rmaNumber}` : `Claim #: ${claimNumber || rmaNumber}`);
 
     const { items: normalizedItems } = getConsolidatedPickupItems({
       report: primaryReport,
@@ -723,10 +819,10 @@ export function generatePickupFormPdfAttachment({
     const preparedBy = String(
       preparedByOverride ||
       pickup.processed_by ||
-      primaryReport.inspected_by ||
-      meta.simple_rtv_updated_by ||
-      'Warehouse Staff'
-    ).replace(/\s*\([^)]*\)/g, '').trim() || 'Warehouse Staff';
+      ''
+    ).replace(/\s*\([^)]*\)/g, '').trim();
+
+    const pickupPhotosStats = getPickupPhotosSummary(pickup.photos);
 
     const info = {
       rmaNumber,
@@ -734,12 +830,16 @@ export function generatePickupFormPdfAttachment({
       rmaNumbersList,
       claimNumber,
       isTest,
+      isCustomerStream,
       isReplacementForm,
+      partyFieldLabel: isCustomerStream ? 'CUSTOMER / STORE BRANCH NAME' : 'SUPPLIER COMPANY NAME',
       formHeaderTitle,
       claimPurposeLabel,
       refLineLabel,
       formattedTime: outcome.formattedTime || '',
-      photoCount: pickup.photos && typeof pickup.photos === 'object' ? Object.keys(pickup.photos).length : 0,
+      photoCount: pickupPhotosStats.slotCount,
+      photoSlotCount: pickupPhotosStats.slotCount,
+      photoTotalCount: pickupPhotosStats.totalPhotos,
       supplierName,
       supplierEmailTo: pickup.supplier_email_to || '',
       supplierEmailCc: pickup.supplier_email_cc || '',
@@ -753,12 +853,22 @@ export function generatePickupFormPdfAttachment({
       grandTotalValue: normalizedItems.reduce((s, it) => s + it.lineTotal, 0)
     };
 
-    const canvases = normalizedItems.length <= 4
-      ? renderCompactDualCopyPage(info)
-      : [
-          ...renderFullPageCopy(info, 'OUR COMPANY COPY'),
-          ...renderFullPageCopy(info, "SUPPLIER DRIVER'S COPY")
-        ];
+    const copiesList = buildPickupFormCopiesList({
+      ourCopyCount,
+      otherCopyCount,
+      isCustomerStream
+    });
+    if (copiesList.length === 0) return null;
+
+    const canUseCombinedOnePage =
+      layoutMode !== 'separated' &&
+      layoutMode !== 'full_page' &&
+      normalizedItems.length < 4 &&
+      copiesList.length === 2;
+
+    const canvases = canUseCombinedOnePage
+      ? renderCompactDualCopyPage(info, copiesList)
+      : copiesList.flatMap((cp) => renderFullPageCopy(info, cp.title));
 
     const encodeAtQuality = (quality) => {
       const jpegPages = canvases.map((c) => {
@@ -776,9 +886,13 @@ export function generatePickupFormPdfAttachment({
     }
 
     const safeRef = sanitizeFilenamePart(claimNumber || rmaNumber);
-    const filename = isReplacementForm
-      ? `Replacement-Form-${safeRef}.pdf`
-      : `Debit-Claim-Form-${safeRef}.pdf`;
+    const filename = isCustomerStream
+      ? (isReplacementForm
+        ? `Customer-Buffer-Replacement-Form-${safeRef}.pdf`
+        : `Customer-Credit-Handover-Form-${safeRef}.pdf`)
+      : (isReplacementForm
+        ? `Replacement-Form-${safeRef}.pdf`
+        : `Debit-Claim-Form-${safeRef}.pdf`);
 
     return {
       filename,

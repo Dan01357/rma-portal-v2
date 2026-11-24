@@ -21,14 +21,18 @@ import {
   ExternalLink,
   MapPin,
   FileSpreadsheet,
-  Send
+  Send,
+  Clock,
+  FlaskConical
 } from 'lucide-react';
 import { rmaApi, supabase } from '../supabaseClient';
 import { applyEmailTestMode, getWarehouseLocations } from '../utils/rmaHelpers';
-import { notificationService } from '../services/notificationService';
+import { formatTime12hFromHhmm } from '../utils/followUpWorkflow';
+import { notificationService, EMAIL_PROFILE_TYPES } from '../services/notificationService';
 import { purchaseOrdersApi } from '../services/purchaseOrdersApi';
 import ApiKeysManagementSection from './ApiKeysManagementSection';
 import WarehouseLocationsModal from './WarehouseLocationsModal';
+import EmailRecipientsEditor from './EmailRecipientsEditor';
 
 export default function SettingsTab({ 
   isTestMode, 
@@ -54,6 +58,29 @@ export default function SettingsTab({
   });
 
   const [dailyMatrixStatus, setDailyMatrixStatus] = useState({
+    loading: false,
+    done: false,
+    success: false,
+    message: '',
+    detail: ''
+  });
+
+  // Per-Email Recipient Manager Active Type & Matrix Config State
+  const [activeEmailProfileType, setActiveEmailProfileType] = useState('new_rma');
+  const [syncMatrixFeedback, setSyncMatrixFeedback] = useState('');
+  const [matrixConfig, setMatrixConfig] = useState(() => notificationService.getDailyMatrixConfig());
+  const [isSavingMatrixConfig, setIsSavingMatrixConfig] = useState(false);
+  const [matrixConfigFeedback, setMatrixConfigFeedback] = useState(null);
+
+  const [testSandboxEmail, setTestSandboxEmail] = useState(() => notificationService.getTestSandboxEmail());
+  const [sandboxEmailInput, setSandboxEmailInput] = useState(() => notificationService.getTestSandboxEmail());
+  const [isSavingSandboxEmail, setIsSavingSandboxEmail] = useState(false);
+  const [sandboxEmailFeedback, setSandboxEmailFeedback] = useState(null);
+
+  const [followUpConfig, setFollowUpConfig] = useState(() => notificationService.getDailyFollowUpConfig());
+  const [isSavingFollowUpConfig, setIsSavingFollowUpConfig] = useState(false);
+  const [followUpConfigFeedback, setFollowUpConfigFeedback] = useState(null);
+  const [followUpRunStatus, setFollowUpRunStatus] = useState({
     loading: false,
     done: false,
     success: false,
@@ -114,21 +141,37 @@ export default function SettingsTab({
       }
     });
 
-    // 1. Load active email recipient settings
+    // 1. Load active email recipient settings & matrix config
     const active = notificationService.getEmailSettings();
     if (active?.toEmail) setMainRecipient(active.toEmail);
     if (Array.isArray(active?.baseCcList)) setCcRecipients(active.baseCcList);
+    setMatrixConfig(notificationService.getDailyMatrixConfig());
+    setFollowUpConfig(notificationService.getDailyFollowUpConfig());
+    const initialSandbox = notificationService.getTestSandboxEmail();
+    setTestSandboxEmail(initialSandbox);
+    setSandboxEmailInput(initialSandbox);
 
-    // 2. Load from Supabase rma_settings if available
-    notificationService.loadEmailSettingsFromDb().then(dbSettings => {
-      if (dbSettings?.toEmail) setMainRecipient(dbSettings.toEmail);
-      if (Array.isArray(dbSettings?.baseCcList)) setCcRecipients(dbSettings.baseCcList);
+    // 2. Load global + per-type profiles + matrix config from Supabase rma_settings
+    notificationService.loadAllEmailProfilesFromDb().then(({ globalSettings, dailyMatrixConfig, dailyFollowUpConfig, testSandboxEmail: dbSandbox }) => {
+      if (globalSettings?.toEmail) setMainRecipient(globalSettings.toEmail);
+      if (Array.isArray(globalSettings?.baseCcList)) setCcRecipients(globalSettings.baseCcList);
+      if (dailyMatrixConfig) setMatrixConfig(dailyMatrixConfig);
+      if (dailyFollowUpConfig) setFollowUpConfig(dailyFollowUpConfig);
+      if (dbSandbox) {
+        setTestSandboxEmail(dbSandbox);
+        setSandboxEmailInput(dbSandbox);
+      }
     });
 
     const handleSyncRecipients = () => {
       const updated = notificationService.getEmailSettings();
       if (updated?.toEmail) setMainRecipient(updated.toEmail);
       if (Array.isArray(updated?.baseCcList)) setCcRecipients(updated.baseCcList);
+      setMatrixConfig(notificationService.getDailyMatrixConfig());
+      setFollowUpConfig(notificationService.getDailyFollowUpConfig());
+      const curSandbox = notificationService.getTestSandboxEmail();
+      setTestSandboxEmail(curSandbox);
+      setSandboxEmailInput(curSandbox);
     };
 
     window.addEventListener('rma-settings-changed', handleSyncRecipients);
@@ -192,6 +235,104 @@ export default function SettingsTab({
     });
   };
 
+  const handleSaveSandboxEmail = async () => {
+    const raw = String(sandboxEmailInput || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
+      setSandboxEmailFeedback({ type: 'error', message: 'Please enter a valid Test Mode sandbox email address.' });
+      return;
+    }
+    setIsSavingSandboxEmail(true);
+    setSandboxEmailFeedback(null);
+    try {
+      const saved = await notificationService.saveTestSandboxEmail(raw);
+      setTestSandboxEmail(saved);
+      setSandboxEmailInput(saved);
+      setSandboxEmailFeedback({ type: 'success', message: `Test Mode sandbox override updated to ${saved}!` });
+      setTimeout(() => setSandboxEmailFeedback(null), 4000);
+    } catch (err) {
+      setSandboxEmailFeedback({ type: 'error', message: err?.message || 'Failed to save sandbox email.' });
+    } finally {
+      setIsSavingSandboxEmail(false);
+    }
+  };
+
+  const handleSaveFollowUpConfig = async () => {
+    setIsSavingFollowUpConfig(true);
+    setFollowUpConfigFeedback(null);
+    try {
+      const saved = await notificationService.saveDailyFollowUpConfig(followUpConfig);
+      setFollowUpConfig(saved);
+      setFollowUpConfigFeedback({ type: 'success', message: `10-Day Pickup Follow-Up schedule (${formatTime12hFromHhmm(saved.autoSendTimePht)} PHT) saved to cloud!` });
+      setTimeout(() => setFollowUpConfigFeedback(null), 4000);
+    } catch (err) {
+      setFollowUpConfigFeedback({ type: 'error', message: err?.message || 'Failed to save follow-up schedule.' });
+    } finally {
+      setIsSavingFollowUpConfig(false);
+    }
+  };
+
+  const handleRunFollowUpCheckNow = async () => {
+    setFollowUpRunStatus({
+      loading: true,
+      done: false,
+      success: false,
+      message: 'Checking open 10-day pickup countdowns & auto-disposals...',
+      detail: ''
+    });
+    const res = await notificationService.runDailyFollowUpNow({
+      isTestMode: Boolean(isTestMode),
+      operation: 'run_all',
+      force: false
+    });
+    if (res?.success) {
+      const s = res.summary || {};
+      setFollowUpRunStatus({
+        loading: false,
+        done: true,
+        success: true,
+        message: `Follow-Up SLA check complete: ${s.followUpsSent || 0} reminder(s) sent, ${s.autoDisposed || 0} overdue item(s) auto-disposed.`,
+        detail: `Scanned: ${s.scanned || 0} | Skipped: ${s.skippedCount || 0} | PHT Date: ${res.phtDate || ''} ${res.phtTime || ''}`
+      });
+    } else {
+      setFollowUpRunStatus({
+        loading: false,
+        done: true,
+        success: false,
+        message: res?.error || res?.errors?.[0]?.message || 'Failed running follow-up check.',
+        detail: res?.detail || ''
+      });
+    }
+  };
+
+  const handleSaveMatrixConfig = async () => {
+    setIsSavingMatrixConfig(true);
+    setMatrixConfigFeedback(null);
+    try {
+      const autoProf = notificationService.getEmailProfile('daily_matrix_auto');
+      const saved = await notificationService.saveDailyMatrixConfig({
+        ...matrixConfig,
+        toList: autoProf.toList,
+        ccList: autoProf.ccList
+      });
+      setMatrixConfig(saved);
+      setMatrixConfigFeedback({ type: 'success', message: 'Overall Matrix schedule, date range & scope saved to cloud!' });
+      setTimeout(() => setMatrixConfigFeedback(null), 4000);
+    } catch (err) {
+      setMatrixConfigFeedback({ type: 'error', message: err?.message || 'Failed to save Matrix config.' });
+    } finally {
+      setIsSavingMatrixConfig(false);
+    }
+  };
+
+  const handleSyncAutoAndManualMatrixRecipients = async () => {
+    const sourceKey = activeEmailProfileType === 'manual_matrix' ? 'manual_matrix' : 'daily_matrix_auto';
+    const srcProfile = notificationService.getEmailProfile(sourceKey);
+    await notificationService.saveEmailProfile('daily_matrix_auto', srcProfile);
+    await notificationService.saveEmailProfile('manual_matrix', srcProfile);
+    setSyncMatrixFeedback('Synced TO & CC recipients between Auto Daily 1:00 PM Matrix and Manual Matrix!');
+    setTimeout(() => setSyncMatrixFeedback(''), 4000);
+  };
+
   const handleSendDailyMatrixNow = async () => {
     setDailyMatrixStatus({
       loading: true,
@@ -200,7 +341,20 @@ export default function SettingsTab({
       message: 'Generating & emailing Overall RMA Matrix (.xlsx)...',
       detail: ''
     });
+    const manualProf = notificationService.getEmailProfile('manual_matrix');
+    const autoProf = notificationService.getEmailProfile('daily_matrix_auto');
+    const chosenProf = manualProf.isCustom ? manualProf : autoProf;
+
+    const payloadDates = matrixConfig.rangeMode === 'custom' && matrixConfig.startDate && matrixConfig.endDate
+      ? { startDate: matrixConfig.startDate, endDate: matrixConfig.endDate }
+      : {};
+
     const res = await notificationService.sendDailyMatrixEmailNow({
+      ...payloadDates,
+      stream: matrixConfig.stream || 'overall',
+      includeZeroCatalogSkus: Boolean(matrixConfig.includeZeroCatalogSkus),
+      toList: chosenProf.toList,
+      ccList: chosenProf.ccList,
       isTestMode: Boolean(isTestMode),
       force: true
     });
@@ -210,7 +364,7 @@ export default function SettingsTab({
         loading: false,
         done: true,
         success: true,
-        message: `Daily Matrix dispatched to ${res.to || mainRecipient}${ccTxt}`,
+        message: `Daily Matrix dispatched to ${res.to || chosenProf.toEmail || mainRecipient}${ccTxt}`,
         detail: `${res.filename || 'Overall_RMA_Matrix_Report.xlsx'} • ${res.dataset?.lineCount ?? 0} lines • ${res.dataset?.grandTotalPcs ?? 0} pcs`
       });
     } else {
@@ -465,6 +619,89 @@ export default function SettingsTab({
         </div>
       </div>
 
+      {/* CARD 1B: PER-EMAIL RECIPIENT MANAGER (ALL 9 SYSTEM EMAIL TYPES) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-7 shadow-sm space-y-5 w-full min-w-0 box-border">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+          <div className="flex items-center space-x-3">
+            <div className="p-2.5 rounded-2xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 shrink-0">
+              <Mail className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
+                  Per-Email Recipient Manager
+                </h2>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                  {EMAIL_PROFILE_TYPES.length} Email Profiles
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Customize Primary TO and CC recipients independently for each email workflow (synced to Supabase).
+              </p>
+            </div>
+          </div>
+
+          {(activeEmailProfileType === 'daily_matrix_auto' || activeEmailProfileType === 'manual_matrix') && (
+            <button
+              type="button"
+              onClick={handleSyncAutoAndManualMatrixRecipients}
+              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black flex items-center gap-1.5 shadow-2xs cursor-pointer shrink-0"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Sync Recipients Between Auto &amp; Manual</span>
+            </button>
+          )}
+        </div>
+
+        {/* Profile Selector Pills */}
+        <div className="flex flex-wrap gap-1.5">
+          {EMAIL_PROFILE_TYPES.map((t) => {
+            const isActive = activeEmailProfileType === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setActiveEmailProfileType(t.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                  isActive
+                    ? 'bg-slate-900 text-white border-slate-900 dark:bg-blue-600 dark:border-blue-500 shadow-xs'
+                    : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-blue-400'
+                }`}
+              >
+                <span>{t.label}</span>
+                <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-black uppercase ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-slate-200/70 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                }`}>
+                  {t.badge}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {syncMatrixFeedback && (
+          <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{syncMatrixFeedback}</span>
+          </div>
+        )}
+
+        <EmailRecipientsEditor
+          emailType={activeEmailProfileType}
+          isTestMode={isTestMode}
+          allowEmptyTo={activeEmailProfileType === 'invite_email' || activeEmailProfileType === 'supplier_followup'}
+          extraHint={
+            activeEmailProfileType === 'invite_email'
+              ? 'Addresses added here are included as extra CCs on generated Portal/Editor Invite emails.'
+              : activeEmailProfileType === 'supplier_followup'
+                ? 'Extra internal CCs copied on automated 10-Calendar-Day pickup follow-up emails (Primary TO comes from each RMA’s Supplier Email).'
+                : activeEmailProfileType === 'pickup_debit_claim' || activeEmailProfileType === 'pickup_replacement'
+                  ? 'Supplier To/CC fields entered in Driver Pickup Verification merge automatically with these base recipients.'
+                  : 'Product Account Executive (AE) email is also CC’d automatically when applicable.'
+          }
+        />
+      </div>
+
       {/* CARD 2: TEST MODE SWITCH CARD */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -485,7 +722,7 @@ export default function SettingsTab({
               )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xl">
-              When ON, test emails are safely sent exclusively to <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">mgan@a2z2go.net</code> with <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">[TEST] </code> at the very beginning of the subject. <strong>This setting is strictly restricted to Super Admin; all other staff roles and public intake users operate permanently in Live Mode.</strong>
+              When ON, test emails are safely sent exclusively to <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">{testSandboxEmail}</code> with <code className="text-amber-600 dark:text-amber-300 font-mono font-bold">[TEST] </code> at the very beginning of the subject. <strong>This setting is strictly restricted to Super Admin; all other staff roles and public intake users operate permanently in Live Mode.</strong>
             </p>
           </div>
 
@@ -519,7 +756,7 @@ export default function SettingsTab({
           </span>
           <div className="text-slate-700 dark:text-slate-300">
             <strong>Target TO:</strong> <span className={isTestMode ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-emerald-600 dark:text-emerald-400 font-bold'}>
-              {isTestMode ? `mgan@a2z2go.net (Live target "${mainRecipient}" safely bypassed)` : mainRecipient}
+              {isTestMode ? `${testSandboxEmail} (Live target "${mainRecipient}" safely bypassed)` : mainRecipient}
             </span>
           </div>
           <div className="text-slate-700 dark:text-slate-300">
@@ -529,6 +766,38 @@ export default function SettingsTab({
                 : `${ccRecipients.join(', ') || 'None'} + [Customer AE email]`}
             </span>
           </div>
+        </div>
+
+        {/* Configurable Test Mode Sandbox Email Override */}
+        <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/70 space-y-2 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="font-bold text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
+              <FlaskConical className="w-4 h-4 text-amber-600" />
+              <span>Test Mode Sandbox Email Override (Default: mgan@pingconmarketing.com)</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveSandboxEmail}
+              disabled={isSavingSandboxEmail}
+              className="px-3 py-1 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            >
+              <Save className="w-3 h-3" />
+              <span>{isSavingSandboxEmail ? 'Saving...' : 'Save Sandbox Email'}</span>
+            </button>
+          </div>
+          <input
+            type="email"
+            aria-label="Test Mode Sandbox Email Override"
+            value={sandboxEmailInput}
+            onChange={(e) => setSandboxEmailInput(e.target.value)}
+            placeholder="mgan@pingconmarketing.com"
+            className="w-full px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 font-mono font-bold text-xs text-slate-900 dark:text-white"
+          />
+          {sandboxEmailFeedback && (
+            <div className={`text-[11px] font-bold ${sandboxEmailFeedback.type === 'success' ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'}`}>
+              {sandboxEmailFeedback.message}
+            </div>
+          )}
         </div>
       </div>
 
@@ -594,7 +863,7 @@ export default function SettingsTab({
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white">Google SMTP Notification Service</h2>
               <span className="text-xs text-slate-500 dark:text-slate-400">
-                Automated intake alerts &amp; Daily 1:00 PM PHT Overall RMA Matrix (.xlsx) dispatcher
+                Automated intake alerts &amp; Daily {formatTime12hFromHhmm(matrixConfig.autoSendTimePht || '13:00')} PHT Overall RMA Matrix (.xlsx) dispatcher
               </span>
             </div>
           </div>
@@ -611,7 +880,7 @@ export default function SettingsTab({
               ) : (
                 <FileSpreadsheet className="w-3.5 h-3.5" />
               )}
-              <span>{dailyMatrixStatus.loading ? 'Dispatching Matrix...' : 'Send Daily Matrix Now'}</span>
+              <span>{dailyMatrixStatus.loading ? 'Dispatching Matrix...' : 'Send Manual Matrix Email Now'}</span>
             </button>
 
             <button
@@ -630,9 +899,288 @@ export default function SettingsTab({
           <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-200 font-semibold">
             <Send className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
             <span>
-              <strong>Daily Auto-Email Schedule:</strong> 1:00 PM PHT (<code className="font-mono">Asia/Manila</code> / <code className="font-mono">05:00 UTC</code>) — Sends Combined Overall RMA Matrix (<code className="font-mono">.xlsx</code>) to configured Live To &amp; CC recipients.
+              <strong>Daily Auto-Email Schedule:</strong> {formatTime12hFromHhmm(matrixConfig.autoSendTimePht || '13:00')} PHT (<code className="font-mono">Asia/Manila</code>) {matrixConfig.autoEnabled !== false ? '— Enabled' : '— Paused'} — Sends Overall RMA Matrix (<code className="font-mono">.xlsx</code>) using configurable time, window, scope &amp; recipients below.
             </span>
           </div>
+        </div>
+
+        {/* Configurable Auto Daily Matrix & Manual Matrix Schedule Controls */}
+        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3.5 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
+              Auto Daily ({formatTime12hFromHhmm(matrixConfig.autoSendTimePht || '13:00')} PHT) &amp; Manual Overall Matrix Settings
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSyncAutoAndManualMatrixRecipients}
+                className="px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[11px] font-bold cursor-pointer"
+              >
+                Sync Recipients Between Auto &amp; Manual
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveMatrixConfig}
+                disabled={isSavingMatrixConfig}
+                className="px-3 py-1 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <Save className="w-3 h-3" />
+                <span>{isSavingMatrixConfig ? 'Saving...' : 'Save Matrix Config'}</span>
+              </button>
+            </div>
+          </div>
+
+          {matrixConfigFeedback && (
+            <div className={`p-2.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 ${
+              matrixConfigFeedback.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200'
+                : 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-700 text-rose-800 dark:text-rose-200'
+            }`}>
+              {matrixConfigFeedback.type === 'success' ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+              <span>{matrixConfigFeedback.message}</span>
+            </div>
+          )}
+
+          {/* Range Mode + Scope */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">Date Window Mode</span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setMatrixConfig((p) => ({ ...p, rangeMode: 'rolling' }))}
+                  className={`px-3 py-1.5 rounded-xl text-[11px] font-black border cursor-pointer ${
+                    matrixConfig.rangeMode === 'rolling'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+                  }`}
+                >
+                  Rolling Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMatrixConfig((p) => ({ ...p, rangeMode: 'custom' }))}
+                  className={`px-3 py-1.5 rounded-xl text-[11px] font-black border cursor-pointer ${
+                    matrixConfig.rangeMode === 'custom'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+                  }`}
+                >
+                  Custom Date Range
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">Report Scope</span>
+              <select
+                aria-label="Matrix Scope"
+                value={matrixConfig.stream}
+                onChange={(e) => setMatrixConfig((p) => ({ ...p, stream: e.target.value }))}
+                className="w-full px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white"
+              >
+                <option value="overall">Overall RMA (Customer Hub + Supplier RTV)</option>
+                <option value="customer_inbound">Customer Hub Only</option>
+                <option value="supplier_outbound">Supplier RTV Only</option>
+              </select>
+            </div>
+          </div>
+
+          {matrixConfig.rangeMode === 'rolling' ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-bold text-slate-500">Rolling Window:</span>
+              {[7, 14, 30].map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setMatrixConfig((p) => ({ ...p, rollingDays: d }))}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer ${
+                    Number(matrixConfig.rollingDays) === d
+                      ? 'bg-slate-900 text-white border-slate-900 dark:bg-blue-600 dark:border-blue-500'
+                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+                  }`}
+                >
+                  {d} Days
+                </button>
+              ))}
+              <label className="flex items-center gap-1 text-[11px] font-mono">
+                <span>Custom Days:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={matrixConfig.rollingDays}
+                  onChange={(e) => setMatrixConfig((p) => ({ ...p, rollingDays: Math.max(1, Math.min(365, parseInt(e.target.value, 10) || 14)) }))}
+                  className="w-16 px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-center"
+                />
+              </label>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="space-y-1">
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">Start Date (YYYY-MM-DD)</span>
+                <input
+                  type="date"
+                  value={matrixConfig.startDate || ''}
+                  max={matrixConfig.endDate || undefined}
+                  onChange={(e) => setMatrixConfig((p) => ({ ...p, startDate: e.target.value }))}
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono font-bold"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block">End Date (YYYY-MM-DD)</span>
+                <input
+                  type="date"
+                  value={matrixConfig.endDate || ''}
+                  min={matrixConfig.startDate || undefined}
+                  onChange={(e) => setMatrixConfig((p) => ({ ...p, endDate: e.target.value }))}
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono font-bold"
+                />
+              </label>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                aria-label="Auto Daily Matrix Email Enabled"
+                checked={matrixConfig.autoEnabled !== false}
+                onChange={(e) => setMatrixConfig((p) => ({ ...p, autoEnabled: e.target.checked }))}
+                className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span>Auto-Email Matrix Daily at Scheduled Time</span>
+            </label>
+            <label className="flex items-center justify-between gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-200">
+              <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-emerald-600" /> Auto-Send Time (Asia/Manila):</span>
+              <input
+                type="time"
+                aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"
+                value={matrixConfig.autoSendTimePht || '13:00'}
+                onChange={(e) => setMatrixConfig((p) => ({ ...p, autoSendTimePht: e.target.value || '13:00' }))}
+                className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-xs text-slate-900 dark:text-white"
+              />
+            </label>
+          </div>
+
+          <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={Boolean(matrixConfig.includeZeroCatalogSkus)}
+              onChange={(e) => setMatrixConfig((p) => ({ ...p, includeZeroCatalogSkus: e.target.checked }))}
+              className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            <span>Include 0-return catalog SKUs inside scheduled / manual Matrix exports</span>
+          </label>
+
+          <EmailRecipientsEditor
+            emailType="daily_matrix_auto"
+            compact={true}
+            defaultExpanded={false}
+            isTestMode={isTestMode}
+            title={`Auto Daily ${formatTime12hFromHhmm(matrixConfig.autoSendTimePht || '13:00')} PHT Matrix Recipients`}
+          />
+        </div>
+
+        {/* 10-Calendar-Day Pickup Follow-Up & Auto-Dispose SLA Configuration */}
+        <div className="p-4 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/70 space-y-3.5 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span className="font-black uppercase tracking-wider text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-amber-600" />
+                <span>10-Calendar-Day Pickup Follow-Up &amp; Auto-Dispose SLA ({formatTime12hFromHhmm(followUpConfig.autoSendTimePht || '08:00')} PHT)</span>
+              </span>
+              <p className="text-[11px] text-amber-900/80 dark:text-amber-300/80 mt-0.5">
+                Sends daily supplier pickup reminders up to Day 10, stops automatically on pickup/case close, and auto-disposes overdue items after Day 10.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRunFollowUpCheckNow}
+                disabled={followUpRunStatus.loading}
+                className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Send className="w-3 h-3" />
+                <span>{followUpRunStatus.loading ? 'Running Check...' : 'Run Follow-Ups & 10-Day Auto-Dispose Check Now'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveFollowUpConfig}
+                disabled={isSavingFollowUpConfig}
+                className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <Save className="w-3 h-3" />
+                <span>{isSavingFollowUpConfig ? 'Saving...' : 'Save Follow-Up SLA'}</span>
+              </button>
+            </div>
+          </div>
+
+          {followUpConfigFeedback && (
+            <div className={`p-2.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 ${
+              followUpConfigFeedback.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200'
+                : 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-700 text-rose-800 dark:text-rose-200'
+            }`}>
+              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+              <span>{followUpConfigFeedback.message}</span>
+            </div>
+          )}
+
+          {followUpRunStatus.done && (
+            <div className={`p-3 rounded-xl border text-[11px] space-y-0.5 ${
+              followUpRunStatus.success
+                ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+                : 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-700 text-rose-900 dark:text-rose-200'
+            }`}>
+              <div className="font-bold">{followUpRunStatus.message}</div>
+              {followUpRunStatus.detail && <div className="font-mono opacity-80">{followUpRunStatus.detail}</div>}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-slate-800">
+            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                aria-label="Auto Daily Follow-Up Enabled"
+                checked={followUpConfig.autoEnabled !== false}
+                onChange={(e) => setFollowUpConfig((p) => ({ ...p, autoEnabled: e.target.checked }))}
+                className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+              />
+              <span>Auto Daily Follow-Up Enabled</span>
+            </label>
+
+            <label className="flex items-center justify-between gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-200">
+              <span>Follow-Up Time (Asia/Manila):</span>
+              <input
+                type="time"
+                aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"
+                value={followUpConfig.autoSendTimePht || '08:00'}
+                onChange={(e) => setFollowUpConfig((p) => ({ ...p, autoSendTimePht: e.target.value || '08:00' }))}
+                className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-xs text-slate-900 dark:text-white"
+              />
+            </label>
+
+            <label className="flex items-center gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                aria-label="Customer Hub Default Follow-Up Enabled"
+                checked={Boolean(followUpConfig.customerFollowUpDefaultEnabled)}
+                onChange={(e) => setFollowUpConfig((p) => ({ ...p, customerFollowUpDefaultEnabled: e.target.checked }))}
+                className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+              />
+              <span>Customer Hub Default Countdown ON</span>
+            </label>
+          </div>
+
+          <EmailRecipientsEditor
+            emailType="supplier_followup"
+            allowEmptyTo={true}
+            compact={true}
+            defaultExpanded={false}
+            isTestMode={isTestMode}
+            title="Supplier Follow-Up Extra Internal CCs"
+          />
         </div>
 
         {dailyMatrixStatus.done && (

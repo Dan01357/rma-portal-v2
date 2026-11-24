@@ -3,6 +3,10 @@ import { test, expect } from '@playwright/test';
 import { buildRmaMatrixXlsxBytes } from '../src/utils/exportMatrixXlsx.js';
 import { buildTableXlsxBytes } from '../src/utils/exportXlsx.js';
 import {
+  getCleanHumanWorkflowStatus,
+  computeFourStepWorkflow
+} from '../src/utils/followUpWorkflow.js';
+import {
   PNG_BUFFER,
   VERIFIED_BARCODE,
   attachStrictGuards,
@@ -148,7 +152,7 @@ function assertEmailPayloadClean({ payload, expectedExpiry, expectTestMode }) {
     expect(payload.subject).toMatch(/^\[TEST\] /);
     expect(payload.subject).not.toMatch(/^(?:Test\s*-|\[TEST MODE\]|\[TEST\]\s+\[TEST\])/i);
     expect(payload.fromName).toContain('[TEST]');
-    expect(payload.html).toContain('mgan@a2z2go.net');
+    expect(payload.html).toContain('mgan@pingconmarketing.com');
   } else {
     expect(payload.subject).not.toMatch(/^(?:\[TEST|Test\s*-)/i);
     expect(payload.fromName).not.toContain('[TEST]');
@@ -176,7 +180,7 @@ function decodeBase64Header(b64) {
   return Buffer.from(String(b64 || ''), 'base64').toString('latin1');
 }
 
-test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2go.net Sandbox, Date Format Audit & Overall Matrix (.xlsx)', () => {
+test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingconmarketing.com Sandbox, Date Format Audit & Overall Matrix (.xlsx)', () => {
   test('New RMA intake email (Live & Test), 4 lifecycle emails (Scrapped, Restocked, Debit Pickup + PDF, Replacement Pickup + PDF), & Overall Matrix (.xlsx) deep XML verification', async ({
     page,
     context,
@@ -205,7 +209,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
           try {
             const parsed = req.postDataJSON();
             body = Array.isArray(parsed) ? parsed[0] : parsed;
-          } catch {}
+          } catch { }
           if (body && !String(body.token || '').startsWith('inv_test_')) {
             capturedLiveEditorInvite = body;
             return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(body) });
@@ -228,7 +232,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
           try {
             const parsed = req.postDataJSON();
             body = Array.isArray(parsed) ? parsed[0] : parsed;
-          } catch {}
+          } catch { }
           if (body && !String(body.rma_number || '').startsWith('RMA-TEST-') && body.is_test !== true) {
             return route.fulfill({
               status: 201,
@@ -265,7 +269,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       await page.locator('input[placeholder="Phone No. or Email *"]').fill('playwright-live@pingcon.local');
 
       await page.getByRole('button', { name: /Submit Return Report/i }).click();
-      await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText('Printable QR Ready')).toBeVisible({ timeout: 20_000 });
 
       await expect.poll(() => capturedEmails.length, { timeout: 35_000 }).toBeGreaterThan(0);
       assertEmailPayloadClean({
@@ -292,11 +296,14 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       // =========================================================================
       await page.getByRole('button', { name: /Report Another/i }).click();
       await setPublicPortalTestMode(page, true);
-      await expect(page.getByText(/mgan@a2z2go\.net/).first()).toBeVisible();
+      await expect(page.getByText(/mgan@pingconmarketing\.com/).first()).toBeVisible();
 
       await page.locator('input[placeholder*="barcode" i]').first().fill(VERIFIED_BARCODE);
       await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 45_000 });
       await page.locator('input[type="date"]').first().fill('2027-08-20');
+      const explainBox = page.locator('input[placeholder*="explanation" i], textarea[placeholder*="explanation" i]').first();
+      await expect(explainBox).toBeVisible();
+      await explainBox.fill('Crushed cap and leaking bottle [REORDER: NO]');
       await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({
         name: 'pw-lifecycle-test.png',
         mimeType: 'image/png',
@@ -307,7 +314,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
 
       const countBeforeTestSubmit = capturedEmails.length;
       await page.getByRole('button', { name: /Submit Return Report/i }).click();
-      await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText('Printable QR Ready')).toBeVisible({ timeout: 20_000 });
 
       const rmaNum = (
         await page
@@ -318,7 +325,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       ).trim();
       seededTestRmas.push(rmaNum);
 
-      await expect.poll(() => capturedEmails.length, { timeout: 35_000 }).toBeGreaterThan(countBeforeTestSubmit);
+      await expect.poll(() => capturedEmails.length, { timeout: 65_000 }).toBeGreaterThan(countBeforeTestSubmit);
       assertEmailPayloadClean({
         payload: capturedEmails[capturedEmails.length - 1],
         expectedExpiry: '2027-08-20',
@@ -329,51 +336,87 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       await page.getByRole('button', { name: /Choose Disposition \/ (?:Log )?Driver Pickup/i }).click();
       await expect(page.getByText('What do you want to do with this item?')).toBeVisible({ timeout: 10_000 });
 
-      // (a) Scrapped lifecycle email
+      // (a) Scrapped lifecycle email (Processed By required -> must NOT auto-fill for new record!)
       const countBeforeScrap = capturedEmails.length;
+      await expect(page.locator('#wizard-processed-by-step1')).toHaveValue('');
       await page.getByRole('button', { name: /Throw Away \/ Dispose \(Scrap\)/i }).click();
       await page.getByRole('button', { name: /Confirm & Save: Throw Away \/ Dispose \(Scrap\)/i }).click();
-      await expect(page.getByRole('button', { name: /Edit Choice \/ Details/i })).toBeVisible({ timeout: 15_000 });
-      await expect.poll(() => capturedEmails.length, { timeout: 12_000 }).toBeGreaterThan(countBeforeScrap);
+      await expect(page.getByText(/Please enter "Processed By \(Staff Full Name\)"/i)).toBeVisible({ timeout: 5_000 });
+      await page.locator('#wizard-processed-by-step1').fill('Playwright Manual Processor');
+      await page.getByRole('button', { name: /Confirm & Save: Throw Away \/ Dispose \(Scrap\)/i }).click();
+      await expect(page.getByRole('button', { name: /Edit Choice \/ Details/i })).toBeVisible({ timeout: 35_000 });
+      await expect.poll(() => capturedEmails.length, { timeout: 25_000 }).toBeGreaterThan(countBeforeScrap);
       const scrapMail = capturedEmails[capturedEmails.length - 1];
       expect(scrapMail.isTestMode).toBe(true);
       expect(scrapMail.subject).toMatch(/^\[TEST\] \[RMA Scrapped\]/);
+      expect(scrapMail.html).toContain('Store / Branch:');
+      expect(scrapMail.html).toContain('Warehouse Location:');
+      expect(scrapMail.html).toContain('Playwright Manual Processor');
 
-      // (b) Restocked lifecycle email
+      // (b) Restocked lifecycle email (keeps Store/Branch + Warehouse Location)
       await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
+      await expect(page.locator('#wizard-processed-by-step1')).toHaveValue('Playwright Manual Processor');
       const countBeforeRestock = capturedEmails.length;
       await page.getByRole('button', { name: /Put Back on Good Shelf \(Restock\)/i }).click();
       await page.getByRole('button', { name: /Confirm & Save: Put Back on Good Shelf \(Restock\)/i }).click();
-      await expect(page.getByRole('button', { name: /Edit Choice \/ Details/i })).toBeVisible({ timeout: 15_000 });
-      await expect.poll(() => capturedEmails.length, { timeout: 12_000 }).toBeGreaterThan(countBeforeRestock);
+      await expect(page.getByRole('button', { name: /Edit Choice \/ Details/i })).toBeVisible({ timeout: 35_000 });
+      await expect.poll(() => capturedEmails.length, { timeout: 25_000 }).toBeGreaterThan(countBeforeRestock);
       const restockMail = capturedEmails[capturedEmails.length - 1];
       expect(restockMail.isTestMode).toBe(true);
       expect(restockMail.subject).toMatch(/^\[TEST\] \[RMA Restocked\]/);
+      expect(restockMail.html).toContain('Store / Branch:');
+      expect(restockMail.html).toContain('Warehouse Location:');
 
-      const completeDriverPickup = async (optionRegex) => {
+      const completeDriverPickup = async (optionRegex, { exerciseMultiPhoto = false, processorName = 'Playwright Manual Processor' } = {}) => {
         await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
-        await page.locator('input[placeholder*="Supplier Company Name" i]').fill('Suy Sing Commercial Corp');
+        await page.locator('input[placeholder*="Customer / Store Branch Name" i]').fill('Suy Sing Commercial Corp');
         await page.getByRole('button', { name: optionRegex }).click();
         await page
           .getByRole('button', {
-            name: /Edit Pickup Details, Emails & 5 Photos|Driver Is Here — Upload Photos & Print Letter/i
+            name: /Edit Pickup Details, Emails & (?:5 )?Photos|Driver Is Here — Upload Photos & Print Letter/i
           })
           .click();
-        await expect(page.getByText(/Driver Pickup Verification \(\d+\/5 Photos\)/i)).toBeVisible();
+        await expect(page.getByText(/Driver Pickup Verification \(\d+\/5 Slots\)/i)).toBeVisible();
 
-        await page.locator('input[placeholder*="claims@supplier.com" i]').fill('vendor-claims@example.com');
-        await page.locator('input[placeholder*="rep@supplier.com" i]').fill('vendor-cc@example.com');
+        await page.locator('input[placeholder*="branch.manager@customer.com" i]').fill('vendor-claims@example.com');
+        await page.locator('input[placeholder*="accounting@customer.com" i]').fill('vendor-cc@example.com');
 
-        const photoFileInputs = page.locator('input[type="file"][accept="image/*"]');
-        const slotCount = await photoFileInputs.count();
-        for (let i = 0; i < slotCount; i++) {
-          await photoFileInputs.nth(i).setInputFiles({
-            name: `pickup-slot-${i + 1}.png`,
+        if (exerciseMultiPhoto) {
+          const chooseFilesInputs = page.locator('input[type="file"][accept="image/*"][multiple]');
+          // Upload 2 photos into Slot 1
+          await chooseFilesInputs.nth(0).setInputFiles([
+            { name: 'pickup-slot1-front-a.png', mimeType: 'image/png', buffer: PNG_BUFFER },
+            { name: 'pickup-slot1-front-b.png', mimeType: 'image/png', buffer: PNG_BUFFER }
+          ]);
+          await expect(page.getByText('(2/10)').first()).toBeVisible();
+
+          // Attempt to upload 11 photos into Slot 2 -> enforces max 10 per slot with warning
+          const elevenFiles = Array.from({ length: 11 }, (_, idx) => ({
+            name: `pickup-slot2-over-${idx + 1}.png`,
             mimeType: 'image/png',
             buffer: PNG_BUFFER
-          });
+          }));
+          await chooseFilesInputs.nth(1).setInputFiles(elevenFiles);
+          await expect(page.getByText(/Maximum 10 photos per slot/i)).toBeVisible();
+          await expect(page.getByText('(10/10)').first()).toBeVisible();
+
+          // Remove 8 photos from Slot 2 via individual X remove buttons (leaving 2/10)
+          const slot2RemoveBtns = page.locator('button[aria-label*="Driver Valid Gov’t / Legal ID — BACK"]');
+          for (let rem = 0; rem < 8; rem++) {
+            await slot2RemoveBtns.first().click();
+          }
+
+          // Fill Slots 3-5
+          for (let s = 2; s < 5; s++) {
+            await chooseFilesInputs.nth(s).setInputFiles({
+              name: `pickup-slot-${s + 1}.png`,
+              mimeType: 'image/png',
+              buffer: PNG_BUFFER
+            });
+          }
+          await expect(page.getByText(/Driver Pickup Verification \(5\/5 Slots\)/i)).toBeVisible();
+          await expect(page.getByText(/Total:\s*7\/50 photos/i)).toBeVisible();
         }
-        await expect(page.getByText(/Driver Pickup Verification \(5\/5 Photos\)/i)).toBeVisible();
 
         await page.locator('input[placeholder*="Auto-filled or type name" i]').fill('Playwright Driver');
         const idTypeSelect = page.locator('select').filter({ hasText: /PhilSys National ID/i }).first();
@@ -382,52 +425,82 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
         }
         await page.locator('input[placeholder*="ID # / License #" i], input[placeholder*="Auto-filled from ID photo" i]').first().fill('PSN-4801-9988-7766');
         await page.locator('input[placeholder*="NAA 1234" i]').fill('PW-8899');
+        await page.locator('#wizard-processed-by-step2').fill(processorName);
 
         const mailCountBefore = capturedEmails.length;
         await page
-          .getByRole('button', { name: /Upload 5 Photos to RMA Drive|Save Updates & Open Letter Form/i })
+          .getByRole('button', { name: /Upload \d+(?: New)? Photos? to RMA Drive|Save Updates & Open Letter Form/i })
           .click();
-        await expect(page.getByText(/SUPPLIER (DEBIT CLAIM|REPLACEMENT \/ EXCHANGE)/i).first()).toBeVisible({
+        await expect(page.getByText(/CUSTOMER (?:CREDIT MEMO \/ RETURN HANDOVER FORM|BUFFER REPLACEMENT & HANDOVER FORM)/i).first()).toBeVisible({
           timeout: 45_000
         });
         await expect(page.locator('#letter-supplier-pickup-form')).toContainText('PSN-4801-9988-7766');
+        await expect(page.locator('#letter-supplier-pickup-form input[title*="Prepared By" i]').first()).toHaveValue(processorName);
 
-        // Verify pure B&W Letter modal and close it before next step
-        const formPrintBtn = page.getByRole('button', { name: /Print Letter Dual-Copy Form|Print Full-Page Letter Copies/i });
+        // Verify pure B&W Letter modal, copy presets & close before next step
+        const formPrintBtn = page.getByRole('button', { name: /Print (?:Letter Dual-Copy Form|Separated Letter Copies)/i });
+        if (exerciseMultiPhoto) {
+          await page.getByRole('button', { name: '2 Ours + 1 Theirs (3 Papers)' }).click();
+          await expect(page.getByText(/^COPY 3 OF 3 — CUSTOMER COPY/i)).toBeVisible();
+          await page.locator('input[aria-label="Our Company Copies"]').fill('0');
+          await page.locator('input[aria-label="Customer Copies"]').fill('0');
+          await expect(formPrintBtn).toBeDisabled();
+          await page.getByRole('button', { name: '1 + 1 (2 Papers)' }).click();
+          await expect(formPrintBtn).toBeEnabled();
+        }
         const formPrintsBefore = await page.evaluate(() => window.__pwPrintCount || 0);
         await formPrintBtn.click();
         await expect.poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 8_000 }).toBeGreaterThan(formPrintsBefore);
 
         const claimTxt = await page.locator('#letter-supplier-pickup-form').innerText().catch(() => '');
-        const cMatch = claimTxt.match(/(RTV-TEST-\d{4}-\d+-[A-Z0-9]+)/i);
+        const cMatch = claimTxt.match(/((?:RTV|BUF)-TEST-\d{4}-\d+-[A-Z0-9]+)/i);
         if (cMatch) createdClaimNum = cMatch[1];
 
         await page.locator('button[aria-label="Close form"]').click();
-        await expect.poll(() => capturedEmails.length, { timeout: 15_000 }).toBeGreaterThan(mailCountBefore);
+        await expect.poll(() => capturedEmails.length, { timeout: 25_000 }).toBeGreaterThan(mailCountBefore);
         return capturedEmails[capturedEmails.length - 1];
       };
 
-      // (c) Driver Picked Up for Debit Claim -> PDF + Supplier To/CC + 5 photos
-      const debitMail = await completeDriverPickup(/Accepted for Debit \/ Credit|Return to supplier for Debit Claim/i);
+      // (c) Customer Credit / Return Handover -> PDF + Customer To/CC + 7 multi-photos + Explanation row (NO Store/Branch or Warehouse Location!)
+      const debitMail = await completeDriverPickup(/Customer Credit Memo \/ Return Handover/i, {
+        exerciseMultiPhoto: true,
+        processorName: 'Playwright Debit Processor'
+      });
       expect(debitMail.isTestMode).toBe(true);
       expect(debitMail.subject).toMatch(/^\[TEST\] \[Driver Picked Up - Debit Claim\]/);
       expect(debitMail.to).toContain('vendor-claims@example.com');
       expect(debitMail.cc).toContain('vendor-cc@example.com');
-      expect(debitMail.html).toContain('Driver Pickup Verification Photos (5/5)');
+      expect(debitMail.html).toContain('Driver Pickup Verification Photos (5/5 categories');
+      expect(debitMail.html).toContain('7 photos');
       expect(debitMail.html).toContain('PhilSys National ID (PhilID / ePhilID)');
       expect(debitMail.html).toContain('PSN-4801-9988-7766');
-      const debitPdfAtt = (debitMail.attachments || []).find((a) => String(a.filename || '').startsWith('Debit-Claim-Form-'));
+      expect(debitMail.html).toContain('Playwright Debit Processor');
+      expect(debitMail.html).toContain('Explanation / Defect Notes:');
+      expect(debitMail.html).toContain('Crushed cap and leaking bottle');
+      expect(debitMail.html).not.toContain('[REORDER: NO]');
+      expect(debitMail.html).not.toContain('Store / Branch:');
+      expect(debitMail.html).not.toContain('Warehouse Location:');
+      expect(debitMail.text).toContain('Explanation / Defect Notes:');
+      expect(debitMail.text).not.toContain('Store / Branch:');
+      expect(debitMail.text).not.toContain('Warehouse Location:');
+      const debitPdfAtt = (debitMail.attachments || []).find((a) => String(a.filename || '').startsWith('Customer-Credit-Handover-Form-'));
       expect(debitPdfAtt).toBeTruthy();
       expect(debitPdfAtt.contentType).toBe('application/pdf');
       expect(decodeBase64Header(debitPdfAtt.content).startsWith('%PDF-1.4')).toBe(true);
 
-      // (d) Driver Picked Up for Replacement -> PDF + Supplier To/CC + 5 photos
-      const replaceMail = await completeDriverPickup(/Replaced with Good Stock|Return to supplier for Replacement \/ Exchange/i);
+      // (d) Customer Buffer Replacement -> PDF + Customer To/CC + hydrated multi-photos + Store/Branch & Warehouse Location preserved
+      const replaceMail = await completeDriverPickup(/Customer Buffer Replacement \/ Good Stock Exchange/i, {
+        exerciseMultiPhoto: false,
+        processorName: 'Playwright Debit Processor'
+      });
       expect(replaceMail.isTestMode).toBe(true);
       expect(replaceMail.subject).toMatch(/^\[TEST\] \[Driver Picked Up - Replacement\]/);
       expect(replaceMail.to).toContain('vendor-claims@example.com');
       expect(replaceMail.cc).toContain('vendor-cc@example.com');
-      const replacePdfAtt = (replaceMail.attachments || []).find((a) => String(a.filename || '').startsWith('Replacement-Form-'));
+      expect(replaceMail.html).toContain('Store / Branch:');
+      expect(replaceMail.html).toContain('Warehouse Location:');
+      expect(replaceMail.html).toContain('Driver Pickup Verification Photos (5/5 categories');
+      const replacePdfAtt = (replaceMail.attachments || []).find((a) => String(a.filename || '').startsWith('Customer-Buffer-Replacement-Form-'));
       expect(replacePdfAtt).toBeTruthy();
       expect(replacePdfAtt.contentType).toBe('application/pdf');
       expect(decodeBase64Header(replacePdfAtt.content).startsWith('%PDF-1.4')).toBe(true);
@@ -569,7 +642,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
 
         await editorPage.goto(editorPathWithQuery, { waitUntil: 'domcontentloaded' });
         await expect(editorPage.getByText('RMA Details Editor Authorization')).toBeVisible({ timeout: 20_000 });
-        await expect(editorPage.getByText('mgan@a2z2go.net', { exact: true }).first()).toBeVisible();
+        await expect(editorPage.getByText('mgan@pingconmarketing.com', { exact: true }).first()).toBeVisible();
         await expect(editorPage.getByText(/No Expiry.*Revocable by Admin/i).first()).toBeVisible();
         await expect(editorPage.getByText(rmaNum).first()).toBeVisible();
 
@@ -626,7 +699,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
         await expect(editorPage.getByText('403 Forbidden — Identity Mismatch')).toBeVisible({ timeout: 15_000 });
         await expect(editorPage.getByRole('button', { name: /Switch Google Account/i })).toBeVisible();
 
-        // Matching authorized email (mgan@a2z2go.net) -> Unlocks ONLY Scoped RMA Details Editor
+        // Matching authorized email (mgan@pingconmarketing.com) -> Unlocks ONLY Scoped RMA Details Editor
         let savedPayload = null;
         await editorPage.route('**/api/v1/rma-email-edit**', async (route) => {
           const req = route.request();
@@ -637,7 +710,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
               body: JSON.stringify({
                 success: true,
                 mode: 'test',
-                authorized_email: 'mgan@a2z2go.net',
+                authorized_email: 'mgan@pingconmarketing.com',
                 scope_locked_rma: true,
                 report: {
                   id: 88888,
@@ -670,7 +743,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
               contentType: 'application/json',
               body: JSON.stringify({
                 success: true,
-                edited_by_email: 'mgan@a2z2go.net',
+                edited_by_email: 'mgan@pingconmarketing.com',
                 updated_at: new Date().toISOString(),
                 report: {
                   id: 88888,
@@ -692,7 +765,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
                   ai_document_metadata: {
                     is_test: true,
                     last_email_edit: {
-                      edited_by_email: 'mgan@a2z2go.net',
+                      edited_by_email: 'mgan@pingconmarketing.com',
                       edited_at: new Date().toISOString()
                     }
                   },
@@ -704,10 +777,10 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
           return route.continue();
         });
 
-        mockOAuthEmail = 'mgan@a2z2go.net';
+        mockOAuthEmail = 'mgan@pingconmarketing.com';
         await editorPage.goto('about:blank');
         await editorPage.goto(
-          `${editorPathWithQuery}#access_token=${buildMockJwt('mgan@a2z2go.net')}&refresh_token=pw_ref&expires_in=3600`,
+          `${editorPathWithQuery}#access_token=${buildMockJwt('mgan@pingconmarketing.com')}&refresh_token=pw_ref&expires_in=3600`,
           { waitUntil: 'domcontentloaded' }
         );
 
@@ -742,8 +815,8 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
           const row = {
             token: tok,
             stream_type: 'customer_inbound',
-            authorized_email: 'mgan@a2z2go.net',
-            entity_name: `[RMA_EDITOR:${targetRma}|mgan@a2z2go.net,cc-reviewer@pingcon-test.local]`,
+            authorized_email: 'mgan@pingconmarketing.com',
+            entity_name: `[RMA_EDITOR:${targetRma}|mgan@pingconmarketing.com,cc-reviewer@pingcon-test.local]`,
             store_branch: targetRma,
             duration_value: 0,
             duration_unit: 'permanent',
@@ -796,7 +869,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
               method: 'DELETE',
               headers: { apikey: key, Authorization: `Bearer ${bearer}` }
             });
-          }, { tok: multiToken, ...readSupabasePublicEnv() }).catch(() => {});
+          }, { tok: multiToken, ...readSupabasePublicEnv() }).catch(() => { });
         }
       } finally {
         editorGuard.detach();
@@ -836,7 +909,39 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       expect(liveMatrixJson.filename).toMatch(/^Overall_RMA_Matrix_Report_\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2} \d{4}\.xlsx$/);
       assertStrictOoxmlWorkbook(Buffer.from(liveMatrixJson.attachmentBase64, 'base64'), { expectMatrixPanes: true });
 
-      // Authenticated Test Mode dry-run dispatch -> [TEST] first word + strictly mgan@a2z2go.net + empty CC
+      // Authenticated Test Mode dry-run dispatch with custom scope, custom dates, includeZeroCatalogSkus & multiple TO/CC overrides
+      const customEnd = testMatrixResToday();
+      function testMatrixResToday() {
+        return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+      }
+      const customStart = new Date(Date.now() + 8 * 3600 * 1000 - 6 * 86400 * 1000).toISOString().slice(0, 10);
+
+      const liveCustomRes = await request.post('/api/send-email?action=daily-matrix', {
+        headers: { Authorization: `Bearer ${adminJwt}`, 'Content-Type': 'application/json' },
+        data: {
+          action: 'daily-matrix',
+          dryRun: true,
+          isTestMode: false,
+          force: true,
+          stream: 'customer_inbound',
+          startDate: customStart,
+          endDate: customEnd,
+          includeZeroCatalogSkus: true,
+          toList: ['custom-lead@pingconmarketing.com', 'custom-backup@pingconmarketing.com'],
+          ccList: ['custom-cc@pingconmarketing.com']
+        }
+      });
+      expect(liveCustomRes.status()).toBe(200);
+      const liveCustomJson = await liveCustomRes.json();
+      expect(liveCustomJson.success).toBe(true);
+      expect(liveCustomJson.stream).toBe('customer_inbound');
+      expect(liveCustomJson.includeZeroCatalogSkus).toBe(true);
+      expect(liveCustomJson.startDate).toBe(customStart);
+      expect(liveCustomJson.endDate).toBe(customEnd);
+      expect(liveCustomJson.to).toContain('custom-lead@pingconmarketing.com');
+      expect(liveCustomJson.to).toContain('custom-backup@pingconmarketing.com');
+      expect(liveCustomJson.cc).toContain('custom-cc@pingconmarketing.com');
+
       const testMatrixRes = await request.post('/api/send-email?action=daily-matrix', {
         headers: { Authorization: `Bearer ${adminJwt}`, 'Content-Type': 'application/json' },
         data: { action: 'daily-matrix', dryRun: true, isTestMode: true, force: true, includeAttachmentBase64: true }
@@ -845,13 +950,46 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       const testMatrixJson = await testMatrixRes.json();
       expect(testMatrixJson.success).toBe(true);
       expect(testMatrixJson.isTestMode).toBe(true);
-      expect(testMatrixJson.to).toBe('mgan@a2z2go.net');
+      expect(testMatrixJson.to).toBe('mgan@pingconmarketing.com');
       expect(testMatrixJson.cc).toEqual([]);
       expect(testMatrixJson.subject).toMatch(/^\[TEST\] /);
       expect(testMatrixJson.filename).toMatch(/^TEST_Overall_RMA_Matrix_Report_/);
       assertStrictOoxmlWorkbook(Buffer.from(testMatrixJson.attachmentBase64, 'base64'), { expectMatrixPanes: true });
 
-      // UI Check: SettingsTab -> Send Daily Matrix Now button
+      // 5B. DAILY 10-CALENDAR-DAY PICKUP FOLLOW-UP & AUTO-DISPOSE API + EXCEL WORKFLOW STATUS QA
+      const unauthFollowUp = await request.get('/api/send-email?action=daily-followup');
+      expect(unauthFollowUp.status()).toBe(401);
+      const dryRunFollowUp = await request.post('/api/send-email?action=daily-followup', {
+        headers: { Authorization: `Bearer ${adminJwt}`, 'Content-Type': 'application/json' },
+        data: { action: 'daily-followup', operation: 'run_all', dryRun: true, isTestMode: true }
+      });
+      expect(dryRunFollowUp.status()).toBe(200);
+      const dryRunFollowUpJson = await dryRunFollowUp.json();
+      expect(dryRunFollowUpJson.success).toBe(true);
+      expect(dryRunFollowUpJson.dryRun).toBe(true);
+      expect(dryRunFollowUpJson.sandboxEmail).toBe('mgan@pingconmarketing.com');
+
+      // Assert clean human workflow status labels (zero raw snake_case strings) & 4-step helper
+      const rawPendingStatus = getCleanHumanWorkflowStatus({
+        rma_number: 'RMA-TEST-WF-1',
+        status: 'pending_admin_details',
+        disposition: 'Pending Triage',
+        rma_type: 'supplier_outbound',
+        created_at: new Date().toISOString()
+      }, []);
+      expect(rawPendingStatus.label).not.toMatch(/pending_admin_details|under_inspection|triaged/i);
+      const overdueWf = computeFourStepWorkflow({
+        rma_number: 'RMA-TEST-WF-2',
+        status: 'pending',
+        supplier_name: 'Mondelez',
+        rma_type: 'supplier_outbound',
+        created_at: new Date(Date.now() - 12 * 86400000).toISOString(),
+        ai_document_metadata: { follow_up: { enabled: true, started_at: new Date(Date.now() - 12 * 86400000).toISOString() } }
+      }, []);
+      expect(overdueWf.isExpiredAfter10Days).toBe(true);
+      expect(overdueWf.calendarDay).toBeGreaterThan(10);
+
+      // UI Check: SettingsTab -> Send Manual Matrix Email Now + RMAMatrixExportModal -> Email Matrix tab
       await page.route('**/api/send-email?action=daily-matrix**', async (route) => {
         return route.fulfill({
           status: 200,
@@ -867,8 +1005,38 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@a2z2g
       });
       await page.getByRole('button', { name: /Settings & SMTP/i }).click();
       await expect(page.getByText(/1:00 PM PHT/i).first()).toBeVisible();
-      await page.getByRole('button', { name: /Send Daily Matrix Now/i }).click();
+      await page.getByRole('button', { name: /Send Manual Matrix Email Now/i }).click();
       await expect(page.getByText(/Daily Matrix dispatched to/i).first()).toBeVisible({ timeout: 15_000 });
+
+      // Open Matrix Export Modal from Customer RMA Hub -> switch to Email Matrix tab & dispatch
+      await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
+      await page.getByRole('button', { name: /Overall RMA Matrix \(\.xlsx\)/i }).first().click();
+      const matrixModal = page.locator('div.fixed', { hasText: 'Email Dispatch Studio' });
+      await expect(matrixModal).toBeVisible();
+      await matrixModal.getByRole('button', { name: /Email Matrix/i }).click();
+      await expect(matrixModal.locator('[data-email-recipients-editor="manual_matrix"]')).toBeVisible();
+      await matrixModal.getByRole('button', { name: /Send Matrix Email Now/i }).click();
+      await expect(matrixModal.getByText(/Matrix email dispatched to/i)).toBeVisible({ timeout: 15_000 });
+      await matrixModal.getByRole('button', { name: 'Close', exact: true }).click();
+
+      // Verify Customer Hub inbound Excel export has clean workflow headers & zero raw DB snake_case status strings
+      const [inboundDl] = await Promise.all([
+        page.waitForEvent('download', { timeout: 20_000 }),
+        page.getByRole('button', { name: /Export Inbound \(\.xlsx\)/i }).click()
+      ]);
+      const inboundPath = await inboundDl.path();
+      const inboundBuf = fs.readFileSync(inboundPath);
+      assertStrictOoxmlWorkbook(inboundBuf, { expectMatrixPanes: false });
+      const inboundEntries = parseStoredZipEntries(inboundBuf);
+      const inboundXmlAll = [
+        inboundEntries.get('xl/sharedStrings.xml') || '',
+        inboundEntries.get('xl/worksheets/sheet1.xml') || ''
+      ].join('\n');
+      expect(inboundXmlAll).toContain('Workflow Step (1-4)');
+      expect(inboundXmlAll).toContain('Follow-Up Day (of 10)');
+      expect(inboundXmlAll).toContain('Handover Date (YYYY-MM-DD)');
+      expect(inboundXmlAll).toContain('Case Closed Date (YYYY-MM-DD)');
+      expect(inboundXmlAll).not.toMatch(/pending_admin_details|under_inspection|received_at_dock/);
 
       guard.assertClean('suite 07 lifecycle emails + pdf + overall matrix xlsx');
     } finally {

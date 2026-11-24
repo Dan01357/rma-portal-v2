@@ -128,6 +128,19 @@ test.describe('Suite 08: REST API Endpoints, /docs & /api/context, Date Format A
       expect(cmListRes.status()).toBe(200);
       expect((await cmListRes.json()).success).toBe(true);
 
+      // POST /api/upload-photo?action=inspect-plate -> verifies truck plate OCR route contract under 12-function cap
+      const plateOcrRes = await request.post('/api/upload-photo?action=inspect-plate', {
+        data: {
+          fileData: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+          mimeType: 'image/png'
+        }
+      });
+      expect(plateOcrRes.status()).toBe(200);
+      const plateOcrJson = await plateOcrRes.json();
+      expect(typeof plateOcrJson).toBe('object');
+      expect('is_valid_plate' in plateOcrJson).toBe(true);
+      expect('plate_number' in plateOcrJson).toBe(true);
+
       // Navigate once so strict guards observe page cleanly too
       await page.goto('/docs', { waitUntil: 'domcontentloaded', timeout: 45_000 });
       guard.assertClean('suite 08 REST API & /docs');
@@ -167,13 +180,12 @@ test.describe('Suite 08: REST API Endpoints, /docs & /api/context, Date Format A
         });
         await assertNoHorizontalOverflow(page, `${vp.name} Public Intake`);
 
-        // 2. Admin Dashboard all 7 tabs responsive check
+        // 2. Admin Dashboard all 6 top-level tabs + Customer Hub Credit Memos Ledger sub-tab responsive check
         await gotoAdmin(page);
         for (const tabLabel of [
           'Saved Products',
           'Customer RMA Hub',
           'Supplier Hub',
-          'Credit Memos',
           'Test Mode Sandbox',
           'Archive & Trash',
           'Settings & SMTP'
@@ -181,18 +193,24 @@ test.describe('Suite 08: REST API Endpoints, /docs & /api/context, Date Format A
           await page.getByRole('button', { name: new RegExp(tabLabel, 'i') }).first().click();
           await page.waitForTimeout(250);
           await assertNoHorizontalOverflow(page, `${vp.name} Admin Tab: ${tabLabel}`);
+          if (tabLabel === 'Customer RMA Hub') {
+            await page.getByRole('button', { name: /Credit Memos Ledger \(/i }).first().click();
+            await page.waitForTimeout(200);
+            await assertNoHorizontalOverflow(page, `${vp.name} Customer Hub Sub-Tab: Credit Memos Ledger`);
+          }
         }
       }
 
       // Global Date Format Audit on Admin Tables: ensure zero locale-ambiguous MM/DD/YYYY in rendered table headers/badges
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.getByRole('button', { name: /Customer RMA Hub/i }).click();
+      await page.getByRole('button', { name: /Customer Returns \(/i }).first().click();
       const custText = await page.locator('table').first().innerText().catch(() => '');
       if (custText) {
         expect(custText).not.toMatch(/\b(0?[1-9]|1[0-2])\/(0?[1-9]|[12]\d|3[01])\/\d{4}\b/);
       }
 
-      await page.getByRole('button', { name: /Credit Memos/i }).first().click();
+      await page.getByRole('button', { name: /Credit Memos Ledger \(/i }).first().click();
       await expect(page.getByText(/From \(YYYY-MM-DD\)/i).first()).toBeVisible();
       await expect(page.getByText(/To \(YYYY-MM-DD\)/i).first()).toBeVisible();
 

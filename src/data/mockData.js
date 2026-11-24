@@ -349,7 +349,7 @@ export const AE_ROSTERS = {
     sender: 'finance2@a2z2go.net',
     to: 'azgodev@gmail.com',
     baseCC: [
-      'mgan@a2z2go.net',
+      'mgan@pingconmarketing.com',
       'AZGan@a2z2go.net',
       'marketing@a2z2go.net',
       'jaezelle.benito@pingconmarketing.com'

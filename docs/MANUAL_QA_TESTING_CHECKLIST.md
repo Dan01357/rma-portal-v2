@@ -175,8 +175,8 @@ Each test scenario defines:
 - [ ] **TC-PUB-02 (Super Admin Sandbox Active)**
   * **Location**: Top of Public Portal (`/`)
   * **Action**: Log in as `super_admin` in Admin, enable Test Mode in Settings, then return to `/`.
-  * **Expected Behavior**: Amber warning banner appears: `🧪 Super Admin Sandbox Active — Test emails routed safely to mgan@a2z2go.net • Reports saved to database.` The toggle switch indicates ON.
-  * **Edge Case**: Submitting a return records `is_test: true` (`RMA-TEST-`) in `rma_reports` and dispatches test emails exclusively to `mgan@a2z2go.net`.
+  * **Expected Behavior**: Amber warning banner appears: `🧪 Super Admin Sandbox Active — Test emails routed safely to mgan@pingconmarketing.com • Reports saved to database.` The toggle switch indicates ON.
+  * **Edge Case**: Submitting a return records `is_test: true` (`RMA-TEST-`) in `rma_reports` and dispatches test emails exclusively to the configured Sandbox email (`mgan@pingconmarketing.com`).
 
 - [ ] **TC-PUB-03 (Super Admin 1-Click Toggle)**
   * **Location**: Top banner toggle switch
@@ -1842,9 +1842,9 @@ Each test scenario defines:
   * **Location**: `ProductAutoSuggest` across Assign SKU, Edit Product, & Quick Details Edit
   * **Expected Behavior**: Lowercase SKU (`ss1319p`) or item name (`Magnolia`) queries Supabase + Laravel `erply_products` (`[trimmed, capitalized, uppercase, lowercase]` + `?code=`), preserving `supplierName`/`supplier_name`, prices, units, and pieces/case while locking existing barcodes on SKU assignment.
 
-- [ ] **TC-P24-03 (Unambiguous `(YYYY-MM-DD)` / `(YYYY-MM-DD HH:mm)` Dates & `mgan@a2z2go.net` Sandbox Routing)**
+- [ ] **TC-P24-03 (Unambiguous `(YYYY-MM-DD)` / `(YYYY-MM-DD HH:mm)` Dates & `mgan@pingconmarketing.com` Sandbox Routing)**
   * **Location**: All tables, filter labels, ISO readouts, US Letter printables, `.xlsx` Matrix headers, and `/api/send-email` Test Mode payloads.
-  * **Expected Behavior**: All dates render in Asia/Manila `YYYY-MM-DD` / `YYYY-MM-DD HH:mm`; Test Mode emails route strictly to `mgan@a2z2go.net` with `[TEST] ` as the very first word of the subject line (`[TEST_MODE]` metadata) and zero live vendor/customer leaks.
+  * **Expected Behavior**: All dates render in Asia/Manila `YYYY-MM-DD` / `YYYY-MM-DD HH:mm`; Test Mode emails route strictly to the configured Sandbox email (default `mgan@pingconmarketing.com`, editable in Settings) with `[TEST] ` as the very first word of the subject line (`[TEST_MODE]` metadata) and zero live vendor/customer leaks.
 
 - [ ] **TC-P24-04 (4 Lifecycle Emails w/ All 5 Pickup Photos & Official PDF Form Attachments)**
   * **Location**: `SimpleSupplierRtvWizardModal` + `notificationService.js`
@@ -1880,15 +1880,30 @@ Each test scenario defines:
   * **Location**: `CustomerRMAInvitesModal`, `GatekeeperPinModal`, `RmaEmailEditorView`, `notificationService.js`, `/api/v1/rma-email-edit`
   * **Expected Behavior**:
     1. `CustomerRMAInvitesModal` adds `✏️ RMA Details Editor` stream mode (`rma_editor` / `inv_edit_` / `inv_test_edit_`) and filter pill (`✏️ Editor`).
-    2. New RMA Alert emails auto-generate a never-expiring (`expires_at: null`, revocable by Admin) Google Identity-locked editor invite authorized for **`To` + ALL `CC` recipients** in Live Mode (or `mgan@a2z2go.net` in Test Mode) and render a clickable **`✏️ Edit RMA Details & Documents`** button/link.
+    2. New RMA Alert emails auto-generate a never-expiring (`expires_at: null`, revocable by Admin) Google Identity-locked editor invite authorized for **`To` + ALL `CC` recipients** in Live Mode (`mgan@pingconmarketing.com` or Sandbox override in Test Mode) and render a clickable **`✏️ Edit RMA Details & Documents`** button/link.
     3. Opening the link reuses `GatekeeperPinModal` Google Identity Lock (NO OTP; enforces 403 Identity Mismatch and Admin Revoked checks without false expiration), unlocking ONLY `RmaEmailEditorView` (zero Admin tabs/settings/trash/API keys) and saving updates server-side via `/api/v1/rma-email-edit` (`401`/`403` blocked when unauthenticated, non-recipient, revoked, or cross-mode).
 
 - [ ] **TC-P24-11 (Automated Daily 1:00 PM PHT Overall RMA Matrix `.xlsx` Email & `[TEST]` First-Word Enforcement)**
-  * **Location**: `vercel.json` cron (`0 5 * * *`), `api/send-email.js?action=daily-matrix`, `api/_lib/dailyMatrixEmailHandler.js`, `SettingsTab.jsx`
+  * **Location**: `vercel.json` cron (`0 5 * * *`), `api/send-email.js?action=daily-matrix`, `api/_lib/dailyMatrixEmailHandler.js`, `SettingsTab.jsx`, `RMAMatrixExportModal.jsx`
   * **Expected Behavior**:
     1. Vercel Cron hits `/api/send-email?action=daily-matrix` daily at 1:00 PM PHT (`05:00 UTC`), adhering to the 12-function limit (`API_ROUTE_COUNT === 12`) and enforcing `CRON_SECRET` / Admin Bearer JWT authentication (`401` unauthenticated).
-    2. Queries Live `rma_reports`, `products`, and `credit_memos`, generates the strict Microsoft-Excel-valid 14-day rolling Overall RMA Matrix (`.xlsx`), and emails configured `rma_settings.email_recipients` (`To` + `CC`) once per Manila day (`daily_matrix_last_sent_pht_date`).
-    3. Clicking **Send Daily Matrix Now** in Settings dispatches manually on demand; when Test Mode is active, subject strictly starts with `[TEST] ` as the first word and sends only to `mgan@a2z2go.net`.
+    2. Queries Live `rma_reports`, `products`, and `credit_memos`, reads `rma_settings.daily_matrix_config` (Rolling Days or Custom Date Range `YYYY-MM-DD`, Scope `overall` / `customer_inbound` / `supplier_outbound`, `includeZeroCatalogSkus`) and per-type recipient profiles (`daily_matrix_auto` vs `manual_matrix`), builds the strict Microsoft-Excel-valid `.xlsx` workbook, and dispatches once per Manila day (`daily_matrix_last_sent_pht_date`) for cron runs.
+    3. Clicking **Send Manual Matrix Email Now** in Settings or **📧 Email Matrix -> Send Matrix Email Now** in `RMAMatrixExportModal` dispatches on demand with custom scope/date range/recipients (plus optional Sync Auto & Manual recipients); when Test Mode is active, subject strictly starts with `[TEST] ` as the very first word and sends only to the configured Sandbox email (`mgan@pingconmarketing.com`).
+
+- [ ] **TC-P24-12 (Per-Email Editable TO/CC Recipient Profiles & Unified QR/Hub Architecture)**
+  * **Location**: `EmailRecipientsEditor.jsx`, `notificationService.js` (`email_recipients_by_type`), `SettingsTab.jsx` (Card 1B), `App.jsx` (`/` intake), `SimpleSupplierRtvWizardModal.jsx`, `ProductEditModal.jsx`, `CustomerRMAInvitesModal.jsx`, `CustomerHubTab.jsx`, `ReturnQRModal.jsx`
+  * **Expected Behavior**:
+    1. Super Admin can customize multiple comma/chip **To** and **CC** recipients for all 10 outgoing email profiles (`new_rma`, `pickup_debit_claim`, `pickup_replacement`, `rma_scrapped`, `rma_restocked`, `daily_matrix_auto`, `manual_matrix`, `supplier_followup`, `product_update`, `invite_email`) with reset-to-global-defaults and multi-TO normalization in `/api/send-email`.
+    2. Inline collapsible `<EmailRecipientsEditor compact />` appears on `/` intake ONLY for authenticated Staff/Admin/Super Admin (strictly hidden for external invited customers `!currentUser`), in Wizard Step 1 & Step 2, Product Edit modal, Invites modal, and `RMAMatrixExportModal`. Active `new_rma` To + CC recipients automatically receive `rma_editor` access on that RMA's edit link in Live Mode.
+    3. `Credit Memos Ledger` lives cleanly as a sub-tab inside Customer RMA Hub (Live & Sandbox), and QR downloads/printing share one unified `Save QR (PNG)` / `Resize / Print QR` (`QR Print Studio`) design with Quantity & Unit plus multi-QR page packing.
+
+- [ ] **TC-P24-13 (4-Step Workflow, 10-Calendar-Day Auto Follow-Up & Editable Schedules)**
+  * **Location**: `followUpWorkflow.js`, `dailyFollowUpHandler.js`, `SupplierFollowUpModal.jsx`, `SettingsTab.jsx`, `SupplierClaimsTab.jsx`, `CustomerHubTab.jsx`, `QuickRMAActionModal.jsx`, `exportCsv.js`
+  * **Expected Behavior**:
+    1. Intake Section 1 provides `Supplier / Vendor Name (Optional)` (`<SupplierInput />`, catalog auto-populated) without breaking Section 3 Store/Branch. Blank/placeholder supplier RMAs render inline **`+ Set Supplier & Email`** buttons to configure `supplier_name`, `supplier_email_to`, `supplier_email_cc`, and `Auto Daily Follow-Up (10-Day SLA)` toggle.
+    2. Each RMA tracks 4 steps (Step 1 Report Date -> Step 2 Waiting `Day N of 10` -> Step 3 Picked Up / Handover Date -> Step 4 Case Close). `/api/send-email?action=daily-followup` enforces cron/Admin auth, sends daily reminders up to Day 10, stops immediately on pickup or `✓ Case Close`, and auto-disposes >10-day unclaimed RMAs (`status: 'resolved'`, `5- Scrap / Dispose`, `Disposal / Scrap Area`) while notifying `new_rma` recipients.
+    3. Settings allows editing **Matrix Auto-Send Time (`HH:mm Asia/Manila`)** (default `13:00`), **Follow-Up Auto-Send Time (`HH:mm Asia/Manila`)** (default `08:00`), **Test Mode Sandbox Email Override** (`mgan@pingconmarketing.com`), and **Customer Hub Default Countdown ON**, backed by `.github/workflows/rma-scheduler.yml` + `vercel.json` + Admin background scheduler.
+    4. Excel exports (`exportRMAReportsToXlsx`, `exportCustomerInboundRMAsToXlsx`, `exportSupplierOutboundClaimsToXlsx`) display clean human status labels (zero raw `pending_admin_details`/`under_inspection` snake_case strings) plus the 4 workflow/pickup/close columns.
 
 ---
 

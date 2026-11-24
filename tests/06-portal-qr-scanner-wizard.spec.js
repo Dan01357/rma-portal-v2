@@ -43,7 +43,7 @@ async function submitQuickCustomerPortalRma(page, { isTestMode, reporterName }) 
   );
 
   await page.getByRole('button', { name: /Submit Return Report/i }).click();
-  await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText('Printable QR Ready')).toBeVisible({ timeout: 45_000 });
   expect((await insertResponsePromise).status()).toBeLessThan(400);
 
   const prefixRegex = isTestMode ? /^RMA-TEST-/ : /^RMA-\d{4}-/;
@@ -105,27 +105,33 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       await scanQrThroughPortalScanner(page, `PINGCON-RMA:LIVE:${liveRmaNumber}`);
       await expect(page.getByText('What do you want to do with this item?')).toBeVisible({ timeout: 15_000 });
 
-      // Option 4: Restock
+      // Option 4: Restock (verify manual Processed By starts blank and enforces validation)
+      await expect(page.locator('#wizard-processed-by-step1')).toHaveValue('');
       await page.getByRole('button', { name: /Put Back on Good Shelf \(Restock\)/i }).first().click();
       await page.getByRole('button', { name: /Confirm & Save: Put Back on Good Shelf \(Restock\)/i }).click();
-      await expect(page.getByRole('button', { name: /Edit Choice \/ Details/i })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText(/Please enter "Processed By \(Staff Full Name\)"/i)).toBeVisible({ timeout: 5_000 });
+      await page.locator('#wizard-processed-by-step1').fill('Playwright Live Processor');
+      await page.getByRole('button', { name: /Confirm & Save: Put Back on Good Shelf \(Restock\)/i }).click();
+      await expect(page.getByRole('button', { name: /Edit Choice \/ Details/i })).toBeVisible({ timeout: 35_000 });
       await expect
         .poll(() => capturedEmails.some((e) => String(e?.subject || '').includes('[RMA Restocked]')), {
-          timeout: 10_000
+          timeout: 15_000
         })
         .toBe(true);
 
-      // Option 1: Customer Debit/Credit wait-only + Driver Pickup screen navigation
+      // Option 1: Customer Credit Memo / Return Handover wait-only + Driver Pickup screen navigation
       await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
-      await page.locator('input[placeholder*="Supplier Company Name" i]').fill('Playwright Live Vendor Corp');
-      await page.getByRole('button', { name: /Driver Picked Up \/ Accepted for Debit \/ Credit/i }).click();
+      await page.locator('input[placeholder*="Customer / Store Branch Name" i]').fill('Playwright Live Outlet');
+      await page.locator('#wizard-processed-by-step1').fill('Playwright Live Processor');
+      await page.getByRole('button', { name: /Customer Credit Memo \/ Return Handover/i }).click();
       await page.getByRole('button', { name: /Save Choice Only \(Waiting for Driver\)/i }).click();
-      await expect(page.getByRole('button', { name: /Edit Choice \/ Details/i })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole('button', { name: /Edit Choice \/ Details/i })).toBeVisible({ timeout: 35_000 });
 
       await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
-      await page.getByRole('button', { name: /Driver Picked Up \/ Accepted for Debit \/ Credit/i }).click();
+      await page.getByRole('button', { name: /Customer Credit Memo \/ Return Handover/i }).click();
       await page.getByRole('button', { name: /Driver Is Here — Upload Photos & Print Letter/i }).click();
-      await expect(page.getByText(/Driver Pickup Verification \(0\/5 Photos\)/i)).toBeVisible();
+      await expect(page.getByText(/Driver Pickup Verification \(0\/5 Slots\)/i)).toBeVisible();
+      await expect(page.getByText(/Total:\s*0\/50 photos/i)).toBeVisible();
       await page.getByRole('button', { name: /^Back$/i }).click();
       await page.locator('button[aria-label="Close modal"]').first().click();
 
@@ -145,7 +151,9 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       await expect(page.getByText('What do you want to do with this item?')).toBeVisible({ timeout: 15_000 });
       await expect(page.getByText('🧪 Test Mode').first()).toBeVisible();
 
-      // Option 3: Scrap + Re-Order YES/NO toggle check
+      // Option 3: Scrap + Re-Order YES/NO toggle + manual Processed By
+      await expect(page.locator('#wizard-processed-by-step1')).toHaveValue('');
+      await page.locator('#wizard-processed-by-step1').fill('Playwright Test Processor');
       await page.getByRole('button', { name: /Throw Away \/ Dispose \(Scrap\)/i }).click();
       const noReorderBtn = page.getByRole('button', { name: /NO.*Do Not Re-Order/i }).first();
       const yesReorderBtn = page.getByRole('button', { name: /YES.*Re-Order/i }).first();
@@ -154,19 +162,20 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
         await yesReorderBtn.click();
       }
       await page.getByRole('button', { name: /Confirm & Save: Throw Away \/ Dispose \(Scrap\)/i }).click();
-      await expect(page.getByRole('button', { name: /Edit Choice \/ Details/i })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole('button', { name: /Edit Choice \/ Details/i })).toBeVisible({ timeout: 45_000 });
       await expect
         .poll(() => capturedEmails.some((e) => e?.isTestMode && String(e?.subject || '').startsWith('[TEST] [RMA Scrapped]')), {
-          timeout: 10_000
+          timeout: 15_000
         })
         .toBe(true);
 
-      // Option 2: Replacement / Exchange wait-only
+      // Option 2: Customer Buffer Replacement / Good Stock Exchange wait-only
       await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
-      await page.locator('input[placeholder*="Supplier Company Name" i]').fill('Playwright Sandbox Vendor Corp');
-      await page.getByRole('button', { name: /Driver Picked Up \/ Replaced with Good Stock/i }).click();
+      await page.locator('input[placeholder*="Customer / Store Branch Name" i]').fill('Playwright Sandbox Outlet');
+      await page.locator('#wizard-processed-by-step1').fill('Playwright Test Processor');
+      await page.getByRole('button', { name: /Customer Buffer Replacement \/ Good Stock Exchange/i }).click();
       await page.getByRole('button', { name: /Save Choice Only \(Waiting for Driver\)/i }).click();
-      await expect(page.getByRole('button', { name: /^Done$/i })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole('button', { name: /^Done$/i })).toBeVisible({ timeout: 45_000 });
       await page.getByRole('button', { name: /^Done$/i }).click();
 
       // Legacy ?rma= URL payload
@@ -293,40 +302,53 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       await page.locator('tr', { hasText: sup1A }).first().locator('input[type="checkbox"]').first().check();
       await page.locator('tr', { hasText: sup1B }).first().locator('input[type="checkbox"]').first().check();
 
-      // 2. Process Consolidated Batch (2 RMAs) -> Debit Claim 5-photo pickup
+      // 2. Process Consolidated Batch (2 RMAs) -> Debit Claim multi-photo pickup & manual Processed By
       await page.getByRole('button', { name: /Process Consolidated Batch \(2 RMAs\)/i }).click();
       await expect(page.getByText(/Consolidated Batch: 2 RMAs Selected/i)).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('#wizard-processed-by-step1')).toHaveValue('');
       await page.getByRole('button', { name: /Return to supplier for Debit Claim/i }).click();
       await page.getByRole('button', { name: /Driver Is Here — Upload Photos & Print Letter/i }).click();
-      await expect(page.getByText(/Driver Pickup Verification \(0\/5 Photos\)/i)).toBeVisible();
+      await expect(page.getByText(/Driver Pickup Verification \(0\/5 Slots\)/i)).toBeVisible();
+      await expect(page.getByText(/Total:\s*0\/50 photos/i)).toBeVisible();
+      await expect(page.locator('#wizard-processed-by-step2')).toHaveValue('');
 
       await page.locator('input[placeholder*="claims@supplier.com" i]').fill('batch-claims@example.com');
       await page.locator('input[placeholder*="rep@supplier.com" i]').fill('batch-ap@example.com');
 
-      const photoInputs = page.locator('input[type="file"][accept="image/*"]');
-      const count = await photoInputs.count();
-      for (let i = 0; i < count; i++) {
-        await photoInputs.nth(i).setInputFiles({
-          name: `pw-batch-${i + 1}.png`,
+      const chooseFilesInputs = page.locator('input[type="file"][accept="image/*"][multiple]');
+      const multiCount = await chooseFilesInputs.count();
+      expect(multiCount).toBe(5);
+      // Upload 2 photos via multiple Choose Files into Slot 1, plus 1 per slot for Slots 2-5
+      await chooseFilesInputs.nth(0).setInputFiles([
+        { name: 'pw-batch-slot1-a.png', mimeType: 'image/png', buffer: PNG_BUFFER },
+        { name: 'pw-batch-slot1-b.png', mimeType: 'image/png', buffer: PNG_BUFFER }
+      ]);
+      for (let i = 1; i < multiCount; i++) {
+        await chooseFilesInputs.nth(i).setInputFiles({
+          name: `pw-batch-slot${i + 1}.png`,
           mimeType: 'image/png',
           buffer: PNG_BUFFER
         });
       }
-      await expect(page.getByText(/Driver Pickup Verification \(5\/5 Photos\)/i)).toBeVisible();
+      await expect(page.getByText(/Driver Pickup Verification \(5\/5 Slots\)/i)).toBeVisible();
+      await expect(page.getByText(/Total:\s*6\/50 photos/i)).toBeVisible();
+      await expect(page.getByText('(2/10)').first()).toBeVisible();
 
       await page.locator('input[placeholder*="Auto-filled or type name" i]').fill('Playwright Batch Driver');
       await page.locator('input[placeholder*="NAA 1234" i]').fill('PW-777');
+      await page.locator('#wizard-processed-by-step2').fill('Playwright Batch Staff');
 
       const emailsBeforeBatch = capturedEmails.length;
       await page
-        .getByRole('button', { name: /Upload 5 Photos to RMA Drive|Save Updates & Open Letter Form/i })
+        .getByRole('button', { name: /Upload \d+(?: New)? Photos? to RMA Drive|Save Updates & Open Letter Form/i })
         .click();
 
-      // Assert Unified B&W Letter Debit Claim Form opens with Auto-Combine Identical Items toggle & Layout toggle
+      // Assert Unified B&W Letter Debit Claim Form opens with Auto-Combine Identical Items toggle, Layout toggle & Prepared By
       await expect(page.getByText(/SUPPLIER DEBIT CLAIM & PICKUP VALIDATION FORM/i).first()).toBeVisible({
         timeout: 25_000
       });
       await expect(page.getByText(/BATCH \(2 RMAs\)/i).first()).toBeVisible();
+      await expect(page.locator('#letter-supplier-pickup-form input[title*="Prepared By" i]').first()).toHaveValue('Playwright Batch Staff');
 
       // Toggle Auto-Combine Identical Items ON <-> OFF (3 + 2 = 5 pcs combined -> 2 separate rows when OFF!)
       const combineToggle = page.getByRole('button', { name: /Auto-Combine Identical Items:/i });
@@ -338,13 +360,32 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
         await expect(combineToggle).toContainText('ON');
       }
 
-      // Toggle Full Page per Copy <-> Auto & print to verify US Letter B&W HTML without A4
-      const fullPageToggle = page.getByRole('button', { name: /Full Page per Copy/i });
-      if (await fullPageToggle.isVisible().catch(() => false)) {
-        await fullPageToggle.click();
+      // Toggle Separated Full Pages <-> Combined 1-Page & exercise customizable copy counts
+      const separatedBtn = page.getByRole('button', { name: /Separated Full Pages \(Dedicated Paper per Copy\)/i });
+      if (await separatedBtn.isVisible().catch(() => false)) {
+        await separatedBtn.click();
+      }
+      await page.getByRole('button', { name: '2 Ours + 1 Theirs (3 Papers)' }).click();
+      await expect(page.getByText('Total Output: 3 Copies')).toBeVisible();
+      await expect(page.getByText(/^COPY 3 OF 3 — SUPPLIER COPY/i)).toBeVisible();
+
+      await page.locator('input[aria-label="Our Company Copies"]').fill('0');
+      await page.locator('input[aria-label="Supplier Copies"]').fill('0');
+      await expect(page.getByText(/Total copy count is 0\./i)).toBeVisible();
+      const pickupPrintBtn = page.getByRole('button', { name: /Print (?:Letter Dual-Copy Form|Separated Letter Copies)/i });
+      await expect(pickupPrintBtn).toBeDisabled();
+
+      await page.getByRole('button', { name: '1 + 1 (2 Papers)' }).click();
+      await expect(page.getByText('Total Output: 2 Copies')).toBeVisible();
+      await expect(pickupPrintBtn).toBeEnabled();
+
+      const combinedBtn = page.getByRole('button', { name: /Combined 1-Page \(Cut at 50%\)/i });
+      if (await combinedBtn.isVisible().catch(() => false)) {
+        await combinedBtn.click();
+        await separatedBtn.click();
       }
       const printsBefore = await page.evaluate(() => window.__pwPrintCount || 0);
-      await page.getByRole('button', { name: /Print Letter Dual-Copy Form|Print Full-Page Letter Copies/i }).click();
+      await pickupPrintBtn.click();
       await expect.poll(() => page.evaluate(() => window.__pwPrintCount || 0), { timeout: 8_000 }).toBeGreaterThan(printsBefore);
       const htmls = await page.evaluate(() => window.__pwPrintHtmls || []);
       const formHtml = htmls[htmls.length - 1] || '';
@@ -360,11 +401,14 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       expect(batchEmail.subject).toMatch(/Driver Picked Up - Debit Claim/);
       expect(batchEmail.html).toContain(sup1A);
       expect(batchEmail.html).toContain(sup1B);
+      expect(batchEmail.html).toContain('Playwright Batch Staff');
+      expect(batchEmail.html).not.toContain('Store / Branch:');
+      expect(batchEmail.html).not.toContain('Warehouse Location:');
       expect((batchEmail.attachments || []).filter((a) => String(a.filename || '').startsWith('Debit-Claim-Form-')).length).toBe(1);
 
       await page.locator('button[aria-label="Close modal"]').first().click();
 
-      // 3. Verify BOTH rows show the exact same Batch Claim RTV- ID & Re-Editing preserves Claim ID without duplicating!
+      // 3. Verify BOTH rows show the exact same Batch Claim RTV- ID & Re-Editing preserves Claim ID & prefills saved Processed By + photos!
       await page.locator('input[placeholder*="Search" i]').first().fill(sup1B);
       const batchBadgeRow = page.locator('tr', { hasText: sup1B }).first();
       await expect(batchBadgeRow.getByText(/Batch Claim: RTV-TEST-/i)).toBeVisible({ timeout: 10_000 });
@@ -376,6 +420,7 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       // Click Edit Claim / Open 4-Choice on sup1B -> opens whole 2-RMA batch -> update truck plate -> preserve sharedClaimNumber!
       await batchBadgeRow.locator('button[title*="Edit" i], button[title*="4-Choice" i]').first().click();
       await expect(page.getByText(/Consolidated Batch: 2 RMAs Selected/i)).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('#wizard-processed-by-step1')).toHaveValue('Playwright Batch Staff');
       const editChoiceBtn = page.getByRole('button', { name: /Edit Choice \/ Details/i });
       if (await editChoiceBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
         await editChoiceBtn.click();
@@ -383,9 +428,11 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       await page.getByRole('button', { name: /Return to supplier for Debit Claim/i }).click();
       await page
         .getByRole('button', {
-          name: /Edit Pickup Details, Emails & 5 Photos|Driver Is Here — Upload Photos & Print Letter/i
+          name: /Edit Pickup Details, Emails & (?:5 )?Photos|Driver Is Here — Upload Photos & Print Letter/i
         })
         .click();
+      await expect(page.getByText(/Total:\s*6\/50 photos/i)).toBeVisible();
+      await expect(page.locator('#wizard-processed-by-step2')).toHaveValue('Playwright Batch Staff');
       await page.locator('input[placeholder*="NAA 1234" i]').fill('PW-8888');
       await page.getByRole('button', { name: /Save Updates & Open Letter Form/i }).click();
       await expect(page.getByText(/SUPPLIER DEBIT CLAIM & PICKUP VALIDATION FORM/i).first()).toBeVisible({

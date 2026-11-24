@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   X, 
   Mail, 
@@ -27,6 +27,8 @@ import {
   isPermanentInvite
 } from '../services/inviteService';
 import TablePagination from './TablePagination';
+import EmailRecipientsEditor from './EmailRecipientsEditor';
+import { notificationService } from '../services/notificationService';
 import { copyTextSafe } from '../utils/clipboard';
 import { formatDateTimeYmdHm } from '../utils/rmaHelpers';
 
@@ -76,6 +78,11 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   const [copiedToken, setCopiedToken] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
+  const loadSeqRef = useRef(0);
+  const [inviteExtraRecipients, setInviteExtraRecipients] = useState(() => {
+    const prof = notificationService.getEmailProfile('invite_email');
+    return { toList: prof.toList || [], ccList: prof.ccList || [] };
+  });
 
   useEffect(() => {
     if (isOpen) {
@@ -86,14 +93,19 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   }, [isOpen]);
 
   const loadInvites = async () => {
+    const reqId = ++loadSeqRef.current;
     setIsLoading(true);
     try {
       const data = await inviteService.getInvites();
-      setInvites(data || []);
+      if (reqId === loadSeqRef.current) {
+        setInvites(data || []);
+      }
     } catch (err) {
       console.warn('Error loading invites:', err);
     } finally {
-      setIsLoading(false);
+      if (reqId === loadSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -159,6 +171,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       setTargetRmaNumber('');
       setStreamFilter('all');
       setCurrentPage(1);
+      loadSeqRef.current += 1;
       setInvites((prev) => [newInv, ...(prev || []).filter((i) => i.token !== newInv.token)]);
       showToast(
         `${inviteIsTestMode ? '🧪 TEST MODE ' : ''}${
@@ -199,8 +212,12 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   const handleSendEmail = async (inv) => {
     setIsSendingEmail(true);
     try {
-      await inviteService.sendInviteEmail(inv);
-      showToast(`Invite emailed to ${inv.authorized_email}!`);
+      await inviteService.sendInviteEmail(inv, inviteExtraRecipients);
+      const extras = [
+        ...(inviteExtraRecipients?.toList || []),
+        ...(inviteExtraRecipients?.ccList || [])
+      ].filter(Boolean);
+      showToast(`Invite emailed to ${inv.authorized_email}${extras.length > 0 ? ` (+ ${extras.length} extra CC)` : ''}!`);
     } catch (err) {
       alert(`Could not send email: ${err.message}`);
     } finally {
@@ -214,6 +231,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     }
     try {
       await inviteService.revokeInvite(token);
+      loadSeqRef.current += 1;
       setInvites((prev) =>
         prev.map((inv) => ((inv.token === token || inv.id === token) ? { ...inv, status: 'revoked' } : inv))
       );
@@ -238,6 +256,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     setDeletingToken(tokenKey);
     try {
       await inviteService.deleteInvite(tokenKey);
+      loadSeqRef.current += 1;
       setInvites((prev) => prev.filter((item) => (item.token || item.id) !== tokenKey));
       showToast('Invite record deleted successfully.');
       loadInvites();
@@ -637,6 +656,20 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
                   </button>
                 );
               })}
+            </div>
+
+            <div className="pt-1">
+              <EmailRecipientsEditor
+                emailType="invite_email"
+                value={inviteExtraRecipients}
+                onChange={setInviteExtraRecipients}
+                compact={true}
+                defaultExpanded={false}
+                allowEmptyTo={true}
+                isTestMode={inviteIsTestMode}
+                title="Optional Extra Invite Email CCs"
+                extraHint="Any addresses added here are automatically CC’d when clicking Send Invite Email."
+              />
             </div>
 
             <div className="flex justify-end pt-1">

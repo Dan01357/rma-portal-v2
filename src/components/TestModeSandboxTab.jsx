@@ -6,7 +6,6 @@ import {
   Check,
   FileText,
   Building2,
-  Receipt,
   FileSpreadsheet,
   Terminal,
   ChevronDown
@@ -18,7 +17,6 @@ import {
 } from '../utils/rmaHelpers';
 import CustomerHubTab from './CustomerHubTab';
 import SupplierClaimsTab from './SupplierClaimsTab';
-import CreditMemosTab from './CreditMemosTab';
 import { copyTextSafe } from '../utils/clipboard';
 
 export default function TestModeSandboxTab({
@@ -31,6 +29,9 @@ export default function TestModeSandboxTab({
   updatingQueueId = null,
   activeSubTab: controlledSubTab,
   onSubTabChange,
+  customerHubSubTab = 'returns',
+  externalCustomerSubTab = null,
+  onCustomerHubSubTabChange,
   onRefresh,
   onInspectTriage,
   onOpenQuickAction,
@@ -58,12 +59,14 @@ export default function TestModeSandboxTab({
   onOpenPickupForm
 }) {
   const [internalSubTab, setInternalSubTab] = useState('customer');
-  const activeSubTab = controlledSubTab || internalSubTab;
+  const rawSubTab = controlledSubTab || internalSubTab;
+  const activeSubTab = rawSubTab === 'supplier' ? 'supplier' : 'customer';
   const setActiveSubTab = (nextTab) => {
+    const normalized = nextTab === 'supplier' ? 'supplier' : 'customer';
     if (onSubTabChange) {
-      onSubTabChange(nextTab);
+      onSubTabChange(normalized);
     } else {
-      setInternalSubTab(nextTab);
+      setInternalSubTab(normalized);
     }
   };
 
@@ -159,7 +162,7 @@ export default function TestModeSandboxTab({
               <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showApiGuide ? 'rotate-180' : ''}`} />
             </button>
 
-            {onOpenMatrixExport && activeSubTab !== 'memos' && (
+            {onOpenMatrixExport && !(activeSubTab === 'customer' && customerHubSubTab === 'credit_memos') && (
               <button
                 type="button"
                 onClick={() => onOpenMatrixExport('overall')}
@@ -242,7 +245,7 @@ export default function TestModeSandboxTab({
         )}
       </div>
 
-      {/* 2. Standardized Sandbox Sub-Tabs Bar */}
+      {/* 2. Standardized Symmetrical 2-Hub Sandbox Sub-Tabs Bar */}
       <div className="flex items-center gap-2 bg-slate-200/80 dark:bg-slate-800/80 p-1 rounded-2xl overflow-x-auto">
         <button
           type="button"
@@ -269,19 +272,6 @@ export default function TestModeSandboxTab({
           <Building2 className="w-4 h-4 text-amber-600" />
           <span>🚚 Sandbox Supplier RTVs ({sandboxSupplierCount})</span>
         </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveSubTab('memos')}
-          className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-            activeSubTab === 'memos'
-              ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-          }`}
-        >
-          <Receipt className="w-4 h-4 text-emerald-600" />
-          <span>💳 Sandbox Credit Memos ({testCreditMemosList.length})</span>
-        </button>
       </div>
 
       {/* 3. Full-Parity Standardized Sandbox Views */}
@@ -305,13 +295,21 @@ export default function TestModeSandboxTab({
           onViewExplanation={onViewExplanation}
           onEditProductFromReport={onEditProductFromReport}
           onOpenCreditMemo={onOpenCreditMemoForReport}
+          onOpenCreateCreditMemo={onOpenCreateCreditMemo}
+          onEditCreditMemo={onEditCreditMemo}
           onViewCreditMemoVoucher={onViewCreditMemoVoucher}
+          onPrintBulkCreditMemos={onViewCreditMemoVoucher}
+          onRequestDeleteCreditMemo={onRequestDeleteCreditMemo}
+          onRequestBulkDeleteCreditMemo={onRequestBulkDeleteCreditMemos}
           onConfirmCoworkerAction={onConfirmCoworkerAction}
           onResetToPending={onResetToPending}
           onArchiveReport={onArchiveReport}
           onBulkArchiveReports={onBulkArchiveReports}
           onRequestDeleteReport={onRequestDeleteReport}
           onRequestBulkDeleteReports={onRequestBulkDeleteReports}
+          defaultSubTab={customerHubSubTab}
+          externalSubTab={externalCustomerSubTab}
+          onSubTabChange={onCustomerHubSubTabChange}
         />
       )}
 
@@ -337,21 +335,6 @@ export default function TestModeSandboxTab({
           onOpenMatrixExport={() => onOpenMatrixExport && onOpenMatrixExport('overall')}
           savedProductsList={savedProductsList}
           coworkerQueueFilter={coworkerQueueFilter}
-          isTestMode={true}
-        />
-      )}
-
-      {activeSubTab === 'memos' && (
-        <CreditMemosTab
-          creditMemosList={testCreditMemosList}
-          recentReportsList={testReportsList}
-          currentUser={currentUser}
-          onOpenCreateModal={onOpenCreateCreditMemo}
-          onEditCreditMemo={onEditCreditMemo}
-          onViewVoucher={onViewCreditMemoVoucher}
-          onPrintBulk={onViewCreditMemoVoucher}
-          onRequestDeleteCreditMemo={onRequestDeleteCreditMemo}
-          onRequestBulkDeleteCreditMemo={onRequestBulkDeleteCreditMemos}
           isTestMode={true}
         />
       )}

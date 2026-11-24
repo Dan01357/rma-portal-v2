@@ -3,8 +3,33 @@
  * Formats financial and warehouse records into genuine OOXML (.xlsx) spreadsheets
  * with bold frozen headers, clean column widths, numeric/currency cells, and plain-text IDs/barcodes.
  */
-import { normalizeWarehouseLocation, isTestRecord, formatDateYmd, formatDateTimeYmdHm, stripCreditMemoMetaTag } from './rmaHelpers';
+import {
+  normalizeWarehouseLocation,
+  isTestRecord,
+  formatDateYmd,
+  formatDateTimeYmdHm,
+  formatFourChoiceOutcome,
+  stripCreditMemoMetaTag
+} from './rmaHelpers';
+import { getCleanHumanWorkflowStatus } from './followUpWorkflow';
 import { downloadTableXlsx } from './exportXlsx';
+
+function getWorkflowExportFields(r, savedProducts = []) {
+  const statusInfo = getCleanHumanWorkflowStatus(r, savedProducts);
+  const wf = statusInfo.workflow;
+  const followUpDay = wf.isClosed
+    ? (wf.isAutoDisposed ? 'Expired (>10)' : 'Closed')
+    : (wf.followUpEnabled ? `Day ${wf.calendarDay} of 10` : 'Paused / Off');
+  const pickedUpDate = wf.step3.dateYmd || (wf.isAutoClosed || wf.isExpiredAfter10Days ? 'Expired (>10 Days)' : '');
+  const caseClosedDate = wf.step4.dateYmd || '';
+  return {
+    cleanStatusLabel: statusInfo.label,
+    workflowStep: wf.stepSummary,
+    followUpDay,
+    pickedUpDate,
+    caseClosedDate
+  };
+}
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -112,8 +137,8 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
     { header: 'Purchase Order (PO) #', width: 18, type: 'text' },
     { header: 'Batch / Lot #', width: 16, type: 'text' },
     { header: 'Expiry Date (YYYY-MM-DD)', width: 22, type: 'text' },
-    { header: 'Status', width: 18, type: 'text' },
-    { header: 'Disposition', width: 24, type: 'text' },
+    { header: 'Status', width: 28, type: 'text' },
+    { header: 'Disposition', width: 26, type: 'text' },
     { header: 'Condition Grade', width: 18, type: 'text' },
     { header: 'Warehouse Location', width: 20, type: 'text' },
     { header: 'Supplier / Vendor', width: 24, type: 'text' },
@@ -131,7 +156,11 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
     { header: 'Defect Reason', width: 28, type: 'text' },
     { header: 'Google Drive Photo Link', width: 36, type: 'text' },
     { header: 'Google Drive Folder', width: 36, type: 'text' },
-    { header: 'Notes', width: 32, type: 'text' }
+    { header: 'Notes', width: 32, type: 'text' },
+    { header: 'Workflow Step (1-4)', width: 28, type: 'text' },
+    { header: 'Follow-Up Day (of 10)', width: 18, type: 'text' },
+    { header: 'Picked Up / Handover Date (YYYY-MM-DD)', width: 24, type: 'text' },
+    { header: 'Case Closed Date (YYYY-MM-DD)', width: 24, type: 'text' }
   ];
 
   const rows = reports.map((r, index) => {
@@ -143,6 +172,8 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
     const cleanExpiry = formatCleanDateOnly(r.expiry_date);
     const loc = normalizeWarehouseLocation(r.warehouse_location, r);
     const supplier = resolveExportSupplier(r, savedProducts);
+    const wfExport = getWorkflowExportFields(r, savedProducts);
+    const outcome = formatFourChoiceOutcome(r);
 
     return [
       index + 1,
@@ -154,8 +185,8 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
       r.po_number || '',
       r.batch_lot_number || '',
       cleanExpiry,
-      r.status || 'pending',
-      r.disposition || 'Pending Triage',
+      wfExport.cleanStatusLabel,
+      outcome.hasDecision ? outcome.label : (r.disposition || 'Pending Triage'),
       r.condition_grade || 'Unassessed',
       loc,
       supplier,
@@ -173,7 +204,11 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
       r.reason || '',
       photoLink,
       r.google_drive_folder_url || '',
-      r.notes || ''
+      r.notes || '',
+      wfExport.workflowStep,
+      wfExport.followUpDay,
+      wfExport.pickedUpDate,
+      wfExport.caseClosedDate
     ];
   });
 
@@ -218,14 +253,18 @@ export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedP
     { header: 'Packaging Unit', width: 14, type: 'text' },
     { header: 'Unit Price (PHP)', width: 16, type: 'currency' },
     { header: 'Total Credit Claim (PHP)', width: 20, type: 'currency' },
-    { header: 'Lifecycle Stage / Status', width: 20, type: 'text' },
-    { header: 'Disposition', width: 24, type: 'text' },
+    { header: 'Lifecycle Stage / Status', width: 28, type: 'text' },
+    { header: 'Disposition', width: 26, type: 'text' },
     { header: 'Condition Grade', width: 18, type: 'text' },
     { header: 'Defect Reason', width: 28, type: 'text' },
     { header: 'Credit Memo #', width: 18, type: 'text' },
     { header: 'Google Drive Photo Link', width: 36, type: 'text' },
     { header: 'Google Drive Folder', width: 36, type: 'text' },
-    { header: 'Customer Notes', width: 32, type: 'text' }
+    { header: 'Customer Notes', width: 32, type: 'text' },
+    { header: 'Workflow Step (1-4)', width: 28, type: 'text' },
+    { header: 'Follow-Up Day (of 10)', width: 18, type: 'text' },
+    { header: 'Handover Date (YYYY-MM-DD)', width: 24, type: 'text' },
+    { header: 'Case Closed Date (YYYY-MM-DD)', width: 24, type: 'text' }
   ];
 
   const rows = reports.map((r, index) => {
@@ -234,6 +273,8 @@ export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedP
     const totalVal = Number((qty * unitPrice).toFixed(2));
     const dateStr = formatMilitaryDateTime(r.created_at);
     const photoLink = extractPhotoLink(r);
+    const wfExport = getWorkflowExportFields(r, savedProducts);
+    const outcome = formatFourChoiceOutcome(r);
 
     return [
       index + 1,
@@ -254,14 +295,18 @@ export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedP
       r.unit_name || 'pc',
       Number(unitPrice.toFixed(2)),
       totalVal,
-      r.status || 'received_at_dock',
-      r.disposition || 'Pending Triage',
+      wfExport.cleanStatusLabel,
+      outcome.hasDecision ? outcome.label : (r.disposition || 'Pending Triage'),
       r.condition_grade || 'Unassessed',
       r.reason || '',
       r.credit_memo_no || r.credit_memo_number || '',
       photoLink,
       r.google_drive_folder_url || '',
-      r.notes || ''
+      r.notes || '',
+      wfExport.workflowStep,
+      wfExport.followUpDay,
+      wfExport.pickedUpDate,
+      wfExport.caseClosedDate
     ];
   });
 
@@ -303,8 +348,8 @@ export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, sav
     { header: 'Net Purchase Price (PHP)', width: 20, type: 'currency' },
     { header: 'Total Debit Value (PHP)', width: 20, type: 'currency' },
     { header: 'Condition Grade', width: 18, type: 'text' },
-    { header: 'Disposition', width: 24, type: 'text' },
-    { header: 'Debit Claim Status', width: 18, type: 'text' },
+    { header: 'Disposition', width: 26, type: 'text' },
+    { header: 'Debit Claim Status', width: 28, type: 'text' },
     { header: 'Inspected By', width: 20, type: 'text' },
     { header: 'Defect Reason / Diagnosis', width: 28, type: 'text' },
     { header: 'Sales Invoice (SI) #', width: 18, type: 'text' },
@@ -312,7 +357,11 @@ export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, sav
     { header: 'Purchase Order (PO) #', width: 18, type: 'text' },
     { header: 'Google Drive Photo Link', width: 36, type: 'text' },
     { header: 'Google Drive Folder', width: 36, type: 'text' },
-    { header: 'Warehouse Notes', width: 32, type: 'text' }
+    { header: 'Warehouse Notes', width: 32, type: 'text' },
+    { header: 'Workflow Step (1-4)', width: 28, type: 'text' },
+    { header: 'Follow-Up Day (of 10)', width: 18, type: 'text' },
+    { header: 'Picked Up Date (YYYY-MM-DD)', width: 24, type: 'text' },
+    { header: 'Case Closed Date (YYYY-MM-DD)', width: 24, type: 'text' }
   ];
 
   const rows = reports.map((r, index) => {
@@ -324,6 +373,8 @@ export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, sav
     const cleanExpiry = formatCleanDateOnly(r.expiry_date);
     const loc = normalizeWarehouseLocation(r.warehouse_location, r);
     const supplier = resolveExportSupplier(r, savedProducts);
+    const wfExport = getWorkflowExportFields(r, savedProducts);
+    const outcome = formatFourChoiceOutcome(r);
 
     return [
       index + 1,
@@ -341,8 +392,8 @@ export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, sav
       Number(unitPrice.toFixed(2)),
       totalVal,
       r.condition_grade || 'Unassessed',
-      r.disposition || 'Return to Vendor (RTV)',
-      r.status || 'Pending Debit',
+      outcome.hasDecision ? outcome.label : (r.disposition || 'Return to Vendor (RTV)'),
+      wfExport.cleanStatusLabel,
       r.inspected_by || '',
       r.reason || r.explanation || '',
       r.si_number || '',
@@ -350,7 +401,11 @@ export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, sav
       r.po_number || r.supplier_po_no || '',
       photoLink,
       r.google_drive_folder_url || '',
-      r.notes || ''
+      r.notes || '',
+      wfExport.workflowStep,
+      wfExport.followUpDay,
+      wfExport.pickedUpDate,
+      wfExport.caseClosedDate
     ];
   });
 

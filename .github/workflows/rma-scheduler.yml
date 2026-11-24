@@ -1,0 +1,52 @@
+name: RMA Automated Matrix & 10-Day Follow-Up Scheduler
+
+on:
+  schedule:
+    # Runs every 15 minutes UTC; backend enforces exact configured Asia/Manila HH:mm schedule
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      force_matrix:
+        description: 'Force Daily Matrix run regardless of configured HH:mm'
+        required: false
+        default: 'false'
+      force_followup:
+        description: 'Force Daily Follow-Up & Auto-Dispose check regardless of configured HH:mm'
+        required: false
+        default: 'false'
+
+jobs:
+  dispatch-schedules:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secrets availability
+        id: check
+        run: |
+          if [ -z "${{ secrets.RMA_PORTAL_URL }}" ] || [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "ready=false" >> $GITHUB_OUTPUT
+            echo "RMA_PORTAL_URL or CRON_SECRET secret is not set; skipping remote call."
+          else
+            echo "ready=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger Overall Matrix Email (respects Settings HH:mm Asia/Manila)
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          FORCE_PARAM=""
+          if [ "${{ github.event.inputs.force_matrix }}" = "true" ]; then FORCE_PARAM="&force=true"; fi
+          curl --fail --silent --show-error -X POST \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"action":"daily-matrix","respectSchedule":true}' \
+            "${{ secrets.RMA_PORTAL_URL }}/api/send-email?action=daily-matrix&respectSchedule=true${FORCE_PARAM}"
+
+      - name: Trigger Daily 10-Day Pickup Follow-Up & Auto-Dispose Check (respects Settings HH:mm Asia/Manila)
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          FORCE_PARAM=""
+          if [ "${{ github.event.inputs.force_followup }}" = "true" ]; then FORCE_PARAM="&force=true"; fi
+          curl --fail --silent --show-error -X POST \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"action":"daily-followup","operation":"run_all","respectSchedule":true}' \
+            "${{ secrets.RMA_PORTAL_URL }}/api/send-email?action=daily-followup&respectSchedule=true${FORCE_PARAM}"

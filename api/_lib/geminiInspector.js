@@ -266,3 +266,58 @@ NEVER guess or make up a name or ID number. Return ONLY valid JSON:
   };
 }
 
+/**
+ * Inspects a delivery truck / van / vehicle license plate photo using Gemini Flash OCR.
+ * Extracts normalized uppercase plate_number without fabricating missing values.
+ */
+export async function inspectTruckPlateWithGemini({ fileData, imageUrl, mimeType = 'image/jpeg' }) {
+  const apiKey = process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_AI_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY;
+
+  const { cleanMimeType, base64String } = await prepareGeminiImagePayload({ fileData, imageUrl, mimeType });
+
+  if (!apiKey) {
+    return {
+      is_valid_plate: false,
+      plate_number: null,
+      vehicle_type: 'Unknown',
+      confidence: 0,
+      error: 'MISSING_GEMINI_API_KEY',
+      rejection_reason: 'AI key is not configured. Please enter Truck Plate Number manually.'
+    };
+  }
+
+  const promptText = `
+You are a Commercial Logistics Gate Security OCR Reader specializing in Philippine LTO vehicle license plates and commercial delivery truck conduction/plate stickers.
+Examine the uploaded vehicle/plate photo and extract ONLY clearly legible fields:
+- "is_valid_plate": true if a vehicle license plate or official LTO conduction/temporary plate is clearly legible (cars, vans, L300, box trucks, motorcycles). False if blurry, dark, obstructed, or no plate is visible.
+- "plate_number": Exact plate number formatted in clean UPPERCASE (e.g. "NAA 1234", "ABC-5678", "NCB 9012"), or null if unreadable.
+- "vehicle_type": Match one of "Delivery Truck" | "Van" | "L300 / Utility" | "Sedan / SUV" | "Motorcycle" | "Other Vehicle" | "Unknown".
+- "confidence": 0.0 to 1.0
+- "rejection_reason": Short explanation if is_valid_plate is false, else null.
+
+NEVER guess or fabricate characters that are not visibly readable. Return ONLY valid JSON:
+{
+  "is_valid_plate": boolean,
+  "plate_number": string | null,
+  "vehicle_type": string,
+  "confidence": number,
+  "rejection_reason": string | null
+}
+`;
+
+  const parsed = await invokeGeminiVisionJson({ apiKey, promptText, cleanMimeType, base64String });
+  const rawPlate = parsed.plate_number ? String(parsed.plate_number).trim().toUpperCase().replace(/\s+/g, ' ') : null;
+  const isValid = Boolean(parsed.is_valid_plate && rawPlate);
+
+  return {
+    is_valid_plate: isValid,
+    plate_number: rawPlate,
+    vehicle_type: parsed.vehicle_type || (isValid ? 'Delivery Truck' : 'Unknown'),
+    confidence: typeof parsed.confidence === 'number' ? parsed.confidence : (isValid ? 0.92 : 0),
+    rejection_reason: isValid ? null : (parsed.rejection_reason || 'Could not clearly read license plate characters. Please type Truck Plate Number manually.')
+  };
+}
+

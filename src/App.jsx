@@ -79,7 +79,6 @@ import AdminLoginModal from './components/AdminLoginModal';
 import EmployeeManagementModal from './components/EmployeeManagementModal';
 import SavedProductsTab from './components/SavedProductsTab';
 import SettingsTab from './components/SettingsTab';
-import CreditMemosTab from './components/CreditMemosTab';
 import SupplierClaimsTab from './components/SupplierClaimsTab';
 import TestModeSandboxTab from './components/TestModeSandboxTab';
 import CustomerHubTab from './components/CustomerHubTab';
@@ -99,9 +98,17 @@ import RMAMatrixExportModal from './components/RMAMatrixExportModal';
 import RmaEmailEditorView from './components/RmaEmailEditorView';
 import GatekeeperPinModal from './components/GatekeeperPinModal';
 import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
+import EmailRecipientsEditor from './components/EmailRecipientsEditor';
+import SupplierInput from './components/SupplierInput';
 import { inviteService, formatRemainingCountdown, isPermanentInvite } from './services/inviteService';
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
+import {
+  getManilaDateYmd,
+  hasReachedManilaSchedule,
+  normalizeTimeHhmm,
+  isPlaceholderSupplier
+} from './utils/followUpWorkflow';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   isSplitChildTicket,
@@ -257,12 +264,49 @@ export default function App() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
 
-  // Admin Dashboard Active Tab: 'products' | 'reports' | 'search'
+  // Admin Dashboard Active Tab: 'products' | 'customer_reports' | 'supplier_claims' | 'sandbox' | 'archive_trash' | 'settings'
   const [adminActiveTab, setAdminActiveTab] = useState('products');
   const [testModeStreamType, setTestModeStreamType] = useState('customer_inbound');
   const [sandboxSubTab, setSandboxSubTab] = useState('customer');
+  const [customerHubSubTab, setCustomerHubSubTab] = useState('returns');
+  const [customerHubExternalSubTab, setCustomerHubExternalSubTab] = useState(null);
+  const [sandboxCustomerSubTab, setSandboxCustomerSubTab] = useState('returns');
+  const [sandboxExternalSubTab, setSandboxExternalSubTab] = useState(null);
   const [customerHubResetTick, setCustomerHubResetTick] = useState(0);
   const [customerHubExternalStatus, setCustomerHubExternalStatus] = useState(null);
+
+  const handleCustomerHubSubTabChange = React.useCallback((nextSub) => {
+    setCustomerHubSubTab(nextSub === 'credit_memos' ? 'credit_memos' : 'returns');
+    setCustomerHubExternalSubTab(null);
+  }, []);
+
+  const handleSandboxCustomerSubTabChange = React.useCallback((nextSub) => {
+    setSandboxCustomerSubTab(nextSub === 'credit_memos' ? 'credit_memos' : 'returns');
+    setSandboxExternalSubTab(null);
+  }, []);
+
+  const openLiveCustomerHub = React.useCallback((subTab = 'returns') => {
+    const normalizedSub = subTab === 'credit_memos' ? 'credit_memos' : 'returns';
+    setAdminActiveTab('customer_reports');
+    setCustomerHubSubTab(normalizedSub);
+    setCustomerHubExternalSubTab({ value: normalizedSub, tick: Date.now() });
+  }, []);
+
+  // Redirect legacy 'credit_memos' top-level tab cleanly into Customer RMA Hub -> Credit Memos Ledger
+  useEffect(() => {
+    if (adminActiveTab === 'credit_memos') {
+      openLiveCustomerHub('credit_memos');
+    }
+  }, [adminActiveTab, openLiveCustomerHub]);
+
+  // Redirect legacy 'memos' sandbox tab cleanly into Sandbox Customer RMAs -> Credit Memos Ledger
+  useEffect(() => {
+    if (sandboxSubTab === 'memos') {
+      setSandboxSubTab('customer');
+      setSandboxCustomerSubTab('credit_memos');
+      setSandboxExternalSubTab({ value: 'credit_memos', tick: Date.now() });
+    }
+  }, [sandboxSubTab]);
 
   // Strict role gate: Only Super Admin can view Settings & SMTP
   useEffect(() => {
@@ -276,6 +320,36 @@ export default function App() {
   const [isSavedProductsLoading, setIsSavedProductsLoading] = useState(false);
   const [isProductEditOpen, setIsProductEditOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
+  const [newRmaRecipients, setNewRmaRecipients] = useState(() => {
+    const prof = notificationService.getEmailProfile('new_rma');
+    return { toList: prof.toList || [], ccList: prof.ccList || [] };
+  });
+  const [testSandboxEmail, setTestSandboxEmail] = useState(() => notificationService.getTestSandboxEmail());
+
+  // Load saved per-email recipient profiles & matrix config from Supabase on mount
+  useEffect(() => {
+    notificationService.loadAllEmailProfilesFromDb()
+      .then(({ profilesByType, testSandboxEmail: dbSandbox }) => {
+        if (profilesByType?.new_rma) {
+          setNewRmaRecipients({
+            toList: profilesByType.new_rma.toList || [],
+            ccList: profilesByType.new_rma.ccList || []
+          });
+        }
+        if (dbSandbox) {
+          setTestSandboxEmail(dbSandbox);
+        }
+      })
+      .catch(() => {});
+
+    const syncProfile = () => {
+      const prof = notificationService.getEmailProfile('new_rma');
+      setNewRmaRecipients({ toList: prof.toList || [], ccList: prof.ccList || [] });
+      setTestSandboxEmail(notificationService.getTestSandboxEmail());
+    };
+    window.addEventListener('rma-settings-changed', syncProfile);
+    return () => window.removeEventListener('rma-settings-changed', syncProfile);
+  }, []);
   const [staffList, setStaffList] = useState([]);
 
   // Credit Memos State
@@ -289,6 +363,26 @@ export default function App() {
   const [voucherModalMemos, setVoucherModalMemos] = useState([]);
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
   const [qrModalReport, setQrModalReport] = useState(null);
+  const [qrModalReports, setQrModalReports] = useState([]);
+
+  const openQrModal = (reportOrList) => {
+    if (Array.isArray(reportOrList)) {
+      const clean = reportOrList.filter(Boolean);
+      setQrModalReports(clean);
+      setQrModalReport(clean[0] || null);
+    } else if (reportOrList && typeof reportOrList === 'object') {
+      setQrModalReports([reportOrList]);
+      setQrModalReport(reportOrList);
+    } else {
+      setQrModalReports([]);
+      setQrModalReport(null);
+    }
+  };
+
+  const closeQrModal = () => {
+    setQrModalReport(null);
+    setQrModalReports([]);
+  };
 
   // Quick RMA Action Modal State (triggered by Box QR scan or ?rma= URL parameter)
   const [isQuickRmaModalOpen, setIsQuickRmaModalOpen] = useState(false);
@@ -745,6 +839,71 @@ export default function App() {
     (!gateSession?.stream_type && gateSession?.type === 'internal_warehouse')
   );
 
+  // Lightweight Admin-only Browser Fallback Scheduler (checks Asia/Manila HH:mm every 60s when Admin has active session)
+  useEffect(() => {
+    const role = currentUser?.role;
+    if (!isAdminView || !['admin', 'super_admin'].includes(role) || isTestMode) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const runSchedulerTick = async () => {
+      if (cancelled) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const expMs = session?.expires_at ? session.expires_at * 1000 : 0;
+        // Strict guard: never emit background 401 when auth JWT is missing or stale/expired
+        if (!session?.access_token || expMs <= Date.now() + 30000) {
+          return;
+        }
+
+        const todayYmd = getManilaDateYmd();
+        const matrixCfg = notificationService.getDailyMatrixConfig();
+        if (
+          matrixCfg.autoEnabled !== false &&
+          hasReachedManilaSchedule(normalizeTimeHhmm(matrixCfg.autoSendTimePht, '13:00'))
+        ) {
+          const lastMatrixDay = localStorage.getItem('rma_bg_matrix_sent_ymd');
+          if (lastMatrixDay !== todayYmd) {
+            localStorage.setItem('rma_bg_matrix_sent_ymd', todayYmd);
+            notificationService.sendDailyMatrixEmailNow({
+              isTestMode: false,
+              force: false,
+              dryRun: false,
+              respectSchedule: true
+            }).catch(() => {});
+          }
+        }
+
+        const followCfg = notificationService.getDailyFollowUpConfig();
+        if (
+          followCfg.autoEnabled !== false &&
+          hasReachedManilaSchedule(normalizeTimeHhmm(followCfg.autoSendTimePht, '08:00'))
+        ) {
+          const lastFollowDay = localStorage.getItem('rma_bg_followup_sent_ymd');
+          if (lastFollowDay !== todayYmd) {
+            localStorage.setItem('rma_bg_followup_sent_ymd', todayYmd);
+            notificationService.runDailyFollowUpNow({
+              isTestMode: false,
+              force: false,
+              dryRun: false,
+              operation: 'run_all',
+              respectSchedule: true
+            }).catch(() => {});
+          }
+        }
+      } catch {}
+    };
+
+    const intervalId = setInterval(runSchedulerTick, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [isAdminView, currentUser?.role, isTestMode]);
+
   // Simple 4-Option Supplier RTV Wizard, Letter Pickup Validation Form & Daily Matrix Exporter State
   const [simpleRtvWizard, setSimpleRtvWizard] = useState({ isOpen: false, report: null, reports: [], initialMode: 'wizard' });
   const [pickupFormReport, setPickupFormReport] = useState(null);
@@ -920,20 +1079,13 @@ export default function App() {
       setPortalScanAlert(null);
       playBeep('success');
 
-      // On the Public Portal ('/'), scanning any valid generated RMA QR immediately opens the 4-option wizard
-      if (!isAdminView) {
+      // On BOTH Public Portal ('/') and Admin Portal ('/admin'), scanning any valid generated RMA QR
+      // opens the 4-option wizard directly (Customer perspective for Customer Hub, Supplier perspective for Supplier RTV)
+      if (!isAdminView || hasAdminAuth) {
         openSimpleWizardModal(matchedReport, 'wizard');
         return;
-      }
-
-      const isSupplierRtvItem = matchedReport.rma_type === 'supplier_outbound';
-      if (isSupplierRtvItem) {
-        openSimpleWizardModal(matchedReport, 'wizard');
-      } else if (hasAdminAuth) {
-        setQuickRmaNumber(scannedRma);
-        setIsQuickRmaModalOpen(true);
       } else {
-        const msg = 'Customer Hub RMA QR editing is restricted to Warehouse Admins.';
+        const msg = 'RMA QR editing is restricted to authorized Warehouse & Admin staff.';
         setPortalScanAlert({ type: 'warning', title: 'Admin Access Required', message: msg });
         showToast(msg, 'warning');
       }
@@ -1002,7 +1154,9 @@ export default function App() {
       window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'test-mode-toggled', isTestMode: next } }));
     } catch (e) { }
     if (next) {
-      showToast('🧪 Test Mode Enabled: Emails safely sent exclusively to mgan@a2z2go.net', 'success');
+      const sandboxTarget = notificationService.getTestSandboxEmail();
+      setTestSandboxEmail(sandboxTarget);
+      showToast(`🧪 Test Mode Enabled: Emails safely sent exclusively to ${sandboxTarget}`, 'success');
     } else {
       showToast('Live Mode Enabled: Real email delivery active.', 'success');
     }
@@ -1061,22 +1215,31 @@ export default function App() {
   };
 
   const handleSelectNotification = (notif) => {
-    if (notif.type === 'rma') {
+    const notifType = String(notif?.type || '').toLowerCase();
+    const targetsCreditMemo =
+      notifType === 'credit_memo' ||
+      notifType === 'credit_memos' ||
+      notif?.targetTab === 'credit_memos' ||
+      String(notif?.subTab || '').toLowerCase() === 'credit_memos';
+
+    if (targetsCreditMemo) {
+      if (!isAdminView) {
+        navigateTo('/admin');
+      }
+      openLiveCustomerHub('credit_memos');
+    } else if (notifType === 'rma') {
       if (isAdminView) {
-        setAdminActiveTab('customer_reports');
+        openLiveCustomerHub('returns');
       } else {
         setIsReportsModalOpen(true);
       }
-    } else if (notif.type === 'unknown') {
-      if (isAdminView) {
-        setAdminActiveTab('customer_reports');
-        setCustomerHubExternalStatus({ value: 'pending_admin_details', tick: Date.now() });
-      } else {
+    } else if (notifType === 'unknown') {
+      if (!isAdminView) {
         navigateTo('/admin');
-        setAdminActiveTab('customer_reports');
-        setCustomerHubExternalStatus({ value: 'pending_admin_details', tick: Date.now() });
       }
-    } else if (notif.type === 'product' || notif.type === 'delete') {
+      openLiveCustomerHub('returns');
+      setCustomerHubExternalStatus({ value: 'pending_admin_details', tick: Date.now() });
+    } else if (notifType === 'product' || notifType === 'delete') {
       if (isAdminView) {
         setAdminActiveTab('products');
       }
@@ -1486,6 +1649,7 @@ export default function App() {
           return r;
         }));
         await catalogService.moveReportToTrash(id, rmaNumber, currentUser?.name || 'Staff');
+        mutationEpochRef.current += 1;
         setCustomerHubResetTick(t => t + 1);
         showToast(`Moved RMA #${rmaNumber} to 30-Day Trash Bin.`, 'success');
         refreshAllData();
@@ -1518,6 +1682,7 @@ export default function App() {
           return r;
         }));
         await catalogService.moveMultipleReportsToTrash(items, currentUser?.name || 'Staff');
+        mutationEpochRef.current += 1;
         setCustomerHubResetTick(t => t + 1);
         showToast(`Moved ${items.length} return reports to 30-Day Trash Bin.`, 'success');
         refreshAllData();
@@ -1590,6 +1755,7 @@ export default function App() {
   const [manifestItems, setManifestItems] = useState([]); // Queued return line items for Multi-Item Batch Return
   const [barcodeInput, setBarcodeInput] = useState('');
   const [customItemName, setCustomItemName] = useState('');
+  const [supplierNameInput, setSupplierNameInput] = useState('');
   const [detectedProduct, setDetectedProduct] = useState(null);
   const [isCheckingBarcode, setIsCheckingBarcode] = useState(false);
   const [quantity, setQuantity] = useState(1);
@@ -2207,11 +2373,13 @@ export default function App() {
         }
         const foundSup = String(found?.supplier_name || found?.supplierName || found?.supplier || '').trim();
         if (
-          isSupplierRtvPortal &&
           foundSup &&
           !/^(pending assignment|pending|unassigned|warehouse|n\/a)$/i.test(foundSup)
         ) {
-          setStoreBranch((prev) => (prev && prev.trim() ? prev : foundSup));
+          setSupplierNameInput((prev) => (prev && prev.trim() ? prev : foundSup));
+          if (isSupplierRtvPortal) {
+            setStoreBranch((prev) => (prev && prev.trim() ? prev : foundSup));
+          }
         }
       } catch (e) {
         if (!isCurrent) return;
@@ -2277,7 +2445,7 @@ export default function App() {
         if (mutationEpochRef.current !== batchEpoch) { sawStaleMutation = true; return; }
         setPendingBarcodesList(pending || []);
       }),
-      catalogService.getRecentReports(100).then(reports => {
+      catalogService.getRecentReports(500).then(reports => {
         if (mutationEpochRef.current !== batchEpoch) { sawStaleMutation = true; return; }
         setRecentReportsList(reports || []);
         if (Array.isArray(reports) && reports.length > 0) {
@@ -2531,7 +2699,9 @@ export default function App() {
       ? detectedProduct.code
       : ((detectedProduct?.sku && detectedProduct.sku !== cleanBarcode) ? detectedProduct.sku : '');
 
-    const resolvedDetectedSupplier = String(
+    const resolvedDetectedSupplier = (
+      !isPlaceholderSupplier(supplierNameInput) ? supplierNameInput.trim() : ''
+    ) || String(
       detectedProduct?.supplier_name ||
       detectedProduct?.supplierName ||
       detectedProduct?.supplier ||
@@ -2568,6 +2738,7 @@ export default function App() {
     setIsUnlabeledItem(false);
     setBarcodeInput('');
     setCustomItemName('');
+    setSupplierNameInput('');
     setDetectedProduct(null);
     setQuantity(1);
     setUnitName('pc');
@@ -2648,7 +2819,9 @@ export default function App() {
         ? detectedProduct.code
         : ((detectedProduct?.sku && detectedProduct.sku !== activeBarcode) ? detectedProduct.sku : '');
 
-      const resolvedActiveSupplier = String(
+      const resolvedActiveSupplier = (
+        !isPlaceholderSupplier(supplierNameInput) ? supplierNameInput.trim() : ''
+      ) || String(
         detectedProduct?.supplier_name ||
         detectedProduct?.supplierName ||
         detectedProduct?.supplier ||
@@ -2722,11 +2895,14 @@ export default function App() {
       return !s || s === 'warehouse' || s === 'pending assignment' || s === 'unassigned' || s === 'n/a';
     };
     const itemSup = itemsToSubmit[0]?.supplier_name || itemsToSubmit[0]?.supplierName || itemsToSubmit[0]?.supplier;
-    const resolvedSupplierFromPortal = !isPlaceholderSup(itemSup)
-      ? itemSup
-      : (isSupplierStream && (cleanBranchInput || inviteEntity))
-        ? (cleanBranchInput || inviteEntity)
-        : (itemSup || 'Pending Assignment');
+    const manualSupTrimmed = !isPlaceholderSupplier(supplierNameInput) ? supplierNameInput.trim() : '';
+    const resolvedSupplierFromPortal = manualSupTrimmed || (
+      !isPlaceholderSup(itemSup)
+        ? itemSup
+        : (isSupplierStream && (cleanBranchInput || inviteEntity))
+          ? (cleanBranchInput || inviteEntity)
+          : (itemSup || 'Pending Assignment')
+    );
 
     // Persist reporter contact info in localStorage for 1-tap zero-typing returns
     try {
@@ -2819,6 +2995,7 @@ export default function App() {
     setManifestItems([]);
     setBarcodeInput('');
     setCustomItemName('');
+    setSupplierNameInput('');
     setDetectedProduct(null);
     setQuantity(1);
     setUnitName('pc');
@@ -2978,7 +3155,8 @@ export default function App() {
           },
           google_drive_folder_url: gdriveFolderUrl,
           google_drive_folder_id: gdriveFolderId,
-          gps: capturedGps
+          gps: capturedGps,
+          customRecipients: currentUser && !gateSession ? newRmaRecipients : null
         });
 
         if (res?.report) {
@@ -3147,7 +3325,7 @@ export default function App() {
                         </div>
                         <p className="text-[11px] opacity-85 leading-relaxed">
                           {isTestMode
-                            ? 'Test emails routed safely to mgan@a2z2go.net • Reports saved to database.'
+                            ? `Test emails routed safely to ${testSandboxEmail} • Reports saved to database.`
                             : 'Official return reports saved to database & sent directly to supplier & Assigned AEs.'}
                         </p>
                       </div>
@@ -3319,9 +3497,10 @@ export default function App() {
                   <div className="space-y-1 min-w-0 flex-1 text-center sm:text-left">
                     <div className="flex items-center justify-center sm:justify-start gap-1.5 flex-wrap">
                       <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300">
-                        Box Sticker Ready
+                        Printable QR Ready
                       </span>
-                      <span className="text-[10px] text-slate-400 font-mono">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-300 font-mono font-bold">
+                        Qty:{' '}
                         {submitSuccessReport.total_items > 1
                           ? formatManifestBreakdown(submitSuccessReport.items, true)
                           : formatQuantityWithPackSize(
@@ -3343,6 +3522,12 @@ export default function App() {
                       {submitSuccessReport.productName}
                     </div>
                     <div className="text-[10px] text-slate-500 dark:text-slate-400 space-y-0.5 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      {submitSuccessReport.barcode && (
+                        <div>Barcode: <strong className="font-mono text-slate-700 dark:text-slate-300">{submitSuccessReport.barcode}</strong>{(submitSuccessReport.sku || submitSuccessReport.code) ? ` • SKU: ${submitSuccessReport.sku || submitSuccessReport.code}` : ''}</div>
+                      )}
+                      {(submitSuccessReport.expiry_date || submitSuccessReport.items?.[0]?.expiry_date) && (
+                        <div>Expiry (YYYY-MM-DD): <strong className="font-mono text-slate-700 dark:text-slate-300">{formatDateYmd(submitSuccessReport.expiry_date || submitSuccessReport.items?.[0]?.expiry_date) || submitSuccessReport.expiry_date || submitSuccessReport.items?.[0]?.expiry_date}</strong></div>
+                      )}
                       <div>Reported by: <strong className="text-slate-700 dark:text-slate-300">{submitSuccessReport.reporter_name || 'Staff'}</strong></div>
                       {submitSuccessReport.reporter_contact && <div>Contact: <strong className="font-mono text-slate-700 dark:text-slate-300">{submitSuccessReport.reporter_contact}</strong></div>}
                       {submitSuccessReport.invoice_dr_number && (
@@ -3364,12 +3549,12 @@ export default function App() {
                     </div>
 
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 pt-1">
-                      Download QR or print sticker to tape directly to the returned box for instant warehouse intake scanning.
+                      Download QR (PNG) or resize &amp; print directly onto paper/labels for instant warehouse intake scanning.
                     </p>
                   </div>
                 </div>
 
-                {/* Action Buttons: Save Sticker (PNG), Print Sticker, Report Another */}
+                {/* Action Buttons: Save QR (PNG), Resize / Print QR, Report Another */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                   <button
                     type="button"
@@ -3378,12 +3563,11 @@ export default function App() {
                         const dateFormatted = formatDateTimeYmdHm(submitSuccessReport.created_at || Date.now());
                         await downloadCustomSizedStickerPng({
                           svgElementOrId: 'filed-report-qr-svg',
-                          widthMm: 95,
-                          heightMm: 112,
+                          widthMm: 90,
+                          heightMm: 105,
                           rmaNumber: submitSuccessReport.rmaNumber,
                           isTestMode: Boolean(submitSuccessReport.is_test || isTestRecord(submitSuccessReport) || effectiveIsTestMode),
                           streamType: submitSuccessReport.rma_type || 'customer_inbound',
-                          supplier: submitSuccessReport.supplier || submitSuccessReport.supplier_name || 'Pending Assignment',
                           itemName: submitSuccessReport.productName || submitSuccessReport.name || 'Returned Merchandise',
                           barcode: submitSuccessReport.barcode,
                           sku: submitSuccessReport.sku || submitSuccessReport.code || '',
@@ -3398,29 +3582,30 @@ export default function App() {
                           storeBranch: submitSuccessReport.store_branch,
                           totalItems: submitSuccessReport.total_items,
                           totalQuantity: submitSuccessReport.total_quantity,
-                          items: submitSuccessReport.items
+                          items: submitSuccessReport.items,
+                          filename: `${submitSuccessReport.rmaNumber}-QR.png`
                         });
-                        showToast(`Official Box Sticker for ${submitSuccessReport.rmaNumber} downloaded!`, 'success');
+                        showToast(`Printable QR Card for ${submitSuccessReport.rmaNumber} downloaded!`, 'success');
                       } catch (err) {
-                        console.error('Failed to download sticker:', err);
-                        showToast('Failed to download sticker image.', 'warning');
+                        console.error('Failed to download QR PNG:', err);
+                        showToast('Failed to download QR image.', 'warning');
                       }
                     }}
                     className="touch-target w-full py-3 px-3 bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white font-extrabold text-xs rounded-2xl shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                    title="Download high-resolution official RMA Box Verification Sticker PNG"
+                    title="Download high-resolution Printable RMA QR Card PNG"
                   >
                     <Download className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Save Sticker (PNG)</span>
+                    <span>Save QR (PNG)</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => setQrModalReport(submitSuccessReport)}
+                    onClick={() => openQrModal(submitSuccessReport)}
                     className="touch-target w-full py-3 px-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-2xl shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                    title="Open drag-to-resize print studio (Small Tuna Can to Extra Large)"
+                    title="Open Printable QR Resize & Print Studio"
                   >
                     <Printer className="w-4 h-4 shrink-0" />
-                    <span>Resize / Print Sticker</span>
+                    <span>Resize / Print QR</span>
                   </button>
 
                   {currentUser && (
@@ -3669,6 +3854,32 @@ export default function App() {
                           }`}
                       />
                     </div>
+                  </div>
+
+                  {/* Supplier / Vendor Name Input (Auto-populated from Catalog or Manually Entered) */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <label htmlFor="intake-supplier-input" className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                        Supplier / Vendor Name (Optional)
+                      </label>
+                      {supplierNameInput.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => setSupplierNameInput('')}
+                          className="text-[10px] font-bold text-slate-400 hover:text-rose-500 cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    <SupplierInput
+                      id="intake-supplier-input"
+                      name="intakeVendorName"
+                      value={supplierNameInput}
+                      onChange={setSupplierNameInput}
+                      placeholder="Optional vendor / manufacturer (e.g. Mondelez, URC, Nestle)..."
+                      className="w-full"
+                    />
                   </div>
 
                   {/* Recognized Product Banner */}
@@ -4416,6 +4627,20 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Authenticated Staff / Admin / Super Admin Configurable New RMA Alert Recipients */}
+                {currentUser && !gateSession && (
+                  <EmailRecipientsEditor
+                    emailType="new_rma"
+                    value={newRmaRecipients}
+                    onChange={setNewRmaRecipients}
+                    compact={true}
+                    defaultExpanded={false}
+                    isTestMode={effectiveIsTestMode}
+                    title="New RMA Email Alert Recipients"
+                    extraHint="Assigned Product Account Executive (AE) email is added automatically to CC."
+                  />
+                )}
+
                 {/* Submit Action Button */}
                 <button
                   type="submit"
@@ -4524,8 +4749,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* SaaS KPI Overview Strip: Enterprise Logistics 6-column Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3.5">
+            {/* SaaS KPI Overview Strip: Symmetrical 5-column Logistics & Finance Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3.5">
               {/* Metric 1: Saved Products */}
               <div
                 onClick={() => setAdminActiveTab('products')}
@@ -4543,9 +4768,9 @@ export default function App() {
                 <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Catalog items</div>
               </div>
 
-              {/* Metric 2: Customer Returns (Inbound Logistics) */}
+              {/* Metric 2: Customer Returns + Integrated Credit Memos Ledger Link */}
               <div
-                onClick={() => setAdminActiveTab('customer_reports')}
+                onClick={() => openLiveCustomerHub('returns')}
                 className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports') ? 'border-blue-500 ring-2 ring-blue-100 dark:ring-blue-900/40' : 'border-slate-200 dark:border-slate-800'
                   }`}
               >
@@ -4558,8 +4783,20 @@ export default function App() {
                 </div>
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Customer Inbound</div>
                 <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">
-                  {customerInboundReports.filter(r => !liveCreditMemosList.some(m => doesCreditMemoLinkReport(m, r))).length} pending credit
+                  {customerInboundReports.filter(r => !liveCreditMemosList.some(m => doesCreditMemoLinkReport(m, r))).length} pending • ₱{liveCreditMemosList.reduce((acc, m) => acc + Number(m.credit_amount || m.amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} credited
                 </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openLiveCustomerHub('credit_memos');
+                  }}
+                  className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors cursor-pointer"
+                  title="Open Credit Memos Ledger inside Customer RMA Hub"
+                >
+                  <Receipt className="w-3 h-3 shrink-0" />
+                  <span>Credit Memos ({liveCreditMemosList.length}) →</span>
+                </button>
               </div>
 
               {/* Metric 3: Supplier RTVs (Outbound Logistics) */}
@@ -4579,28 +4816,7 @@ export default function App() {
                 <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Vendor claims queued</div>
               </div>
 
-              {/* Metric 4: Credit Memos (Finance Section) */}
-              <div
-                onClick={() => setAdminActiveTab('credit_memos')}
-                className={`bg-white dark:bg-slate-900 border rounded-3xl p-3.5 sm:p-5 shadow-sm cursor-pointer transition-all hover:shadow-md ${adminActiveTab === 'credit_memos' ? 'border-emerald-500 ring-2 ring-emerald-100 dark:ring-emerald-900/40' : 'border-slate-200 dark:border-slate-800'
-                  }`}
-              >
-                <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 mb-1.5 sm:mb-2">
-                  <Receipt className="w-5 h-5 shrink-0" />
-                  <span className="text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">Finance</span>
-                </div>
-                <div className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white font-mono">
-                  {liveCreditMemosList.length}
-                </div>
-                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">Credit Memos</div>
-                <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">
-                  {liveCreditMemosList.length > 0
-                    ? `₱${liveCreditMemosList.reduce((acc, m) => acc + Number(m.credit_amount || m.amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} credited`
-                    : 'Customer deductions'}
-                </div>
-              </div>
-
-              {/* Metric 5: Awaiting SKU */}
+              {/* Metric 4: Awaiting SKU */}
               <div
                 onClick={() => {
                   setIsPendingModalOpen(true);
@@ -4619,7 +4835,7 @@ export default function App() {
                 <div className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 truncate">Needs SKU assignment</div>
               </div>
 
-              {/* Metric 6: Staff Directory */}
+              {/* Metric 5: Staff Directory */}
               <div
                 onClick={() => {
                   if (currentUser?.role === 'super_admin') setIsEmployeeModalOpen(true);
@@ -4654,7 +4870,7 @@ export default function App() {
                 <span>Saved Products ({savedProductsList.length})</span>
               </button>
 
-              {/* Tab 2: Customer RMA Hub (Inbound) */}
+              {/* Tab 2: Customer RMA Hub (Inbound + Integrated Credit Memos Ledger) */}
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('customer_reports')}
@@ -4680,20 +4896,7 @@ export default function App() {
                 <span>Supplier Hub (RTV Claims) ({supplierOutboundReports.length})</span>
               </button>
 
-              {/* Tab 4: Credit Memos */}
-              <button
-                type="button"
-                onClick={() => setAdminActiveTab('credit_memos')}
-                className={`touch-target px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${adminActiveTab === 'credit_memos'
-                  ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-              >
-                <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                <span>Credit Memos ({liveCreditMemosList.length})</span>
-              </button>
-
-              {/* Tab 5: Dedicated Test Mode Sandbox */}
+              {/* Tab 4: Dedicated Test Mode Sandbox */}
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('sandbox')}
@@ -4706,7 +4909,7 @@ export default function App() {
                 <span>🧪 Test Mode Sandbox ({testReportsList.length})</span>
               </button>
 
-              {/* Tab 6: Enterprise Archive & 30-Day Trash Bin */}
+              {/* Tab 5: Enterprise Archive & 30-Day Trash Bin */}
               <button
                 type="button"
                 onClick={() => setAdminActiveTab('archive_trash')}
@@ -4719,7 +4922,7 @@ export default function App() {
                 <span>🗄️ Archive & Trash ({archivedReportsList.length + trashedReportsList.length})</span>
               </button>
 
-              {/* Tab 7: Settings & SMTP (Super Admin Only) */}
+              {/* Tab 6: Settings & SMTP (Super Admin Only) */}
               {currentUser?.role === 'super_admin' && (
                 <button
                   type="button"
@@ -4776,8 +4979,12 @@ export default function App() {
               />
             )}
 
-            {/* COWORKER INVENTORY & PROCUREMENT WORKSTATION QUICK-ACTION VIEW FILTERS */}
-            {(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports' || adminActiveTab === 'supplier_claims' || (adminActiveTab === 'sandbox' && sandboxSubTab !== 'memos')) && (
+            {/* COWORKER INVENTORY & PROCUREMENT WORKSTATION QUICK-ACTION VIEW FILTERS (hidden on Credit Memos Ledger sub-tab) */}
+            {(
+              ((adminActiveTab === 'customer_reports' || adminActiveTab === 'reports') && customerHubSubTab !== 'credit_memos') ||
+              adminActiveTab === 'supplier_claims' ||
+              (adminActiveTab === 'sandbox' && (sandboxSubTab === 'supplier' || (sandboxSubTab === 'customer' && sandboxCustomerSubTab !== 'credit_memos')))
+            ) && (
               <div className="bg-slate-900 dark:bg-slate-950 border border-slate-800 rounded-2xl p-3 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider shrink-0">
@@ -4852,7 +5059,7 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB 2: CUSTOMER RMA HUB (INBOUND LOGISTICS) */}
+            {/* TAB 2: CUSTOMER RMA HUB (INBOUND LOGISTICS + INTEGRATED CREDIT MEMOS LEDGER) */}
             {(adminActiveTab === 'customer_reports' || adminActiveTab === 'reports') && (
               <CustomerHubTab
                 reportsList={liveReportsList}
@@ -4868,12 +5075,20 @@ export default function App() {
                 onInspectTriage={handleInspectTriageForReport}
                 onOpenSimpleWizard={(reportOrList) => openSimpleWizardModal(reportOrList, 'wizard')}
                 onOpenPickupForm={(reportOrList) => openPickupFormModal(reportOrList)}
-                onViewQR={(reportObj) => setQrModalReport(reportObj)}
+                onViewQR={(reportOrList) => openQrModal(reportOrList)}
                 onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
                 onViewExplanation={(info) => setViewingExplanationModal(info)}
                 onEditProductFromReport={handleEditProductFromReport}
                 onOpenCreditMemo={handleOpenCreditMemoForReport}
+                onOpenCreateCreditMemo={handleOpenCreateCreditMemo}
+                onEditCreditMemo={handleEditCreditMemo}
                 onViewCreditMemoVoucher={handleViewCreditMemoVoucher}
+                onPrintBulkCreditMemos={handleViewCreditMemoVoucher}
+                onRequestDeleteCreditMemo={requestDeleteCreditMemo}
+                onRequestBulkDeleteCreditMemo={requestBulkDeleteCreditMemos}
+                defaultSubTab={customerHubSubTab}
+                externalSubTab={customerHubExternalSubTab}
+                onSubTabChange={handleCustomerHubSubTabChange}
                 onConfirmCoworkerAction={handleConfirmCoworkerAction}
                 onResetToPending={handleResetReportToPending}
                 onArchiveReport={handleArchiveReport}
@@ -4885,23 +5100,7 @@ export default function App() {
               />
             )}
 
-            {/* TAB 3: FINANCE CREDIT MEMO SECTION */}
-            {adminActiveTab === 'credit_memos' && (
-              <CreditMemosTab
-                creditMemosList={liveCreditMemosList}
-                recentReportsList={liveReportsList}
-                currentUser={currentUser}
-                onOpenCreateModal={handleOpenCreateCreditMemo}
-                onEditCreditMemo={handleEditCreditMemo}
-                onViewVoucher={handleViewCreditMemoVoucher}
-                onPrintBulk={handleViewCreditMemoVoucher}
-                onRequestDeleteCreditMemo={requestDeleteCreditMemo}
-                onRequestBulkDeleteCreditMemo={requestBulkDeleteCreditMemos}
-                isTestMode={false}
-              />
-            )}
-
-            {/* TAB 4: SUPPLIER RECOVERY / CHARGEBACK BATCHING (RTV CLAIMS) */}
+            {/* TAB 3: SUPPLIER RECOVERY / CHARGEBACK BATCHING (RTV CLAIMS) */}
             {adminActiveTab === 'supplier_claims' && (
               <SupplierClaimsTab
                 reportsList={liveReportsList}
@@ -4920,7 +5119,7 @@ export default function App() {
                   setQuickRmaNumber(rmaNumber);
                   setIsQuickRmaModalOpen(true);
                 }}
-                onViewQR={(report) => setQrModalReport(report)}
+                onViewQR={(reportOrList) => openQrModal(reportOrList)}
                 onViewExplanation={(info) => setViewingExplanationModal(info)}
                 onOpenSimpleWizard={(reportOrList) => openSimpleWizardModal(reportOrList, 'wizard')}
                 onOpenPickupForm={(reportOrList) => openPickupFormModal(reportOrList)}
@@ -4931,7 +5130,7 @@ export default function App() {
               />
             )}
 
-            {/* TAB 5: DEDICATED TEST MODE SANDBOX */}
+            {/* TAB 4: DEDICATED TEST MODE SANDBOX */}
             {adminActiveTab === 'sandbox' && (
               <TestModeSandboxTab
                 testReportsList={testReportsList}
@@ -4943,9 +5142,12 @@ export default function App() {
                 updatingQueueId={updatingQueueId}
                 activeSubTab={sandboxSubTab}
                 onSubTabChange={setSandboxSubTab}
+                customerHubSubTab={sandboxCustomerSubTab}
+                externalCustomerSubTab={sandboxExternalSubTab}
+                onCustomerHubSubTabChange={handleSandboxCustomerSubTabChange}
                 onRefresh={refreshAllData}
                 onInspectTriage={handleInspectTriageForReport}
-                onViewQR={(report) => setQrModalReport(report)}
+                onViewQR={(reportOrList) => openQrModal(reportOrList)}
                 onViewPhoto={(photoObj) => setLightboxPhoto(photoObj)}
                 onRequestDeleteReport={requestDeleteReport}
                 onRequestBulkDeleteReports={requestBulkDeleteReports}
@@ -5066,7 +5268,7 @@ export default function App() {
         savedProductsList={savedProductsList}
         isTestMode={adminActiveTab === 'sandbox'}
         onEditProductFromReport={handleEditProductFromReport}
-        onViewReportQR={(rep) => setQrModalReport(rep)}
+        onViewReportQR={(repOrList) => openQrModal(repOrList)}
         onOpenCreditMemo={(rep) => {
           setIsReportsModalOpen(false);
           handleOpenCreditMemoForReport(rep);
@@ -5461,14 +5663,15 @@ export default function App() {
         onClose={() => setLightboxPhoto(null)}
       />
 
-      {/* Return Merchandise Authorization QR Sticker Modal */}
+      {/* Unified Printable RMA QR Card & Consolidated Multi-Select Studio */}
       <ReturnQRModal
-        isOpen={Boolean(qrModalReport)}
+        isOpen={Boolean(qrModalReport || qrModalReports.length > 0)}
         onClose={() => {
-          setQrModalReport(null);
+          closeQrModal();
           restoreQuickRmaIfPending();
         }}
         report={qrModalReport}
+        reports={qrModalReports}
         onOpenQuickAction={(rmaOrReport) => {
           setPendingQuickRmaNumber(null);
           const repObj = typeof rmaOrReport === 'object' && rmaOrReport !== null
@@ -5478,7 +5681,7 @@ export default function App() {
             ? rmaOrReport
             : (rmaOrReport?.rma_number || rmaOrReport?.rmaNumber || '');
 
-          setQrModalReport(null);
+          closeQrModal();
           if (repObj?.rma_type === 'supplier_outbound' || isSupplierRtvPortal) {
             openSimpleWizardModal(repObj || { rma_number: rmaStr }, 'wizard');
           } else {
@@ -5547,7 +5750,7 @@ export default function App() {
           setQuickRmaNumber(currentRma);
           setPendingQuickRmaNumber(currentRma);
           setIsQuickRmaModalOpen(false);
-          setQrModalReport(rep);
+          openQrModal(rep);
         }}
         onOpenLightbox={setLightboxPhoto}
         onReportUpdated={(updated) => {

@@ -21,10 +21,21 @@ import {
   Search,
   Trash2,
   Unlock,
-  X
+  X,
+  Clock,
+  Send
 } from 'lucide-react';
 import TablePagination from './TablePagination';
+import CreditMemosTab from './CreditMemosTab';
+import SupplierFollowUpModal from './SupplierFollowUpModal';
 import { exportCustomerInboundRMAsToXlsx } from '../utils/exportCsv';
+import { notificationService } from '../services/notificationService';
+import { catalogService } from '../services/catalogService';
+import {
+  computeFourStepWorkflow,
+  getCleanHumanWorkflowStatus,
+  isPlaceholderSupplier
+} from '../utils/followUpWorkflow';
 import {
   DEFECT_REASONS,
   cleanExplanationText,
@@ -78,11 +89,109 @@ export default function CustomerHubTab({
   onBulkArchiveReports,
   onRequestDeleteReport,
   onRequestBulkDeleteReports,
+  onOpenCreateCreditMemo,
+  onEditCreditMemo,
+  onPrintBulkCreditMemos,
+  onRequestDeleteCreditMemo,
+  onRequestBulkDeleteCreditMemo,
+  defaultSubTab = 'returns',
+  externalSubTab = null,
+  onSubTabChange,
   selectionResetTick = 0,
   externalStatusFilter = null
 }) {
   const canEditProducts = currentUser?.role === 'super_admin' || currentUser?.role === 'admin' || currentUser?.role === 'staff';
   const canDeleteReports = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
+
+  const [activeSubTab, setActiveSubTab] = useState(() => (
+    defaultSubTab === 'credit_memos' ? 'credit_memos' : 'returns'
+  ));
+  const [followUpModalReport, setFollowUpModalReport] = useState(null);
+  const [followUpConfig, setFollowUpConfig] = useState(() => notificationService.getDailyFollowUpConfig());
+  const [customerRowBusyId, setCustomerRowBusyId] = useState(null);
+  const [customerFollowUpBanner, setCustomerFollowUpBanner] = useState(null);
+
+  useEffect(() => {
+    const syncCfg = () => setFollowUpConfig(notificationService.getDailyFollowUpConfig());
+    window.addEventListener('rma-settings-changed', syncCfg);
+    return () => window.removeEventListener('rma-settings-changed', syncCfg);
+  }, []);
+
+  const handleCustomerSendFollowUp = async (item) => {
+    const statusInfo = getCleanHumanWorkflowStatus(item, savedProductsList, {
+      customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled
+    });
+    const wf = statusInfo.workflow;
+    if (wf.isClosed) return;
+    if (!wf.party.hasValidSupplier || (!isTestMode && wf.party.toEmails.length === 0)) {
+      setFollowUpModalReport(item);
+      return;
+    }
+    const key = item.id || item.rma_number;
+    setCustomerRowBusyId(key);
+    setCustomerFollowUpBanner(null);
+    try {
+      const res = await notificationService.runDailyFollowUpNow({
+        isTestMode: Boolean(isTestMode),
+        force: true,
+        rmaNumber: item.rma_number,
+        operation: 'send_single'
+      });
+      if (res?.success) {
+        setCustomerFollowUpBanner({
+          type: 'success',
+          text: `Dispatched Day ${wf.calendarDay} of 10 handover follow-up for ${item.rma_number}.`
+        });
+        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'followup-sent', rmaNumber: item.rma_number } }));
+      } else {
+        setCustomerFollowUpBanner({
+          type: 'error',
+          text: res?.error || res?.errors?.[0]?.message || `Could not send follow-up for ${item.rma_number}.`
+        });
+      }
+    } finally {
+      setCustomerRowBusyId(null);
+    }
+  };
+
+  const handleCustomerCloseCase = async (item) => {
+    const key = item.id || item.rma_number;
+    setCustomerRowBusyId(key);
+    setCustomerFollowUpBanner(null);
+    try {
+      await catalogService.closeFollowUpCase(item, {
+        markPickedUp: true,
+        reason: 'Handover Completed — Case Closed',
+        actorName: currentUser?.name || currentUser?.email || 'Admin'
+      });
+      setCustomerFollowUpBanner({
+        type: 'success',
+        text: `${item.rma_number} marked Case Closed.`
+      });
+      window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'followup-closed', rmaNumber: item.rma_number } }));
+    } catch (err) {
+      setCustomerFollowUpBanner({ type: 'error', text: err?.message || 'Failed closing case.' });
+    } finally {
+      setCustomerRowBusyId(null);
+    }
+  };
+  const onSubTabChangeRef = React.useRef(onSubTabChange);
+  onSubTabChangeRef.current = onSubTabChange;
+
+  useEffect(() => {
+    const requestedSub = typeof externalSubTab === 'string'
+      ? externalSubTab
+      : externalSubTab?.value;
+    if (requestedSub === 'returns' || requestedSub === 'credit_memos') {
+      setActiveSubTab(requestedSub);
+    }
+  }, [externalSubTab]);
+
+  useEffect(() => {
+    if (onSubTabChangeRef.current) {
+      onSubTabChangeRef.current(activeSubTab);
+    }
+  }, [activeSubTab]);
 
   const [reportsViewMode, setReportsViewMode] = useState(() => {
     return localStorage.getItem('rma_admin_reports_view_mode') || 'table';
@@ -136,6 +245,7 @@ export default function CustomerHubTab({
   // Honor external status filter navigation (e.g. from notification bell)
   useEffect(() => {
     if (externalStatusFilter && externalStatusFilter.value) {
+      setActiveSubTab('returns');
       setReportsStatusFilter(externalStatusFilter.value);
       setReportsCurrentPage(1);
     }
@@ -499,6 +609,17 @@ export default function CustomerHubTab({
               <span>⚡ Process Consolidated 4-Choice ({selectedReportIds.size} RMA{selectedReportIds.size > 1 ? 's' : ''})</span>
             </button>
           )}
+          {onViewQR && (
+            <button
+              type="button"
+              onClick={() => onViewQR(selectedReportsList.length === 1 ? selectedReportsList[0] : selectedReportsList)}
+              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+              title="Open Consolidated QR Print & PNG Studio for all selected Customer Hub RMAs"
+            >
+              <QrCode className="w-3.5 h-3.5 shrink-0" />
+              <span>🖨️ Print / Save QRs ({selectedReportIds.size})</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={clearReportsSelection}
@@ -530,6 +651,48 @@ export default function CustomerHubTab({
   };
 
   return (
+  <div className="space-y-4 w-full min-w-0">
+    {/* Symmetrical Segmented Sub-Tab Switcher: Customer Returns | Credit Memos Ledger */}
+    <div className="flex items-center gap-1.5 bg-slate-200/80 dark:bg-slate-800/80 p-1 rounded-2xl w-full sm:w-fit overflow-x-auto">
+      <button
+        type="button"
+        onClick={() => setActiveSubTab('returns')}
+        className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+          activeSubTab === 'returns'
+            ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 shadow-sm'
+            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+        }`}
+      >
+        <span>📥 Customer Returns ({customerScopedTotal})</span>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setActiveSubTab('credit_memos')}
+        className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+          activeSubTab === 'credit_memos'
+            ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm'
+            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+        }`}
+      >
+        <span>💳 Credit Memos Ledger ({creditMemosList.length})</span>
+      </button>
+    </div>
+
+    {activeSubTab === 'credit_memos' ? (
+      <CreditMemosTab
+        creditMemosList={creditMemosList}
+        recentReportsList={reportsList}
+        currentUser={currentUser}
+        onOpenCreateModal={onOpenCreateCreditMemo}
+        onEditCreditMemo={onEditCreditMemo}
+        onViewVoucher={onViewCreditMemoVoucher}
+        onPrintBulk={onPrintBulkCreditMemos || onViewCreditMemoVoucher}
+        onRequestDeleteCreditMemo={onRequestDeleteCreditMemo}
+        onRequestBulkDeleteCreditMemo={onRequestBulkDeleteCreditMemo}
+        isTestMode={isTestMode}
+      />
+    ) : (
   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 w-full min-w-0 box-border">
     {/* Header & Responsive Action Toolbar */}
     <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 w-full min-w-0">
@@ -622,6 +785,18 @@ export default function CustomerHubTab({
     <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 sm:p-3.5 space-y-2.5 w-full min-w-0 box-border">
 
       {/* Search Input: Full width row */}
+      {customerFollowUpBanner && (
+        <div className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center justify-between gap-2 ${
+          customerFollowUpBanner.type === 'success'
+            ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+            : 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-700 text-rose-900 dark:text-rose-200'
+        }`}>
+          <span>{customerFollowUpBanner.text}</span>
+          <button type="button" onClick={() => setCustomerFollowUpBanner(null)} className="cursor-pointer opacity-70 hover:opacity-100">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
       <div className="relative w-full min-w-0">
         <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 shrink-0" />
         <input
@@ -1126,9 +1301,30 @@ export default function CustomerHubTab({
                             </button>
                           )}
                         </div>
-                        {((item.supplier_name && item.supplier_name !== 'Pending Assignment') || (matchedProduct?.supplier_name && matchedProduct.supplier_name !== 'Pending Assignment')) && (
-                          <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate mt-0.5">
-                            Vendor: <span className="font-semibold text-slate-700 dark:text-slate-300">{item.supplier_name || matchedProduct?.supplier_name}</span>
+                        {((item.supplier_name && !isPlaceholderSupplier(item.supplier_name)) || (matchedProduct?.supplier_name && !isPlaceholderSupplier(matchedProduct.supplier_name))) ? (
+                          <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                            <span className="truncate max-w-[140px]">
+                              Vendor: <span className="font-semibold text-slate-700 dark:text-slate-300">{(!isPlaceholderSupplier(item.supplier_name) ? item.supplier_name : matchedProduct?.supplier_name)}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setFollowUpModalReport(item)}
+                              className="px-1.5 py-0.2 rounded bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9px] font-bold cursor-pointer"
+                              title="Configure Supplier Email & 10-Day Countdown SLA"
+                            >
+                              📧 SLA
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="mt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setFollowUpModalReport(item)}
+                              className="px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[9.5px] font-black cursor-pointer whitespace-nowrap"
+                              title="Set Supplier Name, Email (TO/CC) & 10-Day Countdown SLA"
+                            >
+                              + Set Supplier &amp; Email
+                            </button>
                           </div>
                         )}
                         {(item.batch_lot_number || item.expiry_date) && (
@@ -1267,10 +1463,21 @@ export default function CustomerHubTab({
                           );
                         })() : (() => {
                           const stageInfo = formatLifecycleStage(item.status, item);
+                          const wf = computeFourStepWorkflow(item, savedProductsList, {
+                            customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled
+                          });
                           return (
-                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-block shadow-2xs ${stageInfo.color}`}>
-                              {stageInfo.label}
-                            </span>
+                            <div className="flex flex-col items-center gap-1">
+                              <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-block shadow-2xs ${stageInfo.color}`}>
+                                {stageInfo.label}
+                              </span>
+                              {wf.isCountdownActive && !wf.isClosed && (
+                                <span className="px-2 py-0.2 rounded-full text-[9px] font-black bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 inline-flex items-center gap-1">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  <span>{wf.step2.text}</span>
+                                </span>
+                              )}
+                            </div>
                           );
                         })()}
                       </td>
@@ -1358,7 +1565,7 @@ export default function CustomerHubTab({
                             </button>
                           )}
 
-                          {/* View / Re-print Debit Claim or Replacement Form when generated */}
+                          {/* View / Re-print Buffer Replacement or Credit Return Form when generated */}
                           {onOpenPickupForm && outcome.formType && (
                             <button
                               type="button"
@@ -1367,10 +1574,35 @@ export default function CustomerHubTab({
                                 onOpenPickupForm(batchGroup.length > 1 ? batchGroup : item);
                               }}
                               className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap shadow-2xs"
-                              title={outcome.formType === 'replacement' ? 'View / Re-print Replacement Form' : 'View / Re-print Debit Claim Form'}
+                              title={outcome.formType === 'replacement' ? 'View / Re-print Buffer Replacement Form' : 'View / Re-print Credit Return Form'}
                             >
-                              <span>{outcome.formType === 'replacement' ? '📄 Replacement Form' : '📄 Debit Claim Form'}</span>
+                              <span>{outcome.formType === 'replacement' ? '📄 Buffer Replacement Form' : '📄 Credit Return Form'}</span>
                             </button>
+                          )}
+
+                          {/* Follow-Up & Case Close Quick Actions */}
+                          {!computeFourStepWorkflow(item, savedProductsList, { customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled }).isClosed && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={customerRowBusyId === (item.id || item.rma_number)}
+                                onClick={() => handleCustomerSendFollowUp(item)}
+                                className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                title="Send 10-Day Pickup / Handover Follow-Up Email now"
+                              >
+                                <Send className="w-2.5 h-2.5" />
+                                <span>📧 Send Follow-Up</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={customerRowBusyId === (item.id || item.rma_number)}
+                                onClick={() => handleCustomerCloseCase(item)}
+                                className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                title="Close 4-Step Workflow Case & Stop 10-Day Countdown"
+                              >
+                                <span>✓ Case Close</span>
+                              </button>
+                            </>
                           )}
 
                           {/* Split Qty / Details */}
@@ -2072,10 +2304,41 @@ export default function CustomerHubTab({
                           onOpenPickupForm(batchGroup.length > 1 ? batchGroup : item);
                         }}
                         className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap shadow-2xs"
-                        title={outcome.formType === 'replacement' ? 'View / Re-print Replacement Form' : 'View / Re-print Debit Claim Form'}
+                        title={outcome.formType === 'replacement' ? 'View / Re-print Buffer Replacement Form' : 'View / Re-print Credit Return Form'}
                       >
-                        {outcome.formType === 'replacement' ? '📄 Replacement Form' : '📄 Debit Claim Form'}
+                        {outcome.formType === 'replacement' ? '📄 Buffer Replacement Form' : '📄 Credit Return Form'}
                       </button>
+                    )}
+
+                    {/* Follow-Up SLA & Case Close Controls (Card View) */}
+                    {!computeFourStepWorkflow(item, savedProductsList, { customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled }).isClosed && (
+                      <>
+                        {isPlaceholderSupplier(item.supplier_name || matchedProduct?.supplier_name) && (
+                          <button
+                            type="button"
+                            onClick={() => setFollowUpModalReport(item)}
+                            className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap"
+                          >
+                            + Set Supplier &amp; Email
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={customerRowBusyId === (item.id || item.rma_number)}
+                          onClick={() => handleCustomerSendFollowUp(item)}
+                          className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap disabled:opacity-50"
+                        >
+                          📧 Send Follow-Up
+                        </button>
+                        <button
+                          type="button"
+                          disabled={customerRowBusyId === (item.id || item.rma_number)}
+                          onClick={() => handleCustomerCloseCase(item)}
+                          className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap disabled:opacity-50"
+                        >
+                          ✓ Case Close
+                        </button>
+                      </>
                     )}
 
                     {/* Split Qty / Details */}
@@ -2537,6 +2800,21 @@ export default function CustomerHubTab({
         />
       </div>
     )}
+  </div>
+    )}
+
+    {/* Supplier, Email & 10-Day SLA Follow-Up Modal */}
+    <SupplierFollowUpModal
+      isOpen={Boolean(followUpModalReport)}
+      onClose={() => setFollowUpModalReport(null)}
+      report={followUpModalReport}
+      catalogProducts={savedProductsList}
+      isTestMode={isTestMode}
+      currentUser={currentUser}
+      onUpdated={() => {
+        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'followup-updated' } }));
+      }}
+    />
   </div>
   );
 }

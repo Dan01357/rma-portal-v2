@@ -20,7 +20,7 @@ Enterprise wholesale return merchandise authorization and warehouse intake platf
 - **Group 1 (KEYSYS & A2Z2GO)**:
   - **Sender**: `finance2@a2z2go.net`
   - **To**: `azgodev@gmail.com`
-  - **CC**: `mgan@a2z2go.net`, `AZGan@a2z2go.net`, `marketing@a2z2go.net`, `jaezelle.benito@pingconmarketing.com` + Assigned AE + Supervisor
+  - **CC**: `mgan@pingconmarketing.com`, `AZGan@a2z2go.net`, `marketing@a2z2go.net`, `jaezelle.benito@pingconmarketing.com` + Assigned AE + Supervisor
 - **Group 2 (PINGCON & BONITA TISSUE)**:
   - **Sender**: `finance@pingconmarketing.com`
   - **To**: `azgodev@gmail.com`

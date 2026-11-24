@@ -115,11 +115,12 @@ export function formatPeso(amount) {
  * Format email recipient based on Test Mode toggle
  * Appends .test to any email address if testMode is active
  */
-export function applyEmailTestMode(email, isTestMode) {
+export function applyEmailTestMode(email, isTestMode, sandboxEmail = 'mgan@pingconmarketing.com') {
   if (!email) return '';
   const clean = email.trim();
   if (!isTestMode) return clean;
-  return 'mgan@a2z2go.net (Sandbox)';
+  const safeSandbox = String(sandboxEmail || 'mgan@pingconmarketing.com').trim() || 'mgan@pingconmarketing.com';
+  return `${safeSandbox} (Sandbox)`;
 }
 
 /**
@@ -133,7 +134,7 @@ export function getEmailRoutingPayload(ticket, isTestMode = false) {
     const sender = 'finance2@a2z2go.net';
     const rawTo = 'azgodev@gmail.com';
     const rawCC = [
-      'mgan@a2z2go.net',
+      'mgan@pingconmarketing.com',
       'AZGan@a2z2go.net',
       'marketing@a2z2go.net',
       'jaezelle.benito@pingconmarketing.com',
@@ -496,11 +497,11 @@ export function formatFourChoiceOutcome(item) {
   const pickedUpAt = pickup.picked_up_at || null;
   const isPickedUp = Boolean(pickedUpAt) || statusLower === 'picked_up' || statusLower === 'picked_up_by_supplier';
 
-  const notesMatch = String(item?.notes || '').match(/\[RTV:\s*([^\]]+)\]/i);
+  const notesMatch = String(item?.notes || '').match(/\[(?:RTV|BUF):\s*([^\]]+)\]/i);
   const auditRtv = Array.isArray(item?.audit_trail)
-    ? item.audit_trail.find((a) => a?.rtv_number)?.rtv_number
+    ? item.audit_trail.find((a) => a?.rtv_number || a?.buf_number)
     : null;
-  const claimNumber = pickup.claim_number || (notesMatch && notesMatch[1]?.trim()) || auditRtv || null;
+  const claimNumber = pickup.claim_number || (notesMatch && notesMatch[1]?.trim()) || auditRtv?.rtv_number || auditRtv?.buf_number || null;
 
   const decisionTs =
     pickedUpAt ||
@@ -1584,6 +1585,40 @@ export function findConsolidatedRtvBatchReports(targetReport, allReports = []) {
 }
 
 /**
+ * Normalizes a photo field (`string | string[] | null | undefined`) into a clean non-empty string array.
+ */
+export function normalizePhotoUrlArray(val) {
+  if (Array.isArray(val)) {
+    return val.map((u) => String(u || '').trim()).filter(Boolean);
+  }
+  if (typeof val === 'string' && val.trim()) {
+    return [val.trim()];
+  }
+  return [];
+}
+
+/**
+ * Summarizes supplier pickup photos across legacy string slots and multi-photo string[] slots.
+ */
+export function getPickupPhotosSummary(photosObj) {
+  if (!photosObj || typeof photosObj !== 'object') {
+    return { totalPhotos: 0, slotCount: 0, entriesBySlot: {} };
+  }
+  let totalPhotos = 0;
+  let slotCount = 0;
+  const entriesBySlot = {};
+  Object.entries(photosObj).forEach(([slotKey, rawVal]) => {
+    const urls = Array.from(new Set(normalizePhotoUrlArray(rawVal)));
+    if (urls.length > 0) {
+      entriesBySlot[slotKey] = urls;
+      slotCount += 1;
+      totalPhotos += urls.length;
+    }
+  });
+  return { totalPhotos, slotCount, entriesBySlot };
+}
+
+/**
  * Build normalized item rows for 1 or many consolidated RMA reports,
  * supporting automatic combination of identical items (SKU + Price + Expiry Date).
  */
@@ -1613,6 +1648,8 @@ export function getConsolidatedPickupItems({
       const barcode = String(it.barcode || rep.barcode || '').trim();
       const displaySku = sku || barcode || '—';
       const name = it.name || it.product_name || it.productName || rep.name || `Item ${barcode || idx + 1}`;
+      const explanation = cleanExplanationText(it.explanation) || cleanExplanationText(rep.explanation) || '';
+      const reason = String(it.reason || rep.reason || '').trim();
       const unitPricePerPiece = calc.totalPieces > 0
         ? Number((calc.lineTotal / calc.totalPieces).toFixed(4))
         : Number(calc.recordedUnitPrice || 0);
@@ -1630,6 +1667,8 @@ export function getConsolidatedPickupItems({
         cleanSku: sku,
         barcode,
         expiry,
+        explanation,
+        reason,
         rawQty: calc.rawQty,
         unitName: calc.unitName,
         piecesPerCase: calc.piecesPerCase,
@@ -1662,7 +1701,9 @@ export function getConsolidatedPickupItems({
     if (!combinedMap.has(row.groupKey)) {
       combinedMap.set(row.groupKey, {
         ...row,
-        rmaNumbers: [...row.rmaNumbers]
+        rmaNumbers: [...row.rmaNumbers],
+        _explanations: row.explanation ? [row.explanation] : [],
+        _reasons: row.reason ? [row.reason] : []
       });
       return;
     }
@@ -1678,16 +1719,27 @@ export function getConsolidatedPickupItems({
       existing.unitName = 'pc';
       existing.recordedUnitPrice = existing.pricePerPiece;
     }
+    if (row.explanation && !existing._explanations.includes(row.explanation)) {
+      existing._explanations.push(row.explanation);
+    }
+    if (row.reason && !existing._reasons.includes(row.reason)) {
+      existing._reasons.push(row.reason);
+    }
     if (!existing.rmaNumbers.includes(row.rmaNumber)) {
       existing.rmaNumbers.push(row.rmaNumber);
     }
     existing.rmaNumber = existing.rmaNumbers.join(', ');
   });
 
-  const combinedItems = Array.from(combinedMap.values()).map((it, idx) => ({
-    ...it,
-    idx: idx + 1
-  }));
+  const combinedItems = Array.from(combinedMap.values()).map((it, idx) => {
+    const { _explanations = [], _reasons = [], ...rest } = it;
+    return {
+      ...rest,
+      explanation: _explanations.join(' | '),
+      reason: _reasons.join(' | ') || rest.reason || '',
+      idx: idx + 1
+    };
+  });
 
   return {
     items: combinedItems,

@@ -162,6 +162,7 @@ export async function interceptAndCaptureEmails(page) {
  * while preserving the AI paperwork inspection sub-route if passed through.
  */
 export async function mockPhotoUploadSuccess(page) {
+  let uploadSeq = 0;
   await page.route('**/pw-mock-photo-*.png', async (route) => {
     return route.fulfill({
       status: 200,
@@ -173,7 +174,7 @@ export async function mockPhotoUploadSuccess(page) {
     const req = route.request();
     const url = req.url();
     if (req.method() === 'POST' && !url.includes('inspect-paperwork')) {
-      const idx = Date.now() % 10000;
+      const idx = ++uploadSeq;
       const localUrl = `https://localhost:5173/pw-mock-photo-${idx}.png`;
       return route.fulfill({
         status: 200,
@@ -403,7 +404,7 @@ export async function seedTestModeRma(
     { timeout: 45_000 }
   );
   await page.getByRole('button', { name: /Submit Return Report/i }).click();
-  await expect(page.getByText('Box Sticker Ready')).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText('Printable QR Ready')).toBeVisible({ timeout: 45_000 });
   const postRes = await submitPostPromise;
   expect(postRes.status()).toBeLessThan(400);
 

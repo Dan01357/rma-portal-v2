@@ -1,0 +1,502 @@
+import { supabase } from './supabase.js';
+import { authorizeCronOrAdmin } from './cronAuth.js';
+import {
+  createSmtpTransport,
+  DEFAULT_EMAIL_RECIPIENTS,
+  DEFAULT_SANDBOX_EMAIL,
+  normalizeSandboxEmail
+} from './smtpMailer.js';
+import {
+  isTrashedRecord,
+  isArchivedRecord,
+  isTestRecord,
+  isManifestSubItem
+} from '../../src/utils/rmaHelpers.js';
+import {
+  FOLLOW_UP_MAX_DAYS,
+  DEFAULT_FOLLOWUP_CONFIG,
+  normalizeTimeHhmm,
+  getManilaDateYmd,
+  getManilaTimeHhmm,
+  hasReachedManilaSchedule,
+  splitEmailStringOrList,
+  computeFourStepWorkflow,
+  buildFollowUpEmailContent,
+  buildAutoDisposedEmailContent
+} from '../../src/utils/followUpWorkflow.js';
+
+const EMAIL_RECIPIENTS_KEY = 'email_recipients';
+const EMAIL_RECIPIENTS_BY_TYPE_KEY = 'email_recipients_by_type';
+const DAILY_FOLLOWUP_CONFIG_KEY = 'daily_followup_config';
+const TEST_SANDBOX_EMAIL_KEY = 'test_sandbox_email';
+
+async function safeUpdateRmaReport(reportId, updates) {
+  let { data, error } = await supabase
+    .from('rma_reports')
+    .update(updates)
+    .eq('id', reportId)
+    .select();
+
+  if (error) {
+    const fallback = { ...updates };
+    if (String(error.message || '').includes('rma_reports_status_check') && fallback.status) {
+      fallback.status = 'under_inspection';
+    }
+    const retry = await supabase
+      .from('rma_reports')
+      .update(fallback)
+      .eq('id', reportId)
+      .select();
+    if (retry.error) throw retry.error;
+    data = retry.data;
+  }
+
+  return Array.isArray(data) && data.length > 0 ? data[0] : null;
+}
+
+/**
+ * Handles automated & manual 10-Calendar-Day Pickup Follow-Up emails and Auto-Dispose (>10 days).
+ * Invoked via /api/send-email?action=daily-followup to stay within Vercel's 12-function cap.
+ */
+export async function handleDailyFollowUp(req, res, preParsedBody = null) {
+  if (!['GET', 'POST'].includes(req.method)) {
+    res.setHeader('Allow', 'GET, POST');
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
+
+  const auth = await authorizeCronOrAdmin(req);
+  if (!auth.authorized) {
+    return res.status(auth.status).json({
+      error: auth.error,
+      message: auth.message
+    });
+  }
+
+  const body = (preParsedBody && typeof preParsedBody === 'object')
+    ? preParsedBody
+    : (typeof req.body === 'string'
+        ? (() => { try { return JSON.parse(req.body); } catch { return {}; } })()
+        : (req.body || {}));
+
+  const operation = String(body.operation || req.query?.operation || 'run_all').trim().toLowerCase();
+  const targetRmaNumber = String(body.rmaNumber || req.query?.rmaNumber || '').trim();
+  const isTestMode = Boolean(
+    body.isTestMode === true ||
+    body.isTestMode === 'true' ||
+    req.query?.testMode === 'true' ||
+    req.query?.test === '1' ||
+    targetRmaNumber.toUpperCase().startsWith('TEST-')
+  );
+  const force = Boolean(
+    body.force === true ||
+    body.force === 'true' ||
+    req.query?.force === 'true' ||
+    req.query?.force === '1'
+  );
+  const dryRun = Boolean(
+    body.dryRun === true ||
+    body.dryRun === 'true' ||
+    req.query?.dryRun === 'true' ||
+    req.query?.dryRun === '1'
+  );
+  const respectSchedule = Boolean(
+    body.respectSchedule === true ||
+    body.respectSchedule === 'true' ||
+    req.query?.respectSchedule === 'true' ||
+    req.query?.respectSchedule === '1'
+  );
+
+  const nowDate = new Date();
+  const nowIso = nowDate.toISOString();
+  const todayManila = getManilaDateYmd(nowDate);
+  const currentHhmm = getManilaTimeHhmm(nowDate);
+
+  // 1. Load configuration from rma_settings
+  const settingsMap = new Map();
+  try {
+    const { data: settingsRows } = await supabase
+      .from('rma_settings')
+      .select('key, value')
+      .in('key', [
+        EMAIL_RECIPIENTS_KEY,
+        EMAIL_RECIPIENTS_BY_TYPE_KEY,
+        DAILY_FOLLOWUP_CONFIG_KEY,
+        TEST_SANDBOX_EMAIL_KEY
+      ]);
+
+    if (Array.isArray(settingsRows)) {
+      for (const row of settingsRows) {
+        if (row?.key) settingsMap.set(row.key, row.value);
+      }
+    }
+  } catch (err) {
+    console.warn('[dailyFollowUpHandler] Failed to read rma_settings:', err?.message);
+  }
+
+  const sandboxEmail = normalizeSandboxEmail(
+    body.sandboxEmail || settingsMap.get(TEST_SANDBOX_EMAIL_KEY) || DEFAULT_SANDBOX_EMAIL
+  );
+
+  const rawFollowUpCfg = settingsMap.get(DAILY_FOLLOWUP_CONFIG_KEY);
+  const followUpConfig = {
+    ...DEFAULT_FOLLOWUP_CONFIG,
+    ...(rawFollowUpCfg && typeof rawFollowUpCfg === 'object' ? rawFollowUpCfg : {})
+  };
+  const autoEnabled = followUpConfig.autoEnabled !== false;
+  const targetTimePht = normalizeTimeHhmm(followUpConfig.autoSendTimePht, '08:00');
+  const customerFollowUpDefaultEnabled = Boolean(followUpConfig.customerFollowUpDefaultEnabled);
+
+  if (respectSchedule && operation === 'run_all' && !force) {
+    if (!autoEnabled) {
+      return res.status(200).json({
+        success: true,
+        skipped: true,
+        reason: 'AUTO_DISABLED',
+        phtDate: todayManila,
+        phtTime: currentHhmm,
+        targetTimePht
+      });
+    }
+    if (!hasReachedManilaSchedule(targetTimePht, nowDate)) {
+      return res.status(200).json({
+        success: true,
+        skipped: true,
+        reason: 'BEFORE_SCHEDULED_TIME',
+        phtDate: todayManila,
+        phtTime: currentHhmm,
+        targetTimePht
+      });
+    }
+  }
+
+  // 2. Resolve recipient profiles
+  const legacyRecipients = settingsMap.get(EMAIL_RECIPIENTS_KEY);
+  const recipientsByType = settingsMap.get(EMAIL_RECIPIENTS_BY_TYPE_KEY);
+  const defaultTo = Array.isArray(DEFAULT_EMAIL_RECIPIENTS?.to) ? DEFAULT_EMAIL_RECIPIENTS.to : [];
+  const defaultCc = Array.isArray(DEFAULT_EMAIL_RECIPIENTS?.cc) ? DEFAULT_EMAIL_RECIPIENTS.cc : [];
+
+  const newRmaProfile = recipientsByType?.new_rma || legacyRecipients || {};
+  const rawNewRmaTo = splitEmailStringOrList(newRmaProfile?.to);
+  const newRmaToList = rawNewRmaTo.length > 0 ? rawNewRmaTo : splitEmailStringOrList(defaultTo);
+  const rawNewRmaCc = splitEmailStringOrList(newRmaProfile?.cc);
+  const newRmaCcList = (rawNewRmaCc.length > 0 || rawNewRmaTo.length > 0 ? rawNewRmaCc : splitEmailStringOrList(defaultCc))
+    .filter((e) => !newRmaToList.includes(e));
+
+  const followUpProfile = recipientsByType?.supplier_followup || {};
+  const followUpProfileTo = splitEmailStringOrList(followUpProfile?.to);
+  const followUpProfileCc = splitEmailStringOrList(followUpProfile?.cc);
+
+  // 3. Prepare SMTP transport if sending real emails
+  let transporter = null;
+  const gmailUser = String(process.env.GMAIL_USER || '').trim();
+  const gmailPass = String(process.env.GMAIL_APP_PASSWORD || '').trim();
+  if (!dryRun) {
+    if (!gmailUser || !gmailPass) {
+      return res.status(500).json({
+        error: 'SMTP_NOT_CONFIGURED',
+        message: 'Server email credentials (GMAIL_USER / GMAIL_APP_PASSWORD) are missing.'
+      });
+    }
+    transporter = createSmtpTransport();
+  }
+
+  // 4. Fetch reports + catalog products
+  const [reportsRes, productsRes] = await Promise.all([
+    supabase
+      .from('rma_reports')
+      .select('*')
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('products')
+      .select('*')
+  ]);
+
+  if (reportsRes.error) {
+    return res.status(500).json({
+      error: 'DB_QUERY_FAILED',
+      message: reportsRes.error.message || 'Failed to query rma_reports'
+    });
+  }
+
+  const allRows = Array.isArray(reportsRes.data) ? reportsRes.data : [];
+  const catalogProducts = Array.isArray(productsRes.data) ? productsRes.data : [];
+
+  const activeRows = allRows.filter((r) => !isTrashedRecord(r) && !isArchivedRecord(r));
+  const candidates = activeRows.filter((r) => {
+    if (isManifestSubItem(r, activeRows)) return false;
+    if (targetRmaNumber) {
+      return String(r.rma_number || '').trim().toUpperCase() === targetRmaNumber.toUpperCase();
+    }
+    return Boolean(isTestRecord(r)) === Boolean(isTestMode);
+  });
+
+  const followUpsSent = [];
+  const autoDisposed = [];
+  const skippedItems = [];
+  const errors = [];
+
+  for (const report of candidates) {
+    const rmaNumber = report.rma_number || String(report.id);
+    const wf = computeFourStepWorkflow(report, catalogProducts, {
+      now: nowDate,
+      customerFollowUpDefaultEnabled
+    });
+
+    if (wf.isClosed) {
+      if (targetRmaNumber) {
+        skippedItems.push({ rmaNumber, reason: 'CASE_ALREADY_CLOSED' });
+      }
+      continue;
+    }
+
+    // Check Auto-Dispose (> 10 calendar days) first
+    if (wf.isExpiredAfter10Days && !wf.isAutoDisposed) {
+      const existingMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
+        ? report.ai_document_metadata
+        : {};
+      const prevFollowUp = (existingMeta.follow_up && typeof existingMeta.follow_up === 'object')
+        ? existingMeta.follow_up
+        : {};
+
+      const nextMeta = {
+        ...existingMeta,
+        workflow_resolution: 'scrapped_no_reorder',
+        resolved_at: nowIso,
+        simple_rtv_disposition: '5- Scrap / Dispose',
+        follow_up: {
+          ...prevFollowUp,
+          enabled: false,
+          started_at: wf.startedAtIso,
+          auto_disposed_at: nowIso,
+          case_closed_at: nowIso,
+          case_status: 'auto_disposed_after_10_days'
+        }
+      };
+
+      const existingAudit = Array.isArray(report.audit_trail) ? report.audit_trail : [];
+      const nextAudit = [
+        ...existingAudit,
+        {
+          timestamp: nowIso,
+          action: 'AUTO_DISPOSED_AFTER_10_DAYS',
+          stage: 'RESOLVED',
+          actor: auth.actor || '10-Day SLA Auto-Dispose',
+          note: `Auto-disposed on ${todayManila} after >${FOLLOW_UP_MAX_DAYS} calendar days (${wf.calendarDay} days elapsed without pickup)`
+        }
+      ];
+
+      const updatedReportPreview = {
+        ...report,
+        status: 'resolved',
+        disposition: '5- Scrap / Dispose',
+        warehouse_location: 'Disposal / Scrap Area',
+        ai_document_metadata: nextMeta,
+        updated_at: nowIso,
+        audit_trail: nextAudit
+      };
+
+      const emailPayload = buildAutoDisposedEmailContent({
+        report: updatedReportPreview,
+        allReports: activeRows,
+        catalogProducts,
+        isTestMode,
+        sandboxEmail,
+        now: nowDate
+      });
+
+      const finalTo = isTestMode ? [sandboxEmail] : newRmaToList;
+      const finalCc = isTestMode
+        ? []
+        : Array.from(new Set([...newRmaCcList, ...(wf.party.aeEmail ? [wf.party.aeEmail] : [])]))
+            .filter((e) => !finalTo.includes(e));
+
+      try {
+        if (!dryRun) {
+          await safeUpdateRmaReport(report.id, {
+            status: 'resolved',
+            disposition: '5- Scrap / Dispose',
+            warehouse_location: 'Disposal / Scrap Area',
+            ai_document_metadata: nextMeta,
+            updated_at: nowIso,
+            audit_trail: nextAudit
+          });
+
+          try {
+            await supabase
+              .from('rma_reports')
+              .update({
+                status: 'resolved',
+                disposition: '5- Scrap / Dispose',
+                warehouse_location: 'Disposal / Scrap Area'
+              })
+              .eq('parent_rma_id', report.id);
+          } catch {}
+
+          if (finalTo.length > 0 && transporter) {
+            await transporter.sendMail({
+              from: `Pingcon Marketing RMA <${gmailUser}>`,
+              to: finalTo.join(', '),
+              ...(finalCc.length > 0 ? { cc: finalCc.join(', ') } : {}),
+              subject: emailPayload.subject,
+              html: emailPayload.html,
+              text: emailPayload.text
+            });
+          }
+        }
+
+        autoDisposed.push({
+          rmaNumber,
+          supplierName: wf.party.supplierName,
+          calendarDay: wf.calendarDay,
+          to: finalTo,
+          cc: finalCc,
+          subject: emailPayload.subject,
+          dryRun
+        });
+      } catch (err) {
+        errors.push({ rmaNumber, step: 'auto_dispose', message: err?.message || 'Failed auto-dispose' });
+      }
+      continue;
+    }
+
+    if (operation === 'check_dispose_only') {
+      continue;
+    }
+
+    if (!wf.isCountdownActive || wf.calendarDay > FOLLOW_UP_MAX_DAYS) {
+      if (targetRmaNumber) {
+        skippedItems.push({
+          rmaNumber,
+          reason: !wf.followUpEnabled ? 'FOLLOW_UP_DISABLED' : 'OUTSIDE_COUNTDOWN_WINDOW'
+        });
+      }
+      continue;
+    }
+
+    if (wf.alreadySentToday && !force) {
+      skippedItems.push({ rmaNumber, reason: 'ALREADY_SENT_TODAY', lastSentPhtDate: wf.lastSentPhtDate });
+      continue;
+    }
+
+    const overrideTo = splitEmailStringOrList(body.overrideToEmail);
+    const liveTo = overrideTo.length > 0
+      ? overrideTo
+      : (wf.party.toEmails.length > 0 ? wf.party.toEmails : followUpProfileTo);
+
+    if (!isTestMode && liveTo.length === 0) {
+      skippedItems.push({ rmaNumber, reason: 'NO_SUPPLIER_EMAIL' });
+      continue;
+    }
+
+    const finalTo = isTestMode ? [sandboxEmail] : liveTo;
+    const finalCc = isTestMode
+      ? []
+      : Array.from(
+          new Set([
+            ...wf.party.ccEmails,
+            ...followUpProfileTo,
+            ...followUpProfileCc,
+            ...(wf.party.aeEmail ? [wf.party.aeEmail] : [])
+          ])
+        ).filter((e) => !finalTo.includes(e));
+
+    const emailPayload = buildFollowUpEmailContent({
+      report,
+      allReports: activeRows,
+      catalogProducts,
+      workflow: wf,
+      isTestMode,
+      sandboxEmail,
+      now: nowDate
+    });
+
+    try {
+      if (!dryRun) {
+        if (transporter && finalTo.length > 0) {
+          await transporter.sendMail({
+            from: `Pingcon Marketing RMA <${gmailUser}>`,
+            to: finalTo.join(', '),
+            ...(finalCc.length > 0 ? { cc: finalCc.join(', ') } : {}),
+            subject: emailPayload.subject,
+            html: emailPayload.html,
+            text: emailPayload.text
+          });
+        }
+
+        const existingMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
+          ? report.ai_document_metadata
+          : {};
+        const prevFollowUp = (existingMeta.follow_up && typeof existingMeta.follow_up === 'object')
+          ? existingMeta.follow_up
+          : {};
+
+        const nextMeta = {
+          ...existingMeta,
+          follow_up: {
+            ...prevFollowUp,
+            enabled: true,
+            started_at: wf.startedAtIso,
+            last_sent_at: nowIso,
+            last_sent_pht_date: todayManila,
+            last_sent_day: wf.calendarDay,
+            sent_count: wf.sentCount + 1
+          }
+        };
+
+        const existingAudit = Array.isArray(report.audit_trail) ? report.audit_trail : [];
+        const nextAudit = [
+          ...existingAudit,
+          {
+            timestamp: nowIso,
+            action: 'FOLLOWUP_EMAIL_SENT',
+            stage: 'FOLLOW_UP',
+            actor: auth.actor || 'Daily Follow-Up Scheduler',
+            note: `Sent Day ${wf.calendarDay} of ${FOLLOW_UP_MAX_DAYS} follow-up to ${finalTo.join(', ')}${finalCc.length ? ` (CC: ${finalCc.join(', ')})` : ''}`
+          }
+        ];
+
+        await safeUpdateRmaReport(report.id, {
+          ai_document_metadata: nextMeta,
+          updated_at: nowIso,
+          audit_trail: nextAudit
+        });
+      }
+
+      followUpsSent.push({
+        rmaNumber,
+        supplierName: wf.party.supplierName,
+        calendarDay: wf.calendarDay,
+        to: finalTo,
+        cc: finalCc,
+        subject: emailPayload.subject,
+        dryRun
+      });
+    } catch (err) {
+      errors.push({ rmaNumber, step: 'send_followup', message: err?.message || 'Failed sending follow-up' });
+    }
+  }
+
+  return res.status(200).json({
+    success: errors.length === 0,
+    dryRun,
+    skipped: false,
+    operation,
+    phtDate: todayManila,
+    phtTime: currentHhmm,
+    targetTimePht,
+    isTestMode,
+    sandboxEmail,
+    caller: auth.actor,
+    summary: {
+      scanned: candidates.length,
+      followUpsSent: followUpsSent.length,
+      autoDisposed: autoDisposed.length,
+      skippedCount: skippedItems.length,
+      errorCount: errors.length
+    },
+    followUpsSent,
+    autoDisposed,
+    skippedItems,
+    errors
+  });
+}

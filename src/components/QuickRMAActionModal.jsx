@@ -29,11 +29,16 @@ import {
   Info,
   FileText,
   FileCheck2,
-  Zap
+  Zap,
+  Clock,
+  Send
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
+import { notificationService } from '../services/notificationService';
+import SupplierFollowUpModal from './SupplierFollowUpModal';
+import { getCleanHumanWorkflowStatus } from '../utils/followUpWorkflow';
 import {
   isSplitChildTicket,
   isSplitParentTicket,
@@ -142,6 +147,9 @@ export default function QuickRMAActionModal({
 
   const [isUpdatingType, setIsUpdatingType] = useState(false);
   const [typeFeedback, setTypeFeedback] = useState(null);
+  const [isFollowUpModalOpen, setIsFollowUpModalOpen] = useState(false);
+  const [followUpFeedback, setFollowUpFeedback] = useState(null);
+  const [isFollowUpBusy, setIsFollowUpBusy] = useState(false);
 
   // Multi-Item Manifest Line-Item Count Check
   const [manifestItems, setManifestItems] = useState([]);
@@ -379,24 +387,13 @@ export default function QuickRMAActionModal({
       const reportIsTest = isTestRecord(report);
       const isSupplier = report.rma_type === 'supplier_outbound';
 
-      let childRmaNumber = `${report.rma_number}-B`;
-      const { data: existingChild } = await supabase
+      const candidateSuffixes = ['B', 'C', 'D', 'E'].map((s) => `${report.rma_number}-${s}`);
+      const { data: existingChildren } = await supabase
         .from('rma_reports')
         .select('rma_number')
-        .eq('rma_number', childRmaNumber)
-        .maybeSingle();
-
-      if (existingChild) {
-        childRmaNumber = `${report.rma_number}-C`;
-        const { data: existingChildC } = await supabase
-          .from('rma_reports')
-          .select('rma_number')
-          .eq('rma_number', childRmaNumber)
-          .maybeSingle();
-        if (existingChildC) {
-          childRmaNumber = `${report.rma_number}-D`;
-        }
-      }
+        .in('rma_number', candidateSuffixes);
+      const takenSet = new Set((existingChildren || []).map((r) => r.rma_number));
+      const childRmaNumber = candidateSuffixes.find((num) => !takenSet.has(num)) || `${report.rma_number}-F`;
 
       const timestamp = new Date().toISOString();
       const autoGrade = mapReasonToConditionGrade(report.reason);
@@ -2045,7 +2042,96 @@ export default function QuickRMAActionModal({
                       <span>📄 {outcome.formType === 'replacement' ? 'Replacement Form' : 'Debit Claim Form'}</span>
                     </button>
                   )}
+
+                  {(() => {
+                    const wfInfo = getCleanHumanWorkflowStatus(report, savedProductsList);
+                    const wf = wfInfo.workflow;
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setIsFollowUpModalOpen(true)}
+                          className="px-3 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-xs font-black flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>{!wf.party.hasValidSupplier ? '+ Set Supplier & Email' : `${wf.step2.text} • Supplier SLA`}</span>
+                        </button>
+                        {!wf.isClosed && (
+                          <>
+                            <button
+                              type="button"
+                              disabled={isFollowUpBusy}
+                              onClick={async () => {
+                                if (!wf.party.hasValidSupplier || (!isTestRecord(report) && wf.party.toEmails.length === 0)) {
+                                  setIsFollowUpModalOpen(true);
+                                  return;
+                                }
+                                setIsFollowUpBusy(true);
+                                setFollowUpFeedback(null);
+                                try {
+                                  const res = await notificationService.runDailyFollowUpNow({
+                                    isTestMode: Boolean(isTestRecord(report)),
+                                    force: true,
+                                    rmaNumber: report.rma_number,
+                                    operation: 'send_single'
+                                  });
+                                  if (res?.success) {
+                                    setFollowUpFeedback({ type: 'success', text: `Sent Day ${wf.calendarDay} of 10 follow-up for ${report.rma_number}.` });
+                                    onRefresh?.();
+                                  } else {
+                                    setFollowUpFeedback({ type: 'error', text: res?.error || 'Could not send follow-up.' });
+                                  }
+                                } finally {
+                                  setIsFollowUpBusy(false);
+                                }
+                              }}
+                              className="px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                            >
+                              <Send className="w-3.5 h-3.5" />
+                              <span>📧 Send Follow-Up</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isFollowUpBusy}
+                              onClick={async () => {
+                                setIsFollowUpBusy(true);
+                                setFollowUpFeedback(null);
+                                try {
+                                  const updated = await catalogService.closeFollowUpCase(report, {
+                                    markPickedUp: true,
+                                    reason: 'Picked Up — Case Closed',
+                                    actorName: verifiedAdmin?.name || currentUser?.name || 'Admin'
+                                  });
+                                  setReport(updated);
+                                  onReportUpdated?.(updated);
+                                  onRefresh?.();
+                                  setFollowUpFeedback({ type: 'success', text: 'Case closed & 10-day countdown stopped.' });
+                                } catch (e) {
+                                  setFollowUpFeedback({ type: 'error', text: e?.message || 'Failed closing case.' });
+                                } finally {
+                                  setIsFollowUpBusy(false);
+                                }
+                              }}
+                              className="px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-black cursor-pointer disabled:opacity-50"
+                            >
+                              <span>✓ Case Close</span>
+                            </button>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
+
+                {followUpFeedback && (
+                  <div className={`p-2 rounded-xl border text-[11px] font-bold ${
+                    followUpFeedback.type === 'success'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+                      : 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-700 text-rose-900 dark:text-rose-200'
+                  }`}>
+                    {followUpFeedback.text}
+                  </div>
+                )}
               </div>
 
               {/* (c) Split Qty Feature Intact */}
@@ -2464,6 +2550,20 @@ export default function QuickRMAActionModal({
           </button>
         </div>
       </div>
+
+      <SupplierFollowUpModal
+        isOpen={isFollowUpModalOpen}
+        onClose={() => setIsFollowUpModalOpen(false)}
+        report={report}
+        catalogProducts={savedProductsList}
+        isTestMode={Boolean(report && isTestRecord(report))}
+        currentUser={verifiedAdmin || currentUser}
+        onUpdated={(saved) => {
+          if (saved) setReport(saved);
+          onReportUpdated?.(saved);
+          onRefresh?.();
+        }}
+      />
     </div>
   );
 }

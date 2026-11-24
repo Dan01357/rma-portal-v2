@@ -6,24 +6,25 @@ const SETTINGS_KEY = 'supplier_claims_store';
 
 export const supplierClaimService = {
   /**
-   * GENERATE UNIQUE RTV ID
-   * Format: RTV-YYYY-XXXX-RAND (e.g. RTV-2026-0001-HY67)
-   * RTV + Current Year + 4-digit increasing sequence + 4-char alphanumeric
+   * Shared helper to generate sequential prefixed tracking IDs (`RTV-` / `BUF-`)
    */
-  generateRtvId(existingClaims = [], isTestMode = false) {
+  _generatePrefixedRefId(prefix, existingItems = [], extractors = [], isTestMode = false) {
     const currentYear = new Date().getFullYear();
+    const seqRegex = new RegExp(`^${prefix}-(?:TEST-)?\\d{4}-(\\d+)-`, 'i');
     let maxSeq = 0;
 
-    if (Array.isArray(existingClaims)) {
-      existingClaims.forEach(c => {
-        const num = c.claim_number || c.claimNumber || '';
-        const match = String(num).match(/RTV-(?:TEST-)?\d{4}-(\d+)-/i);
-        if (match && match[1]) {
-          const parsed = parseInt(match[1], 10);
-          if (!isNaN(parsed) && parsed > maxSeq) {
-            maxSeq = parsed;
+    if (Array.isArray(existingItems)) {
+      existingItems.forEach((item) => {
+        extractors.forEach((getVal) => {
+          const num = getVal(item) || '';
+          const match = String(num).match(seqRegex);
+          if (match && match[1]) {
+            const parsed = parseInt(match[1], 10);
+            if (!isNaN(parsed) && parsed > maxSeq) {
+              maxSeq = parsed;
+            }
           }
-        }
+        });
       });
     }
 
@@ -34,7 +35,36 @@ export const supplierClaimService = {
       rand += chars.charAt(Math.floor(Math.random() * chars.length));
     }
 
-    return `RTV-${isTestMode ? 'TEST-' : ''}${currentYear}-${nextSeq}-${rand}`;
+    return `${prefix}-${isTestMode ? 'TEST-' : ''}${currentYear}-${nextSeq}-${rand}`;
+  },
+
+  /**
+   * GENERATE UNIQUE RTV ID
+   * Format: RTV-YYYY-XXXX-RAND (e.g. RTV-2026-0001-HY67)
+   */
+  generateRtvId(existingClaims = [], isTestMode = false) {
+    return this._generatePrefixedRefId(
+      'RTV',
+      existingClaims,
+      [(c) => c?.claim_number || c?.claimNumber],
+      isTestMode
+    );
+  },
+
+  /**
+   * GENERATE UNIQUE CUSTOMER BUFFER REPLACEMENT ID
+   * Format: BUF-YYYY-XXXX-RAND (or BUF-TEST-YYYY-XXXX-RAND in Test Mode)
+   */
+  generateBufferId(existingReports = [], isTestMode = false) {
+    return this._generatePrefixedRefId(
+      'BUF',
+      existingReports,
+      [
+        (r) => r?.ai_document_metadata?.supplier_pickup?.claim_number,
+        (r) => r?.claim_number || r?.claimNumber
+      ],
+      isTestMode
+    );
   },
 
   /**
