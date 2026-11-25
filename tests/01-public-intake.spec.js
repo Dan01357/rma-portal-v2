@@ -37,7 +37,7 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
 
       // 2. Invalid invite token -> "Authorization Unavailable"
       await page.goto('/intake?token=PW-INVALID-TOKEN-000', { waitUntil: 'domcontentloaded' });
-      await expect(page.getByText('Authorization Unavailable')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText('Authorization Unavailable')).toBeVisible({ timeout: 25_000 });
 
       // 3. Revoked invite token -> "403 Forbidden — Authorization Revoked"
       let inviteState = 'revoked';

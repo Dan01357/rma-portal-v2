@@ -19,7 +19,7 @@ export default defineConfig({
     launchOptions: {
       args: [
         '--disable-quic',
-        '--disable-features=AsyncDns',
+        '--disable-http2',
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
       ],

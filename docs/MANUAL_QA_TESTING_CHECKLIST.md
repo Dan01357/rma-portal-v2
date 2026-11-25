@@ -340,15 +340,15 @@ Each test scenario defines:
   * **Expected Behavior**: Button shows loading spinner; confetti animation triggers (`canvas-confetti`); screen switches to Success confirmation displaying generated `RMA-YYYY-MMDD-XXXX`.
   * **Database Verification**: New row exists in `public.rma_reports` with correct `barcode`, `photo_urls`, `status = 'received_at_dock'` (or `'pending_admin_details'`), and initial `audit_trail` entry.
 
-- [ ] **TC-PUB-12 (Save Sticker PNG Download)**
-  * **Location**: Success Screen button **"Save Sticker (PNG)"**
-  * **Action**: Click button.
-  * **Expected Behavior**: A high-resolution PNG file `BOX-STICKER-[RMA-NUMBER].png` downloads.
+- [ ] **TC-PUB-12 (Unified Printable QR Card & `Save QR (PNG)` Download)**
+  * **Location**: Success Screen & Table Row buttons **`Save QR (PNG)`** and **`Resize / Print QR`**
+  * **Action**: Click `Save QR (PNG)` (or open `Resize / Print QR` studio).
+  * **Expected Behavior**: A high-resolution PNG file `RMA-QR-[RMA-NUMBER].png` downloads using ONE unified centered B&W QR Card design across preview, PNG export, and US Letter print.
   * **Visual Layout Verification**:
     1. RMA Number font dynamically scales between 26px–54px and **never overlaps** the QR code frame.
-    2. Long item names wrap cleanly across 2 lines (up to 960px width) without truncation ellipses.
-    3. Defect reason wraps cleanly across 2 lines (up to 560px width).
-    4. Dashed cut line and footer instructions are crisp and legible.
+    2. Long item names wrap cleanly without truncation ellipses, with **Quantity & Packaging Unit** clearly displayed (`e.g. 5 pc` / `2 box`).
+    3. Defect reason and reporter display cleanly with **zero Supplier Name clutter** on the QR card.
+    4. Dashed cut border and footer instructions are crisp and legible.
 
 - [ ] **TC-PUB-13 (Optional Document Numbers & 10 Photo Max)**
   * **Location**: Public Portal (`/`) -> Section 1 (Item Photos) & Section 2 (Commercial Document Numbers)
@@ -388,15 +388,14 @@ Each test scenario defines:
   * **Action**: Click button.
   * **Expected Behavior**: `PortalAccessQRModal` opens with large high-contrast QR code pointing to `https://rma-portal-v2.vercel.app/`, dock worker instructions, and **"Download Printable A4 Poster"** button.
 
-- [ ] **TC-NAV-04 (6 Operational KPI Cards Synchronization)**
+- [ ] **TC-NAV-04 (5 Symmetrical Operational KPI Cards Synchronization)**
   * **Location**: Dashboard Top Metric Cards
-  * **Action**: Click each of the 6 KPI cards:
+  * **Action**: Click each of the 5 KPI cards:
     1. **Saved Products Card**: Switches to `products` tab.
-    2. **Customer Inbound Card**: Switches to `customer_reports` tab (`Customer RMA Hub`).
+    2. **Customer Inbound Card**: Switches to `customer_reports` tab (`Customer RMA Hub` w/ Customer Returns & Credit Memos Ledger sub-tabs).
     3. **Supplier RTVs Card**: Switches to `supplier_claims` tab (`Supplier Hub (RTV Claims)`).
-    4. **Credit Memos Card**: Switches to `credit_memos` tab.
-    5. **Pending Barcodes Card**: Opens `PendingBarcodesModal`.
-    6. **Staff Directory Card**: Opens `EmployeeManagementModal` (Super Admin).
+    4. **Pending Barcodes Card**: Opens `PendingBarcodesModal`.
+    5. **Staff Directory Card**: Opens `EmployeeManagementModal` (Super Admin).
 
 - [ ] **TC-NAV-05 (Instant Cross-Tab Logout Synchronization)**
   * **Location**: Global Application State
@@ -406,13 +405,12 @@ Each test scenario defines:
 
 - [ ] **TC-NAV-06 (4 Consolidated Operational Navigation Tabs)**
   * **Location**: Admin Top Tab Switcher
-  * **Action**: Inspect the tab strip to verify exact consolidation with zero duplicate buttons:
+  * **Action**: Inspect the tab strip to verify exact consolidation with zero duplicate or standalone Credit Memos tab:
     * `[ ] Saved Products Tab` (`adminActiveTab === 'products'`)
-    * `[ ] Customer RMA Hub (Inbound)` (`adminActiveTab === 'customer_reports'`)
+    * `[ ] Customer RMA Hub (Inbound)` (`adminActiveTab === 'customer_reports'` -> segmented `📥 Customer Returns` + `💳 Credit Memos Ledger` sub-tabs)
     * `[ ] Supplier Hub (RTV Claims)` (`adminActiveTab === 'supplier_claims'`)
-    * `[ ] Finance Credit Memos` (`adminActiveTab === 'credit_memos'`)
     * `[ ] Settings & SMTP` (`adminActiveTab === 'settings'`, Super Admin only)
-  * **Expected Behavior**: Only one unified "Supplier Hub (RTV Claims)" button exists. Active tab highlights cleanly with appropriate theme accents.
+  * **Expected Behavior**: Only 4 top-level Admin tabs exist; `Credit Memos Ledger` renders inside `Customer RMA Hub` in both Live Mode and Test Mode Sandbox. Active tab highlights cleanly with appropriate theme accents.
 
 ---
 
@@ -517,10 +515,10 @@ Each test scenario defines:
 
 ---
 
-## Section 5: Tab 3 — Finance Credit Memos
+## Section 5: Customer RMA Hub — Credit Memos Ledger Sub-Tab
 
 - [ ] **TC-FIN-01 ("+ Issue Credit Memo" Modal)**
-  * **Location**: Tab 3 button **"+ Issue Credit Memo"**
+  * **Location**: `Customer RMA Hub` -> `💳 Credit Memos Ledger` sub-tab -> **"+ Issue Credit Memo"**
   * **Action**: Click button.
   * **Expected Behavior**: `CreditMemoModal` opens. Selecting an RMA report from the dropdown auto-populates barcode, item name, quantity, unit price, and gross amount.
 
@@ -800,7 +798,7 @@ Each test scenario defines:
 
 #### 8.4.9 Filtering & Column Sorting in Credit Memos & Supplier Claims
 - [ ] **TC-CM-SORT-01 (Credit Memos Table Filtering & Sorting)**
-  * **Location**: Credit Memos Tab
+  * **Location**: `Customer RMA Hub` -> `💳 Credit Memos Ledger` sub-tab
   * **Expected Behavior**:
     1. Search filter, Supplier `<select>` dropdown, and Date Range filters filter rows reactively.
     2. Table headers (CM #, RMA, Product, Qty, Gross, Pull Out Ref, Credit Amount, Issued By) are clickable and sort ascending/descending with arrow indicators.
@@ -1822,7 +1820,7 @@ Each test scenario defines:
   * **Location**:
     - **Customer RMA Hub** -> `Export Inbound (.xlsx)`
     - **Supplier Hub (RTV)** -> `Export Supplier Claims (.xlsx)`
-    - **Finance Credit Memos** -> `Export Excel (.xlsx)`
+    - **Customer RMA Hub -> `💳 Credit Memos Ledger`** -> `Export Excel (.xlsx)`
     - **Full Audit Log Modal** -> `Export Excel (.xlsx)`
     - **Test Mode Sandbox** -> Sub-tab exports (`Customer`, `Supplier`, `Credit Memos`)
   * **Action**: Click each export button in both Live Mode and Test Mode Sandbox.
@@ -1907,16 +1905,55 @@ Each test scenario defines:
 
 ---
 
+## Section 25: Phase 25 — OpenAPI Sync, Customer 4-Choice, 5x10 Multi-Photo + Plate OCR, Custom Copy Counts, Unified QR Studio, & 10-Day Follow-Up SLA Verification
+
+- [ ] **TC-P25-01 (OpenAPI 3.1 `/docs` & Living Context Synchronization)**
+  * **Location**: `/api/openapi.json`, `/docs`, `/api/context`, `/PROJECT_CONTEXT.txt`
+  * **Expected Behavior**: Dynamic Zod OpenAPI spec documents Customer 4-Choice (`customer_credit`, `customer_exchange`, `scrap`, `restock_good`), `SupplierPickupMetadata` (`ourCopyCount`, `counterpartyCopyCount`, `pageLayout`, `processed_by`), `FollowUpMetadata`, `POST /api/upload-photo` (`?action=inspect-plate|inspect-driver-id|inspect-paperwork`), and `GET`/`POST /api/send-email` (`?action=daily-followup|daily-matrix`) with `API_ROUTE_COUNT === 12` preserved and zero legacy sandbox domain references (`mgan@pingconmarketing.com` active everywhere).
+
+- [ ] **TC-P25-02 (Customer Hub 4-Choice Labels, Plain B&W Separated Forms & Custom Copy Counts)**
+  * **Location**: `SimpleSupplierRtvWizardModal`, `SupplierPickupFormModal`, `CreditMemoVoucherModal`
+  * **Expected Behavior**:
+    1. Customer Hub 4-Choice shows Customer Credit Memo / Return Handover (`customer_credit`), Customer Buffer Replacement / Good Stock Exchange (`customer_exchange`), Scrap, and Restock Good, rendering plain B&W **Customer Credit Return Form** & **Customer Buffer Replacement Form**.
+    2. Both `SupplierPickupFormModal` and `CreditMemoVoucherModal` default to separated Letter pages (`pageLayout: 'repeating'`), expose `1 + 1 (2 Papers)` & `2 Ours + 1 Theirs (3 Papers)` presets plus manual `Our Company Copies` & `Customer/Supplier Copies` inputs (verifying `2 + 2 = 4` renders `Total Output: 4 Copies` / `4` `.voucher-sheet` pages and `COPY 4 OF 4 — CUSTOMER COPY`), and disable Print when totals equal `0`.
+
+- [ ] **TC-P25-03 (Up to 10 Photos/Slot [50 Total], Truck Plate OCR, Any PH Gov't ID OCR & Mandatory `Processed By`)**
+  * **Location**: `SimpleSupplierRtvWizardModal` Step 2 + `api/upload-photo.js?action=inspect-plate`
+  * **Expected Behavior**: All 5 pickup slots accept multiple images up to `10` per slot (`Total: 7/50 photos` across 5/5 slots verified), uploading a blank Slot 3 (`truck_plate`) image invokes `?action=inspect-plate` to auto-populate `Plate #` (`NAA-7788`), PhilSys National ID selection + OCR populates Driver ID #, and Next/Finalize remains gated until manual `Processed By` is entered.
+
+- [ ] **TC-P25-04 (Debit Claim Email Rules & Multi-Recipient `new_rma` Editor Authorization)**
+  * **Location**: `notificationService.js`, `rmaHelpers.js`, `/api/v1/rma-email-edit`
+  * **Expected Behavior**: `pickup_debit_claim` email bodies include `Explanation / Defect Notes:` (merged cleanly across items), completely omit `Store / Branch:` and `Warehouse Location:`, embed all pickup slot photos, attach `Debit-Claim-Form-*.pdf`, and New RMA Alert emails grant never-expiring Google Identity edit links to active `To` + `CC` recipients.
+
+- [ ] **TC-P25-05 (10-Calendar-Day Follow-Up Workflow, Pickup/Case-Close Stopping, >10-Day Auto-Dispose & `.xlsx` Human Statuses)**
+  * **Location**: `CustomerHubTab`, `SupplierClaimsTab`, `SupplierFollowUpModal`, `/api/send-email?action=daily-followup`
+  * **Expected Behavior**:
+    1. Seeded blank-supplier RMAs expose `+ Set Supplier & Email` (`SupplierFollowUpModal`), `📧 Send Follow-Up`, and `✓ Case Close` in both Supplier Hub and Customer Hub (Live & Sandbox).
+    2. `buildFollowUpEmailContent` renders `[TEST] ... Day 1 of 10` through `Day 10 of 10`, the 4-Step table, and the 10-day sanitation warning for both streams.
+    3. Picked-up / closed RMAs return `CASE_ALREADY_CLOSED` on `/api/send-email?action=daily-followup`; backdated >10-day open RMAs return inside `autoDisposed` (`Disposal / Scrap Area`, `status: 'resolved'`) and notify `new_rma` recipients (`buildAutoDisposedEmailContent`).
+    4. Inbound Customer Hub & Outbound Supplier Claims `.xlsx` exports emit valid OOXML with `Workflow Step (1-4)`, `Follow-Up Day (of 10)`, `Case Closed Date (YYYY-MM-DD)`, and zero raw snake_case status strings.
+
+- [ ] **TC-P25-06 (Unified Printable QR Card & Multi-QR US Letter Studio)**
+  * **Location**: `ReturnQRModal.jsx`, `qrDownload.js`, `customStickerCanvas.js`
+  * **Expected Behavior**: Single unified B&W QR Card preview matches `Save QR (PNG)` and US Letter printshots, clearly shows **Quantity & Unit**, omits redundant Supplier Name pills, supports per-QR custom mm & scale, defaults to `US Letter` (`letter`), and toggles cleanly between `Auto-Fit All to 1 Page` and `Multiple Pages` in multi-select QR printing.
+
+- [ ] **TC-P25-07 (Relocated Credit Memos IA, Per-Email Recipients, Editable Schedules & Production Verification)**
+  * **Location**: `CustomerHubTab`, `SettingsTab`, `RMAMatrixExportModal`, `vercel.json`, `.github/workflows/rma-scheduler.yml`
+  * **Expected Behavior**: `Credit Memos Ledger` operates seamlessly inside Customer Hub (Live & Sandbox); `manual_matrix` & other recipient editors persist To/CC chips and `Custom Date Range`; Settings persists custom `Matrix Auto-Send Time` & `Follow-Up Auto-Send Time` (`Asia/Manila`) + `mgan@pingconmarketing.com`; full `tests/01`–`08` Playwright suite passes 100%; live Vercel production responds HTTP 200 across `/`, `/docs`, `/api/v1/health`, `/PROJECT_CONTEXT.txt`.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
 | :--- | :--- | :--- | :--- |
 | **Phase 1: Dock Arrival & Geofence** | Public Portal (`/`) | `VERIFIED (PLAYWRIGHT 01)` | *Lead QA Director* |
 | **Phase 2: Admin SKU & ERP Lookup** | Return Reports & Catalog | `VERIFIED (PLAYWRIGHT 02)` | *Lead QA Director* |
-| **Phase 3: Streamlined Sticker Studio & Letter B&W** | ReturnQRModal & Pickup Form | `VERIFIED (PLAYWRIGHT 01/06)` | *Lead QA Director* |
-| **Phase 4: Credit Memo ₱10K Rule & Consolidated CM** | Finance Accounting | `VERIFIED (PLAYWRIGHT 05)` | *Lead QA Director* |
-| **Phase 5: Supplier RTV Single & Batch Claims** | Supplier Hub & RTV Claims | `VERIFIED (PLAYWRIGHT 03/06)` | *Lead QA Director* |
+| **Phase 3: Unified QR Print Studio & Letter B&W** | ReturnQRModal & Pickup Form | `VERIFIED (PLAYWRIGHT 01/03/06/07)` | *Lead QA Director* |
+| **Phase 4: Credit Memo Ledger Sub-Tab & 2+2 Vouchers** | Customer Hub & Accounting | `VERIFIED (PLAYWRIGHT 05)` | *Lead QA Director* |
+| **Phase 5: Supplier RTV Single & Batch Claims** | Supplier Hub & RTV Claims | `VERIFIED (PLAYWRIGHT 03/06/07)` | *Lead QA Director* |
 | **Phase 6: SHA-256 REST API Vault** | Partner Integration (`/docs`) | `VERIFIED (PLAYWRIGHT 08)` | *Lead QA Director* |
 | **Phase 7–23: Core Infrastructure, Queues, AI OCR, `.xlsx`** | Full Platform & Supabase | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
-| **Phase 24: Streamlined UI, US Letter B&W, 4 PDF Emails, Matrix & Consolidation** | End-to-End Platform & Docs | `VERIFIED` | *Lead QA Director* |
+| **Phase 24: Streamlined UI, US Letter B&W, 4 PDF Emails, Matrix & Consolidation** | End-to-End Platform & Docs | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
+| **Phase 25: OpenAPI Sync, 4-Choice Customer Hub, 5x10 Photos, Plate OCR, 10-Day SLA** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
 

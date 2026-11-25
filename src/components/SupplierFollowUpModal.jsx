@@ -58,7 +58,8 @@ export default function SupplierFollowUpModal({
         : (report.rma_type === 'supplier_outbound' ? true : wf.followUpEnabled)
     );
     setFeedback(null);
-  }, [isOpen, report?.id, report?.rma_number, catalogProducts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, report?.id, report?.rma_number]);
 
   const recordIsTest = useMemo(
     () => Boolean(isTestMode || (report && isTestRecord(report))),

@@ -39,7 +39,13 @@ export async function authorizeCronOrAdmin(req) {
     };
   }
 
-  const { data: userData, error: userErr } = await supabase.auth.getUser(bearerToken);
+  let { data: userData, error: userErr } = await supabase.auth.getUser(bearerToken);
+  if ((userErr || !userData?.user?.email) && (!userErr?.status || userErr.status >= 500)) {
+    await new Promise((r) => setTimeout(r, 300));
+    const retry = await supabase.auth.getUser(bearerToken);
+    userData = retry.data;
+    userErr = retry.error;
+  }
   const userEmail = String(userData?.user?.email || '').trim().toLowerCase();
   if (userErr || !userEmail) {
     return {

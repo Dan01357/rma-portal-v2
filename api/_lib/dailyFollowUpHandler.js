@@ -200,12 +200,17 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
     transporter = createSmtpTransport();
   }
 
-  // 4. Fetch reports + catalog products
+  // 4. Fetch reports (targeted single-RMA lookup when rmaNumber is specified) + catalog products
+  const buildReportsQuery = () => {
+    const q = supabase.from('rma_reports').select('*');
+    if (targetRmaNumber) {
+      return q.ilike('rma_number', targetRmaNumber);
+    }
+    return q.order('created_at', { ascending: false });
+  };
+
   const [reportsRes, productsRes] = await Promise.all([
-    supabase
-      .from('rma_reports')
-      .select('*')
-      .order('created_at', { ascending: false }),
+    buildReportsQuery(),
     supabase
       .from('products')
       .select('*')
@@ -218,7 +223,22 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
     });
   }
 
-  const allRows = Array.isArray(reportsRes.data) ? reportsRes.data : [];
+  let allRows = Array.isArray(reportsRes.data) ? reportsRes.data : [];
+  if (targetRmaNumber && allRows.length > 0) {
+    const parentIds = allRows.map((r) => r.id).filter(Boolean);
+    if (parentIds.length > 0) {
+      const { data: childRows } = await supabase
+        .from('rma_reports')
+        .select('*')
+        .in('parent_rma_id', parentIds);
+      if (Array.isArray(childRows) && childRows.length > 0) {
+        const seen = new Set(allRows.map((r) => r.id));
+        for (const c of childRows) {
+          if (!seen.has(c.id)) allRows.push(c);
+        }
+      }
+    }
+  }
   const catalogProducts = Array.isArray(productsRes.data) ? productsRes.data : [];
 
   const activeRows = allRows.filter((r) => !isTrashedRecord(r) && !isArchivedRecord(r));

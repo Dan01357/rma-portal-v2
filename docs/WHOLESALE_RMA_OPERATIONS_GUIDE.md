@@ -34,10 +34,9 @@ flowchart TD
 
 The Admin Workspace provides 4 crystal-clear, segregated operational hubs:
 1. **Saved Products Catalog** (`adminActiveTab === 'products'`): Verified master SKU catalog with multi-vendor auto-suggest and ERP sync.
-2. **Customer RMA Hub (Inbound Logistics)** (`adminActiveTab === 'customer_reports'`): Dedicated to supermarket and store branch returns (`rma_type: 'customer_inbound'`), billing document matching (SI#/DR#/PO#), and Customer Credit Memo issuance.
-3. **Supplier Hub (RTV Claims)** (`adminActiveTab === 'supplier_claims'`): Unified vendor reverse logistics for warehouse floor defects (`rma_type: 'supplier_outbound'`) and RTV dispositions (`SupplierClaimsTab.jsx`), supporting single and batch vendor debit notes with sequential RTV IDs.
-4. **Finance Credit Memos** (`adminActiveTab === 'credit_memos'`): Official accounting credit memorandum ledger, 12% VAT calculations, and printable vouchers.
-5. **Settings & SMTP** (`adminActiveTab === 'settings'`, Super Admin Only): API key vault, Google SMTP notification configuration, and system diagnostics.
+2. **Customer RMA Hub (Inbound Logistics & Credit Memos Ledger)** (`adminActiveTab === 'customer_reports'`): Unified inbound returns (`rma_type: 'customer_inbound'`), billing document matching (`SI#`/`DR#`/`PO#`), 4-Step Follow-Up SLA tracking, and an integrated **`Credit Memos Ledger`** sub-tab (in both Live Mode and Test Mode Sandbox) with 12% VAT math and multi-copy US Letter vouchers.
+3. **Supplier Hub (RTV Claims)** (`adminActiveTab === 'supplier_claims'`): Unified vendor reverse logistics for warehouse floor defects (`rma_type: 'supplier_outbound'`) and 4-Choice RTV dispositions (`SupplierClaimsTab.jsx`), supporting single and batch vendor debit notes with sequential RTV IDs (`RTV-` / `RTV-TEST-`).
+4. **Settings & SMTP** (`adminActiveTab === 'settings'`, Super Admin Only): API key vault, Per-Email Recipient Profiles (`email_recipients_by_type`), editable `HH:mm Asia/Manila` schedules, Google SMTP notification configuration, and system diagnostics.
 
 ---
 
@@ -204,14 +203,13 @@ When a delivery truck, return pallet, or customer shipment arrives at the wareho
      }
      ```
 
-7. **Instant Box QR Sticker**:
-   * The success screen provides an immediate **"Save Sticker (PNG)"** button.
-   * Renders a 1200x1600 canvas sticker with:
+7. **Unified Printable QR Card (`Save QR (PNG)` & `Resize / Print QR`)**:
+   * The success screen provides an immediate **`Save QR (PNG)`** download button and **`Resize / Print QR`** studio trigger (one single centered B&W QR Card design across preview, PNG export, and print).
+   * Renders a high-contrast PNG / US Letter printout containing:
      * High-contrast QR code pointing to `https://rma-portal-v2.vercel.app/?rma=RMA-...`
      * Auto-scaled RMA number (26px–54px dynamic sizing to strictly prevent QR frame overlap)
-     * Wrapped 2-line item description (up to 960px width)
-     * Defect reason, quantity, reporter, and supplier pill
-     * Dashed cut lines for affixing directly onto outer cartons.
+     * Wrapped item description (up to 960px width), **Quantity & Packaging Unit** badge, defect reason, and reporter (no redundant supplier clutter on the card)
+     * Dashed cut frame for affixing directly onto outer cartons.
 
 ---
 
@@ -261,7 +259,7 @@ The unified **`ProductEditModal`** opens with pre-filled barcode details:
 
 ---
 
-## Chapter 3: Physical Inspection, Triage & 4x6" Thermal Printing
+## Chapter 3: Physical Inspection, 4-Choice Triage & Unified US Letter Printing
 
 Once merchandise is physically sorted at the inspection benches, warehouse inspectors record physical condition and storage routing.
 
@@ -272,32 +270,32 @@ Inspectors do not need to switch tabs or scan codes again:
 - **Clicking the "Details" / "Split Qty" button** opens the modal.
 
 ### 3.2 Streamlined QuickRMAActionModal Controls
-Deprecated triage panels (Condition Grade dropdown, Automated Lifecycle Stage box, Hold / Quarantine controls, Buffer Slips, Driver QR Widget, Gate Passes, and 5/6 Triage Card grids) have been removed in favor of:
+Deprecated triage panels (Condition Grade dropdown, Automated Lifecycle Stage box, Hold / Quarantine controls, Buffer Slips, Driver QR Widget, 4x6" Thermal labels, and 5/6 Triage Card grids) have been removed in favor of:
 1. **Stream Switcher**: Instant reclassification between **Customer Hub (Inbound)** and **Supplier RTV (Outbound)**.
 2. **Current 4-Choice Outcome & Pickup Banner + Launch Button**: Displays the live outcome & pickup timestamp (`YYYY-MM-DD HH:mm`) with **"Open 4-Choice / Pickup Window"**.
 3. **Split Quantity**: Split partial units into independent `-B` / `-C` child tickets (e.g., partial Restock & partial Debit Claim).
 4. **Edit Details & Documents**: Case-insensitive `ProductAutoSuggest` (`erply_products` + Supabase catalog) for Item Name/SKU, Commercial Doc #s (`SI #`, `DR #`, `PO #`), `Expiry Date (YYYY-MM-DD)` with explicit `ISO (YYYY-MM-DD)` confirmation readout, and Super Admin Restitution (>₱10,000 governance).
 5. **Customer Credit Memo Launch** & **RMA Audit Trail Timeline**.
 
-### 3.3 Unified 4-Choice Outcomes & Purchasing Replenishment
-When opening the **4-Choice Outcome & Pickup Window** (`SimpleSupplierRtvWizardModal.jsx`), staff pick one clear operational decision:
+### 3.3 Unified 4-Choice Outcomes, Multi-Photo Pickup & Plate/ID OCR
+When opening the **4-Choice Outcome & Pickup Window** (`SimpleSupplierRtvWizardModal.jsx`), staff pick one clear operational decision tailored to the stream:
 
 #### A. Customer RMA Hub (`customer_inbound`):
-1. **💵 Driver Picked Up / Accepted for Debit / Credit**: Advances to 5-Photo Driver Verification & Unified US Letter Form.
-2. **🔄 Driver Picked Up / Replaced with Good Stock**: Advances to 5-Photo Driver Verification & Unified US Letter Replacement Form.
+1. **💳 Customer Credit Memo / Return Handover (`customer_credit`)**: Advances to 5-Slot Multi-Photo Driver Verification & generates a plain B&W US Letter **Customer Credit Return Form** (separated pages, customizable copy counts).
+2. **🔄 Customer Buffer Replacement / Good Stock Exchange (`customer_exchange`)**: Advances to 5-Slot Multi-Photo Driver Verification & generates a plain B&W US Letter **Customer Buffer Replacement Form**.
 3. **🗑️ Throw Away / Dispose (Scrap)**: Moves to `Disposal / Scrap Area` with **Re-Order Stock? (`YES` / `NO`)** selector & sends `[RMA Scrapped]` notification.
 4. **🟢 Put Back on Good Shelf (Restock)**: Moves to `Good Stock Area` (`needs_reorder: false`) & sends `[RMA Restocked]` notification.
 
 #### B. Supplier RTV Hub (`supplier_outbound`):
-1. **💵 Return to supplier for Debit Claim**: Assigns or reuses `RTV-` / `RTV-TEST-` claim #, captures 5 Drive pickup photos (`driver_license_front`, `driver_license_back`, `truck_plate`, `driver_handover`, `pickup_items`), opens US Letter B&W **SUPPLIER DEBIT CLAIM & PICKUP VALIDATION FORM**, and emails supplier + attached PDF.
-2. **🔄 Return to supplier for Replacement / Exchange**: Captures 5 pickup photos, opens US Letter B&W **SUPPLIER REPLACEMENT / EXCHANGE & PICKUP FORM**, and emails supplier + attached PDF.
+1. **💵 Return to supplier for Debit Claim (`debit`)**: Assigns or reuses `RTV-` / `RTV-TEST-` claim #, captures up to **10 photos per slot (50 total across 5 slots: License Front/Back, Truck Plate, Driver Handover, Pickup Items)**, auto-scans PH Government IDs & blank **Truck Plate #** via `POST /api/upload-photo?action=inspect-plate`, requires manual `Processed By`, opens US Letter B&W **SUPPLIER DEBIT CLAIM & PICKUP VALIDATION FORM** (with `1+1`, `2+1`, or custom `Our Company Copies` + `Supplier/Customer Copies` e.g. `2 + 2 = 4`), and emails supplier (`explanation` shown, `Store / Branch` & `Warehouse Location` omitted) + attached PDF.
+2. **🔄 Return to supplier for Replacement / Exchange (`replacement`)**: Captures multi-photo pickup slots + Plate/ID OCR + `Processed By`, opens US Letter B&W **SUPPLIER REPLACEMENT / EXCHANGE & PICKUP FORM**, and emails supplier + attached PDF.
 3. **🗑️ Throw Away / Dispose (Scrap)**: Moves to `Disposal / Scrap Area` with Re-Order switch & dispatches `[RMA Scrapped]` email.
 4. **🟢 Put Back on Good Shelf (Restock)**: Moves to `Good Stock Area` & dispatches `[RMA Restocked]` email.
 
-### 3.4 US Letter Plain B&W Sticker Studio (`ReturnQRModal.jsx`)
-Clicking any RMA QR sticker button opens the resizeable plain black-and-white **Box Sticker Studio**:
-* Presets: `Standard Square (80 x 80 mm)`, `Large Square (100 x 100 mm)`, `Extra Large (Half Letter) (140 x 195 mm)`, or custom mm width/height with `Reset` button.
-* Plain black-and-white ink on **US Letter (`8.5in x 11in`, `letter portrait`)** with explicit `Date & Time (YYYY-MM-DD HH:mm)` and `Expiry Date (YYYY-MM-DD)` stamps plus Reporter Signature line.
+### 3.4 Unified Printable QR Card & Multi-QR Studio (`ReturnQRModal.jsx`)
+Clicking `Resize / Print QR` or `Print Selected QRs` opens ONE unified plain black-and-white **QR Print Studio**:
+* Presets: `Standard Square (80 x 80 mm)`, `Large Square (100 x 100 mm)`, `Extra Large (Half Letter) (140 x 195 mm)`, or custom mm width/height & zoom scale per QR with `Reset` button.
+* Plain black-and-white ink defaulting to **US Letter (`8.5in x 11in`)** (supports Letter, A4, Legal, Custom paper sizes) with **Quantity & Unit**, explicit `Date & Time (YYYY-MM-DD HH:mm)`, `Expiry Date (YYYY-MM-DD)`, and Reporter Signature line (zero supplier clutter), supporting both **`Auto-Fit All to 1 Page`** packing and **`Multiple Pages`**.
 
 ---
 
@@ -661,13 +659,13 @@ Legacy 5/6 triage cards, Condition Grade dropdowns, Automated Lifecycle Stage ca
 2. **Streamlined QuickRMAActionModal**: Keeps strictly Stream Switcher, Current 4-Choice Outcome Banner (`Open 4-Choice / Pickup Window`), `Split Qty` (`-B`/`-C`), `Edit Details & Documents` (`ProductAutoSuggest`), `+ Issue Credit Memo`, and `RMA Audit Trail`.
 3. **Strictly Two Unified Printables**:
    - **Unified RMA QR Print Studio (`ReturnQRModal.jsx`)**: Single centered Printable QR Card source of truth for on-screen preview, `Save QR (PNG)`, and US Letter `Resize / Print QR` (displaying Quantity & Unit cleanly, supporting individual per-QR mm/scale sizing and multi-QR packed or per-page printing).
-   - **Unified Debit Claim / Replacement & Pickup Form (`SupplierPickupFormModal.jsx`)**: US Letter `8.5" x 11"` plain B&W, dual-copy compact cut for 1–4 items or repeating full-page copy for 5+ items, single & multi-RMA consolidated batches.
+   - **Unified Debit Claim / Replacement & Pickup Form (`SupplierPickupFormModal.jsx`) & Credit Memo Voucher (`CreditMemoVoucherModal.jsx`)**: US Letter `8.5" x 11"` plain B&W, separated pages by default with presets (`1 + 1`, `2 + 1`) and customizable `Our Company Copies` + `Supplier / Customer Copies` counters (e.g. `2 + 2 = 4`), supporting single & multi-RMA consolidated batches.
 
 ### 12.2 The 4 Lifecycle Email Triggers, Per-Email Recipients & Matrix Dispatch Studio
 - `[RMA Scrapped]` (`scrapped`): Dispatched on Scrap confirmation (`Re-Order: YES/NO`).
 - `[RMA Restocked]` (`restocked`): Dispatched when returned goods enter `Good Stock Area`.
-- `[Driver Picked Up - Debit Claim]` (`pickup_debit_claim`): Sent to configured + supplier `To`/`CC` with **Explanation / Defect Notes** per line, all 5 pickup photos (accepting **ANY valid Philippine Government / Legal ID**: LTO Driver's License, PhilSys National ID, Passport, UMID, SSS, Postal, PRC, Voter's ID, TIN, Company ID), and **`Debit-Claim-Form-*.pdf`** attached.
-- `[Driver Picked Up - Replacement]` (`pickup_replacement`): Sent to configured + supplier `To`/`CC` with all 5 pickup photos and **`Replacement-Form-*.pdf`** attached.
+- `[Driver Picked Up - Debit Claim]` (`pickup_debit_claim`): Sent to configured + supplier `To`/`CC` with **Explanation / Defect Notes** per line (`Store / Branch` and `Warehouse Location` omitted), up to 10 photos/slot across all 5 pickup slots (accepting **ANY valid Philippine Government / Legal ID** + Truck Plate OCR via `/api/upload-photo?action=inspect-plate` + manual `Processed By`), and **`Debit-Claim-Form-*.pdf`** attached.
+- `[Driver Picked Up - Replacement]` (`pickup_replacement`): Sent to configured + supplier `To`/`CC` with all pickup photos and **`Replacement-Form-*.pdf`** attached.
 - **Per-Email Recipient Profiles (`email_recipients_by_type`)**: Settings -> **Per-Email Recipient Manager** and collapsible `<EmailRecipientsEditor />` controls let Admin/Staff customize multi-**To** and **CC** lists per notification type (`new_rma`, `pickup_debit_claim`, `pickup_replacement`, `rma_scrapped`, `rma_restocked`, `daily_matrix_auto`, `manual_matrix`, `supplier_followup`, `product_update`, `invite_email`) with reset-to-global-defaults. On public intake (`/`), the recipient selector is shown exclusively to authenticated Staff/Admin/Super Admin and hidden from external invited customers. Test Mode strictly overrides delivery to the configured Sandbox email (default `mgan@pingconmarketing.com`) with `[TEST] ` as the first subject word.
 - **New RMA Alert Email Editor Button**: Every New RMA Alert email embeds a never-expiring (`expires_at = null`, manually revocable by Admin) Google Identity-locked **`✏️ Edit RMA Details & Documents`** button authorized for **ALL active `To` + `CC` recipients** on that email in Live Mode (`mgan@pingconmarketing.com` or Sandbox override in Test Mode), backed by `CustomerRMAInvitesModal` (`✏️ RMA Details Editor` w/ `Never Expires`), `GatekeeperPinModal`, `RmaEmailEditorView`, and `/api/v1/rma-email-edit`.
 - **Auto Daily PHT Matrix & 10-Calendar-Day Follow-Up SLA (`dailyMatrixEmailHandler.js` & `dailyFollowUpHandler.js`)**: Both `/api/send-email?action=daily-matrix` and `/api/send-email?action=daily-followup` respect Settings-configurable `HH:mm Asia/Manila` schedules (defaults `13:00` Matrix / `08:00` Follow-Up), dispatched via GitHub Actions (every 15 min) + `vercel.json` Cron + Admin browser scheduler while preserving `API_ROUTE_COUNT === 12`. Follow-ups track 4 steps (`Report Date -> Waiting Day N of 10 -> Picked Up/Handover Date -> Case Close`), stop on pickup/`✓ Case Close`, and auto-dispose >10-day unclaimed RMAs to `Scrapped / Disposed` (`Disposal / Scrap Area`).

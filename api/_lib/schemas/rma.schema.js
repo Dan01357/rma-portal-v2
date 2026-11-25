@@ -38,6 +38,52 @@ export const RMATypeEnum = z.enum([
   'supplier_outbound'
 ]);
 
+export const FourChoiceOutcomeEnum = z.enum([
+  'customer_credit',
+  'customer_exchange',
+  'supplier_credit',
+  'supplier_exchange',
+  'scrap',
+  'restock_good'
+]).openapi({
+  description: '4-Choice workflow selection: Customer Hub (customer_credit, customer_exchange, scrap, restock_good) or Supplier RTV (supplier_credit, supplier_exchange, scrap, restock_good).'
+});
+
+export const PickupPhotoSlotsSchema = z.object({
+  driver_license_front: z.array(z.string().url()).max(10).optional().openapi({ description: 'Up to 10 Drive/Storage photo URLs of Driver PH Gov/Legal ID front' }),
+  driver_license_back: z.array(z.string().url()).max(10).optional().openapi({ description: 'Up to 10 photo URLs of Driver PH Gov/Legal ID back' }),
+  truck_plate: z.array(z.string().url()).max(10).optional().openapi({ description: 'Up to 10 photo URLs of Delivery Truck Plate (auto-OCR via POST /api/upload-photo?action=inspect-plate)' }),
+  driver_handover: z.array(z.string().url()).max(10).optional().openapi({ description: 'Up to 10 photo URLs of Driver receiving/handover proof' }),
+  pickup_items: z.array(z.string().url()).max(10).optional().openapi({ description: 'Up to 10 photo URLs of physical merchandise (50 photos max across all 5 categories)' })
+}).optional();
+
+export const SupplierPickupMetadataSchema = z.object({
+  disposition: FourChoiceOutcomeEnum.optional(),
+  processed_by: z.string().min(1).optional().openapi({ example: 'Juan Dela Cruz', description: 'Mandatory manually entered Pingcon staff full name (zero auto-fill on new records)' }),
+  driver_name: z.string().optional().openapi({ example: 'Pedro Penduko' }),
+  driver_id_type: z.string().optional().openapi({ example: 'PhilSys National ID (PhilID / ePhilID)' }),
+  driver_license_no: z.string().optional().openapi({ example: 'PSN-4801-9988-7766' }),
+  truck_plate: z.string().optional().openapi({ example: 'PW-8899' }),
+  photos: PickupPhotoSlotsSchema,
+  ourCopyCount: z.number().int().min(0).max(10).optional().openapi({ example: 2, description: 'Customizable Our Company copy count for US Letter B&W Pickup/Handover & Credit Memo forms' }),
+  counterpartyCopyCount: z.number().int().min(0).max(10).optional().openapi({ example: 2, description: 'Customizable Customer/Supplier copy count for US Letter B&W Pickup/Handover & Credit Memo forms' }),
+  pageLayout: z.enum(['separated', 'combined']).optional().openapi({ example: 'separated', description: 'US Letter B&W form pagination: separated full pages vs combined 50% cut dual-copy sheet' }),
+  picked_up_at: z.string().datetime().nullable().optional()
+}).passthrough().openapi('SupplierPickupMetadata');
+
+export const FollowUpMetadataSchema = z.object({
+  enabled: z.boolean().optional().openapi({ example: true, description: '10-Calendar-Day SLA daily follow-up countdown switch' }),
+  started_at: z.string().datetime().optional().openapi({ description: 'Step 1/2 countdown start ISO timestamp (Asia/Manila calendar day 0..10)' }),
+  picked_up_at: z.string().datetime().nullable().optional().openapi({ description: 'Step 3 Picked Up / Handover timestamp (automatically halts follow-up reminders)' }),
+  case_closed_at: z.string().datetime().nullable().optional().openapi({ description: 'Step 4 Case Close or Auto-Dispose completion timestamp' }),
+  auto_disposed_at: z.string().datetime().nullable().optional(),
+  case_status: z.string().optional().openapi({ example: 'waiting_pickup', description: 'e.g. waiting_pickup, picked_up_closed, auto_disposed_after_10_days' }),
+  last_sent_day: z.number().int().min(0).max(30).optional().openapi({ example: 2 }),
+  last_sent_pht_date: z.string().optional().openapi({ example: '2026-11-24' }),
+  supplier_email_to: z.string().optional().openapi({ example: 'claims@supplier.com' }),
+  supplier_email_cc: z.string().optional().openapi({ example: 'ap@supplier.com' })
+}).passthrough().openapi('FollowUpMetadata');
+
 export const RMAReportSchema = z.object({
   id: z.number().int().openapi({ example: 1042 }),
   rma_number: z.string().openapi({ example: 'RMA-2026-0001-6TYH' }),
@@ -74,6 +120,13 @@ export const RMAReportSchema = z.object({
   total_items: z.number().int().default(1).openapi({ example: 1, description: 'Total distinct items in manifest' }),
   total_quantity: z.number().int().default(1).openapi({ example: 1, description: 'Summed quantity across all items in manifest' }),
   notes: z.string().nullable().optional().openapi({ example: 'Customer returned item with receipt' }),
+  ai_document_metadata: z.object({
+    is_test: z.boolean().optional(),
+    test_mode: z.boolean().optional(),
+    workflow_resolution: z.enum(['restocked', 'reordered', 'scrapped_no_reorder']).optional(),
+    supplier_pickup: SupplierPickupMetadataSchema.optional(),
+    follow_up: FollowUpMetadataSchema.optional()
+  }).passthrough().optional().openapi({ description: 'Structured metadata including 5-slot multi-photo driver pickup (up to 10/slot, 50 total), 4-Step / 10-Day SLA follow-up tracking, and Test Mode isolation flags' }),
   created_at: z.string().datetime().openapi({ example: '2026-10-26T14:30:00.000Z' })
 }).openapi('RMAReport');
 
@@ -510,6 +563,132 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
       200: { description: 'RMA record updated cleanly with edited_by_email and updated_at' },
       401: { description: 'Unauthorized session', content: { 'application/json': { schema: StandardErrorSchema } } },
       403: { description: 'Identity mismatch, revoked/expired invite, or Live/Test isolation block', content: { 'application/json': { schema: StandardErrorSchema } } }
+    }
+  });
+
+  // POST /api/upload-photo?action=inspect-plate (plus multi-photo pickup uploads)
+  registry.registerPath({
+    method: 'post',
+    path: '/api/upload-photo',
+    summary: 'Upload Proof/Pickup Photo (up to 5x10=50) & OCR Inspection (?action=inspect-plate / inspect-driver-id / inspect-paperwork)',
+    description: 'Handles Google Shared Drive / Supabase Storage uploads for intake photos and 5-category driver pickup slots (`string[]` up to 10 photos/slot, 50 total), plus Gemini AI OCR actions including `?action=inspect-plate` for Slot 3 Delivery Truck Plate extraction and `?action=inspect-driver-id` for Philippine Gov/Legal ID extraction.',
+    tags: ['AI Document Inspection'],
+    request: {
+      query: z.object({
+        action: z.enum(['inspect-paperwork', 'inspect-driver-id', 'inspect-plate']).optional().openapi({
+          example: 'inspect-plate',
+          description: 'Optional AI OCR action (`inspect-plate` auto-fills Truck Plate # on Slot 3 upload).'
+        })
+      }),
+      body: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: z.object({
+              fileData: z.string().optional().openapi({ description: 'Base64 / data-URI WebP or PNG image string' }),
+              mimeType: z.string().optional().default('image/png'),
+              rmaNumber: z.string().optional().openapi({ example: 'RMA-2026-0001-6TYH' }),
+              fileName: z.string().optional()
+            })
+          }
+        }
+      }
+    },
+    responses: {
+      200: {
+        description: 'Photo uploaded cleanly or OCR fields extracted (including `is_valid_plate` & `plate_number` for `?action=inspect-plate`)'
+      }
+    }
+  });
+
+  const DailySchedulerResponseSchema = z.object({
+    success: z.boolean().openapi({ example: true }),
+    dryRun: z.boolean().optional(),
+    skipped: z.boolean().optional(),
+    reason: z.string().optional().openapi({ example: 'BEFORE_SCHEDULED_TIME' }),
+    phtDate: z.string().optional().openapi({ example: '2026-11-24' }),
+    phtTime: z.string().optional().openapi({ example: '08:05' }),
+    targetTimePht: z.string().optional().openapi({ example: '08:00', description: 'Editable HH:mm Asia/Manila target schedule persisted in rma_settings' }),
+    isTestMode: z.boolean().optional(),
+    sandboxEmail: z.string().optional().openapi({ example: 'mgan@pingconmarketing.com' }),
+    summary: z.object({
+      scanned: z.number().int().optional(),
+      followUpsSent: z.number().int().optional(),
+      autoDisposed: z.number().int().optional(),
+      skippedCount: z.number().int().optional(),
+      errorCount: z.number().int().optional()
+    }).optional()
+  });
+
+  // GET /api/send-email?action=daily-followup|daily-matrix (Cron / Scheduled PHT Execution)
+  registry.registerPath({
+    method: 'get',
+    path: '/api/send-email',
+    summary: 'Execute Scheduled Daily 10-Day Pickup Follow-Up (?action=daily-followup) or Daily Matrix (.xlsx) (?action=daily-matrix)',
+    description: 'Vercel Cron / GitHub Actions endpoint (protected by CRON_SECRET or Admin Bearer JWT under 12-function cap). Respects adjustable `autoSendTimePht` (`respectSchedule=true`) in `Asia/Manila` (`08:00` default Follow-Up, `13:00` default Matrix) and enforces Test Sandbox isolation (`mgan@pingconmarketing.com` + `[TEST] ` subject prefix).',
+    tags: ['Automation & Email'],
+    security: [{ BearerAuth: [] }],
+    request: {
+      query: z.object({
+        action: z.enum(['daily-followup', 'daily-matrix']).openapi({ example: 'daily-followup' }),
+        respectSchedule: z.enum(['true', 'false', '1']).optional().openapi({ example: 'true' }),
+        force: z.enum(['true', 'false', '1']).optional(),
+        dryRun: z.enum(['true', 'false', '1']).optional(),
+        testMode: z.enum(['true', 'false']).optional(),
+        rmaNumber: z.string().optional()
+      })
+    },
+    responses: {
+      200: { description: 'Scheduled dispatcher result', content: { 'application/json': { schema: DailySchedulerResponseSchema } } },
+      401: { description: 'Unauthorized cron/admin caller', content: { 'application/json': { schema: StandardErrorSchema } } }
+    }
+  });
+
+  // POST /api/send-email (Intake, 4 Lifecycle PDFs, ?action=daily-followup, ?action=daily-matrix)
+  registry.registerPath({
+    method: 'post',
+    path: '/api/send-email',
+    summary: 'Dispatch RMA Email, Lifecycle PDF, Daily Matrix (.xlsx), or 10-Day SLA Follow-Up (?action=daily-followup)',
+    description: `Unified serverless mailer preserving Vercel's 12-function cap:
+- **Standard / Lifecycle Emails**: Routes via \`email_recipients_by_type\` (multi-TO + CC). \`pickup_debit_claim\` omits \`Store / Branch:\` and \`Warehouse Location:\` while embedding \`Explanation / Defect Notes:\`, all 5-category pickup photos (max 50), and \`Debit-Claim-Form-*.pdf\` / \`Customer-Credit-Handover-Form-*.pdf\`.
+- **\`?action=daily-followup\`**: Runs 4-Step Workflow & 10-Calendar-Day Pickup Follow-Up SLA (Day 1..10 reminders w/ 4-Step HTML table & health warning; stops immediately when Picked Up / Case Closed; auto-disposes >10 calendar days unclaimed to \`Disposal / Scrap Area\` w/ \`workflow_resolution: "scrapped_no_reorder"\` and notifies \`new_rma\` recipients).
+- **\`?action=daily-matrix\`**: Generates and emails the strict OOXML Overall RMA Matrix (\`.xlsx\`) using \`daily_matrix_config\` (Rolling Days or Custom \`YYYY-MM-DD\`, scope, \`includeZeroCatalogSkus\`, editable \`autoSendTimePht\`).`,
+    tags: ['Automation & Email'],
+    security: [{ BearerAuth: [] }],
+    request: {
+      query: z.object({
+        action: z.enum(['daily-followup', 'daily-matrix']).optional()
+      }),
+      body: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: z.object({
+              action: z.string().optional().openapi({ example: 'daily-followup' }),
+              operation: z.enum(['run_all', 'send_single', 'check_dispose_only']).optional().openapi({ example: 'run_all' }),
+              rmaNumber: z.string().optional().openapi({ example: 'RMA-2026-0001-6TYH' }),
+              respectSchedule: z.boolean().optional().openapi({ example: true }),
+              force: z.boolean().optional(),
+              dryRun: z.boolean().optional(),
+              isTestMode: z.boolean().optional(),
+              sandboxEmail: z.string().email().optional().openapi({ example: 'mgan@pingconmarketing.com' }),
+              startDate: z.string().optional().openapi({ example: '2026-11-10' }),
+              endDate: z.string().optional().openapi({ example: '2026-11-24' }),
+              stream: z.enum(['overall', 'customer_inbound', 'supplier_outbound']).optional(),
+              includeZeroCatalogSkus: z.boolean().optional(),
+              to: z.union([z.string(), z.array(z.string())]).optional(),
+              cc: z.array(z.string()).optional(),
+              subject: z.string().optional(),
+              html: z.string().optional(),
+              text: z.string().optional()
+            })
+          }
+        }
+      }
+    },
+    responses: {
+      200: { description: 'Email or daily automation batch processed cleanly', content: { 'application/json': { schema: DailySchedulerResponseSchema } } },
+      401: { description: 'Unauthorized when invoking daily-followup / daily-matrix without CRON_SECRET or Admin JWT', content: { 'application/json': { schema: StandardErrorSchema } } }
     }
   });
 }

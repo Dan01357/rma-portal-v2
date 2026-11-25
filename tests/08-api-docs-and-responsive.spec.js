@@ -35,9 +35,20 @@ test.describe('Suite 08: REST API Endpoints, /docs & /api/context, Date Format A
       expect(openapiJson.openapi).toMatch(/^3\./);
       expect(openapiJson.paths).toHaveProperty('/api/v1/rma');
       expect(openapiJson.paths).toHaveProperty('/api/v1/rma-email-edit');
+      expect(openapiJson.paths).toHaveProperty('/api/upload-photo');
+      expect(openapiJson.paths).toHaveProperty('/api/send-email');
       expect(openapiJson.paths).toHaveProperty('/api/v1/products');
       expect(openapiJson.paths).toHaveProperty('/api/v1/credit-memos');
       expect(openapiJson.paths).toHaveProperty('/api/v1/health');
+      expect(openapiJson.components?.schemas).toHaveProperty('SupplierPickupMetadata');
+      expect(openapiJson.components?.schemas).toHaveProperty('FollowUpMetadata');
+      const openapiRawStr = JSON.stringify(openapiJson);
+      expect(openapiRawStr).toContain('customer_credit');
+      expect(openapiRawStr).toContain('daily-followup');
+      expect(openapiRawStr).toContain('inspect-plate');
+      expect(openapiRawStr).toContain('ourCopyCount');
+      expect(openapiRawStr).toContain('Credit Memos Ledger');
+      expect(openapiRawStr).toContain('mgan@pingconmarketing.com');
 
       const ctxApiRes = await request.get('/api/context');
       expect(ctxApiRes.status()).toBe(200);

@@ -462,7 +462,7 @@ export const inviteService = {
           updated_at: new Date().toISOString()
         })
         .then(
-          () => {},
+          () => { },
           (err) => console.warn('Failed to persist invite to rma_settings:', err?.message || err)
         );
 
@@ -516,8 +516,8 @@ export const inviteService = {
     ]);
 
     const [tblCheck, settingsCheck] = await Promise.allSettled([
-      withTimeout(supabase.from('rma_invites').select('*').eq('token', cleanToken).maybeSingle(), 6000),
-      withTimeout(supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle(), 5000)
+      withTimeout(supabase.from('rma_invites').select('*').eq('token', cleanToken).maybeSingle(), 15000),
+      withTimeout(supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle(), 12000)
     ]);
 
     let tblInvite = null;
@@ -708,7 +708,7 @@ export const inviteService = {
           updated_at: new Date().toISOString()
         })
         .then(
-          () => {},
+          () => { },
           (err) => console.warn('Failed to delete invite from rma_settings:', err?.message || err)
         );
 
@@ -780,7 +780,7 @@ export const inviteService = {
           .map((e) => String(e || '').trim().toLowerCase())
           .filter((e) => e.includes('@') && !e.endsWith('.test'));
       }
-    } catch {}
+    } catch { }
 
     const ccEmails = Array.from(new Set([
       ...allowedList.slice(1),
@@ -823,13 +823,12 @@ export const inviteService = {
           <div style="padding: 24px;">
             <p style="font-size: 14px; margin-top: 0;">Hello <strong>${recipientsText}</strong>,</p>
             <p style="font-size: 13px; line-height: 1.6; color: #475569;">
-              You have been granted official authorization to ${
-                isEditor
-                  ? `edit product details, pricing, expiry dates, and commercial documents (SI / DR / PO) for <strong>${entityLabel}</strong>`
-                  : isSupplierRtv
-                    ? `process return claims / RTV for <strong>${entityLabel}</strong>`
-                    : `submit returns for <strong>${entityLabel}</strong>`
-              }.
+              You have been granted official authorization to ${isEditor
+        ? `edit product details, pricing, expiry dates, and commercial documents (SI / DR / PO) for <strong>${entityLabel}</strong>`
+        : isSupplierRtv
+          ? `process return claims / RTV for <strong>${entityLabel}</strong>`
+          : `submit returns for <strong>${entityLabel}</strong>`
+      }.
             </p>
             <div style="background: #f1f5f9; border-radius: 12px; padding: 16px; margin: 20px 0; border: 1px solid #cbd5e1;">
               <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Security Notice</div>

@@ -4,7 +4,9 @@ import { buildRmaMatrixXlsxBytes } from '../src/utils/exportMatrixXlsx.js';
 import { buildTableXlsxBytes } from '../src/utils/exportXlsx.js';
 import {
   getCleanHumanWorkflowStatus,
-  computeFourStepWorkflow
+  computeFourStepWorkflow,
+  buildFollowUpEmailContent,
+  buildAutoDisposedEmailContent
 } from '../src/utils/followUpWorkflow.js';
 import {
   PNG_BUFFER,
@@ -14,6 +16,7 @@ import {
   interceptAndCaptureEmails,
   mockPhotoUploadSuccess,
   setPublicPortalTestMode,
+  seedTestModeRma,
   gotoAdmin,
   readSupabasePublicEnv,
   cleanupTestRecords
@@ -187,11 +190,23 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
     browser,
     request
   }) => {
-    test.setTimeout(270_000);
+    test.setTimeout(420_000);
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
     const capturedEmails = await interceptAndCaptureEmails(page);
     await mockPhotoUploadSuccess(page);
+    await page.route('**/api/upload-photo*inspect-plate*', async (route) => {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          is_valid_plate: true,
+          plate_number: 'NAA-7788',
+          vehicle_type: 'Closed Van'
+        })
+      });
+    });
     const seededTestRmas = [];
     let createdClaimNum = null;
 
@@ -406,8 +421,18 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
             await slot2RemoveBtns.first().click();
           }
 
-          // Fill Slots 3-5
-          for (let s = 2; s < 5; s++) {
+          // Upload Slot 3 (Truck Plate) while plate field is empty -> assert ?action=inspect-plate auto-fills NAA-7788
+          await chooseFilesInputs.nth(2).setInputFiles({
+            name: 'pickup-slot-3.png',
+            mimeType: 'image/png',
+            buffer: PNG_BUFFER
+          });
+          await expect(page.locator('input[placeholder*="NAA 1234" i]')).toHaveValue('NAA-7788', {
+            timeout: 15_000
+          });
+
+          // Fill Slots 4-5
+          for (let s = 3; s < 5; s++) {
             await chooseFilesInputs.nth(s).setInputFiles({
               name: `pickup-slot-${s + 1}.png`,
               mimeType: 'image/png',
@@ -442,6 +467,10 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
         if (exerciseMultiPhoto) {
           await page.getByRole('button', { name: '2 Ours + 1 Theirs (3 Papers)' }).click();
           await expect(page.getByText(/^COPY 3 OF 3 — CUSTOMER COPY/i)).toBeVisible();
+          await page.locator('input[aria-label="Our Company Copies"]').fill('2');
+          await page.locator('input[aria-label="Customer Copies"]').fill('2');
+          await expect(page.getByText(/Total Output:\s*4 Copies/i)).toBeVisible();
+          await expect(page.getByText(/^COPY 4 OF 4 — CUSTOMER COPY/i)).toBeVisible();
           await page.locator('input[aria-label="Our Company Copies"]').fill('0');
           await page.locator('input[aria-label="Customer Copies"]').fill('0');
           await expect(formPrintBtn).toBeDisabled();
@@ -957,11 +986,12 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       assertStrictOoxmlWorkbook(Buffer.from(testMatrixJson.attachmentBase64, 'base64'), { expectMatrixPanes: true });
 
       // 5B. DAILY 10-CALENDAR-DAY PICKUP FOLLOW-UP & AUTO-DISPOSE API + EXCEL WORKFLOW STATUS QA
-      const unauthFollowUp = await request.get('/api/send-email?action=daily-followup');
+      const unauthFollowUp = await request.get('/api/send-email?action=daily-followup', { timeout: 60_000 });
       expect(unauthFollowUp.status()).toBe(401);
       const dryRunFollowUp = await request.post('/api/send-email?action=daily-followup', {
         headers: { Authorization: `Bearer ${adminJwt}`, 'Content-Type': 'application/json' },
-        data: { action: 'daily-followup', operation: 'run_all', dryRun: true, isTestMode: true }
+        data: { action: 'daily-followup', operation: 'run_all', dryRun: true, isTestMode: true },
+        timeout: 60_000
       });
       expect(dryRunFollowUp.status()).toBe(200);
       const dryRunFollowUpJson = await dryRunFollowUp.json();
@@ -988,6 +1018,82 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       }, []);
       expect(overdueWf.isExpiredAfter10Days).toBe(true);
       expect(overdueWf.calendarDay).toBeGreaterThan(10);
+
+      // Assert Day 1 & Day 2 10-Day SLA follow-up email content (Supplier & Customer streams) + Auto-Disposed template
+      const nowMs = Date.now();
+      for (const streamSpec of [
+        { rma_type: 'supplier_outbound', supplier_name: 'Mondelez PH', expectedHeader: 'Waiting for Supplier Pickup' },
+        { rma_type: 'customer_inbound', supplier_name: 'Savemore Market', expectedHeader: 'Waiting for Customer Handover' }
+      ]) {
+        for (const dayNum of [1, 2]) {
+          const startedIso = new Date(nowMs - dayNum * 86400000).toISOString();
+          const built = buildFollowUpEmailContent({
+            report: {
+              rma_number: `RMA-TEST-DAY-${dayNum}`,
+              rma_type: streamSpec.rma_type,
+              name: 'Sample Biscuit Pack',
+              barcode: VERIFIED_BARCODE,
+              code: 'SKU-FU-1',
+              quantity: 3,
+              unit_name: 'box',
+              reason: 'Expired',
+              supplier_name: streamSpec.supplier_name,
+              store_branch: streamSpec.supplier_name,
+              status: 'logged',
+              created_at: startedIso,
+              ai_document_metadata: { follow_up: { enabled: true, started_at: startedIso } }
+            },
+            isTestMode: true
+          });
+          expect(built.subject).toMatch(/^\[TEST\] /);
+          expect(built.subject).toContain(`Day ${dayNum} of 10`);
+          expect(built.subject).toContain(streamSpec.expectedHeader);
+          expect(built.html).toContain('4-Step Workflow');
+          expect(built.html).toContain('Step 1: Report Date');
+          expect(built.html).toContain(`Day ${dayNum} of 10`);
+          expect(built.html).toContain('10 calendar days');
+          expect(built.html).toContain('health and sanitation risks');
+        }
+      }
+
+      const disposedPreview = buildAutoDisposedEmailContent({
+        report: {
+          rma_number: 'RMA-TEST-DISP-1',
+          rma_type: 'supplier_outbound',
+          name: 'Expired Milk Carton',
+          barcode: VERIFIED_BARCODE,
+          quantity: 2,
+          unit_name: 'pc',
+          supplier_name: 'Alaska Milk',
+          created_at: new Date(nowMs - 12 * 86400000).toISOString(),
+          ai_document_metadata: {
+            follow_up: {
+              enabled: true,
+              started_at: new Date(nowMs - 12 * 86400000).toISOString(),
+              auto_disposed_at: new Date(nowMs).toISOString(),
+              case_status: 'auto_disposed_after_10_days'
+            }
+          }
+        },
+        isTestMode: true
+      });
+      expect(disposedPreview.subject).toMatch(/^\[TEST\] /);
+      expect(disposedPreview.subject).toContain('Auto-Disposed');
+      expect(disposedPreview.html).toContain('Disposal / Scrap Area');
+
+      // Confirm already-picked-up Test RMA stops follow-ups immediately (CASE_ALREADY_CLOSED) via real backend
+      const closedFollowUpRes = await request.post('/api/send-email?action=daily-followup', {
+        headers: { Authorization: `Bearer ${adminJwt}`, 'Content-Type': 'application/json' },
+        data: { action: 'daily-followup', rmaNumber: rmaNum, dryRun: true, isTestMode: true },
+        timeout: 60_000
+      });
+      expect(closedFollowUpRes.status()).toBe(200);
+      const closedFollowUpJson = await closedFollowUpRes.json();
+      expect(
+        closedFollowUpJson.skippedItems?.some(
+          (item) => item.rmaNumber === rmaNum && item.reason === 'CASE_ALREADY_CLOSED'
+        )
+      ).toBe(true);
 
       // UI Check: SettingsTab -> Send Manual Matrix Email Now + RMAMatrixExportModal -> Email Matrix tab
       await page.route('**/api/send-email?action=daily-matrix**', async (route) => {
@@ -1037,6 +1143,159 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       expect(inboundXmlAll).toContain('Handover Date (YYYY-MM-DD)');
       expect(inboundXmlAll).toContain('Case Closed Date (YYYY-MM-DD)');
       expect(inboundXmlAll).not.toMatch(/pending_admin_details|under_inspection|received_at_dock/);
+
+      // Verify Supplier Hub (RTV Claims) Excel export has clean workflow headers & zero raw snake_case status strings
+      await page.getByRole('button', { name: /Supplier Hub \(RTV Claims\)/i }).first().click();
+      const [supplierDl] = await Promise.all([
+        page.waitForEvent('download', { timeout: 20_000 }),
+        page.getByRole('button', { name: /Export Supplier Claims \(\.xlsx\)/i }).first().click()
+      ]);
+      const supplierPath = await supplierDl.path();
+      const supplierBuf = fs.readFileSync(supplierPath);
+      assertStrictOoxmlWorkbook(supplierBuf, { expectMatrixPanes: false });
+      const supplierEntries = parseStoredZipEntries(supplierBuf);
+      const supplierXmlAll = [
+        supplierEntries.get('xl/sharedStrings.xml') || '',
+        supplierEntries.get('xl/worksheets/sheet1.xml') || ''
+      ].join('\n');
+      expect(supplierXmlAll).toContain('Workflow Step (1-4)');
+      expect(supplierXmlAll).toContain('Follow-Up Day (of 10)');
+      expect(supplierXmlAll).toContain('Picked Up Date (YYYY-MM-DD)');
+      expect(supplierXmlAll).toContain('Case Closed Date (YYYY-MM-DD)');
+      expect(supplierXmlAll).not.toMatch(/pending_admin_details|under_inspection|received_at_dock/);
+
+      // End-to-End 10-Day SLA Follow-Up UI + 12-Day Backdate Auto-Dispose Test
+      const followUpRma = await seedTestModeRma(page, {
+        stream: 'customer',
+        photoCount: 1,
+        barcode: `NOLABEL-FU-${String(Date.now()).slice(-6)}`,
+        supplierOrCompany: ''
+      });
+      seededTestRmas.push(followUpRma);
+
+      await gotoAdmin(page);
+      await page.getByRole('button', { name: /Test Mode Sandbox \([1-9]\d*\)/i }).first().click();
+      const followUpRow = page.locator('tr').filter({ hasText: followUpRma }).first();
+      await expect(followUpRow).toBeVisible({ timeout: 25_000 });
+
+      await followUpRow.getByRole('button', { name: /\+ Set Supplier & Email/i }).click();
+      await page.locator('#followup-modal-supplier-input').fill('Playwright FollowUp Supplier');
+      await page.locator('input[aria-label="Supplier Primary Email(s) (TO)"]').fill('vendor-fu@pingcon-test.local');
+      await page.locator('input[aria-label="Supplier CC Email(s) (Optional)"]').fill('cc-fu@pingcon-test.local');
+      const autoSlaToggle = page.locator('input[aria-label="Auto Daily Follow-Up (10-Day SLA)"]');
+      if (!(await autoSlaToggle.isChecked())) {
+        await autoSlaToggle.check();
+      }
+      await page.getByRole('button', { name: /Save Supplier & Email/i }).click();
+      await expect(page.getByText(/Saved supplier "Playwright FollowUp Supplier"/i)).toBeVisible({ timeout: 15_000 });
+      await page.locator('button[aria-label="Close supplier follow-up modal"]').click();
+      await expect(page.locator('#followup-modal-supplier-input')).toBeHidden({ timeout: 15_000 });
+      await expect(followUpRow.getByText('Playwright FollowUp Supplier')).toBeVisible({ timeout: 15_000 });
+
+      const followUpUiPayloads = [];
+      await page.route('**/api/send-email*action=daily-followup*', async (route) => {
+        const req = route.request();
+        if (req.method() === 'POST') {
+          try {
+            followUpUiPayloads.push(req.postDataJSON());
+          } catch {}
+          return route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              success: true,
+              mocked: true,
+              summary: { scanned: 1, followUpsSent: 1, autoDisposed: 0, skippedCount: 0, errorCount: 0 }
+            })
+          });
+        }
+        return route.continue();
+      });
+
+      await followUpRow.getByRole('button', { name: /Send Follow-Up/i }).click();
+      await expect(
+        page.getByText(new RegExp(`Dispatched Day .* of 10 handover follow-up for ${followUpRma}`, 'i'))
+      ).toBeVisible({ timeout: 15_000 });
+      expect(followUpUiPayloads.some((p) => p.rmaNumber === followUpRma && p.isTestMode === true)).toBe(true);
+
+      await followUpRow.getByRole('button', { name: /Case Close/i }).click();
+      await expect(page.getByText(`${followUpRma} marked Case Closed.`)).toBeVisible({ timeout: 15_000 });
+
+      // Backdate followUpRma 12 days (reopening countdown) & verify real backend /api/send-email?action=daily-followup triggers autoDisposed
+      const backdateOk = await page.evaluate(
+        async ({ targetRma, supaUrl: url, anonKey: key }) => {
+          const supaKey = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'));
+          const token = supaKey ? JSON.parse(localStorage.getItem(supaKey))?.access_token : null;
+          if (!url || !key || !token) return false;
+          const headers = {
+            apikey: key,
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          };
+          const getRes = await fetch(
+            `${url}/rest/v1/rma_reports?rma_number=eq.${encodeURIComponent(targetRma)}&select=id,ai_document_metadata`,
+            { headers }
+          );
+          if (!getRes.ok) return false;
+          const rows = await getRes.json();
+          const row = rows?.[0];
+          if (!row) return false;
+          const minus12 = new Date(Date.now() - 12 * 86400000).toISOString();
+          const meta = (row.ai_document_metadata && typeof row.ai_document_metadata === 'object')
+            ? { ...row.ai_document_metadata }
+            : {};
+          const nextPickup = (meta.supplier_pickup && typeof meta.supplier_pickup === 'object')
+            ? { ...meta.supplier_pickup }
+            : {};
+          delete nextPickup.picked_up_at;
+          const nextFollowUp = {
+            ...(meta.follow_up || {}),
+            enabled: true,
+            started_at: minus12
+          };
+          delete nextFollowUp.picked_up_at;
+          delete nextFollowUp.case_closed_at;
+          delete nextFollowUp.case_status;
+          delete nextFollowUp.auto_disposed_at;
+          delete nextFollowUp.close_reason;
+
+          const patchRes = await fetch(
+            `${url}/rest/v1/rma_reports?id=eq.${encodeURIComponent(row.id)}`,
+            {
+              method: 'PATCH',
+              headers,
+              body: JSON.stringify({
+                status: 'logged',
+                created_at: minus12,
+                ai_document_metadata: {
+                  ...meta,
+                  supplier_pickup: nextPickup,
+                  follow_up: nextFollowUp
+                }
+              })
+            }
+          );
+          return patchRes.ok;
+        },
+        { targetRma: followUpRma, ...readSupabasePublicEnv() }
+      );
+      expect(backdateOk).toBe(true);
+
+      const autoDisposeRes = await request.post('/api/send-email?action=daily-followup', {
+        headers: { Authorization: `Bearer ${adminJwt}`, 'Content-Type': 'application/json' },
+        data: {
+          action: 'daily-followup',
+          rmaNumber: followUpRma,
+          dryRun: true,
+          isTestMode: true,
+          force: true
+        },
+        timeout: 60_000
+      });
+      expect(autoDisposeRes.status()).toBe(200);
+      const autoDisposeJson = await autoDisposeRes.json();
+      expect(autoDisposeJson.summary?.autoDisposed).toBe(1);
+      expect(autoDisposeJson.autoDisposed?.some((a) => a.rmaNumber === followUpRma)).toBe(true);
 
       guard.assertClean('suite 07 lifecycle emails + pdf + overall matrix xlsx');
     } finally {

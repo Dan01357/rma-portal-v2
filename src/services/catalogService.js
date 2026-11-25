@@ -3165,7 +3165,6 @@ export const catalogService = {
     const updates = {
       ...(cleanSupplier ? { supplier_name: cleanSupplier } : {}),
       ai_document_metadata: updatedMeta,
-      updated_at: nowIso,
       audit_trail: [
         ...existingAudit,
         {
@@ -3254,7 +3253,6 @@ export const catalogService = {
     const updates = {
       status: nextStatus,
       ai_document_metadata: updatedMeta,
-      updated_at: nowIso,
       audit_trail: [
         ...existingAudit,
         {

@@ -217,6 +217,14 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       const consolVoucherPrintBtn = page.getByRole('button', { name: /Print Letter Voucher \/ PDF/i });
       await expect(consolVoucherPrintBtn).toBeDisabled();
 
+      // Verify custom 2 Ours + 2 Customer = 4 separated copies on CreditMemoVoucherModal
+      await page.locator('input[aria-label="Our Company Copies"]').fill('2');
+      await page.locator('input[aria-label="Customer Copies"]').fill('2');
+      await expect(page.getByText('Total Output: 4 Papers')).toBeVisible();
+      await expect(page.locator('#credit-memo-voucher-print-root .voucher-sheet')).toHaveCount(4);
+      await expect(page.getByText(/^COPY 4 OF 4 — CUSTOMER COPY/i)).toBeVisible();
+      await expect(consolVoucherPrintBtn).toBeEnabled();
+
       await page.getByRole('button', { name: '1 + 1 (2 Papers)' }).click();
       await expect(page.getByText('Total Output: 2 Papers')).toBeVisible();
       await expect(consolVoucherPrintBtn).toBeEnabled();
@@ -332,19 +340,54 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
         await page.waitForTimeout(400);
       }
 
-      // Per-Email Recipient Manager & Auto Daily Overall Matrix Config verification
+      // Per-Email Recipient Manager & Auto Daily Overall Matrix Config + Adjustable Schedules persistence verification
       await expect(page.getByText('Per-Email Recipient Manager')).toBeVisible();
       await page.getByRole('button', { name: /Driver Pickup — Debit Claim/i }).first().click();
       await expect(page.locator('[data-email-recipients-editor="pickup_debit_claim"]')).toBeVisible();
       await page.getByRole('button', { name: /Manual Overall Matrix Email/i }).first().click();
-      await expect(page.locator('[data-email-recipients-editor="manual_matrix"]')).toBeVisible();
-      await page.getByRole('button', { name: /Sync Recipients Between Auto & Manual/i }).first().click();
-      await expect(page.getByText(/Synced TO & CC recipients between Auto Daily 1:00 PM Matrix and Manual Matrix/i)).toBeVisible();
+      const manualMatrixEditor = page.locator('[data-email-recipients-editor="manual_matrix"]');
+      await expect(manualMatrixEditor).toBeVisible();
+      await manualMatrixEditor.locator('input[placeholder*="Add Primary TO email"]').fill('pw-matrix-to@pingconmarketing.com');
+      await manualMatrixEditor.getByRole('button', { name: /Add TO/i }).click();
+      await expect(manualMatrixEditor.getByText('pw-matrix-to@pingconmarketing.com')).toBeVisible();
+      await manualMatrixEditor.locator('button[title="Remove TO pw-matrix-to@pingconmarketing.com"]').click();
+      await expect(manualMatrixEditor.getByText('pw-matrix-to@pingconmarketing.com')).toBeHidden();
+      await manualMatrixEditor.locator('input[placeholder*="Add CC email"]').fill('pw-matrix-cc@pingconmarketing.com');
+      await manualMatrixEditor.getByRole('button', { name: /Add CC/i }).click();
+      await expect(manualMatrixEditor.getByText('pw-matrix-cc@pingconmarketing.com')).toBeVisible();
+      await manualMatrixEditor.locator('button[title="Remove pw-matrix-cc@pingconmarketing.com"]').click();
+      await expect(manualMatrixEditor.getByText('pw-matrix-cc@pingconmarketing.com')).toBeHidden();
+      await manualMatrixEditor.getByRole('button', { name: /Save Recipients/i }).click();
+      await expect(manualMatrixEditor.getByText(/Recipients saved & synced to cloud/i)).toBeVisible({ timeout: 10_000 });
 
+      await page.getByRole('button', { name: /Sync Recipients Between Auto & Manual/i }).first().click();
+      await expect(page.getByText(/Synced TO & CC recipients between Auto Daily .* Matrix and Manual Matrix/i)).toBeVisible();
+
+      // Update Auto-Send Time (Matrix & Follow-Up) + Custom Date Range, save, reload to assert persistence, then restore defaults
+      const matrixTimeInput = page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]');
+      const followUpTimeInput = page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]');
+      await matrixTimeInput.fill('14:30');
+      await followUpTimeInput.fill('09:15');
       await page.getByRole('button', { name: /Custom Date Range/i }).click();
+      await page.getByRole('button', { name: /Save Matrix Config/i }).click();
+      await expect(page.getByText(/Overall Matrix schedule, date range & scope saved/i)).toBeVisible({ timeout: 10_000 });
+      await page.getByRole('button', { name: /Save Follow-Up SLA/i }).click();
+      await expect(page.getByText(/10-Day Pickup Follow-Up schedule .* saved to cloud/i)).toBeVisible({ timeout: 15_000 });
+
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.getByText('Pingcon RMA Operations')).toBeVisible({ timeout: 45_000 });
+      await page.getByRole('button', { name: /Settings & SMTP/i }).click();
+      await expect(page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('14:30');
+      await expect(page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('09:15');
+
+      // Restore clean corporate default schedules & Rolling Days
+      await page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]').fill('13:00');
+      await page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]').fill('08:00');
       await page.getByRole('button', { name: /Rolling Days/i }).click();
       await page.getByRole('button', { name: /Save Matrix Config/i }).click();
       await expect(page.getByText(/Overall Matrix schedule, date range & scope saved/i)).toBeVisible({ timeout: 10_000 });
+      await page.getByRole('button', { name: /Save Follow-Up SLA/i }).click();
+      await expect(page.getByText(/10-Day Pickup Follow-Up schedule .* saved to cloud/i)).toBeVisible({ timeout: 15_000 });
 
       await page.getByRole('button', { name: /View & Download Poster/i }).click();
       await expect(page.getByRole('button', { name: 'Close', exact: true })).toBeVisible({ timeout: 10_000 });
@@ -403,26 +446,45 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
 
       guard.assertClean('suite 05 settings, SMTP, locations & API key vault');
     } finally {
-      if (trackedMaskedKeys.size > 0) {
-        const { readSupabasePublicEnv } = await import('./helpers/testUtils.js');
-        const { supaUrl, anonKey } = readSupabasePublicEnv();
-        await page
-          .evaluate(async ({ masks, url, key }) => {
-            try {
-              const supaKey = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'));
-              const token = supaKey ? JSON.parse(localStorage.getItem(supaKey))?.access_token : null;
-              if (url && key && token) {
-                for (const m of masks) {
-                  await fetch(`${url}/rest/v1/api_keys?masked_key=eq.${encodeURIComponent(m)}`, {
-                    method: 'DELETE',
-                    headers: { apikey: key, Authorization: `Bearer ${token}` }
-                  });
+      const { readSupabasePublicEnv } = await import('./helpers/testUtils.js');
+      const { supaUrl, anonKey } = readSupabasePublicEnv();
+      await page
+        .evaluate(async ({ masks, url, key }) => {
+          try {
+            const supaKey = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'));
+            const token = supaKey ? JSON.parse(localStorage.getItem(supaKey))?.access_token : null;
+            if (url && key && token) {
+              const hdrs = { apikey: key, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+              for (const m of masks) {
+                await fetch(`${url}/rest/v1/api_keys?masked_key=eq.${encodeURIComponent(m)}`, {
+                  method: 'DELETE',
+                  headers: hdrs
+                });
+              }
+              const sRes = await fetch(`${url}/rest/v1/rma_settings?key=in.(daily_matrix_config,daily_followup_config)&select=key,value`, { headers: hdrs });
+              if (sRes.ok) {
+                const rows = await sRes.json();
+                for (const row of rows || []) {
+                  if (row.key === 'daily_matrix_config' && row.value) {
+                    await fetch(`${url}/rest/v1/rma_settings?key=eq.daily_matrix_config`, {
+                      method: 'PATCH',
+                      headers: hdrs,
+                      body: JSON.stringify({ value: { ...row.value, autoSendTimePht: '13:00', rangeMode: 'rolling' } })
+                    });
+                  }
+                  if (row.key === 'daily_followup_config' && row.value) {
+                    await fetch(`${url}/rest/v1/rma_settings?key=eq.daily_followup_config`, {
+                      method: 'PATCH',
+                      headers: hdrs,
+                      body: JSON.stringify({ value: { ...row.value, autoSendTimePht: '08:00' } })
+                    });
+                  }
                 }
               }
-            } catch { }
-          }, { masks: Array.from(trackedMaskedKeys), url: supaUrl, key: anonKey })
-          .catch(() => { });
-      }
+            }
+          } catch { }
+        }, { masks: Array.from(trackedMaskedKeys), url: supaUrl, key: anonKey })
+        .catch(() => { });
       page.off('dialog', onDialog);
       guard.detach();
     }

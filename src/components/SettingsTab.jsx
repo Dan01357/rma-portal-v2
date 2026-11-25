@@ -163,15 +163,43 @@ export default function SettingsTab({
       }
     });
 
-    const handleSyncRecipients = () => {
-      const updated = notificationService.getEmailSettings();
-      if (updated?.toEmail) setMainRecipient(updated.toEmail);
-      if (Array.isArray(updated?.baseCcList)) setCcRecipients(updated.baseCcList);
-      setMatrixConfig(notificationService.getDailyMatrixConfig());
-      setFollowUpConfig(notificationService.getDailyFollowUpConfig());
-      const curSandbox = notificationService.getTestSandboxEmail();
-      setTestSandboxEmail(curSandbox);
-      setSandboxEmailInput(curSandbox);
+    const handleSyncRecipients = (evt) => {
+      if (evt?.type === 'storage') {
+        const storageKey = String(evt?.key || '');
+        if (!storageKey) return; // Ignore synthetic new Event('storage'); handled via granular rma-settings-changed
+        if (storageKey === 'rma_portal_email_recipients') {
+          const updated = notificationService.getEmailSettings();
+          if (updated?.toEmail) setMainRecipient(updated.toEmail);
+          if (Array.isArray(updated?.baseCcList)) setCcRecipients(updated.baseCcList);
+        } else if (storageKey === 'rma_portal_daily_matrix_config') {
+          setMatrixConfig(notificationService.getDailyMatrixConfig());
+        } else if (storageKey === 'rma_portal_daily_followup_config') {
+          setFollowUpConfig(notificationService.getDailyFollowUpConfig());
+        } else if (storageKey === 'rma_portal_test_sandbox_email') {
+          const curSandbox = notificationService.getTestSandboxEmail();
+          setTestSandboxEmail(curSandbox);
+          setSandboxEmailInput(curSandbox);
+        }
+        return;
+      }
+      const detail = evt?.detail && typeof evt.detail === 'object' ? evt.detail : null;
+      const syncAll = !detail || Boolean(detail.loadedFromDb);
+      if (syncAll || detail.toEmail || detail.baseCcList) {
+        const updated = notificationService.getEmailSettings();
+        if (updated?.toEmail) setMainRecipient(updated.toEmail);
+        if (Array.isArray(updated?.baseCcList)) setCcRecipients(updated.baseCcList);
+      }
+      if (syncAll || detail.dailyMatrixConfig) {
+        setMatrixConfig(notificationService.getDailyMatrixConfig());
+      }
+      if (syncAll || detail.dailyFollowUpConfig) {
+        setFollowUpConfig(notificationService.getDailyFollowUpConfig());
+      }
+      if (syncAll || detail.testSandboxEmail) {
+        const curSandbox = notificationService.getTestSandboxEmail();
+        setTestSandboxEmail(curSandbox);
+        setSandboxEmailInput(curSandbox);
+      }
     };
 
     window.addEventListener('rma-settings-changed', handleSyncRecipients);

@@ -277,6 +277,9 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       await expect(card2).toBeVisible();
       await expect(card1.getByText(/Qty:/i)).toBeVisible();
       await expect(card2.getByText(/Qty:/i)).toBeVisible();
+      expect(await card1.innerText()).not.toMatch(/\bSupplier:/i);
+      expect(await card2.innerText()).not.toMatch(/\bSupplier:/i);
+      await expect(multiQrModal.locator('select[aria-label="Paper Size"]')).toHaveValue('letter');
 
       // Independent per-QR resize: select card 2 and shrink to Mini (50x58mm), card 1 stays 62x74mm
       await card2.click();
@@ -284,9 +287,12 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       await expect(card2.getByText('50×58mm')).toBeVisible();
       await expect(card1.getByText('62×74mm')).toBeVisible();
 
-      // Toggle Multiple Pages -> Auto-Fit All to 1 Page -> Save Consolidated Sheet PNG -> Print 2 QRs
+      // Toggle Multiple Pages -> verify multi-page label -> Auto-Fit All to 1 Page -> Save Consolidated Sheet PNG -> Print 2 QRs
       await multiQrModal.getByRole('button', { name: /Multiple Pages/i }).click();
+      await expect(multiQrModal.getByRole('button', { name: /Multiple Pages/i })).toBeVisible();
       await multiQrModal.getByRole('button', { name: /Auto-Fit All to 1 Page/i }).click();
+      await expect(card1).toBeVisible();
+      await expect(card2).toBeVisible();
 
       const [multiSheetPng] = await Promise.all([
         page.waitForEvent('download'),
