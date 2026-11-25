@@ -40,7 +40,8 @@ export function drawWatermarkOverlay(ctx, width, height, info = {}) {
   const titleFontPx = baseFontPx + 1;
   const padX = Math.max(8, Math.round(baseFontPx * 0.7));
   const padY = Math.max(6, Math.round(baseFontPx * 0.55));
-  const maxBoxWidth = Math.max(180, Math.min(width - 20, Math.round(width * 0.48)));
+  const widthRatio = width < height ? 0.78 : 0.56;
+  const maxBoxWidth = Math.max(200, Math.min(width - 20, Math.round(width * widthRatio)));
   const maxTextWidth = maxBoxWidth - padX * 2;
 
   ctx.save();
@@ -49,8 +50,9 @@ export function drawWatermarkOverlay(ctx, width, height, info = {}) {
   const displayLines = [];
   displayLines.push({ text: timestampText, bold: true, color: '#ffffff' });
 
-  const addrSource = rawAddressLines.length > 0 ? rawAddressLines.join(', ') : 'GPS: Location not captured';
-  const wrappedAddr = wrapCanvasText(ctx, addrSource, maxTextWidth).slice(0, 3);
+  const addrTextFallback = String(info.addressText || '').trim();
+  const addrSource = addrTextFallback || (rawAddressLines.length > 0 ? rawAddressLines.join(', ') : 'GPS: Location not captured');
+  const wrappedAddr = wrapCanvasText(ctx, addrSource, maxTextWidth).slice(0, 4);
   wrappedAddr.forEach((line) => {
     displayLines.push({ text: line, bold: false, color: '#e2e8f0' });
   });

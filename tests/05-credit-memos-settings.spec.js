@@ -418,6 +418,15 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await locModal.locator('div:has(> div > div > h3:has-text("Warehouse Locations & Areas")) > button').click();
       await expect(locModal).toBeHidden();
 
+      // Verify Known Warehouse / Dock GPS Anchors card & Pingcon Warehouse Google Maps Place/Pin URL
+      const gpsAnchorsCard = page.getByTestId('known-gps-anchors-card');
+      await expect(gpsAnchorsCard).toBeVisible();
+      await expect(gpsAnchorsCard.locator('input[value="Pingcon Warehouse"]')).toBeVisible();
+      await expect(gpsAnchorsCard.locator('input[value="64 Mendez Rd, Baesa, Quezon City, Metro Manila 1106"]')).toBeVisible();
+      const mapPinHref = await gpsAnchorsCard.getByRole('link', { name: /Verify Map Pin/i }).first().getAttribute('href');
+      expect(mapPinHref).toContain('google.com/maps/place/');
+      expect(mapPinHref).toContain('@14.6683,121.0114,18z');
+
       // Verify /docs link visible in API Keys Management section & API Key Generate/Rotate/Revoke
       await expect(page.locator('a[href*="/docs"]').first()).toBeVisible();
       const refreshKeysBtn = page.getByRole('button', { name: 'Refresh', exact: true });

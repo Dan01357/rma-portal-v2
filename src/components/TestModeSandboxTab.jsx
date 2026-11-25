@@ -332,6 +332,7 @@ export default function TestModeSandboxTab({
           onViewExplanation={onViewExplanation}
           onOpenSimpleWizard={onOpenSimpleWizard}
           onOpenPickupForm={onOpenPickupForm}
+          onResetToPending={onResetToPending}
           onOpenMatrixExport={() => onOpenMatrixExport && onOpenMatrixExport('overall')}
           savedProductsList={savedProductsList}
           coworkerQueueFilter={coworkerQueueFilter}

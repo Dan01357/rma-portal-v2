@@ -1972,6 +1972,42 @@ Each test scenario defines:
 
 ---
 
+## Section 27: Phase 27 — `Serial No.` Exports, Test Mode Sandbox Isolation & Recipients, Multi-QR Sheet, Full Reset, Pinpoint GPS, Security & Live Camera
+
+- [ ] **TC-P27-01 (`Serial No.` Column A Standardization & Backward-Compatible `.xlsx` Reply Sync)**
+  * **Location**: `rmaAlertXlsx.js`, `exportCsv.js`, `CreditMemosTab.jsx`, `TicketsVaultTab.jsx`, `api/_lib/imapReplySyncHandler.js`
+  * **Expected Behavior**:
+    1. Every non-Matrix Excel download (`Customer Inbound`, `Supplier Claims`, `Credit Memos Ledger`, `Tickets Vault`) and every New RMA Alert mirror `.xlsx` workbook (`Serial No. | Field | Value | Format / Notes` plus `MANIFEST LINE ITEMS`) places `'Serial No.'` strictly in **Column A** with 1-indexed sequential numbers (`1, 2, 3...`).
+    2. `/api/send-email?action=sync-email-replies` and `?action=ingest-xlsx-reply` seamlessly parse both new `Serial No.`-shifted Column A workbooks (`Field` in B / `Value` in C) and legacy unshifted attachments, plus Test Mode `RMA-TEST-...` replies preserving `[TEST_MODE]` isolation.
+
+- [ ] **TC-P27-02 (Admin-Only Test Mode Editable Recipients & Test `.xlsx` Reply Isolation)**
+  * **Location**: `App.jsx` (`/`), `SettingsTab.jsx`, `RMAMatrixExportModal.jsx`, `SimpleSupplierRtvWizardModal.jsx`, `notificationService.js`, `api/send-email.js`
+  * **Expected Behavior**:
+    1. `<EmailRecipientsEditor />` (`"New RMA Email Alert Recipients"`) is **NOT rendered anywhere on the Public Portal (`/`)** for any user (Live Mode or Test Mode) and both Wizard editors are strictly `{isAdmin && ...}` gated.
+    2. Inside `/admin` -> `Settings & SMTP` and `RMAMatrixExportModal`, Super Admin can customize Test Mode TO & CC recipients (`test_email_recipients`, `test_email_recipients_by_type`), Test RMA emails deliver strictly to those configured Test recipients with `[TEST] ` prefix and zero Live recipient leakage, and ingested `RMA-TEST-...` `.xlsx` replies update only Test records without mutating Live reports.
+
+- [ ] **TC-P27-03 (Public Portal & QR Studio `"Add More RMA QRs to Sheet"` Multi-QR Consolidation)**
+  * **Location**: `App.jsx`, `ReturnQRModal.jsx`
+  * **Expected Behavior**: Submitting 2+ RMAs in a public session (Live or Test) and opening `Resize / Print QR` exposes **`➕ Add More RMA QRs to Sheet`** and `Add Recent Session QRs`, letting users search and consolidate multiple RMAs from the same scoped session/mode onto one US Letter print sheet with zero cross-mode or other-customer RMA leakage.
+
+- [ ] **TC-P27-04 (Full Timeline & Outcome Reset via `🔄 Reset Timeline` / `↩️ Reset to Pending`)**
+  * **Location**: `catalogService.resetReportToPending`, `FollowUpTimelineCard.jsx`, `QuickRMAActionModal.jsx`, `SimpleSupplierRtvWizardModal.jsx`, `CustomerHubTab.jsx`, `SupplierClaimsTab.jsx`
+  * **Expected Behavior**: Resetting a `Scrapped` or `Picked Up` RMA via `🔄 Reset Timeline` or `↩️ Reset to Pending` clears 4-Choice `disposition`, `supplier_pickup` photos/driver fields, `picked_up_at`, `case_closed_at`, and `auto_disposed_at`, restores status to `Pending (YYYY-MM-DD HH:mm)` with `Step 2` active (`Day 0` restarted), `Step 3` = `Pending Pickup`, and `Step 4` = `Open`, while preserving saved `supplier_name`, `supplier_email_to`, and `supplier_email_cc`.
+
+- [ ] **TC-P27-05 (Pinpoint Geofence & Street+ZIP Reverse-Geocode + Google Maps `/maps/place/` Pins + Settings Anchors)**
+  * **Location**: `api/_lib/lookupHandler.js`, `src/utils/rmaHelpers.js`, `src/components/SettingsTab.jsx`, `src/App.jsx`
+  * **Expected Behavior**:
+    1. `GET /api/v1/products/lookup?action=reverse-geocode` resolves Priority 1 Known Warehouse / Dock Geofence Anchors (`rma_settings.known_gps_locations`, seeded `Pingcon Warehouse` `14.6683, 121.0114` -> `64 Mendez Rd, Baesa, Quezon City, Metro Manila 1106`, never `Rising Sun Village II`), Priority 2 Google Maps Geocoding API, and Priority 3 Nominatim `zoom=18` Street+ZIP resolution.
+    2. `getGpsMapUrl` builds `https://www.google.com/maps/place/<encodedAddress>/@<lat>,<lng>,18z` links across public portal, hubs, modals, emails, and Excel exports, and Settings displays the editable **Known Warehouse / Dock GPS Anchors** card (`[data-testid="known-gps-anchors-card"]`).
+
+- [ ] **TC-P27-06 (Unified Live Watermarked Camera & Single Bordered Section 3 Stream Input)**
+  * **Location**: `App.jsx`, `CameraCaptureModal.jsx`, `cameraWatermark.js`, `SimpleSupplierRtvWizardModal.jsx`, `ProductEditModal.jsx`, `PendingBarcodesModal.jsx`, `SupplierInput.jsx`
+  * **Expected Behavior**:
+    1. All `Capture Mode` 3-way toggles and `<input capture="environment">` triggers are removed across intake, Wizard 5 slots, Product Edit, and Pending Barcodes, leaving strictly **2 buttons**: **`Take Photo`** (opening full-bleed `object-cover` `<CameraCaptureModal />` with live PHT time, full Street/Barangay/City/ZIP HUD & watermark) and **`Upload from Gallery`**.
+    2. Duplicate Section 1 `Supplier / Vendor Name (Optional)` is removed cleanly; Section 3 renders strictly ONE bordered `rounded-2xl` field — **`3. Supplier Name (Optional)`** (`<SupplierInput />` with left icon & Clear `×`) on Supplier RTV vs **`3. Company / Store Name (Optional)`** on Customer Hub — symmetrically in both Live Mode and Test Mode.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -1986,4 +2022,5 @@ Each test scenario defines:
 | **Phase 24: Streamlined UI, US Letter B&W, 4 PDF Emails, Matrix & Consolidation** | End-to-End Platform & Docs | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
 | **Phase 25: OpenAPI Sync, 4-Choice Customer Hub, 5x10 Photos, Plate OCR, 10-Day SLA** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
 | **Phase 26: Mirror `.xlsx` 2-Way Replies, Reverse-Geocode & Watermark, Day 0..10, Supplier Directory** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
+| **Phase 27: `Serial No.` Exports, Test Mode Recipients/Sync, Multi-QR Sheet, Full Reset, Pinpoint GPS & Live Cam** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
 

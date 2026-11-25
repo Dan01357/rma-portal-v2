@@ -27,6 +27,8 @@ import {
 
 const EMAIL_RECIPIENTS_KEY = 'email_recipients';
 const EMAIL_RECIPIENTS_BY_TYPE_KEY = 'email_recipients_by_type';
+const TEST_EMAIL_RECIPIENTS_KEY = 'test_email_recipients';
+const TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY = 'test_email_recipients_by_type';
 const DAILY_FOLLOWUP_CONFIG_KEY = 'daily_followup_config';
 const TEST_SANDBOX_EMAIL_KEY = 'test_sandbox_email';
 const SUPPLIER_DIRECTORY_KEY = 'supplier_directory_store';
@@ -140,6 +142,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
       .in('key', [
         EMAIL_RECIPIENTS_KEY,
         EMAIL_RECIPIENTS_BY_TYPE_KEY,
+        TEST_EMAIL_RECIPIENTS_KEY,
+        TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY,
         DAILY_FOLLOWUP_CONFIG_KEY,
         TEST_SANDBOX_EMAIL_KEY,
         SUPPLIER_DIRECTORY_KEY
@@ -204,9 +208,39 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
     .filter((e) => !newRmaToList.includes(e));
 
   const followUpProfile = recipientsByType?.supplier_followup || {};
-  const followUpProfileTo = splitEmailStringOrList(followUpProfile?.to);
-  const followUpProfileCc = splitEmailStringOrList(followUpProfile?.cc);
+  const followUpProfileTo = splitEmailStringOrList(followUpProfile?.to ?? followUpProfile?.toList);
+  const followUpProfileCc = splitEmailStringOrList(followUpProfile?.cc ?? followUpProfile?.ccList);
   const directoryMap = buildDirectoryLookupMap(settingsMap.get(SUPPLIER_DIRECTORY_KEY));
+
+  // Isolated Test Mode recipient profiles (never leaks Live recipients or Live defaults)
+  const testGlobalRecipients = settingsMap.get(TEST_EMAIL_RECIPIENTS_KEY);
+  const testRecipientsByType = (settingsMap.get(TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY) && typeof settingsMap.get(TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY) === 'object')
+    ? settingsMap.get(TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY)
+    : {};
+  const resolveTestRecipients = (profileKey, { overrideTo = [], overrideCc = [] } = {}) => {
+    const prof = testRecipientsByType?.[profileKey] || {};
+    const profTo = splitEmailStringOrList(prof?.toList ?? prof?.toEmail ?? prof?.to);
+    const profCc = splitEmailStringOrList(prof?.ccList ?? prof?.cc);
+    const globTo = splitEmailStringOrList(testGlobalRecipients?.toList ?? testGlobalRecipients?.toEmail);
+    const globCc = splitEmailStringOrList(testGlobalRecipients?.baseCcList ?? testGlobalRecipients?.ccList);
+
+    const toList = overrideTo.length > 0
+      ? overrideTo
+      : profTo.length > 0
+        ? profTo
+        : globTo.length > 0
+          ? globTo
+          : [sandboxEmail];
+    const ccSource = overrideTo.length > 0
+      ? overrideCc
+      : profTo.length > 0
+        ? profCc
+        : globTo.length > 0
+          ? globCc
+          : [];
+    const ccList = Array.from(new Set(ccSource)).filter((e) => !toList.includes(e));
+    return { toList, ccList };
+  };
 
   // 3. Prepare SMTP transport if sending real emails
   let transporter = null;
@@ -346,9 +380,10 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
         now: nowDate
       });
 
-      const finalTo = isTestMode ? [sandboxEmail] : newRmaToList;
+      const testDisposeRec = isTestMode ? resolveTestRecipients('new_rma') : null;
+      const finalTo = isTestMode ? testDisposeRec.toList : newRmaToList;
       const finalCc = isTestMode
-        ? []
+        ? testDisposeRec.ccList
         : Array.from(new Set([...newRmaCcList, ...(wf.party.aeEmail ? [wf.party.aeEmail] : [])]))
             .filter((e) => !finalTo.includes(e));
 
@@ -434,9 +469,16 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
       continue;
     }
 
-    const finalTo = isTestMode ? [sandboxEmail] : liveTo;
+    const testFollowUpRec = isTestMode
+      ? resolveTestRecipients('supplier_followup', {
+          overrideTo: body.isTestModeExplicitRecipients ? splitEmailStringOrList(body.toList ?? body.to) : overrideTo,
+          overrideCc: body.isTestModeExplicitRecipients ? splitEmailStringOrList(body.ccList ?? body.cc) : []
+        })
+      : null;
+
+    const finalTo = isTestMode ? testFollowUpRec.toList : liveTo;
     const finalCc = isTestMode
-      ? []
+      ? testFollowUpRec.ccList
       : Array.from(
           new Set([
             ...wf.party.ccEmails,

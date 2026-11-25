@@ -297,6 +297,7 @@ export default function SimpleSupplierRtvWizardModal({
   const [isScanningPlate, setIsScanningPlate] = useState(false);
   const [ocrNotice, setOcrNotice] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isResettingTimeline, setIsResettingTimeline] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [savedReport, setSavedReport] = useState(null);
@@ -350,7 +351,7 @@ export default function SimpleSupplierRtvWizardModal({
   // Revoke temporary preview URLs on unmount/reset
   const clearObjectUrls = () => {
     objectUrlsRef.current.forEach((u) => {
-      try { URL.revokeObjectURL(u); } catch {}
+      try { URL.revokeObjectURL(u); } catch { }
     });
     objectUrlsRef.current = [];
   };
@@ -399,25 +400,25 @@ export default function SimpleSupplierRtvWizardModal({
 
     const partyCandidates = reportIsSupplier
       ? [
-          pickup.supplier_name,
-          targetReport.supplier_name,
-          targetReport.supplierName,
-          targetReport.supplier,
-          matchedProd?.supplier_name,
-          matchedProd?.supplierName,
-          matchedProd?.supplier,
-          manifestFirstItem?.supplier_name,
-          manifestFirstItem?.supplierName,
-          relatedReport?.supplier_name,
-          relatedReport?.supplierName
-        ]
+        pickup.supplier_name,
+        targetReport.supplier_name,
+        targetReport.supplierName,
+        targetReport.supplier,
+        matchedProd?.supplier_name,
+        matchedProd?.supplierName,
+        matchedProd?.supplier,
+        manifestFirstItem?.supplier_name,
+        manifestFirstItem?.supplierName,
+        relatedReport?.supplier_name,
+        relatedReport?.supplierName
+      ]
       : [
-          pickup.customer_name,
-          !isPendingSupplierName(pickup.supplier_name) ? pickup.supplier_name : '',
-          targetReport.store_branch,
-          targetReport.customer_name,
-          targetReport.reporter_name
-        ];
+        pickup.customer_name,
+        !isPendingSupplierName(pickup.supplier_name) ? pickup.supplier_name : '',
+        targetReport.store_branch,
+        targetReport.customer_name,
+        targetReport.reporter_name
+      ];
     const initialSupplier = partyCandidates.find((s) => !isPendingSupplierName(s)) || '';
     const cleanInitSupplier = String(initialSupplier).trim();
     const dirInitial = cleanInitSupplier ? supplierDirectoryService.findBySupplierName(cleanInitSupplier) : null;
@@ -433,7 +434,7 @@ export default function SimpleSupplierRtvWizardModal({
         setSupplierEmailTo((prev) => prev.trim() ? prev : (freshMatch.email_to || ''));
         setSupplierEmailCc((prev) => prev.trim() ? prev : (freshMatch.email_cc || ''));
       }
-    }).catch(() => {});
+    }).catch(() => { });
 
     const matchedOptId = resolveSavedOptionId(targetReport, reportIsSupplier);
     setSelectedOption(matchedOptId);
@@ -492,7 +493,7 @@ export default function SimpleSupplierRtvWizardModal({
         if (foundNum) {
           setExistingClaimNumber((prev) => prev || foundNum);
         }
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     setErrorMsg('');
@@ -595,9 +596,9 @@ export default function SimpleSupplierRtvWizardModal({
 
   useEffect(() => {
     if (!isOpen) return;
-    const prof = notificationService.getEmailProfile(activeWizardEmailType);
+    const prof = notificationService.getEmailProfile(activeWizardEmailType, Boolean(wizardCurrentIsTest));
     setWizardCustomRecipients({ toList: prof.toList || [], ccList: prof.ccList || [] });
-  }, [isOpen, activeWizardEmailType]);
+  }, [isOpen, activeWizardEmailType, wizardCurrentIsTest]);
 
   if (!isOpen || !primaryInputReport) return null;
 
@@ -821,7 +822,7 @@ export default function SimpleSupplierRtvWizardModal({
       const prevList = Array.isArray(prev[slotKey]) ? prev[slotKey] : [];
       const target = prevList.find((item) => item.id === photoId);
       if (target?.previewUrl && !target?.existingUrl) {
-        try { URL.revokeObjectURL(target.previewUrl); } catch {}
+        try { URL.revokeObjectURL(target.previewUrl); } catch { }
       }
       return {
         ...prev,
@@ -905,18 +906,18 @@ export default function SimpleSupplierRtvWizardModal({
 
         const updatedPickup = (Object.keys(repPickup).length > 0 || supplierEmailTo.trim() || supplierEmailCc.trim() || isConsolidatedBatch || (!isSupplierStream && cleanSupplier))
           ? {
-              ...repPickup,
-              disposition: optionId,
-              disposition_label: opt.title,
-              supplier_name: effectiveSupplier,
-              ...(isSupplierStream ? {} : { customer_name: cleanSupplier || repPickup.customer_name || rep.store_branch || '' }),
-              supplier_email_to: supplierEmailTo.trim(),
-              supplier_email_cc: supplierEmailCc.trim(),
-              ...(isConsolidatedBatch ? { consolidated_rma_numbers: batchRmaNumbers } : {}),
-              picked_up_at: null,
-              updated_at: nowIso,
-              processed_by: cleanProcessedBy
-            }
+            ...repPickup,
+            disposition: optionId,
+            disposition_label: opt.title,
+            supplier_name: effectiveSupplier,
+            ...(isSupplierStream ? {} : { customer_name: cleanSupplier || repPickup.customer_name || rep.store_branch || '' }),
+            supplier_email_to: supplierEmailTo.trim(),
+            supplier_email_cc: supplierEmailCc.trim(),
+            ...(isConsolidatedBatch ? { consolidated_rma_numbers: batchRmaNumbers } : {}),
+            picked_up_at: null,
+            updated_at: nowIso,
+            processed_by: cleanProcessedBy
+          }
           : undefined;
 
         const metadataPatch = {
@@ -1338,9 +1339,8 @@ export default function SimpleSupplierRtvWizardModal({
         <div className="bg-white dark:bg-slate-900 w-full max-w-3xl max-h-[94dvh] flex flex-col rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
 
           {/* Modal Header */}
-          <div className={`shrink-0 px-4 sm:px-6 py-3.5 text-white flex items-center justify-between border-b ${
-            isTest ? 'bg-amber-900 border-amber-800' : 'bg-slate-900 border-slate-800'
-          }`}>
+          <div className={`shrink-0 px-4 sm:px-6 py-3.5 text-white flex items-center justify-between border-b ${isTest ? 'bg-amber-900 border-amber-800' : 'bg-slate-900 border-slate-800'
+            }`}>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-mono font-black text-base sm:text-lg tracking-tight">
@@ -1351,11 +1351,10 @@ export default function SimpleSupplierRtvWizardModal({
                     🧪 Test Mode
                   </span>
                 )}
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                  isSupplierStream
-                    ? 'bg-purple-500/20 border-purple-400/40 text-purple-200'
-                    : 'bg-blue-500/20 border-blue-400/40 text-blue-200'
-                }`}>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${isSupplierStream
+                  ? 'bg-purple-500/20 border-purple-400/40 text-purple-200'
+                  : 'bg-blue-500/20 border-blue-400/40 text-blue-200'
+                  }`}>
                   {isSupplierStream ? 'Supplier RTV' : 'Customer Hub'}
                 </span>
                 {effectiveClaimNumber && (
@@ -1626,17 +1625,52 @@ export default function SimpleSupplierRtvWizardModal({
                 report={activeReport}
                 catalogProducts={catalogProducts}
                 compact={true}
+                isResettingTimeline={isResettingTimeline}
+                onResetTimeline={async () => {
+                  const targets = workingBatchReports.filter(Boolean);
+                  if (targets.length === 0) return;
+                  const labelList = targets.map((r) => r.rma_number || r.rmaNumber).filter(Boolean).join(', ');
+                  if (
+                    typeof window !== 'undefined' &&
+                    !window.confirm(`Reset the full 4-step workflow timeline, 10-calendar-day countdown, and disposition/pickup outcome for ${labelList || 'this RMA'} back to Pending?`)
+                  ) {
+                    return;
+                  }
+                  setIsResettingTimeline(true);
+                  setErrorMsg('');
+                  try {
+                    const actor = String(activeUser?.name || processedBy || 'Staff').trim();
+                    const updatedList = [];
+                    for (const rep of targets) {
+                      const updated = await catalogService.resetReportToPending(rep.id, rep.rma_number || rep.rmaNumber, actor);
+                      updatedList.push(updated);
+                    }
+                    setWizardReports(updatedList);
+                    setSavedReport(null);
+                    setSavedBatchReports(null);
+                    setSelectedOption(null);
+                    setExistingClaimNumber(null);
+                    setDriverName('');
+                    setDriverLicenseNo('');
+                    setTruckPlate('');
+                    setStep('choose');
+                    onSuccess?.(updatedList.length > 1 ? updatedList : updatedList[0]);
+                  } catch (err) {
+                    setErrorMsg(err?.message || 'Failed resetting timeline to Pending.');
+                  } finally {
+                    setIsResettingTimeline(false);
+                  }
+                }}
               />
             )}
 
             {/* Step 1: Party Name (Supplier OR Customer / Store Branch) * & Manual Processed By * fields */}
             {step === 'choose' && (
               <div className="space-y-3">
-                <div className={`p-4 rounded-xl border-2 transition-colors ${
-                  supplierMissing
-                    ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-400 dark:border-amber-600'
-                    : 'bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700'
-                }`}>
+                <div className={`p-4 rounded-xl border-2 transition-colors ${supplierMissing
+                  ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-400 dark:border-amber-600'
+                  : 'bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700'
+                  }`}>
                   <label className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 mb-1.5">
                     <Building2 className={`w-4 h-4 ${supplierMissing ? 'text-amber-600' : 'text-slate-500'}`} />
                     <span>{isSupplierStream ? 'Supplier Company Name *' : 'Customer / Store Branch Name *'}</span>
@@ -1665,11 +1699,10 @@ export default function SimpleSupplierRtvWizardModal({
                   </datalist>
                 </div>
 
-                <div className={`p-4 rounded-xl border-2 transition-colors ${
-                  processedByMissing
-                    ? 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700'
-                    : 'bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700'
-                }`}>
+                <div className={`p-4 rounded-xl border-2 transition-colors ${processedByMissing
+                  ? 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700'
+                  : 'bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700'
+                  }`}>
                   <label
                     htmlFor="wizard-processed-by-step1"
                     className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 mb-1.5"
@@ -1729,23 +1762,20 @@ export default function SimpleSupplierRtvWizardModal({
                           setSelectedOption(opt.id);
                           setErrorMsg('');
                         }}
-                        className={`p-4 rounded-2xl border-2 text-left transition-all flex flex-col justify-between gap-2 cursor-pointer ${
-                          isSelected
-                            ? 'border-amber-500 bg-amber-50/70 dark:bg-amber-950/30 ring-2 ring-amber-400/50 shadow-md'
-                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 hover:border-slate-400 dark:hover:border-slate-500'
-                        }`}
+                        className={`p-4 rounded-2xl border-2 text-left transition-all flex flex-col justify-between gap-2 cursor-pointer ${isSelected
+                          ? 'border-amber-500 bg-amber-50/70 dark:bg-amber-950/30 ring-2 ring-amber-400/50 shadow-md'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 hover:border-slate-400 dark:hover:border-slate-500'
+                          }`}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <div className={`p-2 rounded-xl ${
-                            isSelected ? 'bg-amber-500 text-slate-950' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
-                          }`}>
+                          <div className={`p-2 rounded-xl ${isSelected ? 'bg-amber-500 text-slate-950' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                            }`}>
                             <Icon className="w-5 h-5" />
                           </div>
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                            isSelected
-                              ? 'bg-amber-500 text-slate-950'
-                              : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                          }`}>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${isSelected
+                            ? 'bg-amber-500 text-slate-950'
+                            : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                            }`}>
                             {opt.badge}
                           </span>
                         </div>
@@ -1804,11 +1834,10 @@ export default function SimpleSupplierRtvWizardModal({
                               <span className="text-xs font-black text-white">
                                 Re-Order Replacement Stock?
                               </span>
-                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
-                                scrapNeedsReorder
-                                  ? 'bg-amber-400 text-slate-950'
-                                  : 'bg-slate-700 text-slate-300'
-                              }`}>
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${scrapNeedsReorder
+                                ? 'bg-amber-400 text-slate-950'
+                                : 'bg-slate-700 text-slate-300'
+                                }`}>
                                 {scrapNeedsReorder ? 'YES — Queue for Supplier Re-Order' : 'NO — Write-Off Only'}
                               </span>
                             </div>
@@ -1816,22 +1845,20 @@ export default function SimpleSupplierRtvWizardModal({
                               <button
                                 type="button"
                                 onClick={() => setScrapNeedsReorder(true)}
-                                className={`py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                                  scrapNeedsReorder
-                                    ? 'bg-amber-500 text-slate-950 ring-2 ring-amber-300/60 shadow-sm'
-                                    : 'bg-slate-900 text-slate-300 border border-slate-600 hover:bg-slate-700'
-                                }`}
+                                className={`py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer ${scrapNeedsReorder
+                                  ? 'bg-amber-500 text-slate-950 ring-2 ring-amber-300/60 shadow-sm'
+                                  : 'bg-slate-900 text-slate-300 border border-slate-600 hover:bg-slate-700'
+                                  }`}
                               >
                                 YES — Re-Order Stock
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setScrapNeedsReorder(false)}
-                                className={`py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                                  !scrapNeedsReorder
-                                    ? 'bg-rose-600 text-white ring-2 ring-rose-400/60 shadow-sm'
-                                    : 'bg-slate-900 text-slate-300 border border-slate-600 hover:bg-slate-700'
-                                }`}
+                                className={`py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer ${!scrapNeedsReorder
+                                  ? 'bg-rose-600 text-white ring-2 ring-rose-400/60 shadow-sm'
+                                  : 'bg-slate-900 text-slate-300 border border-slate-600 hover:bg-slate-700'
+                                  }`}
                               >
                                 NO — Do Not Re-Order
                               </button>
@@ -1839,19 +1866,21 @@ export default function SimpleSupplierRtvWizardModal({
                           </div>
                         )}
 
-                        {/* Editable Lifecycle Email Recipients before Confirm & Save */}
-                        <div className="text-left">
-                          <EmailRecipientsEditor
-                            emailType={chosenOptionObj.id === 'scrap' ? 'rma_scrapped' : 'rma_restocked'}
-                            value={wizardCustomRecipients}
-                            onChange={setWizardCustomRecipients}
-                            compact={true}
-                            defaultExpanded={false}
-                            isTestMode={isTest}
-                            title="Lifecycle Email Recipients"
-                            extraHint="Customer AE email is appended automatically to CC if present."
-                          />
-                        </div>
+                        {/* Editable Lifecycle Email Recipients before Confirm & Save (Admin Only) */}
+                        {isAdmin && (
+                          <div className="text-left">
+                            <EmailRecipientsEditor
+                              emailType={chosenOptionObj.id === 'scrap' ? 'rma_scrapped' : 'rma_restocked'}
+                              value={wizardCustomRecipients}
+                              onChange={setWizardCustomRecipients}
+                              compact={true}
+                              defaultExpanded={false}
+                              isTestMode={isTest}
+                              title="Lifecycle Email Recipients"
+                              extraHint="Customer AE email is appended automatically to CC if present."
+                            />
+                          </div>
+                        )}
 
                         <button
                           type="button"
@@ -1897,11 +1926,10 @@ export default function SimpleSupplierRtvWizardModal({
                 </div>
 
                 {/* Party Name * + Party Email To + CC(s) */}
-                <div className={`p-4 rounded-xl border-2 space-y-3 ${
-                  supplierMissing
-                    ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-400 dark:border-amber-600'
-                    : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'
-                }`}>
+                <div className={`p-4 rounded-xl border-2 space-y-3 ${supplierMissing
+                  ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-400 dark:border-amber-600'
+                  : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'
+                  }`}>
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
                       <Building2 className="w-4 h-4 text-amber-600" />
@@ -1978,34 +2006,35 @@ export default function SimpleSupplierRtvWizardModal({
                     </div>
                   </div>
 
-                  {/* Base Internal / Finance Recipients for Pickup Email */}
-                  <div className="pt-1">
-                    <EmailRecipientsEditor
-                      emailType={(selectedOption === 'supplier_exchange' || selectedOption === 'customer_exchange') ? 'pickup_replacement' : 'pickup_debit_claim'}
-                      value={wizardCustomRecipients}
-                      onChange={setWizardCustomRecipients}
-                      compact={true}
-                      defaultExpanded={false}
-                      isTestMode={isTest}
-                      title="Base Internal / Finance Email Recipients"
-                      extraHint={
-                        isSupplierStream
-                          ? 'Any Supplier Email To / CC entered above merges cleanly with these base recipients.'
-                          : 'Any Customer / Store Email To / CC entered above merges cleanly with these base recipients.'
-                      }
-                    />
-                  </div>
+                  {/* Base Internal / Finance Recipients for Pickup Email (Admin Only) */}
+                  {isAdmin && (
+                    <div className="pt-1">
+                      <EmailRecipientsEditor
+                        emailType={(selectedOption === 'supplier_exchange' || selectedOption === 'customer_exchange') ? 'pickup_replacement' : 'pickup_debit_claim'}
+                        value={wizardCustomRecipients}
+                        onChange={setWizardCustomRecipients}
+                        compact={true}
+                        defaultExpanded={false}
+                        isTestMode={isTest}
+                        title="Base Internal / Finance Email Recipients"
+                        extraHint={
+                          isSupplierStream
+                            ? 'Any Supplier Email To / CC entered above merges cleanly with these base recipients.'
+                            : 'Any Customer / Store Email To / CC entered above merges cleanly with these base recipients.'
+                        }
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* OCR Status */}
                 {ocrNotice && (
-                  <div className={`p-3 rounded-xl border text-xs font-semibold flex items-center gap-2 ${
-                    ocrNotice.type === 'success'
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-700 dark:text-emerald-200'
-                      : ocrNotice.type === 'warn'
-                        ? 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/40 dark:border-amber-700 dark:text-amber-200'
-                        : 'bg-sky-50 border-sky-200 text-sky-800 dark:bg-sky-950/40 dark:border-sky-700 dark:text-sky-200'
-                  }`}>
+                  <div className={`p-3 rounded-xl border text-xs font-semibold flex items-center gap-2 ${ocrNotice.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-700 dark:text-emerald-200'
+                    : ocrNotice.type === 'warn'
+                      ? 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/40 dark:border-amber-700 dark:text-amber-200'
+                      : 'bg-sky-50 border-sky-200 text-sky-800 dark:bg-sky-950/40 dark:border-sky-700 dark:text-sky-200'
+                    }`}>
                     {(isScanningId || isScanningPlate) ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <Sparkles className="w-4 h-4 shrink-0" />}
                     <span>{ocrNotice.text}</span>
                   </div>
@@ -2020,13 +2049,12 @@ export default function SimpleSupplierRtvWizardModal({
                     return (
                       <div
                         key={slot.key}
-                        className={`p-3 rounded-xl border-2 transition-colors flex flex-col gap-2.5 ${
-                          hasImage
-                            ? 'border-emerald-400 bg-emerald-50/40 dark:bg-emerald-950/20'
-                            : slot.ocrHighlight
-                              ? 'border-amber-300 bg-amber-50/30 dark:bg-amber-950/10'
-                              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50'
-                        }`}
+                        className={`p-3 rounded-xl border-2 transition-colors flex flex-col gap-2.5 ${hasImage
+                          ? 'border-emerald-400 bg-emerald-50/40 dark:bg-emerald-950/20'
+                          : slot.ocrHighlight
+                            ? 'border-amber-300 bg-amber-50/30 dark:bg-amber-950/10'
+                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50'
+                          }`}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div>
@@ -2044,11 +2072,10 @@ export default function SimpleSupplierRtvWizardModal({
                             </p>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            <span className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-black ${
-                              hasImage
-                                ? 'bg-emerald-600 text-white'
-                                : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
-                            }`}>
+                            <span className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-black ${hasImage
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                              }`}>
                               ({slotPhotos.length}/{MAX_PHOTOS_PER_SLOT})
                             </span>
                             {hasImage && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
@@ -2086,52 +2113,34 @@ export default function SimpleSupplierRtvWizardModal({
                           </div>
                         )}
 
-                        <div className="grid grid-cols-3 gap-1.5 mt-auto">
-                          <label className={`px-2 py-2 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1 transition-colors ${
-                            atSlotLimit
-                              ? 'cursor-not-allowed bg-slate-300 dark:bg-slate-800 text-slate-500 opacity-60'
-                              : 'cursor-pointer bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white'
-                          }`}>
-                            <Camera className="w-3.5 h-3.5" />
-                            <span>Take Photo</span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              capture="environment"
-                              className="hidden"
-                              onChange={(e) => {
-                                handleSelectPhotos(slot.key, e.target.files);
-                                e.target.value = '';
-                              }}
-                            />
-                          </label>
-
+                        <div className="grid grid-cols-2 gap-2 mt-auto">
                           <button
                             type="button"
                             disabled={atSlotLimit}
                             onClick={() => setCameraSlotKey(slot.key)}
-                            className={`px-2 py-2 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1 transition-colors ${
+                            className={`px-2.5 py-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors ${
                               atSlotLimit
-                                ? 'cursor-not-allowed bg-slate-200 dark:bg-slate-800 text-slate-400 opacity-60'
-                                : 'cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white'
+                                ? 'cursor-not-allowed bg-slate-300 dark:bg-slate-800 text-slate-500 opacity-60'
+                                : 'cursor-pointer bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white'
                             }`}
                             title="Open Live Watermarked Camera"
                           >
-                            <Camera className="w-3.5 h-3.5" />
-                            <span>Live Cam</span>
+                            <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Take Photo</span>
                           </button>
 
-                          <label className={`px-2 py-2 rounded-lg border text-[10.5px] font-bold flex items-center justify-center gap-1 transition-colors ${
+                          <label className={`px-2.5 py-2 rounded-lg border text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors ${
                             atSlotLimit
                               ? 'cursor-not-allowed bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 opacity-60'
                               : 'cursor-pointer bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200'
                           }`}>
-                            <Upload className="w-3.5 h-3.5" />
-                            <span>Choose Files</span>
+                            <Upload className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                            <span>Upload from Gallery</span>
                             <input
                               type="file"
                               accept="image/*"
                               multiple
+                              disabled={atSlotLimit}
                               className="hidden"
                               onChange={(e) => {
                                 handleSelectPhotos(slot.key, e.target.files);
@@ -2213,11 +2222,10 @@ export default function SimpleSupplierRtvWizardModal({
                     </div>
                   </div>
 
-                  <div className={`p-3 rounded-xl border ${
-                    processedByMissing
-                      ? 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700'
-                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
-                  }`}>
+                  <div className={`p-3 rounded-xl border ${processedByMissing
+                    ? 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700'
+                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
+                    }`}>
                     <label
                       htmlFor="wizard-processed-by-step2"
                       className="flex items-center gap-1.5 text-[11px] font-black text-slate-700 dark:text-slate-200 mb-1"

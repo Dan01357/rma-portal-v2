@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Building2, Check, Sparkles } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 
+const DEFAULT_SUPPLIER_INPUT_CLASS =
+  'w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 shadow-2xs transition-all';
+
 /**
  * Modern Autocomplete Input for Supplier Names
  * - Automatically loads existing suppliers from catalog and RMA returns
@@ -12,7 +15,7 @@ export default function SupplierInput({
   value = '',
   onChange,
   placeholder = 'e.g. Savemore, Walter Mart, Mondelez',
-  className = '',
+  className = DEFAULT_SUPPLIER_INPUT_CLASS,
   id = 'supplier-name-input',
   name = 'supplierName',
   required = false
@@ -121,7 +124,9 @@ export default function SupplierInput({
           onFocus={() => setIsOpen(true)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className={className}
+          className={(className && /\bborder\b|\bborder-/.test(className))
+            ? className
+            : `${DEFAULT_SUPPLIER_INPUT_CLASS} ${className || ''}`.trim()}
         />
 
         <datalist id="known-suppliers-datalist">

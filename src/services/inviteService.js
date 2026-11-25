@@ -760,12 +760,14 @@ export const inviteService = {
     const allowedList = getInviteAllowedEmails(invite);
     const primaryEmail = allowedList[0] || invite.authorized_email;
 
-    // Optional extra TO/CC configured under "invite_email" profile (or passed directly from Invites modal)
+    // Optional extra TO/CC configured under "invite_email" profile (strictly isolated by Live vs Test Mode)
     let profileExtras = [];
+    let hasExplicitTestProfile = false;
     try {
       let profile = extraRecipients;
       if (!profile && typeof window !== 'undefined') {
-        const rawMap = localStorage.getItem('rma_portal_email_recipients_by_type');
+        const storageKey = isTestInv ? 'rma_portal_test_email_recipients_by_type' : 'rma_portal_email_recipients_by_type';
+        const rawMap = localStorage.getItem(storageKey);
         if (rawMap) {
           const parsedMap = JSON.parse(rawMap);
           profile = parsedMap?.invite_email || null;
@@ -779,6 +781,7 @@ export const inviteService = {
         profileExtras = rawList
           .map((e) => String(e || '').trim().toLowerCase())
           .filter((e) => e.includes('@') && !e.endsWith('.test'));
+        if (profileExtras.length > 0) hasExplicitTestProfile = true;
       }
     } catch { }
 
@@ -857,15 +860,49 @@ export const inviteService = {
       </html>
     `;
 
+    let dispatchTo = primaryEmail;
+    let dispatchCc = ccEmails;
+    let explicitTestRecipients = false;
+    if (isTestInv) {
+      let testGlobal = null;
+      try {
+        if (typeof window !== 'undefined') {
+          const rawGlobal = localStorage.getItem('rma_portal_test_email_recipients');
+          if (rawGlobal) testGlobal = JSON.parse(rawGlobal);
+        }
+      } catch {}
+      const testToList = [
+        ...(Array.isArray(extraRecipients?.toList) ? extraRecipients.toList : []),
+        ...(Array.isArray(testGlobal?.toList) ? testGlobal.toList : [])
+      ]
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@') && !e.endsWith('.test'));
+      const testGlobalCc = (Array.isArray(testGlobal?.baseCcList) ? testGlobal.baseCcList : [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@') && !e.endsWith('.test'));
+      if (testToList.length > 0 || hasExplicitTestProfile) {
+        explicitTestRecipients = testToList.length > 0;
+        if (testToList.length > 0) {
+          dispatchTo = Array.from(new Set(testToList)).join(', ');
+        }
+        const toSet = new Set(testToList);
+        dispatchCc = Array.from(new Set([...testGlobalCc, ...profileExtras])).filter((e) => !toSet.has(e));
+      } else {
+        dispatchCc = [];
+      }
+    }
+
     const res = await fetch('/api/send-email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        to: primaryEmail,
-        ...(ccEmails.length > 0 ? { cc: ccEmails } : {}),
+        to: dispatchTo,
+        ...(dispatchCc.length > 0 ? { cc: dispatchCc } : {}),
         subject,
         html,
         isTestMode: isTestInv,
+        isTestModeExplicitRecipients: explicitTestRecipients,
+        emailType: 'invite_email',
         text: `Pingcon RMA Portal Link: ${inviteUrl}\n\nAuthorized for: ${recipientsText}\nValidity: ${expDateStr}\n\nThis link is locked to authorized Google account(s). Forwarding to unauthorized users is prohibited.`
       })
     });

@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { QRCodeSVG } from 'qrcode.react';
 import {
   X, Printer, QrCode, ShieldCheck, CheckCircle2, AlertTriangle,
-  Download, Lock, Move, RotateCcw, ArrowRight, Maximize2, Layers, CopyCheck
+  Download, Lock, Move, RotateCcw, ArrowRight, Maximize2, Layers, CopyCheck,
+  Plus, Search
 } from 'lucide-react';
 import {
   PAPER_PRESETS,
@@ -14,7 +15,7 @@ import {
   downloadConsolidatedQrPagesPng
 } from '../utils/customStickerCanvas';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
-import { buildPortalQrPayload, formatSaveFileTimestamp } from '../utils/rmaHelpers';
+import { buildPortalQrPayload, formatSaveFileTimestamp, isTestRecord, isTrashedRecord } from '../utils/rmaHelpers';
 
 const clampNum = (val, min, max, fallback) => {
   const n = Number(val);
@@ -27,10 +28,12 @@ export default function ReturnQRModal({
   onClose,
   report,
   reports = [],
+  availableReports = [],
+  sessionReports = [],
   onOpenQuickAction
 }) {
-  // Normalize incoming single `report` or multi-select `reports` into a deduped array BEFORE hooks
-  const inputReports = useMemo(() => {
+  // Base initial entries passed into the modal (used for reset signature ONLY, excluding picker additions)
+  const baseEntries = useMemo(() => {
     const rawList = Array.isArray(reports) && reports.length > 0
       ? reports
       : report
@@ -40,8 +43,8 @@ export default function ReturnQRModal({
     const deduped = [];
     rawList.forEach((item, idx) => {
       if (!item || typeof item !== 'object') return;
-      const key = String(item.id || item.rma_number || item.rmaNumber || `row-${idx}`);
-      if (seen.has(key)) return;
+      const key = String(item.rma_number || item.rmaNumber || item.id || `row-${idx}`).trim();
+      if (!key || seen.has(key)) return;
       seen.add(key);
       deduped.push({ key, report: item });
     });
@@ -49,12 +52,15 @@ export default function ReturnQRModal({
   }, [reports, report]);
 
   const batchSignature = useMemo(
-    () => inputReports.map((entry) => entry.key).join('|'),
-    [inputReports]
+    () => baseEntries.map((entry) => entry.key).join('|'),
+    [baseEntries]
   );
 
   // ALL state hooks strictly declared BEFORE any conditional return (prevents React Error #310)
   const [removedKeys, setRemovedKeys] = useState(() => new Set());
+  const [extraReports, setExtraReports] = useState([]);
+  const [isAddPickerOpen, setIsAddPickerOpen] = useState(false);
+  const [addSearchQuery, setAddSearchQuery] = useState('');
   const [paperPresetId, setPaperPresetId] = useState('letter');
   const [customPaperMm, setCustomPaperMm] = useState({ widthMm: 215.9, heightMm: 279.4 });
   const [orientation, setOrientation] = useState('portrait');
@@ -73,16 +79,79 @@ export default function ReturnQRModal({
   useEffect(() => {
     if (!isOpen) return;
     setRemovedKeys(new Set());
+    setExtraReports([]);
+    setIsAddPickerOpen(false);
+    setAddSearchQuery('');
     setSizesByKey({});
-    setActiveKey(inputReports[0]?.key || null);
+    setActiveKey(baseEntries[0]?.key || null);
     setDownloadNotice(null);
     setLayoutMode('one_page');
   }, [isOpen, batchSignature]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const modalIsTestScope = useMemo(
+    () => (baseEntries[0]?.report ? isTestRecord(baseEntries[0].report) : false),
+    [baseEntries]
+  );
+
+  const inputReports = useMemo(() => {
+    const merged = [...baseEntries];
+    const seen = new Set(baseEntries.map((e) => e.key.toUpperCase()));
+    extraReports.forEach((item, idx) => {
+      if (!item || typeof item !== 'object') return;
+      if (isTrashedRecord(item)) return;
+      if (Boolean(isTestRecord(item)) !== Boolean(modalIsTestScope)) return;
+      const key = String(item.rma_number || item.rmaNumber || item.id || `extra-${idx}`).trim();
+      if (!key || seen.has(key.toUpperCase())) return;
+      seen.add(key.toUpperCase());
+      merged.push({ key, report: item });
+    });
+    return merged;
+  }, [baseEntries, extraReports, modalIsTestScope]);
 
   const visibleEntries = useMemo(
     () => inputReports.filter((entry) => !removedKeys.has(entry.key)),
     [inputReports, removedKeys]
   );
+
+  const visibleRmaKeysSet = useMemo(
+    () => new Set(visibleEntries.map((e) => e.key.toUpperCase())),
+    [visibleEntries]
+  );
+
+  const scopedSessionMissing = useMemo(() => {
+    const list = Array.isArray(sessionReports) ? sessionReports : [];
+    const seen = new Set();
+    return list.filter((r) => {
+      if (!r || isTrashedRecord(r)) return false;
+      if (Boolean(isTestRecord(r)) !== Boolean(modalIsTestScope)) return false;
+      const key = String(r.rma_number || r.rmaNumber || r.id || '').trim().toUpperCase();
+      if (!key || visibleRmaKeysSet.has(key) || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [sessionReports, modalIsTestScope, visibleRmaKeysSet]);
+
+  const addableCandidates = useMemo(() => {
+    const pool = [...(Array.isArray(sessionReports) ? sessionReports : []), ...(Array.isArray(availableReports) ? availableReports : [])];
+    const seen = new Set();
+    const q = addSearchQuery.trim().toLowerCase();
+    const out = [];
+    for (const r of pool) {
+      if (!r || isTrashedRecord(r)) continue;
+      if (Boolean(isTestRecord(r)) !== Boolean(modalIsTestScope)) continue;
+      const key = String(r.rma_number || r.rmaNumber || r.id || '').trim();
+      const upperKey = key.toUpperCase();
+      if (!key || visibleRmaKeysSet.has(upperKey) || seen.has(upperKey)) continue;
+      seen.add(upperKey);
+      if (q) {
+        const hay = `${key} ${r.name || r.productName || ''} ${r.code || r.sku || ''} ${r.barcode || ''} ${r.store_branch || ''} ${r.supplier_name || ''}`.toLowerCase();
+        if (!hay.includes(q)) continue;
+      }
+      out.push(r);
+      if (out.length >= 25) break;
+    }
+    return out;
+  }, [sessionReports, availableReports, modalIsTestScope, visibleRmaKeysSet, addSearchQuery]);
 
   // Default card size: Medium 90x105mm for single QR, balanced 62x74mm for multi-select consolidated QRs
   const defaultCardSize = useMemo(
@@ -289,6 +358,55 @@ export default function ReturnQRModal({
       const remaining = cards.find((c) => c.key !== key);
       if (remaining) setActiveKey(remaining.key);
     }
+  };
+
+  const handleAddReportToSheet = (rep) => {
+    if (!rep || typeof rep !== 'object') return;
+    const key = String(rep.rma_number || rep.rmaNumber || rep.id || '').trim();
+    if (!key) return;
+    setRemovedKeys((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+    setExtraReports((prev) => {
+      if (prev.some((x) => String(x?.rma_number || x?.rmaNumber || x?.id || '').trim().toUpperCase() === key.toUpperCase())) {
+        return prev;
+      }
+      return [...prev, rep];
+    });
+    setActiveKey(key);
+    setDownloadNotice({
+      type: 'success',
+      msg: `Added ${key} onto your consolidated QR print sheet.`
+    });
+    setTimeout(() => setDownloadNotice(null), 2500);
+  };
+
+  const handleAddSessionQrs = () => {
+    if (scopedSessionMissing.length === 0) return;
+    setRemovedKeys((prev) => {
+      const next = new Set(prev);
+      scopedSessionMissing.forEach((r) => {
+        const k = String(r.rma_number || r.rmaNumber || r.id || '').trim();
+        if (k) next.delete(k);
+      });
+      return next;
+    });
+    setExtraReports((prev) => {
+      const seen = new Set(prev.map((x) => String(x?.rma_number || x?.rmaNumber || x?.id || '').trim().toUpperCase()));
+      const additions = scopedSessionMissing.filter((r) => {
+        const k = String(r.rma_number || r.rmaNumber || r.id || '').trim().toUpperCase();
+        return k && !seen.has(k);
+      });
+      return [...prev, ...additions];
+    });
+    setDownloadNotice({
+      type: 'success',
+      msg: `Added ${scopedSessionMissing.length} session QR${scopedSessionMissing.length === 1 ? '' : 's'} onto consolidated sheet.`
+    });
+    setTimeout(() => setDownloadNotice(null), 3000);
   };
 
   const handleSaveQrPng = async () => {
@@ -586,7 +704,101 @@ export default function ReturnQRModal({
                 ⚡ Auto-Fit All to 1 Page
               </button>
             )}
+
+            {(availableReports.length > 0 || sessionReports.length > 0) && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsAddPickerOpen((v) => !v)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-black flex items-center gap-1 transition-colors cursor-pointer border ${
+                    isAddPickerOpen
+                      ? 'bg-indigo-700 text-white border-indigo-700'
+                      : 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/70 dark:hover:bg-indigo-900/70 text-indigo-800 dark:text-indigo-200 border-indigo-300 dark:border-indigo-700'
+                  }`}
+                  title="Append additional RMA QRs to print or download on the same consolidated sheet"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>➕ Add More RMA QRs to Sheet</span>
+                </button>
+
+                {scopedSessionMissing.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleAddSessionQrs}
+                    className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                    title="Add all other QRs submitted in this session onto this print sheet"
+                  >
+                    <QrCode className="w-3 h-3" />
+                    <span>Add Recent Session QRs (+{scopedSessionMissing.length})</span>
+                  </button>
+                )}
+              </>
+            )}
           </div>
+
+          {/* Searchable Multi-QR Picker Dropdown Panel */}
+          {isAddPickerOpen && (
+            <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 space-y-2 shadow-sm">
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={addSearchQuery}
+                    onChange={(e) => setAddSearchQuery(e.target.value)}
+                    placeholder={`Search ${modalIsTestScope ? 'Test Sandbox' : 'Live'} RMAs by RMA #, item, SKU, barcode, store or supplier...`}
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-[11px] font-semibold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAddPickerOpen(false)}
+                  className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-500 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                {addableCandidates.length === 0 ? (
+                  <div className="py-2 text-center text-[11px] text-slate-400 italic">
+                    No additional {modalIsTestScope ? 'Test Mode' : 'Live'} RMAs available matching filter.
+                  </div>
+                ) : (
+                  addableCandidates.map((cand) => {
+                    const rmaNo = cand.rma_number || cand.rmaNumber || cand.id;
+                    const itemName = cand.name || cand.productName || cand.barcode || 'Returned Merchandise';
+                    const qty = cand.total_quantity ?? cand.quantity ?? 1;
+                    const unit = cand.unit_name || cand.unit || 'pc';
+                    return (
+                      <button
+                        key={rmaNo}
+                        type="button"
+                        onClick={() => handleAddReportToSheet(cand)}
+                        className="w-full px-2.5 py-1.5 flex items-center justify-between gap-2 text-left hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors cursor-pointer rounded"
+                      >
+                        <div className="min-w-0 flex items-center gap-2">
+                          <span className="font-mono font-black text-[11px] text-indigo-700 dark:text-indigo-300 shrink-0">
+                            {rmaNo}
+                          </span>
+                          <span className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 truncate">
+                            {itemName}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 text-[10px]">
+                          <span className="font-mono font-bold text-slate-600 dark:text-slate-400">
+                            {qty} {unit}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-indigo-600 text-white font-black">
+                            + Add
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Row 2: Active QR Card Sizing Presets & Manual W × H mm Inputs */}
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-slate-200/80 dark:border-slate-700/80">

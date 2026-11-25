@@ -2,7 +2,7 @@ import tls from 'node:tls';
 import zlib from 'node:zlib';
 import { supabase } from './supabase.js';
 import { authorizeCronOrAdmin } from './cronAuth.js';
-import { DEFAULT_EMAIL_RECIPIENTS } from './smtpMailer.js';
+import { DEFAULT_EMAIL_RECIPIENTS, DEFAULT_SANDBOX_EMAIL } from './smtpMailer.js';
 
 function decodeXmlEntities(str) {
   return String(str || '')
@@ -167,13 +167,13 @@ function parseWorksheetRows(sheetXml, sharedStrings = []) {
     }
     rows[rowNumber - 1] = rowArr;
   }
-  return rows.map((r) => (Array.isArray(r) ? r : []));
+  return Array.from({ length: rows.length }, (_, idx) => (Array.isArray(rows[idx]) ? rows[idx] : []));
 }
 
 /**
  * Parses an edited or original RMA Alert mirror `.xlsx` buffer into structured field + manifest updates.
  */
-export function extractRmaUpdatesFromXlsxBuffer(buffer) {
+export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {}) {
   const entries = parseZipEntriesFromBuffer(buffer);
   const sharedStrings = entries.has('xl/sharedStrings.xml')
     ? parseSharedStringsXml(entries.get('xl/sharedStrings.xml').toString('utf8'))
@@ -195,25 +195,43 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer) {
   const rows = parseWorksheetRows(entries.get(sheetEntryName).toString('utf8'), sharedStrings);
   const fieldMap = {};
   let manifestHeaderRowIdx = -1;
+  let fieldColIdx = -1;
+  let valueColIdx = -1;
 
   for (let i = 0; i < rows.length; i += 1) {
     const row = rows[i] || [];
-    const colA = String(row[0] ?? '').trim();
-    if (!colA) continue;
-    if (/^MANIFEST LINE ITEMS/i.test(colA)) {
+    const trimmedCells = Array.from(row, (c) => String(c ?? '').trim());
+    if (!trimmedCells.some(Boolean)) continue;
+
+    if (trimmedCells.some((c) => /^MANIFEST LINE ITEMS/i.test(c))) {
       manifestHeaderRowIdx = i + 1;
       break;
     }
-    if (/^(WHOLESALE RMA|2-WAY EMAIL|Field)$/i.test(colA)) continue;
-    const colB = row[1] !== undefined && row[1] !== null ? String(row[1]).trim() : '';
-    fieldMap[colA.toLowerCase()] = colB;
+
+    const detectedFieldCol = trimmedCells.findIndex((c) => /^field$/i.test(c));
+    const detectedValueCol = trimmedCells.findIndex((c) => /^value$/i.test(c));
+    if (detectedFieldCol >= 0 && detectedValueCol >= 0) {
+      fieldColIdx = detectedFieldCol;
+      valueColIdx = detectedValueCol;
+      continue;
+    }
+
+    if (trimmedCells.some((c) => /^(?:\[TEST\]\s*)?WHOLESALE RMA|2-WAY EMAIL/i.test(c))) continue;
+
+    const effFieldIdx = fieldColIdx >= 0 ? fieldColIdx : 0;
+    const effValueIdx = valueColIdx >= 0 ? valueColIdx : 1;
+    const fieldName = String(row[effFieldIdx] ?? '').trim();
+    if (!fieldName || /^(?:serial\s*no\.?|field|sn)$/i.test(fieldName)) continue;
+
+    const fieldVal = row[effValueIdx] !== undefined && row[effValueIdx] !== null ? String(row[effValueIdx]).trim() : '';
+    fieldMap[fieldName.toLowerCase()] = fieldVal;
   }
 
   const manifestUpdates = [];
   if (manifestHeaderRowIdx >= 0 && manifestHeaderRowIdx < rows.length) {
-    const headerRow = (rows[manifestHeaderRowIdx] || []).map((h) => String(h || '').trim().toLowerCase());
+    const headerRow = Array.from(rows[manifestHeaderRowIdx] || [], (h) => String(h ?? '').trim().toLowerCase());
     const colMap = {
-      line: headerRow.findIndex((h) => h.includes('line')),
+      line: headerRow.findIndex((h) => h && (h.includes('serial') || h.includes('line') || h === 'sn')),
       barcode: headerRow.findIndex((h) => h.includes('barcode')),
       code: headerRow.findIndex((h) => h.includes('sku')),
       name: headerRow.findIndex((h) => h.includes('description') || h.includes('product')),
@@ -251,7 +269,9 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer) {
 
   const rmaNumber = String(getField('RMA Number', 'rma_number') || '').trim().toUpperCase();
   const testModeVal = String(getField('Test Mode', 'is_test') || '').trim().toLowerCase();
-  const isTestHint = /^rma-test-/i.test(rmaNumber) || testModeVal.startsWith('yes') || testModeVal === 'true';
+  const emailSubjectVal = String(subjectHint || getField('Email Subject', 'Subject') || '').trim();
+  const hasTestSubjectTag = /\[TEST\]/i.test(emailSubjectVal);
+  const isTestHint = /^rma-test-/i.test(rmaNumber) || testModeVal.startsWith('yes') || testModeVal === 'true' || hasTestSubjectTag;
 
   const patch = {
     store_branch: getField('Store / Branch'),
@@ -292,34 +312,74 @@ function cleanEmailAddr(raw) {
 }
 
 function extractAuthorizedEmailsFromSettings(settingsRows = []) {
-  const set = new Set([
+  const liveEmailsSet = new Set([
     DEFAULT_EMAIL_RECIPIENTS.toEmail.toLowerCase(),
     ...DEFAULT_EMAIL_RECIPIENTS.baseCcList.map((e) => e.toLowerCase())
   ]);
+  const testEmailsSet = new Set([
+    String(DEFAULT_SANDBOX_EMAIL || 'mgan@pingconmarketing.com').trim().toLowerCase()
+  ]);
+
+  const addEmailsToSet = (targetSet, raw) => {
+    if (!raw) return;
+    const arr = Array.isArray(raw) ? raw : String(raw).split(/[,;\s]+/);
+    arr.forEach((entry) => {
+      const c = cleanEmailAddr(entry);
+      if (c) targetSet.add(c);
+    });
+  };
+
   for (const row of settingsRows) {
     if (!row?.key) continue;
     try {
       const parsed = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
       if (row.key === 'email_recipients' && parsed && typeof parsed === 'object') {
-        if (parsed.toEmail) String(parsed.toEmail).split(/[,;\s]+/).forEach((e) => { const c = cleanEmailAddr(e); if (c) set.add(c); });
-        if (Array.isArray(parsed.baseCcList)) parsed.baseCcList.forEach((e) => { const c = cleanEmailAddr(e); if (c) set.add(c); });
+        addEmailsToSet(liveEmailsSet, parsed.toList);
+        addEmailsToSet(liveEmailsSet, parsed.toEmail);
+        addEmailsToSet(liveEmailsSet, parsed.baseCcList);
       }
       if (row.key === 'email_recipients_by_type' && parsed && typeof parsed === 'object') {
         Object.values(parsed).forEach((prof) => {
           if (!prof || typeof prof !== 'object') return;
-          if (Array.isArray(prof.toList)) prof.toList.forEach((e) => { const c = cleanEmailAddr(e); if (c) set.add(c); });
-          if (Array.isArray(prof.ccList)) prof.ccList.forEach((e) => { const c = cleanEmailAddr(e); if (c) set.add(c); });
+          addEmailsToSet(liveEmailsSet, prof.toList);
+          addEmailsToSet(liveEmailsSet, prof.toEmail);
+          addEmailsToSet(liveEmailsSet, prof.ccList);
+        });
+      }
+      if (row.key === 'test_sandbox_email' && parsed) {
+        addEmailsToSet(testEmailsSet, parsed);
+      }
+      if (row.key === 'test_email_recipients' && parsed && typeof parsed === 'object') {
+        addEmailsToSet(testEmailsSet, parsed.toList);
+        addEmailsToSet(testEmailsSet, parsed.toEmail);
+        addEmailsToSet(testEmailsSet, parsed.baseCcList);
+        addEmailsToSet(testEmailsSet, parsed.ccList);
+      }
+      if (row.key === 'test_email_recipients_by_type' && parsed && typeof parsed === 'object') {
+        Object.values(parsed).forEach((prof) => {
+          if (!prof || typeof prof !== 'object') return;
+          addEmailsToSet(testEmailsSet, prof.toList);
+          addEmailsToSet(testEmailsSet, prof.toEmail);
+          addEmailsToSet(testEmailsSet, prof.ccList);
         });
       }
     } catch {}
   }
-  return set;
+  return { liveEmailsSet, testEmailsSet };
 }
 
-function isSenderAuthorizedForReport(senderEmail, report, adminEmailsSet, globalEmailsSet) {
+function isSenderAuthorizedForReport(senderEmail, report, adminEmailsSet, { liveEmailsSet, testEmailsSet } = {}) {
   const clean = cleanEmailAddr(senderEmail);
   if (!clean) return false;
-  if (adminEmailsSet.has(clean) || globalEmailsSet.has(clean)) return true;
+  if (adminEmailsSet?.has(clean)) return true;
+  if (liveEmailsSet?.has(clean)) return true;
+  const reportIsTest = Boolean(
+    report?.ai_document_metadata?.is_test ||
+    report?.ai_document_metadata?.test_mode ||
+    /^RMA-TEST-/i.test(report?.rma_number || '') ||
+    String(report?.notes || '').includes('[TEST_MODE]')
+  );
+  if (reportIsTest && testEmailsSet?.has(clean)) return true;
   if (report?.ae_email && cleanEmailAddr(report.ae_email) === clean) return true;
   if (report?.reporter_contact && cleanEmailAddr(report.reporter_contact) === clean) return true;
   const domain = clean.split('@')[1] || '';
@@ -333,10 +393,11 @@ export async function applyRmaXlsxUpdates({
   buffer,
   rmaNumberHint = '',
   senderEmail = '',
+  subjectHint = '',
   sourceLabel = 'manual_upload',
   bypassSenderCheck = false
 }) {
-  const parsed = extractRmaUpdatesFromXlsxBuffer(buffer);
+  const parsed = extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint });
   const targetRma = parsed.rmaNumber || String(rmaNumberHint || '').trim().toUpperCase();
   if (!targetRma || !/^RMA-(?:TEST-)?\d{4}-/i.test(targetRma)) {
     throw new Error(`Invalid or missing RMA Number in uploaded .xlsx (${targetRma || 'blank'}).`);
@@ -345,7 +406,17 @@ export async function applyRmaXlsxUpdates({
   const [{ data: matchedRows, error: fetchErr }, { data: adminRows }, { data: settingsRows }] = await Promise.all([
     supabase.from('rma_reports').select('*').ilike('rma_number', targetRma).limit(5),
     supabase.from('admin_users').select('email, is_active'),
-    supabase.from('rma_settings').select('key, value').in('key', ['email_recipients', 'email_recipients_by_type', 'supplier_directory_store'])
+    supabase
+      .from('rma_settings')
+      .select('key, value')
+      .in('key', [
+        'email_recipients',
+        'email_recipients_by_type',
+        'test_email_recipients',
+        'test_email_recipients_by_type',
+        'test_sandbox_email',
+        'supplier_directory_store'
+      ])
   ]);
 
   if (fetchErr) throw new Error(`Failed loading target RMA ${targetRma}: ${fetchErr.message}`);
@@ -368,9 +439,9 @@ export async function applyRmaXlsxUpdates({
       .map((a) => cleanEmailAddr(a.email))
       .filter(Boolean)
   );
-  const globalSet = extractAuthorizedEmailsFromSettings(settingsRows || []);
+  const authorizedSets = extractAuthorizedEmailsFromSettings(settingsRows || []);
 
-  if (!bypassSenderCheck && senderEmail && !isSenderAuthorizedForReport(senderEmail, existing, adminSet, globalSet)) {
+  if (!bypassSenderCheck && senderEmail && !isSenderAuthorizedForReport(senderEmail, existing, adminSet, authorizedSets)) {
     return {
       skipped: true,
       reason: 'UNAUTHORIZED_SENDER',
@@ -495,11 +566,22 @@ export async function applyRmaXlsxUpdates({
 
   const actorLabel = cleanEmailAddr(senderEmail) || sourceLabel;
   const nowIso = new Date().toISOString();
-  if (metaChanged) {
+  if (metaChanged || (existingIsTest && (!prevMeta.is_test || !prevMeta.test_mode))) {
     updates.ai_document_metadata = {
       ...prevMeta,
+      ...(existingIsTest ? { is_test: true, test_mode: true } : {}),
       follow_up: nextFollowUp
     };
+  }
+  if (existingIsTest) {
+    const existingNotesStr = String(existing.notes || '').trim();
+    if (updates.notes !== undefined) {
+      if (!String(updates.notes).includes('[TEST_MODE]')) {
+        updates.notes = `[TEST_MODE] ${String(updates.notes).trim()}`.trim();
+      }
+    } else if (!existingNotesStr.includes('[TEST_MODE]')) {
+      updates.notes = existingNotesStr ? `[TEST_MODE] ${existingNotesStr}` : '[TEST_MODE]';
+    }
   }
 
   const prevAudit = Array.isArray(existing.audit_trail) ? existing.audit_trail : [];
@@ -510,7 +592,7 @@ export async function applyRmaXlsxUpdates({
       action: 'EMAIL_XLSX_REPLY_UPDATE',
       stage: String(existing.status || 'PENDING').toUpperCase(),
       actor: actorLabel,
-      note: `Updated via replied .xlsx mirror (${changedFields.join(', ')})`
+      note: `${existingIsTest ? '[TEST] ' : ''}Updated via replied .xlsx mirror (${changedFields.join(', ')})`
     }
   ];
 
@@ -784,6 +866,7 @@ export async function handleIngestXlsxReply(req, res, payload = {}) {
       buffer,
       rmaNumberHint: payload.rmaNumber || '',
       senderEmail: payload.senderEmail || '',
+      subjectHint: payload.subject || '',
       sourceLabel: payload.actorName || 'Admin Manual .xlsx Upload',
       bypassSenderCheck: true
     });
@@ -861,6 +944,7 @@ export async function handleSyncEmailReplies(req, res, payload = {}) {
               const applyRes = await applyRmaXlsxUpdates({
                 buffer: att.buffer,
                 senderEmail: msg.from,
+                subjectHint: msg.subject || '',
                 sourceLabel: msg.from || 'Email Reply .xlsx'
               });
               results.push({ ...applyRes, filename: att.filename, from: msg.from, messageId: msg.messageId });

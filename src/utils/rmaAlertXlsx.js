@@ -138,39 +138,40 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
   let rIdx = 1;
 
   // Title Row
-  rowsXml.push(`<row r="${rIdx}" ht="26" customHeight="1">${makeCellXml(`A${rIdx}`, `${isTest ? '[TEST] ' : ''}WHOLESALE RMA ALERT WORKSHEET — ${rmaNumber}`, 1)}${makeCellXml(`B${rIdx}`, '', 1)}${makeCellXml(`C${rIdx}`, '', 1)}</row>`);
+  rowsXml.push(`<row r="${rIdx}" ht="26" customHeight="1">${makeCellXml(`A${rIdx}`, `${isTest ? '[TEST] ' : ''}WHOLESALE RMA ALERT WORKSHEET — ${rmaNumber}`, 1)}${makeCellXml(`B${rIdx}`, '', 1)}${makeCellXml(`C${rIdx}`, '', 1)}${makeCellXml(`D${rIdx}`, '', 1)}</row>`);
   rIdx += 1;
 
   // Instructions Row
-  rowsXml.push(`<row r="${rIdx}" ht="24" customHeight="1">${makeCellXml(`A${rIdx}`, '2-WAY EMAIL REPLY EDITABLE WORKSHEET', 4)}${makeCellXml(`B${rIdx}`, 'Edit any Value cells in Column B (or Manifest rows below), save .xlsx, and Reply / Reply-All to this alert email.', 2)}${makeCellXml(`C${rIdx}`, formatSaveFileTimestamp(new Date()), 4)}</row>`);
+  rowsXml.push(`<row r="${rIdx}" ht="24" customHeight="1">${makeCellXml(`A${rIdx}`, '', 4)}${makeCellXml(`B${rIdx}`, '2-WAY EMAIL REPLY EDITABLE WORKSHEET', 4)}${makeCellXml(`C${rIdx}`, 'Edit any Value cells in Column C (or Manifest rows below), save .xlsx, and Reply / Reply-All to this alert email.', 2)}${makeCellXml(`D${rIdx}`, formatSaveFileTimestamp(new Date()), 4)}</row>`);
   rIdx += 1;
 
   // Table Headers
-  rowsXml.push(`<row r="${rIdx}" ht="22" customHeight="1">${makeCellXml(`A${rIdx}`, 'Field', 3)}${makeCellXml(`B${rIdx}`, 'Value', 3)}${makeCellXml(`C${rIdx}`, 'Format / Notes', 3)}</row>`);
+  rowsXml.push(`<row r="${rIdx}" ht="22" customHeight="1">${makeCellXml(`A${rIdx}`, 'Serial No.', 3)}${makeCellXml(`B${rIdx}`, 'Field', 3)}${makeCellXml(`C${rIdx}`, 'Value', 3)}${makeCellXml(`D${rIdx}`, 'Format / Notes', 3)}</row>`);
   rIdx += 1;
 
-  for (const [label, val, note, kind] of fieldRows) {
+  fieldRows.forEach(([label, val, note, kind], idx) => {
     const valStyle = kind === 'currency' ? 6 : 5;
     const valType = (kind === 'number' || kind === 'currency') ? 'number' : 'text';
     rowsXml.push(
       `<row r="${rIdx}" ht="20" customHeight="1">` +
-      makeCellXml(`A${rIdx}`, label, 4, 'text') +
-      makeCellXml(`B${rIdx}`, val, valStyle, valType) +
-      makeCellXml(`C${rIdx}`, note, 2, 'text') +
+      makeCellXml(`A${rIdx}`, idx + 1, 2, 'number') +
+      makeCellXml(`B${rIdx}`, label, 4, 'text') +
+      makeCellXml(`C${rIdx}`, val, valStyle, valType) +
+      makeCellXml(`D${rIdx}`, note, 2, 'text') +
       `</row>`
     );
     rIdx += 1;
-  }
+  });
 
   // Manifest table when multi-item batch return (2+ lines)
   if (items.length > 1) {
     rIdx += 1;
-    rowsXml.push(`<row r="${rIdx}" ht="22" customHeight="1">${makeCellXml(`A${rIdx}`, `MANIFEST LINE ITEMS (${items.length})`, 1)}${makeCellXml(`B${rIdx}`, '', 1)}${makeCellXml(`C${rIdx}`, '', 1)}</row>`);
+    rowsXml.push(`<row r="${rIdx}" ht="22" customHeight="1">${makeCellXml(`A${rIdx}`, `MANIFEST LINE ITEMS (${items.length})`, 1)}${makeCellXml(`B${rIdx}`, '', 1)}${makeCellXml(`C${rIdx}`, '', 1)}${makeCellXml(`D${rIdx}`, '', 1)}</row>`);
     rIdx += 1;
-    const mHeaders = ['Line #', 'Barcode', 'Assigned SKU', 'Product Description', 'Quantity', 'Packaging Unit', 'Expiry Date (YYYY-MM-DD)', 'Defect Reason', 'Explanation'];
+    const mHeaders = ['Serial No.', 'Barcode', 'Assigned SKU', 'Product Description', 'Quantity', 'Packaging Unit', 'Expiry Date (YYYY-MM-DD)', 'Defect Reason', 'Explanation'];
     rowsXml.push(
       `<row r="${rIdx}" ht="22" customHeight="1">` +
-      mHeaders.map((h, i) => makeCellXml(`${colToLetter(i + 1)}${rIdx}`, h, 3, 'text')).join('') +
+      mHeaders.map((h, i) => makeCellXml(`${colToLetter(i)}${rIdx}`, h, 3, 'text')).join('') +
       `</row>`
     );
     rIdx += 1;
@@ -188,27 +189,27 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
       ];
       rowsXml.push(
         `<row r="${rIdx}" ht="20" customHeight="1">` +
-        vals.map(([v, t, s], i) => makeCellXml(`${colToLetter(i + 1)}${rIdx}`, v, s, t)).join('') +
+        vals.map(([v, t, s], i) => makeCellXml(`${colToLetter(i)}${rIdx}`, v, s, t)).join('') +
         `</row>`
       );
       rIdx += 1;
     });
   }
 
-  const maxCols = items.length > 1 ? 9 : 3;
+  const maxCols = items.length > 1 ? 9 : 4;
   const maxRow = rIdx - 1;
-  const colWidths = [34, 48, 42, 34, 14, 16, 22, 26, 36].slice(0, maxCols);
+  const colWidths = [11, 34, 48, 42, 14, 16, 22, 26, 36].slice(0, maxCols);
   const colsXml = `<cols>${colWidths.map((w, idx) => `<col min="${idx + 1}" max="${idx + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>`;
 
   const sheetXml = [
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
-    `<dimension ref="A1:${colToLetter(maxCols)}${maxRow}"/>`,
-    '<sheetViews><sheetView tabSelected="1" workbookViewId="0"><pane ySplit="3" topLeftCell="A4" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="B4" sqref="B4"/></sheetView></sheetViews>',
+    `<dimension ref="A1:${colToLetter(maxCols - 1)}${maxRow}"/>`,
+    '<sheetViews><sheetView tabSelected="1" workbookViewId="0"><pane ySplit="3" topLeftCell="A4" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="C4" sqref="C4"/></sheetView></sheetViews>',
     '<sheetFormatPr defaultRowHeight="20"/>',
     colsXml,
     `<sheetData>${rowsXml.join('')}</sheetData>`,
-    '<mergeCells count="1"><mergeCell ref="A1:C1"/></mergeCells>',
+    '<mergeCells count="1"><mergeCell ref="A1:D1"/></mergeCells>',
     '</worksheet>'
   ].join('');
 

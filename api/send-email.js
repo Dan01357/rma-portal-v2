@@ -97,6 +97,8 @@ export default async function handler(req, res) {
       html,
       text,
       isTestMode = false,
+      isTestModeExplicitRecipients = false,
+      emailType = '',
       attachments = []
     } = payload || {};
 
@@ -128,46 +130,92 @@ export default async function handler(req, res) {
     let finalText = text || '';
 
     // If Test Mode is active:
-    // DO NOT send to actual recipients or customer AE!
-    // Instead, reroute delivery exclusively to the configured sandbox email (default mgan@pingconmarketing.com).
+    // NEVER send to Live recipients or Live customer AE unless explicitly configured inside Test Mode settings!
+    // Priority:
+    //   1. Explicit Test Mode TO/CC passed from Test Mode frontend profile/editor (isTestModeExplicitRecipients)
+    //   2. Saved per-type Test Mode profile (test_email_recipients_by_type[emailType])
+    //   3. Saved global Test Mode recipients (test_email_recipients)
+    //   4. Sandbox fallback (test_sandbox_email -> DEFAULT_SANDBOX_EMAIL)
     if (isTestMode) {
-      const originalTo = normalizedTo;
-      const originalCc = validCc.join(', ');
-      let resolvedSandboxEmail = DEFAULT_SANDBOX_EMAIL;
-      if (payload?.sandboxEmail) {
-        resolvedSandboxEmail = normalizeSandboxEmail(payload.sandboxEmail);
-      } else {
-        try {
-          const { data: sandboxRow } = await supabase
-            .from('rma_settings')
-            .select('value')
-            .eq('key', 'test_sandbox_email')
-            .maybeSingle();
-          if (sandboxRow?.value) {
-            resolvedSandboxEmail = normalizeSandboxEmail(sandboxRow.value);
+      const originalTo = isTestModeExplicitRecipients ? 'Bypassed (Using Test Mode Profile)' : normalizedTo;
+      const originalCc = isTestModeExplicitRecipients ? 'Bypassed (Using Test Mode Profile)' : validCc.join(', ');
+      let resolvedSandboxEmail = payload?.sandboxEmail
+        ? normalizeSandboxEmail(payload.sandboxEmail)
+        : DEFAULT_SANDBOX_EMAIL;
+      let savedTestGlobal = null;
+      let savedTestByType = null;
+
+      try {
+        const { data: testSettingRows } = await supabase
+          .from('rma_settings')
+          .select('key, value')
+          .in('key', ['test_sandbox_email', 'test_email_recipients', 'test_email_recipients_by_type']);
+        for (const row of testSettingRows || []) {
+          if (row.key === 'test_sandbox_email' && row.value && !payload?.sandboxEmail) {
+            resolvedSandboxEmail = normalizeSandboxEmail(row.value);
+          } else if (row.key === 'test_email_recipients') {
+            savedTestGlobal = typeof row.value === 'string'
+              ? (() => { try { return JSON.parse(row.value); } catch { return null; } })()
+              : row.value;
+          } else if (row.key === 'test_email_recipients_by_type') {
+            savedTestByType = typeof row.value === 'string'
+              ? (() => { try { return JSON.parse(row.value); } catch { return null; } })()
+              : row.value;
           }
-        } catch {}
+        }
+      } catch {}
+
+      const cleanTypeKey = String(emailType || '').trim();
+      const typeProf = cleanTypeKey && savedTestByType && typeof savedTestByType === 'object'
+        ? savedTestByType[cleanTypeKey]
+        : null;
+      const typeToList = normalizeEmailArray(typeProf?.toList ?? typeProf?.toEmail ?? typeProf?.to);
+      const typeCcList = normalizeEmailArray(typeProf?.ccList ?? typeProf?.cc);
+      const globalTestToList = normalizeEmailArray(savedTestGlobal?.toList ?? savedTestGlobal?.toEmail);
+      const globalTestCcList = normalizeEmailArray(savedTestGlobal?.baseCcList ?? savedTestGlobal?.ccList);
+
+      const payloadTestToList = payload?.hasCustomTestRecipients ? normalizeEmailArray(payload?.testToList) : [];
+      const payloadTestCcList = payload?.hasCustomTestRecipients ? normalizeEmailArray(payload?.testCcList) : [];
+
+      let testToList = [];
+      let testCcList = [];
+      if (payloadTestToList.length > 0) {
+        testToList = payloadTestToList;
+        testCcList = payloadTestCcList.filter((e) => !testToList.includes(e));
+      } else if (isTestModeExplicitRecipients && validToList.length > 0) {
+        testToList = validToList;
+        testCcList = validCc.filter((e) => !testToList.includes(e));
+      } else if (typeToList.length > 0) {
+        testToList = typeToList;
+        testCcList = typeCcList.filter((e) => !testToList.includes(e));
+      } else if (globalTestToList.length > 0) {
+        testToList = globalTestToList;
+        testCcList = globalTestCcList.filter((e) => !testToList.includes(e));
+      } else {
+        testToList = [resolvedSandboxEmail];
+        testCcList = [];
       }
 
-      finalTo = resolvedSandboxEmail;
-      finalCc = []; // empty to prevent other recipients from receiving anything
+      finalTo = testToList.join(', ');
+      finalCc = testCcList;
       finalSubject = formatTestEmailSubject(finalSubject, true);
 
       const testBanner = `
         <div style="background-color: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 14px 18px; border-radius: 12px; margin-bottom: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px;">
           <div style="font-weight: 800; font-size: 14px; margin-bottom: 6px;">🧪 TEST MODE ACTIVE (Safe Sandbox Delivery)</div>
-          <div>This test email was safely routed exclusively to <strong>${resolvedSandboxEmail}</strong> so you can verify the layout, calculations, attachments, and photo embeds without notifying live stakeholders.</div>
+          <div>This test email was safely routed exclusively to Test Mode recipient(s) <strong>${finalTo}</strong>${finalCc.length ? ` (CC: <strong>${finalCc.join(', ')}</strong>)` : ''} — Live production stakeholders remain completely isolated.</div>
           <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #fde68a; font-size: 11px; color: #78350f;">
-            <strong>Live Production Recipients (Bypassed in Test Mode):</strong><br/>
-            • <strong>Target TO:</strong> ${originalTo}<br/>
-            • <strong>Target CC:</strong> ${originalCc || 'None'}
+            <strong>Test Isolation Audit (Sandbox Fallback: ${resolvedSandboxEmail}):</strong><br/>
+            • <strong>Test Mode TO:</strong> ${finalTo}<br/>
+            • <strong>Test Mode CC:</strong> ${finalCc.length ? finalCc.join(', ') : 'None'}<br/>
+            • <strong>Bypassed / Suppressed Live Target:</strong> ${originalTo}${originalCc && originalCc !== 'Bypassed (Using Test Mode Profile)' ? ` (CC: ${originalCc})` : ''}
           </div>
         </div>
       `;
 
       finalHtml = testBanner + finalHtml;
-      finalText = `[TEST MODE ACTIVE - Safe Sandbox Delivery -> ${resolvedSandboxEmail}]\nTarget TO: ${originalTo}\nTarget CC: ${originalCc}\n\n${finalText}`;
-      console.log(`🧪 [TEST MODE] Dispatched safely via SMTP to ${finalTo} (Original TO: ${originalTo}, CC: ${originalCc})`);
+      finalText = `[TEST MODE ACTIVE - Safe Sandbox Delivery -> TO: ${finalTo}${finalCc.length ? ` | CC: ${finalCc.join(', ')}` : ''} | Sandbox: ${resolvedSandboxEmail}]\n\n${finalText}`;
+      console.log(`🧪 [TEST MODE] Dispatched safely via SMTP to ${finalTo} (CC: ${finalCc.join(', ') || 'none'})`);
     }
 
     const mailOptions = {

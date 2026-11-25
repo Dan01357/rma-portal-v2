@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
+import { Calendar, CheckCircle2, Clock, AlertTriangle, RotateCcw } from 'lucide-react';
 import { computeFourStepWorkflow } from '../utils/followUpWorkflow';
 
 /**
@@ -12,7 +12,9 @@ export default function FollowUpTimelineCard({
   catalogProducts = [],
   workflow = null,
   customerFollowUpDefaultEnabled = false,
-  compact = false
+  compact = false,
+  onResetTimeline = null,
+  isResettingTimeline = false
 }) {
   const wf = workflow || (report
     ? computeFourStepWorkflow(report, catalogProducts, { customerFollowUpDefaultEnabled })
@@ -49,15 +51,29 @@ export default function FollowUpTimelineCard({
           <Calendar className="w-3.5 h-3.5 text-amber-600 shrink-0" />
           <span>Full 4-Step &amp; 10-Calendar-Day Pickup Timeline</span>
         </div>
-        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black border ${
-          wf.isClosed
-            ? (wf.isAutoDisposed ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/70 dark:text-rose-200 dark:border-rose-700' : 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:border-emerald-700')
-            : wf.isExpiredAfter10Days
-              ? 'bg-rose-100 text-rose-900 border-rose-300 dark:bg-rose-950/70 dark:text-rose-200 dark:border-rose-700'
-              : 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/70 dark:text-amber-200 dark:border-amber-700'
-        }`}>
-          {wf.step4.done ? wf.step4.dateDisplay : `Step ${wf.activeStepNumber} of 4 • ${wf.step2.text}`}
-        </span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {typeof onResetTimeline === 'function' && (
+            <button
+              type="button"
+              disabled={isResettingTimeline}
+              onClick={onResetTimeline}
+              className="px-2 py-0.5 rounded-lg bg-slate-200/80 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-600 text-[10px] font-black flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              title="Reset full 4-step workflow timeline, 10-day countdown & disposition outcome back to Pending"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>{isResettingTimeline ? 'Resetting...' : '🔄 Reset Timeline'}</span>
+            </button>
+          )}
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black border ${
+            wf.isClosed
+              ? (wf.isAutoDisposed ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/70 dark:text-rose-200 dark:border-rose-700' : 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:border-emerald-700')
+              : wf.isExpiredAfter10Days
+                ? 'bg-rose-100 text-rose-900 border-rose-300 dark:bg-rose-950/70 dark:text-rose-200 dark:border-rose-700'
+                : 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/70 dark:text-amber-200 dark:border-amber-700'
+          }`}>
+            {wf.step4.done ? wf.step4.dateDisplay : `Step ${wf.activeStepNumber} of 4 • ${wf.step2.text}`}
+          </span>
+        </div>
       </div>
 
       {/* Summary 4 Steps Row */}

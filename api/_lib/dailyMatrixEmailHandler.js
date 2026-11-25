@@ -26,6 +26,8 @@ import {
 
 const EMAIL_RECIPIENTS_KEY = 'email_recipients';
 const EMAIL_RECIPIENTS_BY_TYPE_KEY = 'email_recipients_by_type';
+const TEST_EMAIL_RECIPIENTS_KEY = 'test_email_recipients';
+const TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY = 'test_email_recipients_by_type';
 const DAILY_MATRIX_CONFIG_KEY = 'daily_matrix_config';
 const LAST_SENT_PHT_KEY = 'daily_matrix_last_sent_pht_date';
 const TEST_SANDBOX_EMAIL_KEY = 'test_sandbox_email';
@@ -109,7 +111,7 @@ function buildDailyMatrixEmailHtml({
         <div class="content">
           ${isTestMode ? `
           <div style="background: #fef3c7; border: 2px dashed #f59e0b; color: #92400e; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; font-weight: 700; font-size: 12px;">
-            [TEST] Sandbox Simulation Run — Redirected exclusively to ${escapeEmailHtml(sandboxEmail)}. Live recipients bypassed.
+            [TEST] Sandbox Simulation Run — Routed exclusively to ${escapeEmailHtml(toEmail)}${ccList.length > 0 ? ` (CC: ${escapeEmailHtml(ccList.join(', '))})` : ''} (Sandbox: ${escapeEmailHtml(sandboxEmail)}). Live recipients bypassed.
           </div>` : ''}
 
           <div style="background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 12px 16px; border-radius: 10px; margin-bottom: 16px; font-size: 13px; font-weight: 700;">
@@ -208,6 +210,8 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
       .in('key', [
         EMAIL_RECIPIENTS_KEY,
         EMAIL_RECIPIENTS_BY_TYPE_KEY,
+        TEST_EMAIL_RECIPIENTS_KEY,
+        TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY,
         DAILY_MATRIX_CONFIG_KEY,
         LAST_SENT_PHT_KEY,
         TEST_SANDBOX_EMAIL_KEY
@@ -225,6 +229,10 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
     const savedRecipients = settingsMap.get(EMAIL_RECIPIENTS_KEY);
     const profilesByType = (settingsMap.get(EMAIL_RECIPIENTS_BY_TYPE_KEY) && typeof settingsMap.get(EMAIL_RECIPIENTS_BY_TYPE_KEY) === 'object')
       ? settingsMap.get(EMAIL_RECIPIENTS_BY_TYPE_KEY)
+      : {};
+    const testSavedRecipients = settingsMap.get(TEST_EMAIL_RECIPIENTS_KEY);
+    const testProfilesByType = (settingsMap.get(TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY) && typeof settingsMap.get(TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY) === 'object')
+      ? settingsMap.get(TEST_EMAIL_RECIPIENTS_BY_TYPE_KEY)
       : {};
     const matrixConfig = (settingsMap.get(DAILY_MATRIX_CONFIG_KEY) && typeof settingsMap.get(DAILY_MATRIX_CONFIG_KEY) === 'object')
       ? settingsMap.get(DAILY_MATRIX_CONFIG_KEY)
@@ -330,45 +338,84 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
       includeZeroCatalogSkus: resolvedIncludeZero
     });
 
-    // Resolve recipients strictly honoring overrides -> per-type matrix profile -> matrixConfig -> global email_recipients -> defaults
-    const autoProfile = profilesByType?.daily_matrix_auto;
-    const manualProfile = profilesByType?.manual_matrix;
-    const activeProfile = caller.callerType === 'cron'
-      ? (autoProfile || manualProfile)
-      : (manualProfile || autoProfile);
+    // Resolve recipients strictly isolated by Live vs Test Mode
+    let finalTo = sandboxEmail;
+    let finalToList = [sandboxEmail];
+    let finalCc = [];
 
-    const reqToOverride = caller.callerType !== 'cron' ? splitEmailList(body.toList ?? body.to) : [];
-    const profileToList = splitEmailList(activeProfile?.toList ?? activeProfile?.toEmail);
-    const matrixCfgToList = splitEmailList(matrixConfig?.toList ?? matrixConfig?.toEmail);
-    const globalToList = splitEmailList(savedRecipients?.toList ?? savedRecipients?.toEmail);
+    if (requestedTestMode) {
+      const testAutoProfile = testProfilesByType?.daily_matrix_auto;
+      const testManualProfile = testProfilesByType?.manual_matrix;
+      const activeTestProfile = caller.callerType === 'cron'
+        ? (testAutoProfile || testManualProfile)
+        : (testManualProfile || testAutoProfile);
 
-    const configuredToList = reqToOverride.length > 0
-      ? reqToOverride
-      : profileToList.length > 0
-        ? profileToList
-        : matrixCfgToList.length > 0
-          ? matrixCfgToList
-          : globalToList.length > 0
-            ? globalToList
-            : [DEFAULT_EMAIL_RECIPIENTS.toEmail];
+      const hasExplicitTestOverride = Boolean(body.isTestModeExplicitRecipients) && caller.callerType !== 'cron';
+      const reqTestToOverride = hasExplicitTestOverride ? splitEmailList(body.toList ?? body.to) : [];
+      const testProfileToList = splitEmailList(activeTestProfile?.toList ?? activeTestProfile?.toEmail);
+      const testGlobalToList = splitEmailList(testSavedRecipients?.toList ?? testSavedRecipients?.toEmail);
 
-    const hasExplicitCcOverride = caller.callerType !== 'cron' && (body.cc !== undefined || body.ccList !== undefined);
-    const rawCcSource = hasExplicitCcOverride
-      ? (body.ccList ?? body.cc)
-      : (activeProfile && Array.isArray(activeProfile.ccList))
-        ? activeProfile.ccList
-        : Array.isArray(matrixConfig?.ccList)
-          ? matrixConfig.ccList
-          : Array.isArray(savedRecipients?.baseCcList)
-            ? savedRecipients.baseCcList
-            : DEFAULT_EMAIL_RECIPIENTS.baseCcList;
+      const resolvedTestToList = reqTestToOverride.length > 0
+        ? reqTestToOverride
+        : testProfileToList.length > 0
+          ? testProfileToList
+          : testGlobalToList.length > 0
+            ? testGlobalToList
+            : [sandboxEmail];
 
-    const configuredToSet = new Set(configuredToList);
-    const configuredCc = splitEmailList(rawCcSource).filter((e) => !configuredToSet.has(e));
-    const configuredTo = configuredToList.join(', ');
+      const hasExplicitTestCc = hasExplicitTestOverride && (body.cc !== undefined || body.ccList !== undefined);
+      const rawTestCcSource = hasExplicitTestCc
+        ? (body.ccList ?? body.cc)
+        : (activeTestProfile && Array.isArray(activeTestProfile.ccList))
+          ? activeTestProfile.ccList
+          : Array.isArray(testSavedRecipients?.baseCcList)
+            ? testSavedRecipients.baseCcList
+            : Array.isArray(testSavedRecipients?.ccList)
+              ? testSavedRecipients.ccList
+              : [];
 
-    const finalTo = requestedTestMode ? sandboxEmail : configuredTo;
-    const finalCc = requestedTestMode ? [] : configuredCc;
+      const testToSet = new Set(resolvedTestToList);
+      finalCc = splitEmailList(rawTestCcSource).filter((e) => !testToSet.has(e));
+      finalToList = resolvedTestToList;
+      finalTo = resolvedTestToList.join(', ');
+    } else {
+      const autoProfile = profilesByType?.daily_matrix_auto;
+      const manualProfile = profilesByType?.manual_matrix;
+      const activeProfile = caller.callerType === 'cron'
+        ? (autoProfile || manualProfile)
+        : (manualProfile || autoProfile);
+
+      const reqToOverride = caller.callerType !== 'cron' ? splitEmailList(body.toList ?? body.to) : [];
+      const profileToList = splitEmailList(activeProfile?.toList ?? activeProfile?.toEmail);
+      const matrixCfgToList = splitEmailList(matrixConfig?.toList ?? matrixConfig?.toEmail);
+      const globalToList = splitEmailList(savedRecipients?.toList ?? savedRecipients?.toEmail);
+
+      const configuredToList = reqToOverride.length > 0
+        ? reqToOverride
+        : profileToList.length > 0
+          ? profileToList
+          : matrixCfgToList.length > 0
+            ? matrixCfgToList
+            : globalToList.length > 0
+              ? globalToList
+              : [DEFAULT_EMAIL_RECIPIENTS.toEmail];
+
+      const hasExplicitCcOverride = caller.callerType !== 'cron' && (body.cc !== undefined || body.ccList !== undefined);
+      const rawCcSource = hasExplicitCcOverride
+        ? (body.ccList ?? body.cc)
+        : (activeProfile && Array.isArray(activeProfile.ccList))
+          ? activeProfile.ccList
+          : Array.isArray(matrixConfig?.ccList)
+            ? matrixConfig.ccList
+            : Array.isArray(savedRecipients?.baseCcList)
+              ? savedRecipients.baseCcList
+              : DEFAULT_EMAIL_RECIPIENTS.baseCcList;
+
+      const configuredToSet = new Set(configuredToList);
+      finalCc = splitEmailList(rawCcSource).filter((e) => !configuredToSet.has(e));
+      finalToList = configuredToList;
+      finalTo = configuredToList.join(', ');
+    }
 
     const nowDate = new Date();
     const ts = formatSaveFileTimestamp(nowDate);
@@ -469,7 +516,7 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
       startDate,
       endDate,
       to: finalTo,
-      toList: requestedTestMode ? [sandboxEmail] : configuredToList,
+      toList: finalToList,
       sandboxEmail,
       targetTimePht,
       autoEnabled,

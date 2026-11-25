@@ -122,7 +122,7 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
   const testActive = inferTestMode(reports, isTestMode);
 
   const columns = [
-    { header: 'SN', width: 7, type: 'number' },
+    { header: 'Serial No.', width: 11, type: 'number' },
     { header: 'RMA Number', width: 20, type: 'text' },
     { header: 'Date Logged (YYYY-MM-DD HH:mm)', width: 25, type: 'text' },
     { header: 'Store / Branch', width: 24, type: 'text' },
@@ -233,7 +233,7 @@ export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedP
   const testActive = inferTestMode(reports, isTestMode);
 
   const columns = [
-    { header: 'SN', width: 7, type: 'number' },
+    { header: 'Serial No.', width: 11, type: 'number' },
     { header: 'RMA Number', width: 20, type: 'text' },
     { header: 'Date Logged (YYYY-MM-DD HH:mm)', width: 25, type: 'text' },
     { header: 'Customer Store / Branch', width: 26, type: 'text' },
@@ -335,7 +335,7 @@ export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, sav
   const testActive = inferTestMode(reports, isTestMode);
 
   const columns = [
-    { header: 'SN', width: 7, type: 'number' },
+    { header: 'Serial No.', width: 11, type: 'number' },
     { header: 'RMA Number', width: 20, type: 'text' },
     { header: 'Date Logged (YYYY-MM-DD HH:mm)', width: 25, type: 'text' },
     { header: 'Master Supplier / Vendor', width: 26, type: 'text' },
@@ -434,7 +434,7 @@ export function exportCreditMemosToXlsx(memos, filename = null, isTestMode = und
   const testActive = inferTestMode(memos, isTestMode);
 
   const columns = [
-    { header: 'SN', width: 7, type: 'number' },
+    { header: 'Serial No.', width: 11, type: 'number' },
     { header: 'Credit Memo Number', width: 20, type: 'text' },
     { header: 'RMA Number', width: 20, type: 'text' },
     { header: 'Pull-Out Slip Ref', width: 18, type: 'text' },

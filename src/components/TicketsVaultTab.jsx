@@ -64,6 +64,7 @@ export default function TicketsVaultTab({
   // Export to genuine Excel (.xlsx)
   const handleExportXlsx = () => {
     const columns = [
+      { header: 'Serial No.', width: 11, type: 'number' },
       { header: 'Ticket ID', width: 18, type: 'text' },
       { header: 'Date', width: 14, type: 'text' },
       { header: 'Customer', width: 24, type: 'text' },
@@ -82,7 +83,8 @@ export default function TicketsVaultTab({
       { header: 'Supplier', width: 22, type: 'text' }
     ];
 
-    const rows = filteredTickets.map(t => [
+    const rows = filteredTickets.map((t, idx) => [
+      idx + 1,
       t.id || '',
       t.created_at ? formatDateYmd(t.created_at) : '',
       t.customer_name || '',

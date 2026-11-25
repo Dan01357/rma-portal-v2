@@ -78,6 +78,7 @@ export default function SupplierClaimsTab({
   onOpenSimpleWizard,
   onOpenPickupForm,
   onOpenMatrixExport,
+  onResetToPending = null,
   savedProductsList = [],
   coworkerQueueFilter = 'all',
   isTestMode = false
@@ -1690,12 +1691,16 @@ export default function SupplierClaimsTab({
                               </span>
                             )}
 
-                            {/* Re-open / Reset to Pending Action for Testing Coworker Actions */}
-                            {Boolean(r.ai_document_metadata?.workflow_resolution || r.status === 'resolved' || r.status === 'closed') && (
+                            {/* Re-open / Reset to Pending Action */}
+                            {Boolean(outcome.hasDecision || String(r.status || 'pending').toLowerCase() !== 'pending' || r.ai_document_metadata?.follow_up?.case_closed_at) && (
                               <button
                                 type="button"
                                 disabled={updatingQueueId === (r.id || r.rma_number)}
                                 onClick={async () => {
+                                  if (onResetToPending) {
+                                    await onResetToPending(r);
+                                    return;
+                                  }
                                   try {
                                     setUpdatingQueueId(r.id || r.rma_number);
                                     await catalogService.resetReportToPending(r.id, r.rma_number, currentUser?.name || 'Staff');

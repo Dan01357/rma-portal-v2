@@ -60,8 +60,9 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   const [skuError, setSkuError] = useState(null);
   const [nameError, setNameError] = useState(null);
   const [notifyOnSave, setNotifyOnSave] = useState(false);
+  const isProductTestActive = typeof window !== 'undefined' && localStorage.getItem('rma_portal_test_mode') === 'true' && currentUser?.role === 'super_admin';
   const [productRecipients, setProductRecipients] = useState(() => {
-    const prof = notificationService.getEmailProfile('product_update');
+    const prof = notificationService.getEmailProfile('product_update', isProductTestActive);
     return { toList: prof.toList || [], ccList: prof.ccList || [] };
   });
 
@@ -154,10 +155,10 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
       setSkuError(null);
       setNameError(null);
       setNotifyOnSave(false);
-      const prof = notificationService.getEmailProfile('product_update');
+      const prof = notificationService.getEmailProfile('product_update', isProductTestActive);
       setProductRecipients({ toList: prof.toList || [], ccList: prof.ccList || [] });
     }
-  }, [isOpen, product]);
+  }, [isOpen, product, isProductTestActive]);
 
   const handleNameChange = (val) => {
     setName(val);
@@ -439,37 +440,25 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
 
                 <div className="flex-1 space-y-1.5">
                   <div className="flex flex-wrap items-center gap-2">
-                    <label className="inline-flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer shadow-xs transition-all">
-                      <Upload className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                      <span>Upload Photo</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handlePhotoSelect}
-                        className="hidden"
-                      />
-                    </label>
-
-                    <label className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 font-bold rounded-xl text-xs cursor-pointer shadow-xs transition-all">
-                      <Camera className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                      <span>Take Picture</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        onChange={handlePhotoSelect}
-                        className="hidden"
-                      />
-                    </label>
-
                     <button
                       type="button"
                       onClick={() => setIsCameraOpen(true)}
                       className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold rounded-xl text-xs cursor-pointer shadow-xs transition-all"
                     >
                       <Camera className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Live Camera</span>
+                      <span>Take Photo</span>
                     </button>
+
+                    <label className="inline-flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer shadow-xs transition-all">
+                      <Upload className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>Upload from Gallery</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handlePhotoSelect}
+                        className="hidden"
+                      />
+                    </label>
                   </div>
                   <p className="text-[11px] text-slate-400 dark:text-slate-500">
                     Optional: Upload or take a picture of the product. Displayed when reporters scan this barcode.

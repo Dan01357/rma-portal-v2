@@ -39,8 +39,8 @@ export function registerProductRoutes(registry) {
   registry.registerPath({
     method: 'get',
     path: '/api/v1/products/lookup',
-    summary: 'Public Barcode/Product Lookup & GPS Reverse-Geocode Proxy',
-    description: 'Secure server-side proxy resolving barcodes/SKUs across Supabase & ERPLY catalog OR reverse-geocoding dock GPS coordinates (`?action=reverse-geocode&lat=...&lon=...`) via OpenStreetMap Nominatim into Street, Barangay, City, Region & ZIP without adding extra serverless endpoints (`API_ROUTE_COUNT === 12`).',
+    summary: 'Public Barcode/Product Lookup & Pinpoint GPS Reverse-Geocode Proxy',
+    description: 'Secure server-side proxy resolving barcodes/SKUs across Supabase & ERPLY catalog OR reverse-geocoding dock GPS coordinates (`?action=reverse-geocode&lat=...&lon=...`) using Priority 1 Known Warehouse / Dock Geofence Anchors (`rma_settings.known_gps_locations`, seeded Pingcon Warehouse 64 Mendez Rd, Baesa, Quezon City 1106), Priority 2 Google Maps Geocoding API, and Priority 3 Nominatim `zoom=18` Street+ZIP resolution (`API_ROUTE_COUNT === 12`).',
     tags: ['Products & Catalog'],
     request: {
       query: z.object({
@@ -60,15 +60,17 @@ export function registerProductRoutes(registry) {
             schema: z.object({
               success: z.boolean().openapi({ example: true }),
               found: z.boolean().optional().openapi({ example: true }),
-              source: z.string().optional().openapi({ example: 'erply_api' }),
+              source: z.string().optional().openapi({ example: 'known_gps_anchor' }),
+              anchorName: z.string().optional().openapi({ example: 'Pingcon Warehouse' }),
+              distanceMeters: z.number().optional().openapi({ example: 0 }),
               product: ProductSchema.nullable().optional(),
               products: z.array(ProductSchema).optional(),
-              street: z.string().optional().openapi({ example: '42 Jose Rizal St' }),
-              barangay: z.string().optional().openapi({ example: 'Brgy. Bagong Ilog' }),
-              city: z.string().optional().openapi({ example: 'Pasig' }),
+              street: z.string().optional().openapi({ example: '64 Mendez Rd' }),
+              barangay: z.string().optional().openapi({ example: 'Baesa' }),
+              city: z.string().optional().openapi({ example: 'Quezon City' }),
               region: z.string().optional().openapi({ example: 'Metro Manila' }),
-              zip: z.string().optional().openapi({ example: '1600' }),
-              formatted: z.string().optional().openapi({ example: '42 Jose Rizal St, Brgy. Bagong Ilog, Pasig, Metro Manila, 1600' }),
+              zip: z.string().optional().openapi({ example: '1106' }),
+              formatted: z.string().optional().openapi({ example: '64 Mendez Rd, Baesa, Quezon City, Metro Manila 1106' }),
               lines: z.array(z.string()).optional()
             })
           }

@@ -268,7 +268,7 @@ export default function CreditMemosTab({
   const handleExportXlsx = () => {
     if (!processedMemos.length) return;
     const columns = [
-      { header: 'SN', width: 7, type: 'number' },
+      { header: 'Serial No.', width: 11, type: 'number' },
       { header: 'Credit Memo #', width: 20, type: 'text' },
       { header: 'RMA #', width: 20, type: 'text' },
       { header: 'Issue Date (YYYY-MM-DD)', width: 22, type: 'text' },

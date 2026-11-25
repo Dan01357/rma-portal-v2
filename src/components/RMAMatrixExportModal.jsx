@@ -69,10 +69,10 @@ export default function RMAMatrixExportModal({
       setSelectedScope(stream || 'overall');
       setDownloadMsg('');
       setEmailStatus({ loading: false, done: false, success: false, message: '', detail: '' });
-      const prof = notificationService.getEmailProfile('manual_matrix');
+      const prof = notificationService.getEmailProfile('manual_matrix', Boolean(isTestMode));
       setManualRecipients({ toList: prof.toList || [], ccList: prof.ccList || [] });
     }
-  }, [isOpen, stream]);
+  }, [isOpen, stream, isTestMode]);
 
   const preview = useMemo(() => {
     if (!isOpen) return null;
@@ -123,9 +123,13 @@ export default function RMAMatrixExportModal({
 
   const handleSyncToAutoProfile = async (recipientsOverride = null) => {
     const rec = recipientsOverride || manualRecipients;
-    await notificationService.saveEmailProfile('manual_matrix', rec);
-    await notificationService.saveEmailProfile('daily_matrix_auto', rec);
-    setDownloadMsg('Synced Manual & Daily Auto Matrix recipients cleanly!');
+    await notificationService.saveEmailProfile('manual_matrix', rec, Boolean(isTestMode));
+    await notificationService.saveEmailProfile('daily_matrix_auto', rec, Boolean(isTestMode));
+    setDownloadMsg(
+      isTestMode
+        ? 'Synced Test Mode Manual & Auto Matrix recipients cleanly!'
+        : 'Synced Manual & Daily Auto Matrix recipients cleanly!'
+    );
     setTimeout(() => setDownloadMsg(''), 3500);
   };
 

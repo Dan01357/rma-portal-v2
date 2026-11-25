@@ -505,6 +505,47 @@ export function formatCameraTimestamp(date = new Date()) {
   }
 }
 
+export const DEFAULT_KNOWN_GPS_LOCATIONS = [
+  {
+    name: 'Pingcon Warehouse',
+    street: '64 Mendez Rd',
+    barangay: 'Baesa',
+    city: 'Quezon City',
+    region: 'Metro Manila',
+    zip: '1106',
+    formatted: '64 Mendez Rd, Baesa, Quezon City, Metro Manila 1106',
+    lat: 14.6683,
+    lon: 121.0114,
+    radiusMeters: 250
+  }
+];
+
+/**
+ * Formats structured GPS address parts (street, barangay, city, region, zip) into
+ * clean display string and wrapped corner lines.
+ */
+export function formatGpsAddressParts(parts) {
+  if (!parts || typeof parts !== 'object') return '';
+  if (typeof parts.formatted === 'string' && parts.formatted.trim()) {
+    return parts.formatted.trim();
+  }
+  const street = String(parts.street || '').trim();
+  const barangay = String(parts.barangay || '').trim();
+  const city = String(parts.city || '').trim();
+  const region = String(parts.region || '').trim();
+  const zip = String(parts.zip || '').trim();
+  const regionZip = [
+    region && region.toLowerCase() !== city.toLowerCase() ? region : '',
+    zip
+  ].filter(Boolean).join(' ').trim();
+  return [
+    street,
+    barangay && barangay.toLowerCase() !== city.toLowerCase() ? barangay : '',
+    city,
+    regionZip
+  ].filter(Boolean).join(', ');
+}
+
 /**
  * Extracts clean street/barangay/city/ZIP address string stored on a report or GPS object.
  */
@@ -512,16 +553,22 @@ export function getGpsAddressDisplay(record) {
   if (!record || typeof record !== 'object') return '';
   const direct = record.gps_address ?? record.address ?? '';
   if (typeof direct === 'string' && direct.trim()) return direct.trim();
-  if (direct && typeof direct === 'object' && typeof direct.formatted === 'string' && direct.formatted.trim()) {
-    return direct.formatted.trim();
+  if (direct && typeof direct === 'object') {
+    const formattedDirect = formatGpsAddressParts(direct);
+    if (formattedDirect) return formattedDirect;
+  }
+  if (record.addressParts && typeof record.addressParts === 'object') {
+    const formattedFromParts = formatGpsAddressParts(record.addressParts);
+    if (formattedFromParts) return formattedFromParts;
   }
   const meta = (record.ai_document_metadata && typeof record.ai_document_metadata === 'object')
     ? record.ai_document_metadata
     : {};
   const metaAddr = meta.gps_address;
   if (typeof metaAddr === 'string' && metaAddr.trim()) return metaAddr.trim();
-  if (metaAddr && typeof metaAddr === 'object' && typeof metaAddr.formatted === 'string' && metaAddr.formatted.trim()) {
-    return metaAddr.formatted.trim();
+  if (metaAddr && typeof metaAddr === 'object') {
+    const formattedMeta = formatGpsAddressParts(metaAddr);
+    if (formattedMeta) return formattedMeta;
   }
   return '';
 }
@@ -530,8 +577,16 @@ export function getGpsAddressDisplay(record) {
  * Returns formatted raw decimal GPS coordinates if present on the record.
  */
 export function getGpsCoordinatesText(record) {
-  const lat = Number(record?.gps_latitude ?? record?.latitude);
-  const lng = Number(record?.gps_longitude ?? record?.longitude);
+  const meta = (record?.ai_document_metadata && typeof record.ai_document_metadata === 'object')
+    ? record.ai_document_metadata
+    : {};
+  const rawLat = record?.gps_latitude ?? record?.latitude ?? meta.gps_latitude;
+  const rawLng = record?.gps_longitude ?? record?.longitude ?? meta.gps_longitude;
+  if (rawLat === null || rawLat === undefined || rawLat === '' || rawLng === null || rawLng === undefined || rawLng === '') {
+    return '';
+  }
+  const lat = Number(rawLat);
+  const lng = Number(rawLng);
   if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
     return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
   }
@@ -539,17 +594,31 @@ export function getGpsCoordinatesText(record) {
 }
 
 /**
- * Builds the Google Maps URL preferring the reverse-geocoded street/city/ZIP search query
- * and falling back to coordinates only when offline / no resolved address exists.
+ * Builds the Google Maps URL anchoring the formatted street/city/ZIP label to exact GPS
+ * coordinates via /maps/place/{address}/@{lat},{lon},18z so Google Maps never snaps
+ * onto an unrelated subdivision. Falls back cleanly to search query or raw coordinates.
  */
 export function getGpsMapUrl(record) {
   const addr = getGpsAddressDisplay(record);
-  if (addr) {
+  const meta = (record?.ai_document_metadata && typeof record.ai_document_metadata === 'object')
+    ? record.ai_document_metadata
+    : {};
+  const rawLat = record?.gps_latitude ?? record?.latitude ?? meta.gps_latitude;
+  const rawLng = record?.gps_longitude ?? record?.longitude ?? meta.gps_longitude;
+  const hasCoordVals = rawLat !== null && rawLat !== undefined && rawLat !== '' &&
+    rawLng !== null && rawLng !== undefined && rawLng !== '';
+  const lat = hasCoordVals ? Number(rawLat) : NaN;
+  const lng = hasCoordVals ? Number(rawLng) : NaN;
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
+  const isRawCoordAddr = Boolean(addr) && /^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(addr);
+
+  if (addr && !isRawCoordAddr && hasCoords) {
+    return `https://www.google.com/maps/place/${encodeURIComponent(addr)}/@${lat},${lng},18z`;
+  }
+  if (addr && !isRawCoordAddr) {
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`;
   }
-  const lat = Number(record?.gps_latitude ?? record?.latitude);
-  const lng = Number(record?.gps_longitude ?? record?.longitude);
-  if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
+  if (hasCoords) {
     return `https://www.google.com/maps?q=${lat},${lng}`;
   }
   return null;

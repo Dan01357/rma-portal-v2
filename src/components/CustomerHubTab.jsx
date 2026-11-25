@@ -1657,8 +1657,8 @@ export default function CustomerHubTab({
                             </button>
                           )}
 
-                          {/* Re-open / Reset to Pending Action for Testing Coworker Actions */}
-                          {Boolean(item.ai_document_metadata?.workflow_resolution || item.status === 'resolved' || item.status === 'closed') && (
+                          {/* Re-open / Reset to Pending Action */}
+                          {Boolean(outcome.hasDecision || String(item.status || 'pending').toLowerCase() !== 'pending' || item.ai_document_metadata?.follow_up?.case_closed_at) && (
                             <button
                               type="button"
                               disabled={updatingQueueId === (item.id || item.rma_number)}
@@ -2393,8 +2393,8 @@ export default function CustomerHubTab({
                       </button>
                     )}
 
-                    {/* Re-open / Reset to Pending Action for Testing Coworker Actions */}
-                    {Boolean(item.ai_document_metadata?.workflow_resolution || item.status === 'resolved' || item.status === 'closed') && (
+                    {/* Re-open / Reset to Pending Action */}
+                    {Boolean(outcome.hasDecision || String(item.status || 'pending').toLowerCase() !== 'pending' || item.ai_document_metadata?.follow_up?.case_closed_at) && (
                       <button
                         type="button"
                         disabled={updatingQueueId === (item.id || item.rma_number)}

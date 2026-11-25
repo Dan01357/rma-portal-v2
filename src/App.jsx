@@ -99,12 +99,11 @@ import RMAMatrixExportModal from './components/RMAMatrixExportModal';
 import RmaEmailEditorView from './components/RmaEmailEditorView';
 import GatekeeperPinModal from './components/GatekeeperPinModal';
 import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
-import EmailRecipientsEditor from './components/EmailRecipientsEditor';
 import SupplierInput from './components/SupplierInput';
 import CameraCaptureModal from './components/CameraCaptureModal';
 import { stampWatermarkOnFiles } from './utils/cameraWatermark';
 import { getGpsAddressDisplay, getGpsMapUrl } from './utils/rmaHelpers';
-import { inviteService, formatRemainingCountdown, isPermanentInvite } from './services/inviteService';
+import { inviteService, formatRemainingCountdown, isPermanentInvite, getInviteAllowedEmails } from './services/inviteService';
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
 import {
@@ -252,6 +251,31 @@ function reconcileInviteOAuthRedirectOnLoad() {
   return null;
 }
 
+const SESSION_QRS_LIVE_KEY = 'rma_portal_session_qrs_live';
+const SESSION_QRS_TEST_KEY = 'rma_portal_session_qrs_test';
+
+function readSessionSubmittedQrs(isTest = false) {
+  try {
+    if (typeof window === 'undefined' || !window.sessionStorage) return [];
+    const raw = window.sessionStorage.getItem(isTest ? SESSION_QRS_TEST_KEY : SESSION_QRS_LIVE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((r) => r && typeof r === 'object') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSessionSubmittedQrs(isTest = false, list = []) {
+  try {
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    window.sessionStorage.setItem(
+      isTest ? SESSION_QRS_TEST_KEY : SESSION_QRS_LIVE_KEY,
+      JSON.stringify((Array.isArray(list) ? list : []).slice(0, 40))
+    );
+  } catch {}
+}
+
 export default function App() {
   // ROUTE DETECTION: '/' (Public Reporter) vs '/admin' (Staff Admin Portal)
   const [isAdminView, setIsAdminView] = useState(() => {
@@ -324,36 +348,24 @@ export default function App() {
   const [isSavedProductsLoading, setIsSavedProductsLoading] = useState(false);
   const [isProductEditOpen, setIsProductEditOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
-  const [newRmaRecipients, setNewRmaRecipients] = useState(() => {
-    const prof = notificationService.getEmailProfile('new_rma');
-    return { toList: prof.toList || [], ccList: prof.ccList || [] };
-  });
   const [testSandboxEmail, setTestSandboxEmail] = useState(() => notificationService.getTestSandboxEmail());
 
   // Load saved per-email recipient profiles, supplier directory & matrix config from Supabase on mount
   useEffect(() => {
     supplierDirectoryService.loadDirectory().catch(() => {});
     notificationService.loadAllEmailProfilesFromDb()
-      .then(({ profilesByType, testSandboxEmail: dbSandbox }) => {
-        if (profilesByType?.new_rma) {
-          setNewRmaRecipients({
-            toList: profilesByType.new_rma.toList || [],
-            ccList: profilesByType.new_rma.ccList || []
-          });
-        }
+      .then(({ testSandboxEmail: dbSandbox }) => {
         if (dbSandbox) {
           setTestSandboxEmail(dbSandbox);
         }
       })
       .catch(() => {});
 
-    const syncProfile = () => {
-      const prof = notificationService.getEmailProfile('new_rma');
-      setNewRmaRecipients({ toList: prof.toList || [], ccList: prof.ccList || [] });
+    const syncSandbox = () => {
       setTestSandboxEmail(notificationService.getTestSandboxEmail());
     };
-    window.addEventListener('rma-settings-changed', syncProfile);
-    return () => window.removeEventListener('rma-settings-changed', syncProfile);
+    window.addEventListener('rma-settings-changed', syncSandbox);
+    return () => window.removeEventListener('rma-settings-changed', syncSandbox);
   }, []);
   const [staffList, setStaffList] = useState([]);
 
@@ -369,6 +381,24 @@ export default function App() {
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
   const [qrModalReport, setQrModalReport] = useState(null);
   const [qrModalReports, setQrModalReports] = useState([]);
+  const [sessionSubmittedLiveReports, setSessionSubmittedLiveReports] = useState(() => readSessionSubmittedQrs(false));
+  const [sessionSubmittedTestReports, setSessionSubmittedTestReports] = useState(() => readSessionSubmittedQrs(true));
+
+  const recordSessionSubmittedQr = React.useCallback((reportObj) => {
+    if (!reportObj || typeof reportObj !== 'object') return;
+    const rmaNo = String(reportObj.rma_number || reportObj.rmaNumber || reportObj.id || '').trim();
+    if (!rmaNo) return;
+    const isTestItem = Boolean(isTestRecord(reportObj));
+    const setter = isTestItem ? setSessionSubmittedTestReports : setSessionSubmittedLiveReports;
+    setter((prev) => {
+      const next = [
+        reportObj,
+        ...(prev || []).filter((item) => String(item?.rma_number || item?.rmaNumber || item?.id || '').trim().toUpperCase() !== rmaNo.toUpperCase())
+      ].slice(0, 40);
+      writeSessionSubmittedQrs(isTestItem, next);
+      return next;
+    });
+  }, []);
 
   const openQrModal = (reportOrList) => {
     if (Array.isArray(reportOrList)) {
@@ -544,7 +574,11 @@ export default function App() {
       localStorage.removeItem('rma_reporter_contact');
       localStorage.removeItem('rma_portal_verified_email');
       sessionStorage.removeItem('rma_oauth_access_token');
+      sessionStorage.removeItem(SESSION_QRS_LIVE_KEY);
+      sessionStorage.removeItem(SESSION_QRS_TEST_KEY);
     } catch { }
+    setSessionSubmittedLiveReports([]);
+    setSessionSubmittedTestReports([]);
     supabase.auth.signOut({ scope: 'local' }).catch(() => { });
     const slug = gateSession?.slug || intakeSlug || 'dock';
     accessKeyService.clearSession(slug);
@@ -843,6 +877,11 @@ export default function App() {
     gateSession?.stream_type === 'supplier_outbound' ||
     (!gateSession?.stream_type && gateSession?.type === 'internal_warehouse')
   );
+
+  const activeSessionSubmittedReports = React.useMemo(() => {
+    const raw = effectiveIsTestMode ? sessionSubmittedTestReports : sessionSubmittedLiveReports;
+    return (raw || []).filter((r) => Boolean(isTestRecord(r)) === Boolean(effectiveIsTestMode) && !isTrashedRecord(r));
+  }, [effectiveIsTestMode, sessionSubmittedTestReports, sessionSubmittedLiveReports]);
 
   // Lightweight Admin-only Browser Fallback Scheduler (checks Asia/Manila HH:mm every 60s when Admin has active session)
   useEffect(() => {
@@ -1769,7 +1808,6 @@ export default function App() {
   const [manifestItems, setManifestItems] = useState([]); // Queued return line items for Multi-Item Batch Return
   const [barcodeInput, setBarcodeInput] = useState('');
   const [customItemName, setCustomItemName] = useState('');
-  const [supplierNameInput, setSupplierNameInput] = useState('');
   const [detectedProduct, setDetectedProduct] = useState(null);
   const [isCheckingBarcode, setIsCheckingBarcode] = useState(false);
   const [quantity, setQuantity] = useState(1);
@@ -1784,14 +1822,12 @@ export default function App() {
   });
   const [customStoreBranch, setCustomStoreBranch] = useState('');
   const [photoFiles, setPhotoFiles] = useState([]); // Array of { file, previewUrl }
-  const [photoCaptureMode, setPhotoCaptureMode] = useState('single'); // 'single' (Camera snap) | 'batch' (Multi-file select)
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccessReport, setSubmitSuccessReport] = useState(null);
   const [isUnlabeledItem, setIsUnlabeledItem] = useState(false); // Extra feature: Support reporting items with missing labels / unreadable barcodes
 
   // Official Logistics Paperwork (DR / Invoice / PO) & Gemini Flash AI OCR (Multi-photo up to 3)
   const [paperworkPhotos, setPaperworkPhotos] = useState([]); // Array of { file, previewUrl, metadata } (max 3)
-  const [paperworkCaptureMode, setPaperworkCaptureMode] = useState('single'); // 'single' (Camera snap) | 'batch' (Multi-file select)
   const [paperworkMetadata, setPaperworkMetadata] = useState(null);
   const [isInspectingPaperwork, setIsInspectingPaperwork] = useState(false);
   const [paperworkInspectionProgress, setPaperworkInspectionProgress] = useState(null); // { current: 1, total: 3 }
@@ -1819,6 +1855,61 @@ export default function App() {
   const [pendingBarcodesList, setPendingBarcodesList] = useState([]);
   const [recentReportsList, setRecentReportsList] = useState([]);
   const [toastMessage, setToastMessage] = useState(null);
+
+  const qrModalTargetIsTest = React.useMemo(() => {
+    const sample = qrModalReports[0] || qrModalReport;
+    if (sample) return Boolean(isTestRecord(sample));
+    if (currentUser && isAdminView) {
+      return Boolean(adminActiveTab === 'sandbox' || isTestMode);
+    }
+    return effectiveIsTestMode;
+  }, [qrModalReports, qrModalReport, currentUser, isAdminView, adminActiveTab, isTestMode, effectiveIsTestMode]);
+
+  const qrScopedSessionReports = React.useMemo(() => {
+    const raw = qrModalTargetIsTest ? sessionSubmittedTestReports : sessionSubmittedLiveReports;
+    return (raw || []).filter((r) => Boolean(isTestRecord(r)) === Boolean(qrModalTargetIsTest) && !isTrashedRecord(r));
+  }, [qrModalTargetIsTest, sessionSubmittedTestReports, sessionSubmittedLiveReports]);
+
+  const qrScopedAvailableReports = React.useMemo(() => {
+    const merged = [...qrScopedSessionReports, ...(recentReportsList || [])];
+    const seen = new Set();
+
+    if (currentUser) {
+      return merged.filter((r) => {
+        if (!r || isTrashedRecord(r) || isArchivedRecord(r) || isManifestSubItem(r, merged)) return false;
+        if (Boolean(isTestRecord(r)) !== Boolean(qrModalTargetIsTest)) return false;
+        const k = String(r.rma_number || r.rmaNumber || r.id || '').trim().toUpperCase();
+        if (!k || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+    }
+
+    // Unauthenticated / Gatekeeper Invite User: strictly scoped to own session submissions + invited user's RMAs
+    const allowedEmails = new Set(
+      (gateSession ? getInviteAllowedEmails(gateSession) : [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const sessionRmaSet = new Set(
+      qrScopedSessionReports
+        .map((r) => String(r.rma_number || r.rmaNumber || r.id || '').trim().toUpperCase())
+        .filter(Boolean)
+    );
+
+    return merged.filter((r) => {
+      if (!r || isTrashedRecord(r) || isManifestSubItem(r, merged)) return false;
+      if (Boolean(isTestRecord(r)) !== Boolean(qrModalTargetIsTest)) return false;
+      const k = String(r.rma_number || r.rmaNumber || r.id || '').trim().toUpperCase();
+      if (!k || seen.has(k)) return false;
+      const isOwnSession = sessionRmaSet.has(k);
+      const reporterEmail = String(r.reporter_contact || '').trim().toLowerCase();
+      const isOwnEmail = Boolean(reporterEmail && allowedEmails.has(reporterEmail));
+      if (!isOwnSession && !isOwnEmail) return false;
+      seen.add(k);
+      return true;
+    });
+  }, [currentUser, gateSession, qrScopedSessionReports, recentReportsList, qrModalTargetIsTest]);
 
   // Automatically prune orphan report selection IDs whenever recentReportsList updates
   useEffect(() => {
@@ -1852,7 +1943,7 @@ export default function App() {
       setUpdatingQueueId(item.id || item.rma_number);
       await catalogService.resetReportToPending(item.id, item.rma_number, currentUser?.name || 'Staff');
       await refreshAllData();
-      showToast(`Reset ${item.rma_number} to pending / under inspection.`, 'success');
+      showToast(`Reset ${item.rma_number} timeline & outcome back to Pending.`, 'success');
     } catch (e) {
       showToast('Could not reset report: ' + e.message, 'error');
     } finally {
@@ -2389,12 +2480,10 @@ export default function App() {
         const foundSup = String(found?.supplier_name || found?.supplierName || found?.supplier || '').trim();
         if (
           foundSup &&
-          !/^(pending assignment|pending|unassigned|warehouse|n\/a)$/i.test(foundSup)
+          !/^(pending assignment|pending|unassigned|warehouse|n\/a)$/i.test(foundSup) &&
+          isSupplierRtvPortal
         ) {
-          setSupplierNameInput((prev) => (prev && prev.trim() ? prev : foundSup));
-          if (isSupplierRtvPortal) {
-            setStoreBranch((prev) => (prev && prev.trim() ? prev : foundSup));
-          }
+          setStoreBranch((prev) => (prev && prev.trim() ? prev : foundSup));
         }
       } catch (e) {
         if (!isCurrent) return;
@@ -2770,7 +2859,7 @@ export default function App() {
       : ((detectedProduct?.sku && detectedProduct.sku !== cleanBarcode) ? detectedProduct.sku : '');
 
     const resolvedDetectedSupplier = (
-      !isPlaceholderSupplier(supplierNameInput) ? supplierNameInput.trim() : ''
+      isSupplierRtvPortal && !isPlaceholderSupplier(storeBranch) ? storeBranch.trim() : ''
     ) || String(
       detectedProduct?.supplier_name ||
       detectedProduct?.supplierName ||
@@ -2808,7 +2897,6 @@ export default function App() {
     setIsUnlabeledItem(false);
     setBarcodeInput('');
     setCustomItemName('');
-    setSupplierNameInput('');
     setDetectedProduct(null);
     setQuantity(1);
     setUnitName('pc');
@@ -2890,7 +2978,7 @@ export default function App() {
         : ((detectedProduct?.sku && detectedProduct.sku !== activeBarcode) ? detectedProduct.sku : '');
 
       const resolvedActiveSupplier = (
-        !isPlaceholderSupplier(supplierNameInput) ? supplierNameInput.trim() : ''
+        isSupplierRtvPortal && !isPlaceholderSupplier(storeBranch) ? storeBranch.trim() : ''
       ) || String(
         detectedProduct?.supplier_name ||
         detectedProduct?.supplierName ||
@@ -2965,12 +3053,12 @@ export default function App() {
       return !s || s === 'warehouse' || s === 'pending assignment' || s === 'unassigned' || s === 'n/a';
     };
     const itemSup = itemsToSubmit[0]?.supplier_name || itemsToSubmit[0]?.supplierName || itemsToSubmit[0]?.supplier;
-    const manualSupTrimmed = !isPlaceholderSupplier(supplierNameInput) ? supplierNameInput.trim() : '';
+    const manualSupTrimmed = (isSupplierStream && !isPlaceholderSup(cleanBranchInput)) ? cleanBranchInput : '';
     const resolvedSupplierFromPortal = manualSupTrimmed || (
       !isPlaceholderSup(itemSup)
         ? itemSup
-        : (isSupplierStream && (cleanBranchInput || inviteEntity))
-          ? (cleanBranchInput || inviteEntity)
+        : (isSupplierStream && inviteEntity)
+          ? inviteEntity
           : (itemSup || 'Pending Assignment')
     );
 
@@ -3046,6 +3134,7 @@ export default function App() {
     };
 
     setSubmitSuccessReport(optimisticReportPayload);
+    recordSessionSubmittedQr(optimisticReportPayload);
     setRecentReportsList(prev => [optimisticReportPayload, ...prev.filter(r => r.rma_number !== rmaNumber)]);
 
     // 5. Reset form fields immediately so UI is completely responsive
@@ -3065,7 +3154,6 @@ export default function App() {
     setManifestItems([]);
     setBarcodeInput('');
     setCustomItemName('');
-    setSupplierNameInput('');
     setDetectedProduct(null);
     setQuantity(1);
     setUnitName('pc');
@@ -3226,10 +3314,11 @@ export default function App() {
           google_drive_folder_url: gdriveFolderUrl,
           google_drive_folder_id: gdriveFolderId,
           gps: capturedGps,
-          customRecipients: currentUser && !gateSession ? newRmaRecipients : null
+          customRecipients: null
         });
 
         if (res?.report) {
+          recordSessionSubmittedQr(res.report);
           setRecentReportsList(prev => [res.report, ...prev.filter(r => r.rma_number !== rmaNumber)]);
         }
         setTimeout(() => {
@@ -3303,7 +3392,19 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                {activeSessionSubmittedReports.length >= 1 && (
+                  <button
+                    type="button"
+                    onClick={() => openQrModal(activeSessionSubmittedReports)}
+                    className="touch-target px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                    title="View, resize, or print all RMA QR cards submitted during this session"
+                  >
+                    <QrCode className="w-3.5 h-3.5 shrink-0" />
+                    <span>Session QRs ({activeSessionSubmittedReports.length})</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => setIsScannerOpen(true)}
@@ -3678,6 +3779,18 @@ export default function App() {
                     <span>Resize / Print QR</span>
                   </button>
 
+                  {activeSessionSubmittedReports.length >= 2 && (
+                    <button
+                      type="button"
+                      onClick={() => openQrModal(activeSessionSubmittedReports)}
+                      className="touch-target w-full py-3 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-2xl shadow-md shadow-indigo-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 sm:col-span-3"
+                      title="Open Consolidated QR Print Studio with all QRs submitted in this session"
+                    >
+                      <QrCode className="w-4 h-4 shrink-0" />
+                      <span>🖨️ Print All {activeSessionSubmittedReports.length} QRs This Session</span>
+                    </button>
+                  )}
+
                   {currentUser && (
                     <button
                       type="button"
@@ -3926,32 +4039,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Supplier / Vendor Name Input (Auto-populated from Catalog or Manually Entered) */}
-                  <div className="space-y-1.5 pt-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <label htmlFor="intake-supplier-input" className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                        Supplier / Vendor Name (Optional)
-                      </label>
-                      {supplierNameInput.trim() && (
-                        <button
-                          type="button"
-                          onClick={() => setSupplierNameInput('')}
-                          className="text-[10px] font-bold text-slate-400 hover:text-rose-500 cursor-pointer"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
-                    <SupplierInput
-                      id="intake-supplier-input"
-                      name="intakeVendorName"
-                      value={supplierNameInput}
-                      onChange={setSupplierNameInput}
-                      placeholder="Optional vendor / manufacturer (e.g. Mondelez, URC, Nestle)..."
-                      className="w-full"
-                    />
-                  </div>
-
                   {/* Recognized Product Banner */}
                   {isCheckingBarcode ? (
                     <div className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs flex items-center gap-2 text-slate-500 dark:text-slate-400">
@@ -4108,69 +4195,41 @@ export default function App() {
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between py-1 px-2.5 bg-white dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
-                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
-                        Capture Mode:
-                      </span>
-                      <div className="inline-flex items-center gap-1 flex-wrap">
-                        <div className="inline-flex p-0.5 bg-slate-100 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs">
-                          <button
-                            type="button"
-                            onClick={() => setPhotoCaptureMode('single')}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${photoCaptureMode === 'single'
-                              ? 'bg-rose-600 text-white shadow-xs'
-                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                              }`}
-                            title="Direct camera snap (solo photo)"
-                          >
-                            <Camera className="w-3 h-3" />
-                            <span>Camera</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPhotoCaptureMode('batch')}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${photoCaptureMode === 'batch'
-                              ? 'bg-rose-600 text-white shadow-xs'
-                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                              }`}
-                            title="Select multiple photos from gallery"
-                          >
-                            <Upload className="w-3 h-3" />
-                            <span>Gallery (Batch)</span>
-                          </button>
-                        </div>
-                        {photoFiles.length < 10 && (
-                          <button
-                            type="button"
-                            onClick={() => setCameraCaptureTarget('item')}
-                            className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1 cursor-pointer shadow-2xs"
-                            title="Open live watermarked camera viewfinder"
-                          >
-                            <Camera className="w-3 h-3" />
-                            <span>Live Cam</span>
-                          </button>
-                        )}
+                    {photoFiles.length < 10 && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setCameraCaptureTarget('item')}
+                          className="py-2.5 px-3 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-[0.99]"
+                          title="Open live watermarked camera viewfinder"
+                        >
+                          <Camera className="w-4 h-4 text-emerald-400" />
+                          <span>Take Photo</span>
+                        </button>
+                        <label className="py-2.5 px-3 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-[0.99]">
+                          <Upload className="w-4 h-4 text-rose-500" />
+                          <span>Upload from Gallery</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={handlePhotoSelect}
+                            className="hidden"
+                          />
+                        </label>
                       </div>
-                    </div>
+                    )}
 
                     {photoFiles.length === 0 ? (
-                      <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-rose-300 dark:border-rose-800 hover:border-rose-500 dark:hover:border-rose-600 rounded-2xl bg-white dark:bg-slate-850 hover:bg-rose-50/50 cursor-pointer transition-all active:scale-[0.99] text-center group min-h-[100px]">
-                        <Camera className="w-5 h-5 text-rose-500 mb-1 group-hover:scale-110 transition-transform" />
+                      <div className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-rose-300 dark:border-rose-800 rounded-2xl bg-white dark:bg-slate-850 text-center min-h-[84px]">
+                        <Camera className="w-5 h-5 text-rose-500 mb-1" />
                         <span className="text-xs font-black text-rose-950 dark:text-rose-200">
-                          Snap Photo of Item / Damage
+                          Snap Live Photo or Upload Item Proof
                         </span>
                         <span className="text-[10px] text-slate-500 dark:text-slate-400">
-                          {photoCaptureMode === 'single' ? 'Tap to open camera' : 'Tap to select photos from gallery'} (Required *)
+                          Live camera stamps PHT time &amp; street/city address (Required *)
                         </span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          multiple={photoCaptureMode === 'batch'}
-                          capture={photoCaptureMode === 'single' ? 'environment' : undefined}
-                          onChange={handlePhotoSelect}
-                          className="hidden"
-                        />
-                      </label>
+                      </div>
                     ) : (
                       <div className="grid grid-cols-3 gap-2">
                         {photoFiles.map((item, idx) => (
@@ -4202,23 +4261,6 @@ export default function App() {
                             </button>
                           </div>
                         ))}
-
-                        {photoFiles.length < 10 && (
-                          <label className="relative aspect-square rounded-xl border-2 border-dashed border-rose-300 dark:border-rose-700 hover:border-rose-500 bg-white dark:bg-slate-850 hover:bg-rose-50/50 flex flex-col items-center justify-center cursor-pointer transition-all active:scale-95 text-center group">
-                            <Camera className="w-4 h-4 text-rose-600 dark:text-rose-400 group-hover:scale-110 transition-transform" />
-                            <span className="text-[10px] font-black text-rose-700 dark:text-rose-300 mt-1">
-                              + Add ({photoFiles.length}/10)
-                            </span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              multiple={photoCaptureMode === 'batch'}
-                              capture={photoCaptureMode === 'single' ? 'environment' : undefined}
-                              onChange={handlePhotoSelect}
-                              className="hidden"
-                            />
-                          </label>
-                        )}
                       </div>
                     )}
                   </div>
@@ -4361,51 +4403,31 @@ export default function App() {
                         </span>
                       </div>
 
-                      {/* Mode Toggle Bar */}
-                      <div className="flex items-center justify-between py-1 px-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700/60 mb-2.5">
-                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
-                          Capture Mode:
-                        </span>
-                        <div className="inline-flex items-center gap-1 flex-wrap">
-                          <div className="inline-flex p-0.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs">
-                            <button
-                              type="button"
-                              onClick={() => setPaperworkCaptureMode('single')}
-                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${paperworkCaptureMode === 'single'
-                                ? 'bg-violet-600 text-white shadow-xs'
-                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                                }`}
-                              title="Direct camera snap (solo photo)"
-                            >
-                              <Camera className="w-3 h-3" />
-                              <span>Camera</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setPaperworkCaptureMode('batch')}
-                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${paperworkCaptureMode === 'batch'
-                                ? 'bg-violet-600 text-white shadow-xs'
-                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                                }`}
-                              title="Select multiple photos from gallery"
-                            >
-                              <Upload className="w-3 h-3" />
-                              <span>Gallery (Batch)</span>
-                            </button>
-                          </div>
-                          {paperworkPhotos.length < 3 && !isInspectingPaperwork && (
-                            <button
-                              type="button"
-                              onClick={() => setCameraCaptureTarget('paperwork')}
-                              className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1 cursor-pointer shadow-2xs"
-                              title="Open live watermarked camera viewfinder"
-                            >
-                              <Camera className="w-3 h-3" />
-                              <span>Live Cam</span>
-                            </button>
-                          )}
+                      {/* Two-Button Live Camera / Gallery Bar */}
+                      {!isInspectingPaperwork && paperworkPhotos.length < 3 && (
+                        <div className="grid grid-cols-2 gap-2 mb-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setCameraCaptureTarget('paperwork')}
+                            className="py-2.5 px-3 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-[0.99]"
+                            title="Open live watermarked camera viewfinder"
+                          >
+                            <Camera className="w-4 h-4 text-emerald-400" />
+                            <span>Take Photo</span>
+                          </button>
+                          <label className="py-2.5 px-3 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-[0.99]">
+                            <Upload className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+                            <span>Upload from Gallery</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              onChange={handlePaperworkSelect}
+                              className="hidden"
+                            />
+                          </label>
                         </div>
-                      </div>
+                      )}
 
                       {/* Inspecting Radar State */}
                       {isInspectingPaperwork && (
@@ -4439,27 +4461,19 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* Photos Grid & Upload Action (when not inspecting) */}
+                      {/* Photos Grid & Status Banner (when not inspecting) */}
                       {!isInspectingPaperwork && (paperworkPhotos.length === 0 ? (
-                        <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-violet-300 dark:border-violet-800 hover:border-violet-500 dark:hover:border-violet-600 rounded-2xl bg-violet-50/40 dark:bg-violet-950/30 hover:bg-violet-50/70 cursor-pointer transition-all active:scale-[0.99] text-center group min-h-[140px]">
-                          <div className="w-10 h-10 rounded-xl bg-violet-100 dark:bg-violet-900/50 text-violet-600 dark:text-violet-300 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform shadow-xs">
-                            <FileText className="w-5 h-5" />
+                        <div className="flex flex-col items-center justify-center p-5 border-2 border-dashed border-violet-300 dark:border-violet-800 rounded-2xl bg-violet-50/40 dark:bg-violet-950/30 text-center min-h-[110px]">
+                          <div className="w-9 h-9 rounded-xl bg-violet-100 dark:bg-violet-900/50 text-violet-600 dark:text-violet-300 flex items-center justify-center mb-1.5 shadow-xs">
+                            <FileText className="w-4.5 h-4.5" />
                           </div>
                           <span className="text-xs font-black text-violet-950 dark:text-violet-200">
-                            Snap Photo of DR / Invoice / PO
+                            Snap Live Photo or Upload DR / Invoice / PO
                           </span>
                           <span className="text-[10px] text-violet-700/90 dark:text-violet-400 mt-0.5">
-                            {paperworkCaptureMode === 'single' ? 'Tap to open camera' : 'Tap to select paperwork from gallery'}
+                            Up to 3 pages • AI OCR extracts SI, DR &amp; PO automatically
                           </span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            multiple={paperworkCaptureMode === 'batch'}
-                            capture={paperworkCaptureMode === 'single' ? 'environment' : undefined}
-                            onChange={handlePaperworkSelect}
-                            className="hidden"
-                          />
-                        </label>
+                        </div>
                       ) : (
                         <div className="space-y-2">
                           <div className="grid grid-cols-3 gap-2">
@@ -4492,23 +4506,6 @@ export default function App() {
                                 </button>
                               </div>
                             ))}
-
-                            {paperworkPhotos.length < 3 && (
-                              <label className="relative aspect-square rounded-xl border-2 border-dashed border-violet-300 dark:border-violet-700 hover:border-violet-500 bg-violet-50/50 dark:bg-violet-950/30 hover:bg-violet-100/60 flex flex-col items-center justify-center cursor-pointer transition-all active:scale-95 text-center group">
-                                <FileText className="w-4 h-4 text-violet-600 dark:text-violet-400 group-hover:scale-110 transition-transform" />
-                                <span className="text-[10px] font-black text-violet-700 dark:text-violet-300 mt-1">
-                                  + Add ({paperworkPhotos.length}/3)
-                                </span>
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  multiple={paperworkCaptureMode === 'batch'}
-                                  capture={paperworkCaptureMode === 'single' ? 'environment' : undefined}
-                                  onChange={handlePaperworkSelect}
-                                  className="hidden"
-                                />
-                              </label>
-                            )}
                           </div>
 
                           {paperworkMetadata && (
@@ -4640,22 +4637,31 @@ export default function App() {
                   </div>
 
                   <div className="relative">
-                    <input
-                      type="text"
-                      value={storeBranch}
-                      onChange={(e) => setStoreBranch(e.target.value)}
-                      placeholder={
-                        isSupplierRtvPortal
-                          ? 'Optional: e.g., Suy Sing Commercial Corp, Mondelez (auto-filled if product has saved supplier, or type N/A)'
-                          : 'Optional: e.g., Walter Mart, Savemore Taguig, Puregold Cubao (or type N/A if not applicable)'
-                      }
-                      className="w-full px-3.5 py-3 border-2 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none shadow-2xs transition-all bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20"
-                    />
+                    <Building className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none z-10" />
+                    {isSupplierRtvPortal ? (
+                      <SupplierInput
+                        id="intake-supplier-input"
+                        name="intakeVendorName"
+                        value={storeBranch}
+                        onChange={setStoreBranch}
+                        placeholder="Optional: e.g., Suy Sing Commercial Corp, Mondelez (auto-filled if product has saved supplier, or type N/A)"
+                        className="w-full pl-10 pr-9 py-3 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 shadow-2xs transition-all"
+                      />
+                    ) : (
+                      <input
+                        id="intake-company-input"
+                        type="text"
+                        value={storeBranch}
+                        onChange={(e) => setStoreBranch(e.target.value)}
+                        placeholder="Optional: e.g., Walter Mart, Savemore Taguig, Puregold Cubao (or type N/A if not applicable)"
+                        className="w-full pl-10 pr-9 py-3 border-2 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none shadow-2xs transition-all bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20"
+                      />
+                    )}
                     {storeBranch && (
                       <button
                         type="button"
                         onClick={() => setStoreBranch('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full cursor-pointer"
+                        className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full cursor-pointer z-10"
                         title={isSupplierRtvPortal ? 'Clear supplier name' : 'Clear company / store name'}
                       >
                         <X className="w-3.5 h-3.5" />
@@ -4722,20 +4728,6 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-
-                {/* Authenticated Staff / Admin / Super Admin Configurable New RMA Alert Recipients */}
-                {currentUser && !gateSession && (
-                  <EmailRecipientsEditor
-                    emailType="new_rma"
-                    value={newRmaRecipients}
-                    onChange={setNewRmaRecipients}
-                    compact={true}
-                    defaultExpanded={false}
-                    isTestMode={effectiveIsTestMode}
-                    title="New RMA Email Alert Recipients"
-                    extraHint="Assigned Product Account Executive (AE) email is added automatically to CC."
-                  />
-                )}
 
                 {/* GPS Capture Status Pill (Public Portal) */}
                 {gpsLocation.isAccurate && (
@@ -5242,6 +5234,7 @@ export default function App() {
                 onOpenSimpleWizard={(reportOrList) => openSimpleWizardModal(reportOrList, 'wizard')}
                 onOpenPickupForm={(reportOrList) => openPickupFormModal(reportOrList)}
                 onOpenMatrixExport={() => setMatrixExportModal({ isOpen: true, stream: 'overall', isTestMode: false })}
+                onResetToPending={handleResetReportToPending}
                 savedProductsList={savedProductsList}
                 coworkerQueueFilter={coworkerQueueFilter}
                 isTestMode={false}
@@ -5789,7 +5782,7 @@ export default function App() {
         subtitle="Stamps live PHT timestamp, street/barangay/city/ZIP address & reporter tag"
         gpsLocation={gpsLocation}
         tagName={currentUser?.name || reporterName.trim() || gateSession?.profileName || 'Reporter'}
-        multiple={cameraCaptureTarget === 'paperwork' ? paperworkCaptureMode === 'batch' : photoCaptureMode === 'batch'}
+        multiple={true}
         onCapture={async (files) => {
           const target = cameraCaptureTarget;
           setCameraCaptureTarget(null);
@@ -5811,6 +5804,8 @@ export default function App() {
         }}
         report={qrModalReport}
         reports={qrModalReports}
+        availableReports={qrScopedAvailableReports}
+        sessionReports={qrScopedSessionReports}
         onOpenQuickAction={(rmaOrReport) => {
           setPendingQuickRmaNumber(null);
           const repObj = typeof rmaOrReport === 'object' && rmaOrReport !== null

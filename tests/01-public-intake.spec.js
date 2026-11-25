@@ -308,11 +308,14 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       await page.getByRole('button', { name: /\+ Add Another Item to Return/i }).click();
       await expect(page.getByText(/Queued Return Manifest/i)).toBeHidden();
 
-      // Toggle Camera <-> Gallery (Batch) on Section 1, upload photo, open thumbnail Lightbox, remove & re-attach
-      const galleryBtns = page.getByRole('button', { name: /Gallery \(Batch\)/i });
-      const cameraBtns = page.getByRole('button', { name: /^Camera$/i });
-      await galleryBtns.first().click();
-      await cameraBtns.first().click();
+      // Strictly two camera/gallery buttons (no Capture Mode toggle bar & no normal capture="environment" fallback)
+      await expect(page.getByText('Capture Mode:')).toHaveCount(0);
+      await expect(page.locator('input[capture]')).toHaveCount(0);
+      await expect(page.getByText(/Supplier \/ Vendor Name \(Optional\)/i)).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /Take Photo/i })).toHaveCount(2);
+      await expect(page.getByText(/Upload from Gallery/i)).toHaveCount(2);
+      await expect(page.getByText(/3\. Supplier Name \(Optional\)/i)).toBeVisible();
+      await expect(page.locator('#intake-supplier-input')).toBeVisible();
 
       const itemPhotoInput = page.locator('input[type="file"][accept="image/*"]').first();
       await itemPhotoInput.setInputFiles({
@@ -379,8 +382,6 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
 
       // 6. Section 2 Paperwork AI: Invalid rejection (.animate-shake) -> Slow inspection Cancel -> Valid auto-fill SI/DR/PO -> remove & leave blank
       const paperworkInput = page.locator('input[type="file"][accept="image/*"]').last();
-      await galleryBtns.nth(1).click();
-      await cameraBtns.nth(1).click();
 
       mockPaperworkMode = 'invalid';
       await paperworkInput.setInputFiles({
@@ -411,13 +412,14 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       await expect(page.getByText(/Verified Sales Invoice/i).first()).toBeVisible({ timeout: 10_000 });
       await expect(page.locator('input[value="SI-2026-8841"], input[placeholder*="SI-" i]').first()).toHaveValue('SI-2026-8841');
 
-      // Open Live Watermarked Camera Modal & verify HUD timestamp, address, tag, Front/Back switch & fallback upload
-      const liveCamBtn = page.getByRole('button', { name: /Live Cam/i }).first();
-      await expect(liveCamBtn).toBeVisible();
-      await liveCamBtn.click();
+      // Open Live Watermarked Camera Modal via "Take Photo" & verify HUD timestamp, full-bleed object-cover video & Front/Back switch
+      const takePhotoBtn = page.getByRole('button', { name: /Take Photo/i }).first();
+      await expect(takePhotoBtn).toBeVisible();
+      await takePhotoBtn.click();
       const camHud = page.getByTestId('camera-watermark-hud');
       await expect(camHud).toBeVisible({ timeout: 5_000 });
       await expect(camHud).toContainText(/PHT/);
+      await expect(page.locator('video.object-cover')).toBeAttached();
       await page.locator('button[title="Switch Front / Back Camera"]').click();
       await page.getByRole('button', { name: 'Done', exact: true }).click();
       await expect(camHud).toBeHidden();
@@ -458,8 +460,8 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       expect(savedReporter.name).toBe('Playwright Public Tester');
       expect(savedReporter.contact).toBe('playwright-test@pingcon.local');
 
-      // Staff/Admin/Super Admin on / sees compact New RMA Email Recipients editor
-      await expect(page.locator('[data-email-recipients-editor="new_rma"]')).toBeVisible();
+      // Email Alert Recipients MUST NEVER render on the Public Intake Form (even for logged-in Super Admin in Live or Test Mode)
+      await expect(page.locator('[data-email-recipients-editor="new_rma"]')).toHaveCount(0);
 
       await page.getByRole('button', { name: /Submit Return Manifest/i }).click();
 

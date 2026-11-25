@@ -2331,6 +2331,39 @@ export default function QuickRMAActionModal({
                   report={report}
                   catalogProducts={savedProductsList}
                   compact={true}
+                  isResettingTimeline={isFollowUpBusy}
+                  onResetTimeline={async () => {
+                    if (!report) return;
+                    if (
+                      typeof window !== 'undefined' &&
+                      !window.confirm(`Reset the full 4-step workflow timeline, 10-calendar-day countdown, and disposition outcome for ${report.rma_number} back to Pending?`)
+                    ) {
+                      return;
+                    }
+                    setIsFollowUpBusy(true);
+                    setFollowUpFeedback(null);
+                    try {
+                      const updated = await catalogService.resetReportToPending(
+                        report.id,
+                        report.rma_number,
+                        verifiedAdmin?.name || currentUser?.name || 'Admin'
+                      );
+                      setReport(updated);
+                      onReportUpdated?.(updated);
+                      onRefresh?.(updated);
+                      setFollowUpFeedback({
+                        type: 'success',
+                        text: `Timeline, 10-day countdown & disposition outcome reset to Pending for ${report.rma_number}.`
+                      });
+                    } catch (e) {
+                      setFollowUpFeedback({
+                        type: 'error',
+                        text: e?.message || 'Failed resetting timeline to Pending.'
+                      });
+                    } finally {
+                      setIsFollowUpBusy(false);
+                    }
+                  }}
                 />
               </div>
 

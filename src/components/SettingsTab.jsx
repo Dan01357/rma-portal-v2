@@ -24,10 +24,17 @@ import {
   Send,
   Clock,
   FlaskConical,
-  BookOpen
+  BookOpen,
+  X
 } from 'lucide-react';
 import { rmaApi, supabase } from '../supabaseClient';
-import { applyEmailTestMode, getWarehouseLocations } from '../utils/rmaHelpers';
+import {
+  applyEmailTestMode,
+  getWarehouseLocations,
+  DEFAULT_KNOWN_GPS_LOCATIONS,
+  formatGpsAddressParts,
+  getGpsMapUrl
+} from '../utils/rmaHelpers';
 import { formatTime12hFromHhmm } from '../utils/followUpWorkflow';
 import { notificationService, EMAIL_PROFILE_TYPES } from '../services/notificationService';
 import { purchaseOrdersApi } from '../services/purchaseOrdersApi';
@@ -74,12 +81,30 @@ export default function SettingsTab({
     message: ''
   });
 
-  // Per-Email Recipient Manager Active Type & Matrix Config State
+  // Per-Email Recipient Manager Active Type & Scope (Live vs Test) + Matrix Config State
   const [activeEmailProfileType, setActiveEmailProfileType] = useState('new_rma');
+  const [recipientScopeIsTest, setRecipientScopeIsTest] = useState(() => Boolean(isTestMode));
   const [syncMatrixFeedback, setSyncMatrixFeedback] = useState('');
+  const [testGlobalRecipients, setTestGlobalRecipients] = useState(() => notificationService.getEmailSettings(true));
+  const [newTestToInput, setNewTestToInput] = useState('');
+  const [newTestCcInput, setNewTestCcInput] = useState('');
+  const [isSavingTestGlobal, setIsSavingTestGlobal] = useState(false);
+  const [testGlobalFeedback, setTestGlobalFeedback] = useState(null);
   const [matrixConfig, setMatrixConfig] = useState(() => notificationService.getDailyMatrixConfig());
   const [isSavingMatrixConfig, setIsSavingMatrixConfig] = useState(false);
   const [matrixConfigFeedback, setMatrixConfigFeedback] = useState(null);
+
+  // Known Warehouse / Dock GPS Anchors State
+  const [knownGpsAnchors, setKnownGpsAnchors] = useState(() => {
+    try {
+      const raw = localStorage.getItem('rma_portal_known_gps_locations');
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch {}
+    return DEFAULT_KNOWN_GPS_LOCATIONS;
+  });
+  const [isSavingGpsAnchors, setIsSavingGpsAnchors] = useState(false);
+  const [gpsAnchorsFeedback, setGpsAnchorsFeedback] = useState(null);
 
   const [testSandboxEmail, setTestSandboxEmail] = useState(() => notificationService.getTestSandboxEmail());
   const [sandboxEmailInput, setSandboxEmailInput] = useState(() => notificationService.getTestSandboxEmail());
@@ -153,11 +178,13 @@ export default function SettingsTab({
     const initialSandbox = notificationService.getTestSandboxEmail();
     setTestSandboxEmail(initialSandbox);
     setSandboxEmailInput(initialSandbox);
+    setTestGlobalRecipients(notificationService.getEmailSettings(true));
 
     // 2. Load global + per-type profiles + matrix config from Supabase rma_settings
-    notificationService.loadAllEmailProfilesFromDb().then(({ globalSettings, dailyMatrixConfig, dailyFollowUpConfig, testSandboxEmail: dbSandbox }) => {
+    notificationService.loadAllEmailProfilesFromDb().then(({ globalSettings, testSettings, dailyMatrixConfig, dailyFollowUpConfig, testSandboxEmail: dbSandbox }) => {
       if (globalSettings?.toEmail) setMainRecipient(globalSettings.toEmail);
       if (Array.isArray(globalSettings?.baseCcList)) setCcRecipients(globalSettings.baseCcList);
+      if (testSettings) setTestGlobalRecipients(testSettings);
       if (dailyMatrixConfig) setMatrixConfig(dailyMatrixConfig);
       if (dailyFollowUpConfig) setFollowUpConfig(dailyFollowUpConfig);
       if (dbSandbox) {
@@ -166,31 +193,58 @@ export default function SettingsTab({
       }
     });
 
+    // 2b. Load Known Warehouse / Dock GPS Anchors from Supabase rma_settings
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('rma_settings')
+          .select('value')
+          .eq('key', 'known_gps_locations')
+          .maybeSingle();
+        if (!error && data && data.value != null) {
+          let parsed = data.value;
+          if (typeof parsed === 'string') {
+            try { parsed = JSON.parse(parsed); } catch { parsed = null; }
+          }
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setKnownGpsAnchors(parsed);
+            try { localStorage.setItem('rma_portal_known_gps_locations', JSON.stringify(parsed)); } catch {}
+          }
+        }
+      } catch {}
+    })();
+
     const handleSyncRecipients = (evt) => {
       if (evt?.type === 'storage') {
         const storageKey = String(evt?.key || '');
         if (!storageKey) return; // Ignore synthetic new Event('storage'); handled via granular rma-settings-changed
         if (storageKey === 'rma_portal_email_recipients') {
-          const updated = notificationService.getEmailSettings();
+          const updated = notificationService.getEmailSettings(false);
           if (updated?.toEmail) setMainRecipient(updated.toEmail);
           if (Array.isArray(updated?.baseCcList)) setCcRecipients(updated.baseCcList);
+        } else if (storageKey === 'rma_portal_test_email_recipients' || storageKey === 'rma_portal_test_sandbox_email') {
+          setTestGlobalRecipients(notificationService.getEmailSettings(true));
+          if (storageKey === 'rma_portal_test_sandbox_email') {
+            const curSandbox = notificationService.getTestSandboxEmail();
+            setTestSandboxEmail(curSandbox);
+            setSandboxEmailInput(curSandbox);
+          }
         } else if (storageKey === 'rma_portal_daily_matrix_config') {
           setMatrixConfig(notificationService.getDailyMatrixConfig());
         } else if (storageKey === 'rma_portal_daily_followup_config') {
           setFollowUpConfig(notificationService.getDailyFollowUpConfig());
-        } else if (storageKey === 'rma_portal_test_sandbox_email') {
-          const curSandbox = notificationService.getTestSandboxEmail();
-          setTestSandboxEmail(curSandbox);
-          setSandboxEmailInput(curSandbox);
         }
         return;
       }
       const detail = evt?.detail && typeof evt.detail === 'object' ? evt.detail : null;
       const syncAll = !detail || Boolean(detail.loadedFromDb);
-      if (syncAll || detail.toEmail || detail.baseCcList) {
-        const updated = notificationService.getEmailSettings();
+      if (syncAll || detail.toEmail || detail.baseCcList || detail.settings) {
+        const updated = notificationService.getEmailSettings(false);
         if (updated?.toEmail) setMainRecipient(updated.toEmail);
         if (Array.isArray(updated?.baseCcList)) setCcRecipients(updated.baseCcList);
+      }
+      if (syncAll || detail.testSettings || detail.testSandboxEmail) {
+        setTestGlobalRecipients(notificationService.getEmailSettings(true));
       }
       if (syncAll || detail.dailyMatrixConfig) {
         setMatrixConfig(notificationService.getDailyMatrixConfig());
@@ -212,6 +266,160 @@ export default function SettingsTab({
       window.removeEventListener('storage', handleSyncRecipients);
     };
   }, []);
+
+  useEffect(() => {
+    setRecipientScopeIsTest(Boolean(isTestMode));
+  }, [isTestMode]);
+
+  const handleAddGpsAnchor = () => {
+    setGpsAnchorsFeedback(null);
+    setKnownGpsAnchors((prev) => [
+      ...prev,
+      {
+        name: '',
+        street: '',
+        barangay: '',
+        city: '',
+        region: 'Metro Manila',
+        zip: '',
+        formatted: '',
+        lat: '',
+        lon: '',
+        radiusMeters: 250
+      }
+    ]);
+  };
+
+  const handleUpdateGpsAnchor = (idx, field, val) => {
+    setGpsAnchorsFeedback(null);
+    setKnownGpsAnchors((prev) =>
+      prev.map((item, i) => {
+        if (i !== idx) return item;
+        const next = { ...item, [field]: val };
+        if (['street', 'barangay', 'city', 'region', 'zip'].includes(field)) {
+          next.formatted = formatGpsAddressParts({
+            street: next.street,
+            barangay: next.barangay,
+            city: next.city,
+            region: next.region,
+            zip: next.zip
+          });
+        }
+        return next;
+      })
+    );
+  };
+
+  const handleRemoveGpsAnchor = (idx) => {
+    setGpsAnchorsFeedback(null);
+    setKnownGpsAnchors((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleResetDefaultGpsAnchors = () => {
+    setGpsAnchorsFeedback(null);
+    setKnownGpsAnchors(DEFAULT_KNOWN_GPS_LOCATIONS.map((a) => ({ ...a })));
+  };
+
+  const handleCaptureCurrentGpsForAnchor = (idx) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGpsAnchorsFeedback({ type: 'error', message: 'Geolocation is not available in this browser.' });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lon = Number(pos.coords.longitude.toFixed(6));
+        setKnownGpsAnchors((prev) =>
+          prev.map((item, i) => (i === idx ? { ...item, lat, lon } : item))
+        );
+        setGpsAnchorsFeedback({
+          type: 'success',
+          message: `Captured current GPS coordinates (${lat}, ${lon}, ±${Math.round(pos.coords.accuracy)}m) into anchor #${idx + 1}.`
+        });
+      },
+      (err) => {
+        setGpsAnchorsFeedback({
+          type: 'error',
+          message: err?.message || 'Could not capture GPS coordinates.'
+        });
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
+
+  const handleSaveGpsAnchors = async () => {
+    const normalized = [];
+    for (let i = 0; i < knownGpsAnchors.length; i += 1) {
+      const a = knownGpsAnchors[i];
+      const latNum = Number(a.lat);
+      const lonNum = Number(a.lon ?? a.lng);
+      if (!Number.isFinite(latNum) || latNum < -90 || latNum > 90 || !Number.isFinite(lonNum) || lonNum < -180 || lonNum > 180) {
+        setGpsAnchorsFeedback({
+          type: 'error',
+          message: `Anchor #${i + 1} (${a.name || 'Unnamed'}) requires valid numeric latitude and longitude.`
+        });
+        return;
+      }
+      const street = String(a.street || '').trim();
+      const barangay = String(a.barangay || '').trim();
+      const city = String(a.city || '').trim();
+      const region = String(a.region || '').trim();
+      const zip = String(a.zip || '').trim();
+      const autoFormatted = formatGpsAddressParts({ street, barangay, city, region, zip });
+      const formatted = String(a.formatted || '').trim() || autoFormatted;
+      if (!formatted) {
+        setGpsAnchorsFeedback({
+          type: 'error',
+          message: `Anchor #${i + 1} requires at least a street, city, or formatted address.`
+        });
+        return;
+      }
+      normalized.push({
+        name: String(a.name || '').trim() || `Warehouse / Dock #${i + 1}`,
+        street,
+        barangay,
+        city,
+        region,
+        zip,
+        formatted,
+        lat: latNum,
+        lon: lonNum,
+        radiusMeters: Math.max(25, Math.min(5000, Number(a.radiusMeters) || 250))
+      });
+    }
+
+    const payload = normalized.length > 0 ? normalized : DEFAULT_KNOWN_GPS_LOCATIONS;
+    setIsSavingGpsAnchors(true);
+    setGpsAnchorsFeedback(null);
+    try {
+      try {
+        localStorage.setItem('rma_portal_known_gps_locations', JSON.stringify(payload));
+      } catch {}
+      const { error } = await supabase
+        .from('rma_settings')
+        .upsert(
+          {
+            key: 'known_gps_locations',
+            value: payload,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'key' }
+        );
+      if (error) throw error;
+      setKnownGpsAnchors(payload);
+      setGpsAnchorsFeedback({
+        type: 'success',
+        message: `Saved ${payload.length} Known Warehouse / Dock GPS anchor(s) to cloud database.`
+      });
+    } catch (err) {
+      setGpsAnchorsFeedback({
+        type: 'error',
+        message: err?.message || 'Could not save Known GPS Anchors to Supabase.'
+      });
+    } finally {
+      setIsSavingGpsAnchors(false);
+    }
+  };
 
   const handleCheckConnection = async () => {
     setConnectionStatus({ loading: true, checked: false, connected: false, message: 'Pinging Supabase...' });
@@ -291,12 +499,46 @@ export default function SettingsTab({
       const saved = await notificationService.saveTestSandboxEmail(raw);
       setTestSandboxEmail(saved);
       setSandboxEmailInput(saved);
+      setTestGlobalRecipients(notificationService.getEmailSettings(true));
       setSandboxEmailFeedback({ type: 'success', message: `Test Mode sandbox override updated to ${saved}!` });
       setTimeout(() => setSandboxEmailFeedback(null), 4000);
     } catch (err) {
       setSandboxEmailFeedback({ type: 'error', message: err?.message || 'Failed to save sandbox email.' });
     } finally {
       setIsSavingSandboxEmail(false);
+    }
+  };
+
+  const handleSaveTestGlobalRecipients = async () => {
+    setIsSavingTestGlobal(true);
+    setTestGlobalFeedback(null);
+    try {
+      const toList = Array.isArray(testGlobalRecipients?.toList) ? testGlobalRecipients.toList : [];
+      const baseCcList = Array.isArray(testGlobalRecipients?.baseCcList) ? testGlobalRecipients.baseCcList : [];
+      const res = await notificationService.saveEmailSettings({ toList, baseCcList }, true);
+      if (res?.settings) setTestGlobalRecipients(res.settings);
+      setTestGlobalFeedback({ type: 'success', message: 'Test Mode Global Fallback TO & CC saved & synced to cloud!' });
+      setTimeout(() => setTestGlobalFeedback(null), 4000);
+    } catch (err) {
+      setTestGlobalFeedback({ type: 'error', message: err?.message || 'Failed to save Test Mode fallback recipients.' });
+    } finally {
+      setIsSavingTestGlobal(false);
+    }
+  };
+
+  const handleResetTestGlobalFallback = async () => {
+    const sandbox = notificationService.getTestSandboxEmail();
+    setIsSavingTestGlobal(true);
+    setTestGlobalFeedback(null);
+    try {
+      const res = await notificationService.saveEmailSettings({ toList: [sandbox], baseCcList: [] }, true);
+      if (res?.settings) setTestGlobalRecipients(res.settings);
+      setTestGlobalFeedback({ type: 'success', message: `Reset Global Test Mode recipients to Sandbox (${sandbox})!` });
+      setTimeout(() => setTestGlobalFeedback(null), 3500);
+    } catch (err) {
+      setTestGlobalFeedback({ type: 'error', message: err?.message || 'Failed to reset Test Mode fallback.' });
+    } finally {
+      setIsSavingTestGlobal(false);
     }
   };
 
@@ -336,11 +578,16 @@ export default function SettingsTab({
   };
 
   const handleSyncAutoAndManualMatrixRecipients = async () => {
+    const scopeIsTest = Boolean(recipientScopeIsTest);
     const sourceKey = activeEmailProfileType === 'manual_matrix' ? 'manual_matrix' : 'daily_matrix_auto';
-    const srcProfile = notificationService.getEmailProfile(sourceKey);
-    await notificationService.saveEmailProfile('daily_matrix_auto', srcProfile);
-    await notificationService.saveEmailProfile('manual_matrix', srcProfile);
-    setSyncMatrixFeedback('Synced TO & CC recipients between Auto Daily 1:00 PM Matrix and Manual Matrix!');
+    const srcProfile = notificationService.getEmailProfile(sourceKey, scopeIsTest);
+    await notificationService.saveEmailProfile('daily_matrix_auto', srcProfile, scopeIsTest);
+    await notificationService.saveEmailProfile('manual_matrix', srcProfile, scopeIsTest);
+    setSyncMatrixFeedback(
+      scopeIsTest
+        ? 'Synced Test Mode TO & CC recipients between Auto Daily Matrix and Manual Matrix!'
+        : 'Synced TO & CC recipients between Auto Daily 1:00 PM Matrix and Manual Matrix!'
+    );
     setTimeout(() => setSyncMatrixFeedback(''), 4000);
   };
 
@@ -352,8 +599,8 @@ export default function SettingsTab({
       message: 'Generating & emailing Overall RMA Matrix (.xlsx)...',
       detail: ''
     });
-    const manualProf = notificationService.getEmailProfile('manual_matrix');
-    const autoProf = notificationService.getEmailProfile('daily_matrix_auto');
+    const manualProf = notificationService.getEmailProfile('manual_matrix', Boolean(isTestMode));
+    const autoProf = notificationService.getEmailProfile('daily_matrix_auto', Boolean(isTestMode));
     const chosenProf = manualProf.isCustom ? manualProf : autoProf;
 
     const payloadDates = matrixConfig.rangeMode === 'custom' && matrixConfig.startDate && matrixConfig.endDate
@@ -653,6 +900,32 @@ export default function SettingsTab({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* Live vs Test Scope Switcher for Per-Email Recipient Manager */}
+            <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700" role="group" aria-label="Email Recipient Mode Scope">
+              <button
+                type="button"
+                onClick={() => setRecipientScopeIsTest(false)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-black transition-all cursor-pointer ${
+                  !recipientScopeIsTest
+                    ? 'bg-emerald-600 text-white shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                }`}
+              >
+                🟢 Live Mode
+              </button>
+              <button
+                type="button"
+                onClick={() => setRecipientScopeIsTest(true)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-black transition-all cursor-pointer ${
+                  recipientScopeIsTest
+                    ? 'bg-amber-500 text-slate-950 shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                }`}
+              >
+                🧪 Test Mode
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={() => setIsDirectoryOpen(true)}
@@ -711,16 +984,18 @@ export default function SettingsTab({
 
         <EmailRecipientsEditor
           emailType={activeEmailProfileType}
-          isTestMode={isTestMode}
+          isTestMode={recipientScopeIsTest}
           allowEmptyTo={activeEmailProfileType === 'invite_email' || activeEmailProfileType === 'supplier_followup'}
           extraHint={
-            activeEmailProfileType === 'invite_email'
-              ? 'Addresses added here are included as extra CCs on generated Portal/Editor Invite emails.'
-              : activeEmailProfileType === 'supplier_followup'
-                ? 'Extra internal CCs copied on automated 10-Calendar-Day pickup follow-up emails (Primary TO comes from each RMA’s Supplier Email).'
-                : activeEmailProfileType === 'pickup_debit_claim' || activeEmailProfileType === 'pickup_replacement'
-                  ? 'Supplier To/CC fields entered in Driver Pickup Verification merge automatically with these base recipients.'
-                  : 'Product Account Executive (AE) email is also CC’d automatically when applicable.'
+            recipientScopeIsTest
+              ? 'Test Mode profile is stored separately under test_email_recipients_by_type and falls back to Global Test Mode recipients / Sandbox email.'
+              : activeEmailProfileType === 'invite_email'
+                ? 'Addresses added here are included as extra CCs on generated Portal/Editor Invite emails.'
+                : activeEmailProfileType === 'supplier_followup'
+                  ? 'Extra internal CCs copied on automated 10-Calendar-Day pickup follow-up emails (Primary TO comes from each RMA’s Supplier Email).'
+                  : activeEmailProfileType === 'pickup_debit_claim' || activeEmailProfileType === 'pickup_replacement'
+                    ? 'Supplier To/CC fields entered in Driver Pickup Verification merge automatically with these base recipients.'
+                    : 'Product Account Executive (AE) email is also CC’d automatically when applicable.'
           }
         />
       </div>
@@ -779,13 +1054,13 @@ export default function SettingsTab({
           </span>
           <div className="text-slate-700 dark:text-slate-300">
             <strong>Target TO:</strong> <span className={isTestMode ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-emerald-600 dark:text-emerald-400 font-bold'}>
-              {isTestMode ? `${testSandboxEmail} (Live target "${mainRecipient}" safely bypassed)` : mainRecipient}
+              {isTestMode ? `${testGlobalRecipients?.toEmail || testSandboxEmail} (Live target "${mainRecipient}" safely bypassed)` : mainRecipient}
             </span>
           </div>
           <div className="text-slate-700 dark:text-slate-300">
             <strong>Target CC:</strong> <span className={isTestMode ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-700 dark:text-slate-300'}>
               {isTestMode 
-                ? '[] (All CC recipients bypassed in Sandbox)' 
+                ? `${(testGlobalRecipients?.baseCcList || []).join(', ') || '[] (No Test Mode CC — Live CCs bypassed)'}` 
                 : `${ccRecipients.join(', ') || 'None'} + [Customer AE email]`}
             </span>
           </div>
@@ -821,6 +1096,177 @@ export default function SettingsTab({
               {sandboxEmailFeedback.message}
             </div>
           )}
+        </div>
+
+        {/* Configurable Global Test Mode TO & CC Distribution (isolated key: test_email_recipients) */}
+        <div className="p-3.5 rounded-2xl bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/70 space-y-3 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="font-black text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
+                <Mail className="w-4 h-4 text-amber-600" />
+                <span>Test Mode Global Fallback Recipients (TO &amp; CC)</span>
+              </div>
+              <p className="text-[11px] text-amber-900/80 dark:text-amber-300/80 mt-0.5">
+                Used across all Test Mode emails unless overridden in the per-email workflow profiles above (isolated from Live recipients).
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleResetTestGlobalFallback}
+                disabled={isSavingTestGlobal}
+                className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-amber-300 dark:border-amber-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset Test Fallback</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveTestGlobalRecipients}
+                disabled={isSavingTestGlobal}
+                className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <Save className="w-3 h-3" />
+                <span>{isSavingTestGlobal ? 'Saving...' : 'Save Test Fallback'}</span>
+              </button>
+            </div>
+          </div>
+
+          {testGlobalFeedback && (
+            <div className={`px-3 py-2 rounded-xl border text-[11px] font-bold ${
+              testGlobalFeedback.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200'
+                : 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-700 text-rose-800 dark:text-rose-200'
+            }`}>
+              {testGlobalFeedback.message}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Test Mode TO List */}
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-black uppercase tracking-wider text-amber-900 dark:text-amber-300">
+                Test Mode Global TO ({(testGlobalRecipients?.toList || []).length})
+              </span>
+              <div className="p-2 bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800/70 rounded-xl flex flex-wrap gap-1.5 min-h-[36px]">
+                {(testGlobalRecipients?.toList || []).map((em) => (
+                  <span key={em} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-100 dark:bg-amber-900/50 text-amber-950 dark:text-amber-100 font-mono text-[11px] font-bold">
+                    <span>{em}</span>
+                    <button
+                      type="button"
+                      onClick={() => setTestGlobalRecipients((prev) => ({
+                        ...prev,
+                        toList: (prev?.toList || []).filter((x) => x.toLowerCase() !== em.toLowerCase())
+                      }))}
+                      className="text-amber-700 hover:text-rose-600 cursor-pointer"
+                      aria-label={`Remove Test TO ${em}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  type="email"
+                  value={newTestToInput}
+                  onChange={(e) => setNewTestToInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const clean = newTestToInput.trim().toLowerCase();
+                      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return;
+                      setTestGlobalRecipients((prev) => ({
+                        ...prev,
+                        toList: Array.from(new Set([...(prev?.toList || []), clean]))
+                      }));
+                      setNewTestToInput('');
+                    }
+                  }}
+                  placeholder="Add Test Mode Global TO email..."
+                  className="flex-1 px-2.5 py-1.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 text-[11px] font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const clean = newTestToInput.trim().toLowerCase();
+                    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return;
+                    setTestGlobalRecipients((prev) => ({
+                      ...prev,
+                      toList: Array.from(new Set([...(prev?.toList || []), clean]))
+                    }));
+                    setNewTestToInput('');
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-700 text-white text-[11px] font-bold cursor-pointer"
+                >
+                  Add Test TO
+                </button>
+              </div>
+            </div>
+
+            {/* Test Mode CC List */}
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-black uppercase tracking-wider text-amber-900 dark:text-amber-300">
+                Test Mode Global CC ({(testGlobalRecipients?.baseCcList || []).length})
+              </span>
+              <div className="p-2 bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800/70 rounded-xl flex flex-wrap gap-1.5 min-h-[36px]">
+                {(testGlobalRecipients?.baseCcList || []).length === 0 ? (
+                  <span className="text-[11px] text-slate-400 italic">No Test Mode CC added.</span>
+                ) : (testGlobalRecipients?.baseCcList || []).map((em) => (
+                  <span key={em} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-mono text-[11px] font-bold">
+                    <span>{em}</span>
+                    <button
+                      type="button"
+                      onClick={() => setTestGlobalRecipients((prev) => ({
+                        ...prev,
+                        baseCcList: (prev?.baseCcList || []).filter((x) => x.toLowerCase() !== em.toLowerCase())
+                      }))}
+                      className="text-slate-500 hover:text-rose-600 cursor-pointer"
+                      aria-label={`Remove Test CC ${em}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  type="email"
+                  value={newTestCcInput}
+                  onChange={(e) => setNewTestCcInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const clean = newTestCcInput.trim().toLowerCase();
+                      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return;
+                      setTestGlobalRecipients((prev) => ({
+                        ...prev,
+                        baseCcList: Array.from(new Set([...(prev?.baseCcList || []), clean]))
+                      }));
+                      setNewTestCcInput('');
+                    }
+                  }}
+                  placeholder="Add Test Mode Global CC email..."
+                  className="flex-1 px-2.5 py-1.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 text-[11px] font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const clean = newTestCcInput.trim().toLowerCase();
+                    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return;
+                    setTestGlobalRecipients((prev) => ({
+                      ...prev,
+                      baseCcList: Array.from(new Set([...(prev?.baseCcList || []), clean]))
+                    }));
+                    setNewTestCcInput('');
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-700 text-white text-[11px] font-bold cursor-pointer"
+                >
+                  Add Test CC
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1446,6 +1892,226 @@ export default function SettingsTab({
               </span>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* 5b. KNOWN WAREHOUSE / DOCK GPS ANCHORS (GEOFENCED ADDRESS + MAPS PIN OVERRIDE) */}
+      <div
+        data-testid="known-gps-anchors-card"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-xs space-y-4"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 rounded-2xl shadow-inner">
+              <MapPin className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                Known Warehouse / Dock GPS Anchors
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Priority-1 geofence override for reverse geocoding &amp; Google Maps pins (default: Pingcon Warehouse, 64 Mendez Rd, Baesa, Quezon City 1106).
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleResetDefaultGpsAnchors}
+              className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset Default</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleAddGpsAnchor}
+              className="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Anchor</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveGpsAnchors}
+              disabled={isSavingGpsAnchors}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>{isSavingGpsAnchors ? 'Saving...' : 'Save GPS Anchors'}</span>
+            </button>
+          </div>
+        </div>
+
+        {gpsAnchorsFeedback && (
+          <div className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 ${
+            gpsAnchorsFeedback.type === 'success'
+              ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200'
+              : 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-700 text-rose-800 dark:text-rose-200'
+          }`}>
+            {gpsAnchorsFeedback.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+            <span>{gpsAnchorsFeedback.message}</span>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {knownGpsAnchors.map((anchor, idx) => {
+            const previewUrl = getGpsMapUrl({
+              gps_address: anchor.formatted || formatGpsAddressParts(anchor),
+              gps_latitude: anchor.lat,
+              gps_longitude: anchor.lon
+            });
+            return (
+              <div
+                key={`gps-anchor-${idx}`}
+                className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-black text-slate-800 dark:text-slate-100">
+                    Anchor #{idx + 1}: {anchor.name || 'Unnamed Dock'}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleCaptureCurrentGpsForAnchor(idx)}
+                      className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-200 cursor-pointer"
+                    >
+                      Use My Current GPS
+                    </button>
+                    {previewUrl && (
+                      <a
+                        href={previewUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[11px] font-bold flex items-center gap-1"
+                      >
+                        <span>Verify Map Pin</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                    {knownGpsAnchors.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveGpsAnchor(idx)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 cursor-pointer"
+                        title="Remove Anchor"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Anchor Name</label>
+                    <input
+                      type="text"
+                      value={anchor.name || ''}
+                      onChange={(e) => handleUpdateGpsAnchor(idx, 'name', e.target.value)}
+                      placeholder="Pingcon Warehouse"
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Street / No.</label>
+                    <input
+                      type="text"
+                      value={anchor.street || ''}
+                      onChange={(e) => handleUpdateGpsAnchor(idx, 'street', e.target.value)}
+                      placeholder="64 Mendez Rd"
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Barangay / District</label>
+                    <input
+                      type="text"
+                      value={anchor.barangay || ''}
+                      onChange={(e) => handleUpdateGpsAnchor(idx, 'barangay', e.target.value)}
+                      placeholder="Baesa"
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">City</label>
+                    <input
+                      type="text"
+                      value={anchor.city || ''}
+                      onChange={(e) => handleUpdateGpsAnchor(idx, 'city', e.target.value)}
+                      placeholder="Quezon City"
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Region &amp; ZIP</label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <input
+                        type="text"
+                        value={anchor.region || ''}
+                        onChange={(e) => handleUpdateGpsAnchor(idx, 'region', e.target.value)}
+                        placeholder="Metro Manila"
+                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-900 dark:text-white"
+                      />
+                      <input
+                        type="text"
+                        value={anchor.zip || ''}
+                        onChange={(e) => handleUpdateGpsAnchor(idx, 'zip', e.target.value)}
+                        placeholder="1106"
+                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono font-bold text-slate-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Latitude</label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      value={anchor.lat ?? ''}
+                      onChange={(e) => handleUpdateGpsAnchor(idx, 'lat', e.target.value)}
+                      placeholder="14.6683"
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono font-semibold text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Longitude</label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      value={anchor.lon ?? ''}
+                      onChange={(e) => handleUpdateGpsAnchor(idx, 'lon', e.target.value)}
+                      placeholder="121.0114"
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono font-semibold text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Radius (Meters)</label>
+                    <input
+                      type="number"
+                      min="25"
+                      max="5000"
+                      value={anchor.radiusMeters ?? 250}
+                      onChange={(e) => handleUpdateGpsAnchor(idx, 'radiusMeters', e.target.value)}
+                      placeholder="250"
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono font-semibold text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Formatted Watermark &amp; Display Address</label>
+                  <input
+                    type="text"
+                    value={anchor.formatted || ''}
+                    onChange={(e) => handleUpdateGpsAnchor(idx, 'formatted', e.target.value)}
+                    placeholder="64 Mendez Rd, Baesa, Quezon City, Metro Manila 1106"
+                    className="w-full px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

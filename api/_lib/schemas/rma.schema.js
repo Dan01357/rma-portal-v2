@@ -115,9 +115,9 @@ export const RMAReportSchema = z.object({
   dr_number: z.string().nullable().optional().openapi({ example: 'DR-2026-8891' }),
   po_number: z.string().nullable().optional().openapi({ example: 'PO-2026-4401' }),
   expiry_date: z.string().nullable().optional().openapi({ example: '2026-12-31', description: 'ISO YYYY-MM-DD expiry date (required for Supplier RTV & Test Mode; optional for Live Customer Hub)' }),
-  gps_latitude: z.number().nullable().optional().openapi({ example: 14.5764 }),
-  gps_longitude: z.number().nullable().optional().openapi({ example: 121.0851 }),
-  gps_address: z.string().nullable().optional().openapi({ example: '42 Jose Rizal St, Brgy. Bagong Ilog, Pasig, Metro Manila, 1600', description: 'Nominatim reverse-geocoded street/barangay/city/ZIP address' }),
+  gps_latitude: z.number().nullable().optional().openapi({ example: 14.6683 }),
+  gps_longitude: z.number().nullable().optional().openapi({ example: 121.0114 }),
+  gps_address: z.string().nullable().optional().openapi({ example: '64 Mendez Rd, Baesa, Quezon City, Metro Manila 1106', description: 'Pinpoint geofence anchor (`known_gps_locations`) or Google/Nominatim reverse-geocoded street/barangay/city/ZIP address' }),
   is_parent: z.boolean().default(false).openapi({ example: false, description: 'True if this report is a batch return manifest container' }),
   parent_rma_id: z.number().int().nullable().optional().openapi({ example: null, description: 'Parent report ID if this is a line item inside a batch return manifest' }),
   items: z.array(z.any()).default([]).openapi({ example: [], description: 'Line item breakdown objects for multi-item return manifests' }),
@@ -179,7 +179,7 @@ export const UpdateRMAReportSchema = z.object({
   code: z.string().optional().openapi({ example: 'P2678P' }),
   supplier_name: z.string().optional().openapi({ example: 'Liwayway Marketing' }),
   unit_name: z.string().optional().openapi({ example: 'pc' }),
-  status: RMAStatusEnum.optional().openapi({ example: 'restocked', description: 'Lifecycle status update. Use "restocked" (WMS restocking), "reordered" (supplier PO placed), "scrapped", or "pending" (re-open for continuous queue testing)' }),
+  status: RMAStatusEnum.optional().openapi({ example: 'pending', description: 'Lifecycle status update or full reset via resetReportToPending ("pending" clears 4-Choice disposition, pickup/scrap/restock/closed metadata, and restarts the 10-day SLA countdown cleanly). Also accepts "restocked", "reordered", or "scrapped".' }),
   warehouse_location: z.string().optional().openapi({ example: 'Good Stock Area', description: 'Standardized warehouse area (e.g. Good Stock Area, Supplier Return Area (RTV), Disposal / Scrap Area, Receiving Area)' }),
   notes: z.string().optional().openapi({ example: 'Confirmed restocked into WMS' }),
   disposition: RMADispositionEnum.optional().openapi({ example: 'Restock to Inventory' }),
@@ -654,10 +654,10 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
     path: '/api/send-email',
     summary: 'Dispatch RMA Email (with Mirror .xlsx), Lifecycle PDF, Daily Matrix (.xlsx), 10-Day SLA Follow-Up, or 2-Way .xlsx Reply Sync',
     description: `Unified serverless mailer & 2-way .xlsx reply processor preserving Vercel's 12-function cap:
-- **Standard / Lifecycle Emails**: Routes via \`email_recipients_by_type\` (multi-TO + CC). New RMA alerts attach an editable \`Field | Value\` + \`MANIFEST LINE ITEMS\` mirror \`.xlsx\` workbook (matching email subject + \`formatSaveFileTimestamp\`) and set \`replyTo\`. \`pickup_debit_claim\` omits \`Store / Branch:\` and \`Warehouse Location:\` while embedding \`Explanation / Defect Notes:\`, optional 5-slot pickup photos (max 50), and \`Debit-Claim-Form-*.pdf\` / \`Customer-Credit-Handover-Form-*.pdf\`.
-- **\`?action=daily-followup\`**: Runs 4-Step Workflow & Day 0..10 Pickup Follow-Up SLA (Day 1..10 reminders w/ 4-Step HTML table & health warning; stops immediately when Picked Up / Case Closed; auto-disposes >10 calendar days unclaimed to \`Disposal / Scrap Area\` w/ \`workflow_resolution: "scrapped_no_reorder"\` and notifies \`new_rma\` recipients).
+- **Standard, Lifecycle & Admin-Only Test Mode Emails**: Routes Live notifications via \`rma_settings.email_recipients_by_type\` and Test Mode notifications via Admin-only \`rma_settings.test_email_recipients\` / \`test_email_recipients_by_type\` (**never exposed on public \`/\`**), enforcing \`[TEST] \` as the first subject word and Sandbox isolation (default \`mgan@pingconmarketing.com\`). New RMA alerts attach an editable \`Serial No. | Field | Value | Format / Notes\` + \`MANIFEST LINE ITEMS\` (\`Serial No.\` Column A) mirror \`.xlsx\` workbook (matching subject + \`formatSaveFileTimestamp\`) and set \`replyTo\`. \`pickup_debit_claim\` omits \`Store / Branch:\` and \`Warehouse Location:\` while embedding \`Explanation / Defect Notes:\`, optional 5-slot pickup photos (max 50), and \`Debit-Claim-Form-*.pdf\` / \`Customer-Credit-Handover-Form-*.pdf\`.
+- **\`?action=daily-followup\`**: Runs 4-Step Workflow & Day 0..10 Pickup Follow-Up SLA (Day 1..10 reminders w/ 4-Step HTML table & health warning; stops immediately when Picked Up / Case Closed; can be fully reset back to \`Pending\` via \`resetReportToPending\`; auto-disposes >10 calendar days unclaimed to \`Disposal / Scrap Area\` w/ \`workflow_resolution: "scrapped_no_reorder"\` and notifies \`new_rma\` recipients).
 - **\`?action=daily-matrix\`**: Generates and emails the strict OOXML Overall RMA Matrix (\`.xlsx\`) using \`daily_matrix_config\` (Rolling Days or Custom \`YYYY-MM-DD\`, scope, \`includeZeroCatalogSkus\`, editable \`autoSendTimePht\`).
-- **\`?action=sync-email-replies\` / \`?action=ingest-xlsx-reply\`**: Polls unread Gmail IMAP \`.xlsx\` replies (or accepts base64 \`.xlsx\` uploads from Quick Actions / webhook), verifies sender & Live/Test isolation, updates \`rma_reports\` + \`rma_settings.supplier_directory_store\`, and appends \`EMAIL_XLSX_REPLY_UPDATE\` to \`audit_trail\`.`,
+- **\`?action=sync-email-replies\` / \`?action=ingest-xlsx-reply\`**: Polls unread Gmail IMAP \`.xlsx\` replies (or accepts base64 \`.xlsx\` uploads from Quick Actions / webhook), supports both standardized \`Serial No.\` Column A workbooks and legacy Column A \`Field | Value\` layouts, validates sender authorization & strict Test (\`RMA-TEST-...\`) vs Live (\`RMA-...\`) isolation, preserves \`[TEST_MODE]\`, updates \`rma_reports\` + \`rma_settings.supplier_directory_store\`, and appends \`EMAIL_XLSX_REPLY_UPDATE\` to \`audit_trail\`.`,
     tags: ['Automation & Email'],
     security: [{ BearerAuth: [] }],
     request: {

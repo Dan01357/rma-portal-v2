@@ -2020,7 +2020,7 @@ export const catalogService = {
   },
 
   /**
-   * Reset an RMA report back to pending / under_inspection (clearing restocked/reordered/scrapped resolution)
+   * Fully reset an RMA report (timeline, disposition outcome, 10-day countdown & child items) back to Pending
    */
   async resetReportToPending(id, rmaNumber, actorName = 'Admin') {
     if (!id && !rmaNumber) return false;
@@ -2036,22 +2036,87 @@ export const catalogService = {
     const primaryRow = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
     if (!primaryRow) throw new Error('Report not found');
 
+    const nowIso = new Date().toISOString();
+    const isTestRow = Boolean(
+      primaryRow?.ai_document_metadata?.is_test ||
+      primaryRow?.ai_document_metadata?.test_mode ||
+      /^RMA-TEST-/i.test(primaryRow?.rma_number || '') ||
+      String(primaryRow?.notes || '').includes('[TEST_MODE]')
+    );
+
     const currentAudit = Array.isArray(primaryRow?.audit_trail) ? [...primaryRow.audit_trail] : [];
     currentAudit.push({
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
+      action: 'TIMELINE_RESET_TO_PENDING',
       stage: 'RESET_TO_PENDING',
       actor: cleanActor,
-      status: 'under_inspection',
-      note: `Re-opened and reset to pending / under_inspection by ${cleanActor}`
+      status: 'pending',
+      note: `Full 4-step workflow timeline, 10-day countdown & disposition outcome reset to Pending by ${cleanActor}`
     });
 
-    const currentMeta = (primaryRow?.ai_document_metadata && typeof primaryRow.ai_document_metadata === 'object') ? { ...primaryRow.ai_document_metadata } : {};
+    const currentMeta = (primaryRow?.ai_document_metadata && typeof primaryRow.ai_document_metadata === 'object')
+      ? { ...primaryRow.ai_document_metadata }
+      : {};
     delete currentMeta.workflow_resolution;
     delete currentMeta.resolved_at;
     delete currentMeta.resolved_by;
+    delete currentMeta.simple_rtv_disposition;
+    delete currentMeta.simple_rtv_label;
+    delete currentMeta.simple_rtv_updated_at;
+    delete currentMeta.simple_rtv_updated_by;
+    delete currentMeta.needs_reorder;
+    delete currentMeta.credit_memo_no;
+    delete currentMeta.credit_memo_date;
+
+    const prevPickup = (currentMeta.supplier_pickup && typeof currentMeta.supplier_pickup === 'object')
+      ? currentMeta.supplier_pickup
+      : null;
+    if (prevPickup) {
+      const cleanedPickup = {};
+      if (prevPickup.supplier_name) cleanedPickup.supplier_name = prevPickup.supplier_name;
+      if (prevPickup.customer_name) cleanedPickup.customer_name = prevPickup.customer_name;
+      if (prevPickup.supplier_email_to) cleanedPickup.supplier_email_to = prevPickup.supplier_email_to;
+      if (prevPickup.supplier_email_cc) cleanedPickup.supplier_email_cc = prevPickup.supplier_email_cc;
+      if (isTestRow || prevPickup.is_test) cleanedPickup.is_test = true;
+      if (Object.keys(cleanedPickup).length > 0) {
+        currentMeta.supplier_pickup = cleanedPickup;
+      } else {
+        delete currentMeta.supplier_pickup;
+      }
+    }
+
+    const prevFollowUp = (currentMeta.follow_up && typeof currentMeta.follow_up === 'object')
+      ? { ...currentMeta.follow_up }
+      : {};
+    const resetFollowUp = {};
+    if (prevFollowUp.enabled !== undefined) resetFollowUp.enabled = prevFollowUp.enabled;
+    if (prevFollowUp.customer_enabled !== undefined) resetFollowUp.customer_enabled = prevFollowUp.customer_enabled;
+    if (prevFollowUp.supplier_email_to) resetFollowUp.supplier_email_to = prevFollowUp.supplier_email_to;
+    if (prevFollowUp.supplier_email_cc) resetFollowUp.supplier_email_cc = prevFollowUp.supplier_email_cc;
+    resetFollowUp.started_at = nowIso;
+    resetFollowUp.reset_at = nowIso;
+    resetFollowUp.sent_count = 0;
+    currentMeta.follow_up = resetFollowUp;
+
+    if (isTestRow) {
+      currentMeta.is_test = true;
+      currentMeta.test_mode = true;
+    }
+
+    const rawNotes = String(primaryRow.notes || '');
+    let cleanedNotes = rawNotes
+      .replace(/\[(?:RTV|BUF):\s*[^\]]+\]/gi, '')
+      .replace(/\n{2,}/g, '\n')
+      .trim();
+    if (isTestRow && !cleanedNotes.includes('[TEST_MODE]')) {
+      cleanedNotes = cleanedNotes ? `[TEST_MODE] ${cleanedNotes}` : '[TEST_MODE] Sandbox Return';
+    }
 
     const updates = {
-      status: 'under_inspection',
+      status: 'pending',
+      disposition: 'Pending',
+      warehouse_location: 'Receiving / Quarantine Area',
+      notes: cleanedNotes || null,
       audit_trail: currentAudit,
       ai_document_metadata: currentMeta
     };
@@ -2059,8 +2124,12 @@ export const catalogService = {
     // If batch manifest, reset all resolved child items as well
     if (Array.isArray(primaryRow.items) && primaryRow.items.length > 0) {
       updates.items = primaryRow.items.map(child => {
-        const cleanChild = { ...child, status: 'under_inspection' };
+        const cleanChild = { ...child, status: 'pending', disposition: 'Pending' };
         delete cleanChild.workflow_resolution;
+        delete cleanChild.simple_rtv_disposition;
+        delete cleanChild.simple_rtv_label;
+        delete cleanChild.needs_reorder;
+        delete cleanChild.supplier_pickup;
         return cleanChild;
       });
     }
@@ -2069,16 +2138,39 @@ export const catalogService = {
     if (isNumericId) uq = uq.eq('id', Number(primaryRow.id));
     else uq = uq.eq('rma_number', primaryRow.rma_number);
 
-    const { data: updatedData, error: updateErr } = await uq.select('*');
+    let { data: updatedData, error: updateErr } = await uq.select('*');
+    if (updateErr && String(updateErr.message || '').includes('rma_reports_status_check')) {
+      const retryUpdates = { ...updates, status: 'under_inspection' };
+      let rq = supabase.from('rma_reports').update(retryUpdates);
+      if (isNumericId) rq = rq.eq('id', Number(primaryRow.id));
+      else rq = rq.eq('rma_number', primaryRow.rma_number);
+      const retryRes = await rq.select('*');
+      updatedData = retryRes.data;
+      updateErr = retryRes.error;
+    }
     if (updateErr) throw updateErr;
 
     const finalReport = Array.isArray(updatedData) && updatedData.length > 0 ? updatedData[0] : { ...primaryRow, ...updates };
+
+    // Also reset separate child rma_reports rows linked via parent_rma_id
+    if (primaryRow.id) {
+      try {
+        await supabase
+          .from('rma_reports')
+          .update({
+            status: 'pending',
+            disposition: 'Pending',
+            warehouse_location: 'Receiving / Quarantine Area'
+          })
+          .eq('parent_rma_id', primaryRow.id);
+      } catch {}
+    }
 
     this.notifyChange('report-updated', { report: finalReport });
     this.notifyChange('coworker-queue-updated', {
       reportId: finalReport.id,
       rmaNumber: finalReport.rma_number,
-      status: 'under_inspection',
+      status: finalReport.status || 'pending',
       report: finalReport
     });
 

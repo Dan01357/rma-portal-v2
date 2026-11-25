@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Camera, RefreshCw, Upload, X, MapPin, CheckCircle2, SwitchCamera, AlertCircle } from 'lucide-react';
-import { formatCameraTimestamp, getGpsCoordinatesText } from '../utils/rmaHelpers';
+import { formatCameraTimestamp, getGpsCoordinatesText, getGpsAddressDisplay } from '../utils/rmaHelpers';
 import { drawWatermarkOverlay, stampWatermarkOnImage } from '../utils/cameraWatermark';
 
 export default function CameraCaptureModal({
@@ -23,6 +23,7 @@ export default function CameraCaptureModal({
   const [isCapturing, setIsCapturing] = useState(false);
   const [localGeo, setLocalGeo] = useState({
     address: gpsLocation?.address || '',
+    addressParts: gpsLocation?.addressParts || null,
     addressLines: gpsLocation?.addressLines || [],
     latitude: gpsLocation?.latitude ?? null,
     longitude: gpsLocation?.longitude ?? null
@@ -32,6 +33,7 @@ export default function CameraCaptureModal({
   useEffect(() => {
     setLocalGeo((prev) => ({
       address: gpsLocation?.address || prev.address || '',
+      addressParts: gpsLocation?.addressParts || prev.addressParts || null,
       addressLines:
         Array.isArray(gpsLocation?.addressLines) && gpsLocation.addressLines.length > 0
           ? gpsLocation.addressLines
@@ -39,7 +41,7 @@ export default function CameraCaptureModal({
       latitude: gpsLocation?.latitude ?? prev.latitude,
       longitude: gpsLocation?.longitude ?? prev.longitude
     }));
-  }, [gpsLocation?.address, gpsLocation?.latitude, gpsLocation?.longitude, gpsLocation?.addressLines]);
+  }, [gpsLocation?.address, gpsLocation?.addressParts, gpsLocation?.latitude, gpsLocation?.longitude, gpsLocation?.addressLines]);
 
   // Live ticking Asia/Manila clock while modal is open
   useEffect(() => {
@@ -65,6 +67,14 @@ export default function CameraCaptureModal({
         if (!cancelled && data?.formatted) {
           setLocalGeo({
             address: data.formatted,
+            addressParts: {
+              street: data.street || '',
+              barangay: data.barangay || '',
+              city: data.city || '',
+              region: data.region || '',
+              zip: data.zip || '',
+              formatted: data.formatted
+            },
             addressLines: Array.isArray(data.lines) ? data.lines : [data.formatted],
             latitude: lat,
             longitude: lon
@@ -168,7 +178,8 @@ export default function CameraCaptureModal({
   if (!isOpen) return null;
 
   const coordFallback = getGpsCoordinatesText(localGeo);
-  const resolvedAddressText = localGeo.address || (coordFallback ? `Coords: ${coordFallback}` : 'GPS: Location not captured');
+  const fullDisplayAddr = getGpsAddressDisplay(localGeo);
+  const resolvedAddressText = fullDisplayAddr || (coordFallback ? `Coords: ${coordFallback}` : 'GPS: Location not captured');
   const resolvedTag = String(tagName || 'Staff').trim();
 
   const handleCaptureSnap = async () => {
@@ -268,19 +279,30 @@ export default function CameraCaptureModal({
         </div>
 
         {/* Viewfinder */}
-        <div className="relative bg-black flex-1 min-h-[260px] flex items-center justify-center overflow-hidden">
+        <div className="relative bg-black w-full flex-1 min-h-[300px] sm:min-h-[340px] max-h-[64dvh] flex items-center justify-center overflow-hidden">
           {!cameraError ? (
             <video
               ref={videoRef}
               autoPlay
               playsInline
               muted
-              className="w-full h-full max-h-[58dvh] object-contain"
+              className="w-full h-full object-cover"
             />
           ) : (
-            <div className="p-6 text-center max-w-sm space-y-2.5">
+            <div className="p-6 text-center max-w-sm space-y-3">
               <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
               <p className="text-xs text-slate-200 leading-relaxed">{cameraError}</p>
+              <label className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black cursor-pointer shadow-md">
+                <Upload className="w-3.5 h-3.5" />
+                <span>Select Image (Auto-Stamped)</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple={multiple}
+                  onChange={handleFallbackFiles}
+                  className="hidden"
+                />
+              </label>
             </div>
           )}
 
@@ -294,7 +316,7 @@ export default function CameraCaptureModal({
           {/* Live HUD Corner Preview (Mirrors Final Watermark) */}
           <div
             data-testid="camera-watermark-hud"
-            className="absolute bottom-3 left-3 max-w-[82%] sm:max-w-[65%] px-3 py-2 rounded-xl bg-slate-950/75 border border-white/20 text-left space-y-0.5 pointer-events-none shadow-lg"
+            className="absolute bottom-3 left-3 max-w-[88%] sm:max-w-[74%] px-3 py-2 rounded-xl bg-slate-950/75 border border-white/20 text-left space-y-0.5 pointer-events-none shadow-lg"
           >
             <div className="text-[11px] font-black text-white font-mono tracking-tight">
               {liveTime}
@@ -313,18 +335,23 @@ export default function CameraCaptureModal({
 
         {/* Footer Controls */}
         <div className="p-3.5 border-t border-slate-800 bg-slate-900 flex flex-wrap items-center justify-between gap-2">
-          <label className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5 cursor-pointer">
-            <Upload className="w-3.5 h-3.5 text-sky-400" />
-            <span>Choose / Native Camera</span>
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              multiple={multiple}
-              onChange={handleFallbackFiles}
-              className="hidden"
-            />
-          </label>
+          {cameraError ? (
+            <label className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5 cursor-pointer">
+              <Upload className="w-3.5 h-3.5 text-sky-400" />
+              <span>Fallback Photo (Auto-Stamped)</span>
+              <input
+                type="file"
+                accept="image/*"
+                multiple={multiple}
+                onChange={handleFallbackFiles}
+                className="hidden"
+              />
+            </label>
+          ) : (
+            <span className="text-[11px] font-semibold text-slate-400 hidden sm:inline">
+              Live watermarked viewfinder active
+            </span>
+          )}
 
           <div className="flex items-center gap-2 ml-auto">
             <button

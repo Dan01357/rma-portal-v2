@@ -67,10 +67,12 @@ export const EMAIL_PROFILE_TYPES = [
 ];
 
 const EMAIL_PROFILES_STORAGE_KEY = 'rma_portal_email_recipients_by_type';
+const TEST_EMAIL_PROFILES_STORAGE_KEY = 'rma_portal_test_email_recipients_by_type';
 const MATRIX_CONFIG_STORAGE_KEY = 'rma_portal_daily_matrix_config';
 const FOLLOWUP_CONFIG_STORAGE_KEY = 'rma_portal_daily_followup_config';
 const SANDBOX_EMAIL_STORAGE_KEY = 'rma_portal_test_sandbox_email';
 const EMAIL_RECIPIENTS_STORAGE_KEY = 'rma_portal_email_recipients';
+const TEST_EMAIL_RECIPIENTS_STORAGE_KEY = 'rma_portal_test_email_recipients';
 
 const escapeEmailHtml = (val) => String(val ?? '')
   .replace(/&/g, '&amp;')
@@ -205,9 +207,35 @@ function normalizePickupPhotoGroupsInput(pickupPhotoGroups = [], pickupPhotoEntr
 
 export const notificationService = {
   /**
-   * Get configured RMA email recipients (with local storage and corporate defaults)
+   * Get configured RMA email recipients (strictly separated for Live vs Test Mode)
    */
-  getEmailSettings() {
+  getEmailSettings(isTestMode = false) {
+    if (isTestMode) {
+      const sandboxFallback = this.getTestSandboxEmail();
+      try {
+        if (typeof window !== 'undefined') {
+          const savedTest = localStorage.getItem(TEST_EMAIL_RECIPIENTS_STORAGE_KEY);
+          if (savedTest) {
+            const parsed = JSON.parse(savedTest);
+            const toList = splitEmailList(parsed?.toList ?? parsed?.toEmail);
+            if (toList.length > 0) {
+              const ccSource = parsed?.baseCcList ?? parsed?.ccList ?? [];
+              return {
+                toEmail: toList.join(', '),
+                toList,
+                baseCcList: Array.isArray(ccSource) ? splitEmailList(ccSource) : []
+              };
+            }
+          }
+        }
+      } catch {}
+      return {
+        toEmail: sandboxFallback,
+        toList: [sandboxFallback],
+        baseCcList: []
+      };
+    }
+
     try {
       if (typeof window !== 'undefined') {
         const saved = localStorage.getItem(EMAIL_RECIPIENTS_STORAGE_KEY);
@@ -244,48 +272,53 @@ export const notificationService = {
   },
 
   /**
-   * Super Admin action: Save updated Global Corporate Fallback TO and CC recipients
+   * Super Admin action: Save updated Global Corporate or Global Test Mode TO & CC recipients
    */
-  async saveEmailSettings({ toEmail, toList, baseCcList }) {
+  async saveEmailSettings({ toEmail, toList, baseCcList }, isTestMode = false) {
     const cleanToList = splitEmailList(toList ?? toEmail);
     if (cleanToList.length === 0) {
       throw new Error('At least one valid Primary TO recipient email is required.');
     }
 
-    const cleanCcList = splitEmailList(baseCcList);
+    const cleanToSet = new Set(cleanToList);
+    const cleanCcList = splitEmailList(baseCcList).filter((e) => !cleanToSet.has(e));
     const newSettings = {
       toEmail: cleanToList.join(', '),
       toList: cleanToList,
       baseCcList: cleanCcList
     };
 
+    const storageKey = isTestMode ? TEST_EMAIL_RECIPIENTS_STORAGE_KEY : EMAIL_RECIPIENTS_STORAGE_KEY;
+    const dbKey = isTestMode ? 'test_email_recipients' : 'email_recipients';
+
     if (typeof window !== 'undefined') {
-      localStorage.setItem(EMAIL_RECIPIENTS_STORAGE_KEY, JSON.stringify(newSettings));
-      broadcastSettingsSync({ settings: newSettings });
+      localStorage.setItem(storageKey, JSON.stringify(newSettings));
+      broadcastSettingsSync(isTestMode ? { testSettings: newSettings, isTestMode: true } : { settings: newSettings });
     }
 
     try {
       await supabase
         .from('rma_settings')
         .upsert({
-          key: 'email_recipients',
+          key: dbKey,
           value: newSettings,
           updated_at: new Date().toISOString()
         }, { onConflict: 'key' });
     } catch (e) {
-      console.warn('Notice: rma_settings table not created yet in Supabase. Local storage active.');
+      console.warn(`Notice: rma_settings (${dbKey}) sync deferred. Local storage active.`);
     }
 
     return { success: true, settings: newSettings };
   },
 
   /**
-   * Read raw saved per-type profile overrides map from localStorage
+   * Read raw saved per-type profile overrides map from localStorage (isolated Live vs Test)
    */
-  _readSavedProfilesMap() {
+  _readSavedProfilesMap(isTestMode = false) {
     try {
       if (typeof window !== 'undefined') {
-        const raw = localStorage.getItem(EMAIL_PROFILES_STORAGE_KEY);
+        const storageKey = isTestMode ? TEST_EMAIL_PROFILES_STORAGE_KEY : EMAIL_PROFILES_STORAGE_KEY;
+        const raw = localStorage.getItem(storageKey);
         if (raw) {
           const parsed = JSON.parse(raw);
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -298,13 +331,13 @@ export const notificationService = {
   },
 
   /**
-   * Get effective recipient profile for a specific emailType, falling back to Global Corporate Defaults
-   * (except invite_email which defaults to empty optional extras).
+   * Get effective recipient profile for a specific emailType and mode, falling back strictly within that mode
+   * (except invite_email / supplier_followup which default to empty optional extras).
    */
-  getEmailProfile(emailType = 'new_rma') {
+  getEmailProfile(emailType = 'new_rma', isTestMode = false) {
     const key = resolveEmailProfileKey(emailType);
-    const global = this.getEmailSettings();
-    const map = this._readSavedProfilesMap();
+    const global = this.getEmailSettings(Boolean(isTestMode));
+    const map = this._readSavedProfilesMap(Boolean(isTestMode));
     const saved = map[key];
 
     const allowEmptyTo = key === 'invite_email' || key === 'supplier_followup';
@@ -335,12 +368,17 @@ export const notificationService = {
       };
     }
 
-    const fallbackTo = [...(global.toList || [DEFAULT_RECIPIENTS.toEmail])];
+    const fallbackTo = isTestMode
+      ? [...(global.toList || [this.getTestSandboxEmail()])]
+      : [...(global.toList || [DEFAULT_RECIPIENTS.toEmail])];
+    const fallbackCc = isTestMode
+      ? [...(global.baseCcList || [])]
+      : [...(global.baseCcList || DEFAULT_RECIPIENTS.baseCcList)];
     return {
       emailType: key,
       toList: fallbackTo,
       toEmail: fallbackTo.join(', '),
-      ccList: [...(global.baseCcList || DEFAULT_RECIPIENTS.baseCcList)],
+      ccList: fallbackCc,
       isCustom: false
     };
   },
@@ -348,18 +386,18 @@ export const notificationService = {
   /**
    * Return map of all configured profiles keyed by emailType id
    */
-  getAllEmailProfiles() {
+  getAllEmailProfiles(isTestMode = false) {
     const result = {};
     EMAIL_PROFILE_TYPES.forEach(({ id }) => {
-      result[id] = this.getEmailProfile(id);
+      result[id] = this.getEmailProfile(id, Boolean(isTestMode));
     });
     return result;
   },
 
   /**
-   * Persist per-email-type recipient configuration under rma_settings.email_recipients_by_type
+   * Persist per-email-type recipient configuration under rma_settings (email_recipients_by_type or test_email_recipients_by_type)
    */
-  async saveEmailProfile(emailType, { toList, toEmail, ccList } = {}) {
+  async saveEmailProfile(emailType, { toList, toEmail, ccList } = {}, isTestMode = false) {
     const key = resolveEmailProfileKey(emailType);
     const cleanTo = splitEmailList(toList ?? toEmail);
     const allowEmptyTo = key === 'invite_email' || key === 'supplier_followup';
@@ -369,7 +407,7 @@ export const notificationService = {
     const cleanToSet = new Set(cleanTo);
     const cleanCc = splitEmailList(ccList).filter((e) => !cleanToSet.has(e));
 
-    const currentMap = { ...this._readSavedProfilesMap() };
+    const currentMap = { ...this._readSavedProfilesMap(Boolean(isTestMode)) };
     currentMap[key] = {
       toList: cleanTo,
       toEmail: cleanTo.join(', '),
@@ -378,25 +416,32 @@ export const notificationService = {
       updatedAt: new Date().toISOString()
     };
 
+    const storageKey = isTestMode ? TEST_EMAIL_PROFILES_STORAGE_KEY : EMAIL_PROFILES_STORAGE_KEY;
+    const dbKey = isTestMode ? 'test_email_recipients_by_type' : 'email_recipients_by_type';
+
     if (typeof window !== 'undefined') {
-      localStorage.setItem(EMAIL_PROFILES_STORAGE_KEY, JSON.stringify(currentMap));
-      broadcastSettingsSync({ emailType: key, profilesByType: currentMap });
+      localStorage.setItem(storageKey, JSON.stringify(currentMap));
+      broadcastSettingsSync({
+        emailType: key,
+        isTestMode: Boolean(isTestMode),
+        ...(isTestMode ? { testProfilesByType: currentMap } : { profilesByType: currentMap })
+      });
     }
 
     try {
       await supabase
         .from('rma_settings')
         .upsert({
-          key: 'email_recipients_by_type',
+          key: dbKey,
           value: currentMap,
           updated_at: new Date().toISOString()
         }, { onConflict: 'key' });
     } catch (e) {
-      console.warn('Notice saving email_recipients_by_type:', e?.message || e);
+      console.warn(`Notice saving ${dbKey}:`, e?.message || e);
     }
 
-    // Keep daily_matrix_config recipients synced when auto matrix profile is explicitly saved
-    if (key === 'daily_matrix_auto') {
+    // Keep Live daily_matrix_config recipients synced when Live auto matrix profile is explicitly saved
+    if (!isTestMode && key === 'daily_matrix_auto') {
       const cfg = this.getDailyMatrixConfig();
       await this.saveDailyMatrixConfig({ ...cfg, toList: cleanTo, ccList: cleanCc }, { skipProfileSync: true }).catch(() => {});
     }
@@ -411,31 +456,38 @@ export const notificationService = {
   },
 
   /**
-   * Reset a single emailType back to Global Corporate Defaults
+   * Reset a single emailType back to its mode defaults
    */
-  async resetEmailProfileToDefaults(emailType) {
+  async resetEmailProfileToDefaults(emailType, isTestMode = false) {
     const key = resolveEmailProfileKey(emailType);
-    const currentMap = { ...this._readSavedProfilesMap() };
+    const currentMap = { ...this._readSavedProfilesMap(Boolean(isTestMode)) };
     delete currentMap[key];
 
+    const storageKey = isTestMode ? TEST_EMAIL_PROFILES_STORAGE_KEY : EMAIL_PROFILES_STORAGE_KEY;
+    const dbKey = isTestMode ? 'test_email_recipients_by_type' : 'email_recipients_by_type';
+
     if (typeof window !== 'undefined') {
-      localStorage.setItem(EMAIL_PROFILES_STORAGE_KEY, JSON.stringify(currentMap));
-      broadcastSettingsSync({ emailType: key, profilesByType: currentMap });
+      localStorage.setItem(storageKey, JSON.stringify(currentMap));
+      broadcastSettingsSync({
+        emailType: key,
+        isTestMode: Boolean(isTestMode),
+        ...(isTestMode ? { testProfilesByType: currentMap } : { profilesByType: currentMap })
+      });
     }
 
     try {
       await supabase
         .from('rma_settings')
         .upsert({
-          key: 'email_recipients_by_type',
+          key: dbKey,
           value: currentMap,
           updated_at: new Date().toISOString()
         }, { onConflict: 'key' });
     } catch (e) {
-      console.warn('Notice resetting email_recipients_by_type:', e?.message || e);
+      console.warn(`Notice resetting ${dbKey}:`, e?.message || e);
     }
 
-    return this.getEmailProfile(key);
+    return this.getEmailProfile(key, Boolean(isTestMode));
   },
 
   /**
@@ -662,6 +714,8 @@ export const notificationService = {
         .in('key', [
           'email_recipients',
           'email_recipients_by_type',
+          'test_email_recipients',
+          'test_email_recipients_by_type',
           'daily_matrix_config',
           'daily_followup_config',
           'test_sandbox_email'
@@ -689,6 +743,26 @@ export const notificationService = {
         if (byTypeRaw && typeof byTypeRaw === 'object' && !Array.isArray(byTypeRaw)) {
           if (typeof window !== 'undefined') {
             localStorage.setItem(EMAIL_PROFILES_STORAGE_KEY, JSON.stringify(byTypeRaw));
+          }
+        }
+
+        const testGlobalRaw = map.get('test_email_recipients');
+        if (testGlobalRaw && typeof testGlobalRaw === 'object' && (testGlobalRaw.toEmail || Array.isArray(testGlobalRaw.toList))) {
+          const tToList = splitEmailList(testGlobalRaw.toList ?? testGlobalRaw.toEmail);
+          if (tToList.length > 0 && typeof window !== 'undefined') {
+            const ccSource = testGlobalRaw.baseCcList ?? testGlobalRaw.ccList ?? [];
+            localStorage.setItem(TEST_EMAIL_RECIPIENTS_STORAGE_KEY, JSON.stringify({
+              toEmail: tToList.join(', '),
+              toList: tToList,
+              baseCcList: Array.isArray(ccSource) ? splitEmailList(ccSource) : []
+            }));
+          }
+        }
+
+        const testByTypeRaw = map.get('test_email_recipients_by_type');
+        if (testByTypeRaw && typeof testByTypeRaw === 'object' && !Array.isArray(testByTypeRaw)) {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(TEST_EMAIL_PROFILES_STORAGE_KEY, JSON.stringify(testByTypeRaw));
           }
         }
 
@@ -722,8 +796,10 @@ export const notificationService = {
     }
 
     return {
-      globalSettings: this.getEmailSettings(),
-      profilesByType: this.getAllEmailProfiles(),
+      globalSettings: this.getEmailSettings(false),
+      profilesByType: this.getAllEmailProfiles(false),
+      testSettings: this.getEmailSettings(true),
+      testProfilesByType: this.getAllEmailProfiles(true),
       dailyMatrixConfig: this.getDailyMatrixConfig(),
       dailyFollowUpConfig: this.getDailyFollowUpConfig(),
       testSandboxEmail: this.getTestSandboxEmail()
@@ -731,20 +807,24 @@ export const notificationService = {
   },
 
   /**
-   * Determine company configuration with user-configurable recipients
+   * Determine company configuration with user-configurable recipients (isolated Live vs Test)
    */
-  resolveCompanyConfig(report, emailType = null) {
-    const settings = emailType ? this.getEmailProfile(emailType) : this.getEmailSettings();
+  resolveCompanyConfig(report, emailType = null, isTestMode = false) {
+    const testActive = Boolean(isTestMode);
+    const settings = emailType ? this.getEmailProfile(emailType, testActive) : this.getEmailSettings(testActive);
     const toList = splitEmailList(settings.toList ?? settings.toEmail);
-    const finalToList = toList.length > 0 ? toList : [...DEFAULT_RECIPIENTS.toList];
+    const finalToList = toList.length > 0
+      ? toList
+      : (testActive ? [this.getTestSandboxEmail()] : [...DEFAULT_RECIPIENTS.toList]);
     const rawCc = emailType ? settings.ccList : settings.baseCcList;
+    const defaultCc = testActive ? [] : [...DEFAULT_RECIPIENTS.baseCcList];
     return {
       companyName: 'Pingcon RMA Returns',
       senderEmail: 'finance2@keysysincorporated.com',
       senderName: 'Pingcon RMA Finance Portal',
       toList: finalToList,
       toEmail: finalToList.join(', '),
-      baseCcList: Array.isArray(rawCc) ? rawCc : [...DEFAULT_RECIPIENTS.baseCcList]
+      baseCcList: Array.isArray(rawCc) ? rawCc : defaultCc
     };
   },
 
@@ -1030,34 +1110,39 @@ export const notificationService = {
     );
 
     try {
-      const config = this.resolveCompanyConfig(report, 'new_rma');
+      const config = this.resolveCompanyConfig(report, 'new_rma', testActive);
       const customRecipients = options?.customRecipients || report?.customRecipients || null;
+      const sandboxEmail = this.getTestSandboxEmail();
 
       const resolvedToList = customRecipients && (Array.isArray(customRecipients.toList) || customRecipients.toEmail)
         ? splitEmailList(customRecipients.toList ?? customRecipients.toEmail)
         : config.toList;
-      const toList = resolvedToList.length > 0 ? resolvedToList : [...DEFAULT_RECIPIENTS.toList];
+      const toList = resolvedToList.length > 0
+        ? resolvedToList
+        : (testActive ? [sandboxEmail] : [...DEFAULT_RECIPIENTS.toList]);
       const toEmail = toList.join(', ');
 
       const resolvedBaseCc = customRecipients && Array.isArray(customRecipients.ccList)
         ? splitEmailList(customRecipients.ccList)
         : config.baseCcList;
 
-      // Assemble CC list: base profile CC list + Customer AE email
-      const ccSet = new Set(resolvedBaseCc);
-      if (report.ae_email && report.ae_email.includes('@')) {
-        ccSet.add(report.ae_email.trim().toLowerCase());
+      // Assemble CC list: NEVER merge Live Customer AE email into Test Mode recipients!
+      const toSet = new Set(toList);
+      const ccSet = new Set(resolvedBaseCc.filter((e) => !toSet.has(e)));
+      if (!testActive && report.ae_email && report.ae_email.includes('@')) {
+        const cleanAe = report.ae_email.trim().toLowerCase();
+        if (!toSet.has(cleanAe)) ccSet.add(cleanAe);
       }
       const finalCcList = Array.from(ccSet);
 
-      const sandboxEmail = this.getTestSandboxEmail();
-      const editorAuthorizedEmails = testActive
-        ? [sandboxEmail]
-        : Array.from(new Set(
-            [...toList, ...finalCcList]
-              .map((e) => String(e || '').trim().toLowerCase())
-              .filter((e) => e.includes('@'))
-          ));
+      const editorAuthorizedEmails = Array.from(new Set(
+        [...toList, ...finalCcList]
+          .map((e) => String(e || '').trim().toLowerCase())
+          .filter((e) => e.includes('@'))
+      ));
+      if (testActive && editorAuthorizedEmails.length === 0 && sandboxEmail) {
+        editorAuthorizedEmails.push(sandboxEmail);
+      }
       const editorAuthorizedEmail = editorAuthorizedEmails[0] || (testActive ? sandboxEmail : toList[0]);
 
       let editUrl = '';
@@ -1129,6 +1214,8 @@ export const notificationService = {
           subject,
           html: htmlBody,
           isTestMode: testActive,
+          isTestModeExplicitRecipients: testActive,
+          emailType: 'new_rma',
           sandboxEmail,
           attachments,
           text: `${testActive ? '[TEST] ' : ''}New RMA Return: ${report.rma_number} for ${report.name || report.barcode}. Reason: ${report.reason}. Expiry Date (YYYY-MM-DD): ${expiryInfo.text}. Reported by: ${report.reporter_name || report.reported_by}. Customer AE: ${report.ae_name || 'N/A'}${editUrl ? `\n\nEdit RMA Details & Documents (${editorAuthorizedEmails.join(', ')} • No Expiry): ${editUrl}` : ''}`
@@ -1283,22 +1370,27 @@ export const notificationService = {
     );
 
     try {
-      const config = this.resolveCompanyConfig(product, 'product_update');
+      const config = this.resolveCompanyConfig(product, 'product_update', testActive);
+      const sandboxEmail = this.getTestSandboxEmail();
       const resolvedToList = customRecipients && (Array.isArray(customRecipients.toList) || customRecipients.toEmail)
         ? splitEmailList(customRecipients.toList ?? customRecipients.toEmail)
         : config.toList;
-      const toList = resolvedToList.length > 0 ? resolvedToList : [...DEFAULT_RECIPIENTS.toList];
+      const toList = resolvedToList.length > 0
+        ? resolvedToList
+        : (testActive ? [sandboxEmail] : [...DEFAULT_RECIPIENTS.toList]);
       const toEmail = toList.join(', ');
 
       const resolvedBaseCc = customRecipients && Array.isArray(customRecipients.ccList)
         ? splitEmailList(customRecipients.ccList)
         : config.baseCcList;
 
-      // Assemble CC list: base company recipients + Customer AE email
-      const ccSet = new Set(resolvedBaseCc);
+      // Assemble CC list: NEVER merge Live Customer AE email when Test Mode is active
+      const toSet = new Set(toList);
+      const ccSet = new Set(resolvedBaseCc.filter((e) => !toSet.has(e)));
       const aeEmail = product.aeEmail || product.ae_email;
-      if (aeEmail && aeEmail.includes('@')) {
-        ccSet.add(aeEmail.trim().toLowerCase());
+      if (!testActive && aeEmail && aeEmail.includes('@')) {
+        const cleanAe = aeEmail.trim().toLowerCase();
+        if (!toSet.has(cleanAe)) ccSet.add(cleanAe);
       }
       const finalCcList = Array.from(ccSet);
 
@@ -1320,7 +1412,9 @@ export const notificationService = {
           subject,
           html: htmlBody,
           isTestMode: testActive,
-          sandboxEmail: this.getTestSandboxEmail(),
+          isTestModeExplicitRecipients: testActive,
+          emailType: 'product_update',
+          sandboxEmail,
           text: `${testActive ? '[TEST] ' : ''}Product ${isNew ? 'Added' : 'Updated'}: ${product.name} (${product.barcode}). SKU: ${product.code || 'N/A'}. AE: ${product.aeName || product.ae_name || 'N/A'}`
         })
       });
@@ -1690,7 +1784,8 @@ export const notificationService = {
 
     try {
       const profileKey = resolveEmailProfileKey(eventType);
-      const config = this.resolveCompanyConfig(primaryReport, profileKey);
+      const config = this.resolveCompanyConfig(primaryReport, profileKey, testActive);
+      const sandboxEmail = this.getTestSandboxEmail();
       const isBatch = effectiveReports.length > 1;
       const isDebitClaimEvent = eventType === 'pickup_debit_claim';
       const isCustomerStream = primaryReport.rma_type !== 'supplier_outbound';
@@ -1715,22 +1810,39 @@ export const notificationService = {
         ? splitEmailList(customRecipients.ccList)
         : config.baseCcList;
 
-      const toList = Array.from(new Set([
+      const mergedTo = Array.from(new Set([
         ...baseToList,
         ...supplierToList
       ]));
+      const toList = mergedTo.length > 0
+        ? mergedTo
+        : (testActive ? [sandboxEmail] : [...DEFAULT_RECIPIENTS.toList]);
       const toEmail = toList.join(', ') || config.toEmail;
 
+      const toSet = new Set(toList);
       const ccSet = new Set([
         ...baseCcList,
         ...supplierCcList
-      ]);
-      effectiveReports.forEach((r) => {
-        if (r?.ae_email && String(r.ae_email).includes('@')) {
-          ccSet.add(String(r.ae_email).trim().toLowerCase());
-        }
-      });
+      ].filter((e) => !toSet.has(e)));
+      if (!testActive) {
+        effectiveReports.forEach((r) => {
+          if (r?.ae_email && String(r.ae_email).includes('@')) {
+            const cleanAe = String(r.ae_email).trim().toLowerCase();
+            if (!toSet.has(cleanAe)) ccSet.add(cleanAe);
+          }
+        });
+      }
       const finalCcList = Array.from(ccSet);
+
+      const savedTestMap = testActive ? this._readSavedProfilesMap(true) : {};
+      const hasCustomTestProfileOrGlobal = testActive && Boolean(
+        savedTestMap[profileKey] ||
+        (typeof window !== 'undefined' && localStorage.getItem(TEST_EMAIL_RECIPIENTS_STORAGE_KEY)) ||
+        (customRecipients && (
+          splitEmailList(customRecipients.toList ?? customRecipients.toEmail).join(',') !== sandboxEmail ||
+          splitEmailList(customRecipients.ccList).length > 0
+        ))
+      );
 
       const batchTag = isBatch ? `Consolidated (${effectiveReports.length} RMAs) — ` : '';
       const subjectLabelMap = {
@@ -1889,7 +2001,14 @@ export const notificationService = {
           subject,
           html: htmlBody,
           isTestMode: testActive,
-          sandboxEmail: this.getTestSandboxEmail(),
+          isTestModeExplicitRecipients: testActive && !isPickupEvent,
+          ...(testActive && isPickupEvent ? {
+            hasCustomTestRecipients: hasCustomTestProfileOrGlobal,
+            testToList: baseToList,
+            testCcList: baseCcList
+          } : {}),
+          emailType: profileKey,
+          sandboxEmail,
           attachments,
           text: plainTextLines.join('\n')
         })
@@ -1954,10 +2073,16 @@ export const notificationService = {
       if (toList !== undefined || to !== undefined) {
         payload.to = to ?? toList;
         payload.toList = Array.isArray(toList) ? toList : splitEmailList(to);
+        if (isTestMode && payload.toList.length > 0) {
+          payload.isTestModeExplicitRecipients = true;
+        }
       }
       if (ccList !== undefined || cc !== undefined) {
         payload.cc = ccList ?? cc;
         payload.ccList = Array.isArray(ccList) ? ccList : splitEmailList(cc);
+        if (isTestMode) {
+          payload.isTestModeExplicitRecipients = true;
+        }
       }
 
       const res = await fetch('/api/send-email?action=daily-matrix', {

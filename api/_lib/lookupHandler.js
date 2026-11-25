@@ -2,6 +2,113 @@ import { supabase } from './supabase.js';
 import { sendJson, setCorsHeaders } from './auth.js';
 import { INITIAL_PRODUCTS } from './mockProducts.js';
 
+const DEFAULT_KNOWN_GPS_LOCATIONS = [
+  {
+    name: 'Pingcon Warehouse',
+    street: '64 Mendez Rd',
+    barangay: 'Baesa',
+    city: 'Quezon City',
+    region: 'Metro Manila',
+    zip: '1106',
+    formatted: '64 Mendez Rd, Baesa, Quezon City, Metro Manila 1106',
+    lat: 14.6683,
+    lon: 121.0114,
+    radiusMeters: 250
+  }
+];
+
+function toRadians(deg) {
+  return (deg * Math.PI) / 180;
+}
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  if (![lat1, lon1, lat2, lon2].every((v) => Number.isFinite(Number(v)))) {
+    return Infinity;
+  }
+  const R = 6371000;
+  const dLat = toRadians(Number(lat2) - Number(lat1));
+  const dLon = toRadians(Number(lon2) - Number(lon1));
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(Number(lat1))) * Math.cos(toRadians(Number(lat2))) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function formatStructuredAddress({ street = '', barangay = '', city = '', region = '', zip = '' }) {
+  const cleanStreet = String(street || '').trim();
+  const cleanBarangay = String(barangay || '').trim();
+  const cleanCity = String(city || '').trim();
+  const cleanRegion = String(region || '').trim();
+  const cleanZip = String(zip || '').trim();
+
+  const regionZip = [
+    cleanRegion && cleanRegion.toLowerCase() !== cleanCity.toLowerCase() ? cleanRegion : '',
+    cleanZip
+  ].filter(Boolean).join(' ').trim();
+
+  const uniqueParts = [];
+  for (const part of [
+    cleanStreet,
+    cleanBarangay && cleanBarangay.toLowerCase() !== cleanCity.toLowerCase() ? cleanBarangay : '',
+    cleanCity,
+    regionZip
+  ]) {
+    const clean = String(part || '').trim();
+    if (!clean) continue;
+    if (!uniqueParts.some((existing) => existing.toLowerCase() === clean.toLowerCase())) {
+      uniqueParts.push(clean);
+    }
+  }
+
+  const formatted = uniqueParts.join(', ');
+  const line1 = [
+    cleanStreet,
+    cleanBarangay && cleanBarangay.toLowerCase() !== cleanStreet.toLowerCase() ? cleanBarangay : ''
+  ].filter(Boolean).join(', ') || cleanCity || formatted;
+
+  const line2Parts = [];
+  if (cleanCity && cleanCity.toLowerCase() !== line1.toLowerCase()) {
+    line2Parts.push(cleanCity);
+  }
+  if (regionZip && regionZip.toLowerCase() !== line1.toLowerCase()) {
+    line2Parts.push(regionZip);
+  }
+  const line2 = line2Parts.join(', ');
+  const lines = [line1, line2].filter(Boolean);
+
+  return { formatted, lines };
+}
+
+async function loadKnownGpsAnchors() {
+  try {
+    const { data, error } = await supabase
+      .from('rma_settings')
+      .select('value')
+      .eq('key', 'known_gps_locations')
+      .maybeSingle();
+
+    if (!error && data && data.value != null) {
+      let parsed = data.value;
+      if (typeof parsed === 'string') {
+        try {
+          parsed = JSON.parse(parsed);
+        } catch {
+          parsed = null;
+        }
+      }
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const valid = parsed.filter((a) => a && Number.isFinite(Number(a.lat)) && Number.isFinite(Number(a.lon ?? a.lng)));
+        if (valid.length > 0) return valid;
+      }
+    }
+  } catch {
+    // Quiet fallback to default warehouse anchor
+  }
+  return DEFAULT_KNOWN_GPS_LOCATIONS;
+}
+
 /**
  * Retrieve the Laravel Cloud API Key:
  * 1. Checks server environment variables (EXTERNAL_CATALOG_API_KEY, etc.)
@@ -152,6 +259,124 @@ export default async function handler(req, res) {
     const timer = setTimeout(() => controller.abort(), 5500);
 
     try {
+      // Priority 1: Known Warehouse / Dock Geofence Anchors (exact warehouse street & ZIP)
+      const anchors = await loadKnownGpsAnchors();
+      let matchedAnchor = null;
+      let matchedDist = Infinity;
+      for (const anchor of anchors) {
+        const anchorLat = Number(anchor.lat);
+        const anchorLon = Number(anchor.lon ?? anchor.lng);
+        const radius = Number(anchor.radiusMeters) > 0 ? Number(anchor.radiusMeters) : 250;
+        const dist = haversineMeters(rawLat, rawLon, anchorLat, anchorLon);
+        if (dist <= radius && dist < matchedDist) {
+          matchedAnchor = anchor;
+          matchedDist = dist;
+        }
+      }
+
+      if (matchedAnchor) {
+        const street = String(matchedAnchor.street || '').trim();
+        const barangay = String(matchedAnchor.barangay || '').trim();
+        const city = String(matchedAnchor.city || '').trim();
+        const region = String(matchedAnchor.region || '').trim();
+        const zip = String(matchedAnchor.zip || '').trim();
+        const { formatted: builtFormatted, lines: builtLines } = formatStructuredAddress({
+          street,
+          barangay,
+          city,
+          region,
+          zip
+        });
+        const formatted = String(matchedAnchor.formatted || '').trim() || builtFormatted || fallbackFormatted;
+        const lines = builtLines.length > 0 ? builtLines : [formatted];
+
+        return sendJson(res, 200, {
+          success: true,
+          source: 'known_gps_anchor',
+          anchorName: String(matchedAnchor.name || '').trim(),
+          distanceMeters: Math.round(matchedDist),
+          latitude: rawLat,
+          longitude: rawLon,
+          street,
+          barangay,
+          city,
+          region,
+          zip,
+          country: 'Philippines',
+          formatted,
+          lines,
+          display_name: formatted
+        });
+      }
+
+      // Priority 2: Google Maps Geocoding API (if configured in env)
+      const googleMapsKey = String(
+        process.env.GOOGLE_MAPS_API_KEY ||
+        process.env.GOOGLE_GEOCODING_API_KEY ||
+        ''
+      ).trim();
+
+      if (googleMapsKey) {
+        try {
+          const gUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${encodeURIComponent(rawLat)},${encodeURIComponent(rawLon)}&key=${encodeURIComponent(googleMapsKey)}`;
+          const gRes = await fetch(gUrl, { signal: controller.signal });
+          if (gRes.ok) {
+            const gData = await gRes.json();
+            if (gData?.status === 'OK' && Array.isArray(gData.results) && gData.results.length > 0) {
+              const preferred =
+                gData.results.find((r) => Array.isArray(r.types) && r.types.includes('street_address')) ||
+                gData.results.find((r) => Array.isArray(r.types) && r.types.includes('premise')) ||
+                gData.results[0];
+              const comps = Array.isArray(preferred?.address_components) ? preferred.address_components : [];
+              const getComp = (...types) => {
+                for (const t of types) {
+                  const found = comps.find((c) => Array.isArray(c.types) && c.types.includes(t));
+                  if (found?.long_name) return String(found.long_name).trim();
+                }
+                return '';
+              };
+              const streetNum = getComp('street_number');
+              const route = getComp('route');
+              const street = [streetNum, route].filter(Boolean).join(' ').trim();
+              const barangay = getComp('sublocality_level_2', 'sublocality_level_1', 'sublocality', 'neighborhood');
+              const city = getComp('locality', 'administrative_area_level_2');
+              const rawRegion = getComp('administrative_area_level_1');
+              const region = /^national capital region$/i.test(rawRegion) ? 'Metro Manila' : rawRegion;
+              const zip = getComp('postal_code');
+              const country = getComp('country');
+              const { formatted: builtFormatted, lines: builtLines } = formatStructuredAddress({
+                street,
+                barangay,
+                city,
+                region,
+                zip
+              });
+              const formatted = builtFormatted || String(preferred?.formatted_address || '').trim() || fallbackFormatted;
+              if (street || city || zip) {
+                return sendJson(res, 200, {
+                  success: true,
+                  source: 'google_maps',
+                  latitude: rawLat,
+                  longitude: rawLon,
+                  street,
+                  barangay,
+                  city,
+                  region,
+                  zip,
+                  country,
+                  formatted,
+                  lines: builtLines.length > 0 ? builtLines : [formatted],
+                  display_name: preferred?.formatted_address || formatted
+                });
+              }
+            }
+          }
+        } catch {
+          // Fall through cleanly to Priority 3 (Nominatim)
+        }
+      }
+
+      // Priority 3: Nominatim Zoom-18 fallback prioritizing house_number + road -> barangay -> city -> region -> ZIP
       const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(rawLat)}&lon=${encodeURIComponent(rawLon)}&addressdetails=1&zoom=18`;
       const geoRes = await fetch(url, {
         headers: {
@@ -168,37 +393,44 @@ export default async function handler(req, res) {
 
       const data = await geoRes.json();
       const addr = data?.address || {};
-      const street = [
-        addr.house_number,
-        addr.road || addr.pedestrian || addr.residential || addr.footway || addr.path || addr.building
-      ].filter(Boolean).join(' ').trim();
-      const barangay = String(addr.suburb || addr.quarter || addr.village || addr.hamlet || addr.neighbourhood || addr.city_district || '').trim();
+      const primaryRoad = String(
+        addr.road ||
+        addr.pedestrian ||
+        addr.residential ||
+        addr.footway ||
+        addr.path ||
+        addr.building ||
+        ''
+      ).trim();
+      const street = [addr.house_number, primaryRoad].filter(Boolean).join(' ').trim();
+      const barangay = String(
+        addr.suburb ||
+        addr.quarter ||
+        addr.city_district ||
+        addr.neighbourhood ||
+        addr.village ||
+        addr.hamlet ||
+        ''
+      ).trim();
       const city = String(addr.city || addr.town || addr.municipality || addr.county || '').trim();
-      const region = String(addr.state || addr.region || '').trim();
+      const rawRegion = String(addr.state || addr.region || '').trim();
+      const isNcrCity = /^(quezon city|manila|makati|pasig|taguig|mandaluyong|caloocan|paranaque|para\u00f1aque|las pinas|las pi\u00f1as|marikina|pasay|valenzuela|malabon|navotas|san juan|muntinlupa|pateros)$/i.test(city);
+      const region = rawRegion || (isNcrCity ? 'Metro Manila' : '');
       const zip = String(addr.postcode || '').trim();
       const country = String(addr.country || '').trim();
 
-      const uniqueParts = [];
-      for (const part of [street, barangay, city, region, zip]) {
-        const clean = String(part || '').trim();
-        if (!clean) continue;
-        if (!uniqueParts.some((existing) => existing.toLowerCase() === clean.toLowerCase())) {
-          uniqueParts.push(clean);
-        }
-      }
-
-      const formatted = uniqueParts.join(', ') || String(data?.display_name || '').trim() || fallbackFormatted;
-      const line1 = street || barangay || city || formatted;
-      const line2 = [
-        street ? barangay : '',
-        city && city !== line1 ? city : '',
-        region && region !== city && region !== line1 ? region : '',
+      const { formatted: builtFormatted, lines } = formatStructuredAddress({
+        street,
+        barangay,
+        city,
+        region,
         zip
-      ].filter(Boolean).join(', ');
-      const lines = [line1, line2].filter(Boolean);
+      });
+      const formatted = builtFormatted || String(data?.display_name || '').trim() || fallbackFormatted;
 
       return sendJson(res, 200, {
         success: true,
+        source: 'nominatim',
         latitude: rawLat,
         longitude: rawLon,
         street,

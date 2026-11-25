@@ -80,7 +80,7 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
   const [errorMessage, setErrorMessage] = useState(null);
   const loadSeqRef = useRef(0);
   const [inviteExtraRecipients, setInviteExtraRecipients] = useState(() => {
-    const prof = notificationService.getEmailProfile('invite_email');
+    const prof = notificationService.getEmailProfile('invite_email', inviteIsTestMode);
     return { toList: prof.toList || [], ccList: prof.ccList || [] };
   });
 
@@ -89,8 +89,10 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
       loadInvites();
       setGeneratedInvite(null);
       setErrorMessage(null);
+      const prof = notificationService.getEmailProfile('invite_email', Boolean(inviteIsTestMode));
+      setInviteExtraRecipients({ toList: prof.toList || [], ccList: prof.ccList || [] });
     }
-  }, [isOpen]);
+  }, [isOpen, inviteIsTestMode]);
 
   const loadInvites = async () => {
     const reqId = ++loadSeqRef.current;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Mail,
   Plus,
@@ -54,26 +54,31 @@ export default function EmailRecipientsEditor({
   ));
   const [toList, setToList] = useState(() => {
     if (value?.toList) return [...value.toList];
-    return notificationService.getEmailProfile(emailType).toList || [];
+    return notificationService.getEmailProfile(emailType, Boolean(isTestMode)).toList || [];
   });
   const [ccList, setCcList] = useState(() => {
     if (value?.ccList) return [...value.ccList];
-    return notificationService.getEmailProfile(emailType).ccList || [];
+    return notificationService.getEmailProfile(emailType, Boolean(isTestMode)).ccList || [];
   });
   const [newToInput, setNewToInput] = useState('');
   const [newCcInput, setNewCcInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState(null);
+  const isDirtyRef = useRef(false);
 
-  // Sync from controlled prop if provided, else keep synced when emailType or storage changes
+  // Sync from controlled prop if provided, else keep synced when emailType, isTestMode, or storage changes
   useEffect(() => {
+    isDirtyRef.current = false;
     if (value && (Array.isArray(value.toList) || Array.isArray(value.ccList))) {
       if (Array.isArray(value.toList)) setToList(value.toList);
       if (Array.isArray(value.ccList)) setCcList(value.ccList);
       return;
     }
-    const loadSaved = () => {
-      const prof = notificationService.getEmailProfile(emailType);
+    const loadSaved = (evt) => {
+      if (evt?.detail?.loadedFromDb && isDirtyRef.current) {
+        return;
+      }
+      const prof = notificationService.getEmailProfile(emailType, Boolean(isTestMode));
       setToList(prof.toList || []);
       setCcList(prof.ccList || []);
     };
@@ -84,7 +89,7 @@ export default function EmailRecipientsEditor({
       window.removeEventListener('rma-settings-changed', loadSaved);
       window.removeEventListener('storage', loadSaved);
     };
-  }, [emailType, value?.toList, value?.ccList]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [emailType, isTestMode, value?.toList, value?.ccList]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const emitChange = (nextTo, nextCc) => {
     if (onChange) {
@@ -112,6 +117,7 @@ export default function EmailRecipientsEditor({
       return;
     }
 
+    isDirtyRef.current = true;
     const nextTo = [...toList, ...added];
     const addedSet = new Set(added);
     const nextCc = ccList.filter((e) => !addedSet.has(e.toLowerCase()));
@@ -123,6 +129,7 @@ export default function EmailRecipientsEditor({
   };
 
   const handleRemoveTo = (emailToRemove) => {
+    isDirtyRef.current = true;
     const nextTo = toList.filter((e) => e.toLowerCase() !== emailToRemove.toLowerCase());
     setToList(nextTo);
     setFeedback(null);
@@ -149,6 +156,7 @@ export default function EmailRecipientsEditor({
       return;
     }
 
+    isDirtyRef.current = true;
     const nextCc = [...ccList, ...dupes];
     setCcList(nextCc);
     setNewCcInput('');
@@ -157,6 +165,7 @@ export default function EmailRecipientsEditor({
   };
 
   const handleRemoveCc = (emailToRemove) => {
+    isDirtyRef.current = true;
     const nextCc = ccList.filter((e) => e.toLowerCase() !== emailToRemove.toLowerCase());
     setCcList(nextCc);
     setFeedback(null);
@@ -171,11 +180,17 @@ export default function EmailRecipientsEditor({
     setIsSaving(true);
     setFeedback(null);
     try {
-      const saved = await notificationService.saveEmailProfile(emailType, { toList, ccList });
+      const saved = await notificationService.saveEmailProfile(emailType, { toList, ccList }, Boolean(isTestMode));
+      isDirtyRef.current = false;
       setToList(saved.toList);
       setCcList(saved.ccList);
       emitChange(saved.toList, saved.ccList);
-      setFeedback({ type: 'success', message: 'Recipients saved & synced to cloud!' });
+      setFeedback({
+        type: 'success',
+        message: isTestMode
+          ? 'Test Mode recipients saved & synced to cloud!'
+          : 'Recipients saved & synced to cloud!'
+      });
       if (onSaved) onSaved(saved);
       setTimeout(() => setFeedback(null), 4000);
     } catch (err) {
@@ -189,11 +204,17 @@ export default function EmailRecipientsEditor({
     setIsSaving(true);
     setFeedback(null);
     try {
-      const restored = await notificationService.resetEmailProfileToDefaults(emailType);
+      const restored = await notificationService.resetEmailProfileToDefaults(emailType, Boolean(isTestMode));
+      isDirtyRef.current = false;
       setToList(restored.toList);
       setCcList(restored.ccList);
       emitChange(restored.toList, restored.ccList);
-      setFeedback({ type: 'success', message: 'Reset to Global Corporate Defaults!' });
+      setFeedback({
+        type: 'success',
+        message: isTestMode
+          ? 'Reset to Test Mode Sandbox Defaults!'
+          : 'Reset to Global Corporate Defaults!'
+      });
       if (onSaved) onSaved(restored);
       setTimeout(() => setFeedback(null), 3500);
     } catch (err) {
@@ -241,19 +262,21 @@ export default function EmailRecipientsEditor({
                 onClick={handleResetDefaults}
                 disabled={isSaving}
                 className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 text-[11px] font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                title="Reset recipients to Global Corporate Defaults"
+                title={isTestMode ? 'Reset Test Mode recipients to Sandbox Defaults' : 'Reset recipients to Global Corporate Defaults'}
               >
                 <RotateCcw className="w-3 h-3" />
-                <span>Reset to Global Defaults</span>
+                <span>{isTestMode ? 'Reset Test Defaults' : 'Reset to Global Defaults'}</span>
               </button>
               <button
                 type="button"
                 onClick={handleSave}
                 disabled={isSaving}
-                className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer shadow-2xs disabled:opacity-50"
+                className={`px-2.5 py-1 rounded-lg text-white text-[11px] font-black flex items-center gap-1 cursor-pointer shadow-2xs disabled:opacity-50 ${
+                  isTestMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
                 <Save className="w-3 h-3" />
-                <span>{isSaving ? 'Saving...' : 'Save Recipients'}</span>
+                <span>{isSaving ? 'Saving...' : (isTestMode ? 'Save Test Recipients' : 'Save Recipients')}</span>
               </button>
             </>
           )}
@@ -277,7 +300,7 @@ export default function EmailRecipientsEditor({
             <div className="px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-[11px] font-bold flex items-center gap-2">
               <FlaskConical className="w-4 h-4 text-amber-600 shrink-0" />
               <span>
-                Test Mode active: runtime delivery safely reroutes to <code className="font-mono font-black">{sandboxEmail}</code> (Live recipients remain editable here without firing in Sandbox).
+                🧪 Editing Test Mode Recipients (isolated from Live) — When empty/reset, falls back exclusively to <code className="font-mono font-black">{sandboxEmail}</code>. Live stakeholders will never receive Test Mode emails.
               </span>
             </div>
           )}
