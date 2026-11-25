@@ -14,7 +14,7 @@ import {
   downloadConsolidatedQrPagesPng
 } from '../utils/customStickerCanvas';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
-import { buildPortalQrPayload } from '../utils/rmaHelpers';
+import { buildPortalQrPayload, formatSaveFileTimestamp } from '../utils/rmaHelpers';
 
 const clampNum = (val, min, max, fallback) => {
   const n = Number(val);
@@ -302,7 +302,7 @@ export default function ReturnQRModal({
           svgElementOrId: single.svgId,
           widthMm: single.widthMm,
           heightMm: single.heightMm,
-          filename: `${single.cardData.rmaNumber}-QR.png`
+          filename: `${single.cardData.rmaNumber}-QR ${formatSaveFileTimestamp(new Date())}.png`
         });
         setDownloadNotice({ type: 'success', msg: `Saved ${savedName}` });
       } else {
@@ -338,9 +338,10 @@ export default function ReturnQRModal({
       }
 
       const pageSizeCss = `${effectivePaper.widthMm}mm ${effectivePaper.heightMm}mm`;
-      const docTitle = isMulti
+      const baseTitle = isMulti
         ? `${cards.length}-RMA-QRs-${effectivePaper.slug}`
         : `RMA-QR-${cards[0].cardData.rmaNumber}-${cards[0].widthMm}x${cards[0].heightMm}mm`;
+      const docTitle = `${baseTitle} ${formatSaveFileTimestamp(new Date())}`;
 
       printIsolatedElement({
         elementId: 'rma-qr-print-root',

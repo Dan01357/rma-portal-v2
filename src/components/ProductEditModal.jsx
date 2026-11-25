@@ -24,6 +24,8 @@ import ImageLightboxModal from './ImageLightboxModal';
 import SupplierInput from './SupplierInput';
 import ProductAutoSuggest from './ProductAutoSuggest';
 import EmailRecipientsEditor from './EmailRecipientsEditor';
+import CameraCaptureModal from './CameraCaptureModal';
+import { stampWatermarkOnImage } from '../utils/cameraWatermark';
 
 export default function ProductEditModal({ isOpen, onClose, product, onSaved, onDeleted, currentUser }) {
   const isEditing = Boolean(product && product.id && (typeof product.id === 'number' || (/^\d+$/.test(String(product.id).trim()) && !String(product.id).startsWith('prod_'))));
@@ -41,6 +43,7 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
 
   // Customer AE (Account Executive) State
   const [selectedAe, setSelectedAe] = useState(null); // { name, email, department }
@@ -246,11 +249,20 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
     }
   };
 
-  const handlePhotoSelect = (e) => {
+  const applyWatermarkedProductFile = async (rawFile) => {
+    if (!rawFile) return;
+    const stamped = await stampWatermarkOnImage(rawFile, {
+      tagText: currentUser?.name || 'Admin Catalog'
+    });
+    setPhotoFile(stamped);
+    setPhotoPreview(URL.createObjectURL(stamped));
+  };
+
+  const handlePhotoSelect = async (e) => {
     const file = e.target.files?.[0];
+    if (e.target) e.target.value = '';
     if (file) {
-      setPhotoFile(file);
-      setPhotoPreview(URL.createObjectURL(file));
+      await applyWatermarkedProductFile(file);
     }
   };
 
@@ -449,6 +461,15 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
                         className="hidden"
                       />
                     </label>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsCameraOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold rounded-xl text-xs cursor-pointer shadow-xs transition-all"
+                    >
+                      <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Live Camera</span>
+                    </button>
                   </div>
                   <p className="text-[11px] text-slate-400 dark:text-slate-500">
                     Optional: Upload or take a picture of the product. Displayed when reporters scan this barcode.
@@ -783,6 +804,19 @@ export default function ProductEditModal({ isOpen, onClose, product, onSaved, on
         title={lightboxPhoto?.title}
         subtitle={lightboxPhoto?.subtitle}
         onClose={() => setLightboxPhoto(null)}
+      />
+
+      <CameraCaptureModal
+        isOpen={isCameraOpen}
+        onClose={() => setIsCameraOpen(false)}
+        title="Product Photo — Live Camera"
+        tagName={currentUser?.name || 'Admin Catalog'}
+        onCapture={async (files) => {
+          if (files?.[0]) {
+            await applyWatermarkedProductFile(files[0]);
+            setIsCameraOpen(false);
+          }
+        }}
       />
     </div>
   );

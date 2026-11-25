@@ -23,7 +23,8 @@ import {
   FileSpreadsheet,
   Send,
   Clock,
-  FlaskConical
+  FlaskConical,
+  BookOpen
 } from 'lucide-react';
 import { rmaApi, supabase } from '../supabaseClient';
 import { applyEmailTestMode, getWarehouseLocations } from '../utils/rmaHelpers';
@@ -33,6 +34,7 @@ import { purchaseOrdersApi } from '../services/purchaseOrdersApi';
 import ApiKeysManagementSection from './ApiKeysManagementSection';
 import WarehouseLocationsModal from './WarehouseLocationsModal';
 import EmailRecipientsEditor from './EmailRecipientsEditor';
+import SupplierDirectoryModal from './SupplierDirectoryModal';
 
 export default function SettingsTab({ 
   isTestMode, 
@@ -65,6 +67,13 @@ export default function SettingsTab({
     detail: ''
   });
 
+  const [replySyncStatus, setReplySyncStatus] = useState({
+    loading: false,
+    done: false,
+    success: false,
+    message: ''
+  });
+
   // Per-Email Recipient Manager Active Type & Matrix Config State
   const [activeEmailProfileType, setActiveEmailProfileType] = useState('new_rma');
   const [syncMatrixFeedback, setSyncMatrixFeedback] = useState('');
@@ -80,13 +89,7 @@ export default function SettingsTab({
   const [followUpConfig, setFollowUpConfig] = useState(() => notificationService.getDailyFollowUpConfig());
   const [isSavingFollowUpConfig, setIsSavingFollowUpConfig] = useState(false);
   const [followUpConfigFeedback, setFollowUpConfigFeedback] = useState(null);
-  const [followUpRunStatus, setFollowUpRunStatus] = useState({
-    loading: false,
-    done: false,
-    success: false,
-    message: '',
-    detail: ''
-  });
+  const [isDirectoryOpen, setIsDirectoryOpen] = useState(false);
 
   // Super Admin Configurable RMA Email Recipients State
   const [mainRecipient, setMainRecipient] = useState('azgodev@gmail.com');
@@ -263,6 +266,19 @@ export default function SettingsTab({
     });
   };
 
+  const handleCheckEmailRepliesNow = async () => {
+    setReplySyncStatus({ loading: true, done: false, success: false, message: 'Checking unread Gmail .xlsx replies...' });
+    const res = await notificationService.syncEmailRepliesNow();
+    setReplySyncStatus({
+      loading: false,
+      done: true,
+      success: Boolean(res?.success),
+      message: res?.success
+        ? `Inbox scanned (${res.scannedUnseenWithXlsx || 0} unread .xlsx reply email(s)) — updated ${res.updatedCount || 0} RMA record(s).`
+        : (res?.message || res?.error || 'Could not check Gmail .xlsx replies.')
+    });
+  };
+
   const handleSaveSandboxEmail = async () => {
     const raw = String(sandboxEmailInput || '').trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
@@ -296,39 +312,6 @@ export default function SettingsTab({
       setFollowUpConfigFeedback({ type: 'error', message: err?.message || 'Failed to save follow-up schedule.' });
     } finally {
       setIsSavingFollowUpConfig(false);
-    }
-  };
-
-  const handleRunFollowUpCheckNow = async () => {
-    setFollowUpRunStatus({
-      loading: true,
-      done: false,
-      success: false,
-      message: 'Checking open 10-day pickup countdowns & auto-disposals...',
-      detail: ''
-    });
-    const res = await notificationService.runDailyFollowUpNow({
-      isTestMode: Boolean(isTestMode),
-      operation: 'run_all',
-      force: false
-    });
-    if (res?.success) {
-      const s = res.summary || {};
-      setFollowUpRunStatus({
-        loading: false,
-        done: true,
-        success: true,
-        message: `Follow-Up SLA check complete: ${s.followUpsSent || 0} reminder(s) sent, ${s.autoDisposed || 0} overdue item(s) auto-disposed.`,
-        detail: `Scanned: ${s.scanned || 0} | Skipped: ${s.skippedCount || 0} | PHT Date: ${res.phtDate || ''} ${res.phtTime || ''}`
-      });
-    } else {
-      setFollowUpRunStatus({
-        loading: false,
-        done: true,
-        success: false,
-        message: res?.error || res?.errors?.[0]?.message || 'Failed running follow-up check.',
-        detail: res?.detail || ''
-      });
     }
   };
 
@@ -669,16 +652,28 @@ export default function SettingsTab({
             </div>
           </div>
 
-          {(activeEmailProfileType === 'daily_matrix_auto' || activeEmailProfileType === 'manual_matrix') && (
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={handleSyncAutoAndManualMatrixRecipients}
-              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black flex items-center gap-1.5 shadow-2xs cursor-pointer shrink-0"
+              onClick={() => setIsDirectoryOpen(true)}
+              className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-black flex items-center gap-1.5 shadow-2xs cursor-pointer shrink-0"
+              title="Open Persistent Supplier Emails Directory (Add, Edit, Search, Delete contacts)"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Sync Recipients Between Auto &amp; Manual</span>
+              <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+              <span>📒 Supplier Emails Directory</span>
             </button>
-          )}
+
+            {(activeEmailProfileType === 'daily_matrix_auto' || activeEmailProfileType === 'manual_matrix') && (
+              <button
+                type="button"
+                onClick={handleSyncAutoAndManualMatrixRecipients}
+                className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black flex items-center gap-1.5 shadow-2xs cursor-pointer shrink-0"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Sync Recipients Between Auto &amp; Manual</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Profile Selector Pills */}
@@ -913,6 +908,16 @@ export default function SettingsTab({
 
             <button
               type="button"
+              onClick={handleCheckEmailRepliesNow}
+              disabled={replySyncStatus.loading}
+              className="px-3.5 py-1.5 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/70 dark:hover:bg-sky-900 text-sky-700 dark:text-sky-300 text-xs font-bold rounded-xl border border-sky-200 dark:border-sky-800 flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs disabled:opacity-60"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${replySyncStatus.loading ? 'animate-spin' : ''}`} />
+              <span>{replySyncStatus.loading ? 'Checking Replies...' : '📩 Check Email .xlsx Replies'}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={handleTestSmtp}
               disabled={smtpStatus.loading}
               className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/70 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold rounded-xl border border-indigo-200 dark:border-indigo-800 flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs"
@@ -1110,27 +1115,26 @@ export default function SettingsTab({
           />
         </div>
 
-        {/* 10-Calendar-Day Pickup Follow-Up & Auto-Dispose SLA Configuration */}
+        {/* 10-Calendar-Day Pickup Follow-Up Schedule (Automated Backend Scheduler) */}
         <div className="p-4 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/70 space-y-3.5 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <span className="font-black uppercase tracking-wider text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
                 <Clock className="w-4 h-4 text-amber-600" />
-                <span>10-Calendar-Day Pickup Follow-Up &amp; Auto-Dispose SLA ({formatTime12hFromHhmm(followUpConfig.autoSendTimePht || '08:00')} PHT)</span>
+                <span>10-Calendar-Day Pickup Follow-Up Schedule ({formatTime12hFromHhmm(followUpConfig.autoSendTimePht || '08:00')} PHT)</span>
               </span>
               <p className="text-[11px] text-amber-900/80 dark:text-amber-300/80 mt-0.5">
-                Sends daily supplier pickup reminders up to Day 10, stops automatically on pickup/case close, and auto-disposes overdue items after Day 10.
+                Automated backend scheduler sends daily pickup reminders up to Day 10, stops on pickup/case close, and auto-scraps overdue unclaimed items after Day 10.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={handleRunFollowUpCheckNow}
-                disabled={followUpRunStatus.loading}
-                className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                onClick={() => setIsDirectoryOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-black flex items-center gap-1.5 cursor-pointer"
               >
-                <Send className="w-3 h-3" />
-                <span>{followUpRunStatus.loading ? 'Running Check...' : 'Run Follow-Ups & 10-Day Auto-Dispose Check Now'}</span>
+                <BookOpen className="w-3 h-3 text-amber-400" />
+                <span>📒 Supplier Emails Directory</span>
               </button>
               <button
                 type="button"
@@ -1139,7 +1143,7 @@ export default function SettingsTab({
                 className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer disabled:opacity-50"
               >
                 <Save className="w-3 h-3" />
-                <span>{isSavingFollowUpConfig ? 'Saving...' : 'Save Follow-Up SLA'}</span>
+                <span>{isSavingFollowUpConfig ? 'Saving...' : 'Save Follow-Up Time'}</span>
               </button>
             </div>
           </div>
@@ -1155,17 +1159,6 @@ export default function SettingsTab({
             </div>
           )}
 
-          {followUpRunStatus.done && (
-            <div className={`p-3 rounded-xl border text-[11px] space-y-0.5 ${
-              followUpRunStatus.success
-                ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
-                : 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-700 text-rose-900 dark:text-rose-200'
-            }`}>
-              <div className="font-bold">{followUpRunStatus.message}</div>
-              {followUpRunStatus.detail && <div className="font-mono opacity-80">{followUpRunStatus.detail}</div>}
-            </div>
-          )}
-
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-slate-800">
             <label className="flex items-center gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
               <input
@@ -1175,20 +1168,8 @@ export default function SettingsTab({
                 onChange={(e) => setFollowUpConfig((p) => ({ ...p, autoEnabled: e.target.checked }))}
                 className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
               />
-              <span>Auto Daily Follow-Up Enabled</span>
+              <span>Auto-Send Daily Follow-Ups (10-Day SLA)</span>
             </label>
-
-            <label className="flex items-center justify-between gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-200">
-              <span>Follow-Up Time (Asia/Manila):</span>
-              <input
-                type="time"
-                aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"
-                value={followUpConfig.autoSendTimePht || '08:00'}
-                onChange={(e) => setFollowUpConfig((p) => ({ ...p, autoSendTimePht: e.target.value || '08:00' }))}
-                className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-xs text-slate-900 dark:text-white"
-              />
-            </label>
-
             <label className="flex items-center gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
               <input
                 type="checkbox"
@@ -1197,7 +1178,17 @@ export default function SettingsTab({
                 onChange={(e) => setFollowUpConfig((p) => ({ ...p, customerFollowUpDefaultEnabled: e.target.checked }))}
                 className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
               />
-              <span>Customer Hub Default Countdown ON</span>
+              <span>Default Follow-Up ON for Customer Hub RMAs</span>
+            </label>
+            <label className="flex items-center justify-between gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-200">
+              <span>Auto-Send Time (Asia/Manila):</span>
+              <input
+                type="time"
+                aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"
+                value={followUpConfig.autoSendTimePht || '08:00'}
+                onChange={(e) => setFollowUpConfig((p) => ({ ...p, autoSendTimePht: e.target.value || '08:00' }))}
+                className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-xs text-slate-900 dark:text-white"
+              />
             </label>
           </div>
 
@@ -1210,6 +1201,17 @@ export default function SettingsTab({
             title="Supplier Follow-Up Extra Internal CCs"
           />
         </div>
+
+        {replySyncStatus.done && (
+          <div className={`p-3 rounded-2xl border text-xs font-bold flex items-center gap-2 ${
+            replySyncStatus.success
+              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+              : 'bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-700 text-amber-900 dark:text-amber-200'
+          }`}>
+            {replySyncStatus.success ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+            <span>{replySyncStatus.message}</span>
+          </div>
+        )}
 
         {dailyMatrixStatus.done && (
           <div className={`p-3.5 rounded-2xl border text-xs space-y-1 animate-in fade-in ${
@@ -1458,6 +1460,12 @@ export default function SettingsTab({
           setLocationsList(getWarehouseLocations());
         }}
         onLocationsUpdated={(newLocs) => setLocationsList(newLocs)}
+      />
+
+      {/* Persistent Supplier Emails Directory Modal */}
+      <SupplierDirectoryModal
+        isOpen={isDirectoryOpen}
+        onClose={() => setIsDirectoryOpen(false)}
       />
 
     </div>

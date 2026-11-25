@@ -9,13 +9,17 @@ import {
   formatDateYmd,
   formatDateTimeYmdHm,
   formatFourChoiceOutcome,
-  stripCreditMemoMetaTag
+  formatSaveFileTimestamp,
+  stripCreditMemoMetaTag,
+  getGpsAddressDisplay,
+  getGpsMapUrl
 } from './rmaHelpers';
 import { getCleanHumanWorkflowStatus } from './followUpWorkflow';
 import { downloadTableXlsx } from './exportXlsx';
 
 function getWorkflowExportFields(r, savedProducts = []) {
   const statusInfo = getCleanHumanWorkflowStatus(r, savedProducts);
+  const outcome = formatFourChoiceOutcome(r);
   const wf = statusInfo.workflow;
   const followUpDay = wf.isClosed
     ? (wf.isAutoDisposed ? 'Expired (>10)' : 'Closed')
@@ -23,7 +27,7 @@ function getWorkflowExportFields(r, savedProducts = []) {
   const pickedUpDate = wf.step3.dateYmd || (wf.isAutoClosed || wf.isExpiredAfter10Days ? 'Expired (>10 Days)' : '');
   const caseClosedDate = wf.step4.dateYmd || '';
   return {
-    cleanStatusLabel: statusInfo.label,
+    cleanStatusLabel: outcome?.shortStatus || statusInfo.label,
     workflowStep: wf.stepSummary,
     followUpDay,
     pickedUpDate,
@@ -31,22 +35,12 @@ function getWorkflowExportFields(r, savedProducts = []) {
   };
 }
 
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 /**
  * Format timestamp strictly for filenames:
- * YYYY-MMMon-DD HHMM (e.g. 2026-11Nov-09 1430)
+ * "Nov 25, 2026 0832" (Asia/Manila, zero colons) so local files never collide.
  */
 export function formatFilenameDateTime(date = new Date()) {
-  const d = (date instanceof Date && !isNaN(date.getTime())) ? date : new Date(date || Date.now());
-  const safeDate = isNaN(d.getTime()) ? new Date() : d;
-  const yyyy = safeDate.getFullYear();
-  const mm = String(safeDate.getMonth() + 1).padStart(2, '0');
-  const mon = MONTH_NAMES[safeDate.getMonth()] || 'Jan';
-  const dd = String(safeDate.getDate()).padStart(2, '0');
-  const hh = String(safeDate.getHours()).padStart(2, '0');
-  const min = String(safeDate.getMinutes()).padStart(2, '0');
-  return `${yyyy}-${mm}${mon}-${dd} ${hh}${min}`;
+  return formatSaveFileTimestamp(date);
 }
 
 export function resolveFilenameWithTimestamp(defaultPrefix, customFilename, isTestMode = false) {
@@ -160,7 +154,9 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
     { header: 'Workflow Step (1-4)', width: 28, type: 'text' },
     { header: 'Follow-Up Day (of 10)', width: 18, type: 'text' },
     { header: 'Picked Up / Handover Date (YYYY-MM-DD)', width: 24, type: 'text' },
-    { header: 'Case Closed Date (YYYY-MM-DD)', width: 24, type: 'text' }
+    { header: 'Case Closed Date (YYYY-MM-DD)', width: 24, type: 'text' },
+    { header: 'GPS Street Address', width: 38, type: 'text' },
+    { header: 'GPS Maps URL', width: 36, type: 'text' }
   ];
 
   const rows = reports.map((r, index) => {
@@ -186,7 +182,7 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
       r.batch_lot_number || '',
       cleanExpiry,
       wfExport.cleanStatusLabel,
-      outcome.hasDecision ? outcome.label : (r.disposition || 'Pending Triage'),
+      outcome.label,
       r.condition_grade || 'Unassessed',
       loc,
       supplier,
@@ -208,7 +204,9 @@ export function exportRMAReportsToXlsx(reports, filename = null, savedProducts =
       wfExport.workflowStep,
       wfExport.followUpDay,
       wfExport.pickedUpDate,
-      wfExport.caseClosedDate
+      wfExport.caseClosedDate,
+      getGpsAddressDisplay(r) || '',
+      getGpsMapUrl(r) || ''
     ];
   });
 
@@ -264,7 +262,9 @@ export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedP
     { header: 'Workflow Step (1-4)', width: 28, type: 'text' },
     { header: 'Follow-Up Day (of 10)', width: 18, type: 'text' },
     { header: 'Handover Date (YYYY-MM-DD)', width: 24, type: 'text' },
-    { header: 'Case Closed Date (YYYY-MM-DD)', width: 24, type: 'text' }
+    { header: 'Case Closed Date (YYYY-MM-DD)', width: 24, type: 'text' },
+    { header: 'GPS Street Address', width: 38, type: 'text' },
+    { header: 'GPS Maps URL', width: 36, type: 'text' }
   ];
 
   const rows = reports.map((r, index) => {
@@ -296,7 +296,7 @@ export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedP
       Number(unitPrice.toFixed(2)),
       totalVal,
       wfExport.cleanStatusLabel,
-      outcome.hasDecision ? outcome.label : (r.disposition || 'Pending Triage'),
+      outcome.label,
       r.condition_grade || 'Unassessed',
       r.reason || '',
       r.credit_memo_no || r.credit_memo_number || '',
@@ -306,7 +306,9 @@ export function exportCustomerInboundRMAsToXlsx(reports, filename = null, savedP
       wfExport.workflowStep,
       wfExport.followUpDay,
       wfExport.pickedUpDate,
-      wfExport.caseClosedDate
+      wfExport.caseClosedDate,
+      getGpsAddressDisplay(r) || '',
+      getGpsMapUrl(r) || ''
     ];
   });
 
@@ -392,7 +394,7 @@ export function exportSupplierOutboundClaimsToXlsx(reports, filename = null, sav
       Number(unitPrice.toFixed(2)),
       totalVal,
       r.condition_grade || 'Unassessed',
-      outcome.hasDecision ? outcome.label : (r.disposition || 'Return to Vendor (RTV)'),
+      outcome.label,
       wfExport.cleanStatusLabel,
       r.inspected_by || '',
       r.reason || r.explanation || '',

@@ -31,13 +31,16 @@ import {
   FileCheck2,
   Zap,
   Clock,
-  Send
+  Send,
+  MapPin
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { authService } from '../services/authService';
 import { catalogService } from '../services/catalogService';
 import { notificationService } from '../services/notificationService';
+import { supplierDirectoryService } from '../services/supplierDirectoryService';
 import SupplierFollowUpModal from './SupplierFollowUpModal';
+import FollowUpTimelineCard from './FollowUpTimelineCard';
 import { getCleanHumanWorkflowStatus } from '../utils/followUpWorkflow';
 import {
   isSplitChildTicket,
@@ -52,7 +55,9 @@ import {
   formatFourChoiceOutcome,
   getItemNeedsReorder,
   formatDateYmd,
-  doesCreditMemoLinkReport
+  doesCreditMemoLinkReport,
+  getGpsAddressDisplay,
+  getGpsMapUrl
 } from '../utils/rmaHelpers';
 import { copyTextSafe } from '../utils/clipboard';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -168,6 +173,8 @@ export default function QuickRMAActionModal({
   const [adminDrNumber, setAdminDrNumber] = useState('');
   const [adminPoNumber, setAdminPoNumber] = useState('');
   const [adminSupplierName, setAdminSupplierName] = useState('');
+  const [adminSupplierEmailTo, setAdminSupplierEmailTo] = useState('');
+  const [adminSupplierEmailCc, setAdminSupplierEmailCc] = useState('');
   const [adminExpiryDate, setAdminExpiryDate] = useState('');
 
   // Super Admin Silent Restitution & Product Details Hooks
@@ -188,6 +195,8 @@ export default function QuickRMAActionModal({
   isEditingAiDetailsRef.current = isEditingAiDetails;
   const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
   const [copyDrSuccess, setCopyDrSuccess] = useState(false);
+  const [isSyncingXlsx, setIsSyncingXlsx] = useState(false);
+  const [xlsxSyncFeedback, setXlsxSyncFeedback] = useState(null);
 
   // Authentication & Verification State
   const [verifiedAdmin, setVerifiedAdmin] = useState(null);
@@ -216,7 +225,7 @@ export default function QuickRMAActionModal({
         if (curDisp === 'supplier_credit') targetDisposition = 'customer_credit';
         else if (curDisp === 'supplier_exchange') targetDisposition = 'customer_exchange';
         else if (curDisp === 'scrap' || curDisp === 'restock_good') targetDisposition = curDisp;
-        else targetDisposition = 'Pending Triage';
+        else targetDisposition = 'Pending';
       } else {
         if (curDisp === 'customer_credit') {
           targetDisposition = 'supplier_credit';
@@ -227,7 +236,7 @@ export default function QuickRMAActionModal({
         } else if (curDisp === 'scrap' || curDisp === 'restock_good') {
           targetDisposition = curDisp;
         } else {
-          targetDisposition = '3- Return to Vendor (RTV)';
+          targetDisposition = 'Pending';
         }
       }
 
@@ -397,12 +406,8 @@ export default function QuickRMAActionModal({
 
       const timestamp = new Date().toISOString();
       const autoGrade = mapReasonToConditionGrade(report.reason);
-      const p1Disp = splitPart1Choice === 'pending'
-        ? (isSupplier ? '3- Return to Vendor (RTV)' : 'Pending Triage')
-        : splitPart1Choice;
-      const p2Disp = splitPart2Choice === 'pending'
-        ? (isSupplier ? '3- Return to Vendor (RTV)' : 'Pending Triage')
-        : splitPart2Choice;
+      const p1Disp = splitPart1Choice === 'pending' ? 'Pending' : splitPart1Choice;
+      const p2Disp = splitPart2Choice === 'pending' ? 'Pending' : splitPart2Choice;
 
       const p1Meta = {
         ...(report.ai_document_metadata && typeof report.ai_document_metadata === 'object' ? report.ai_document_metadata : {}),
@@ -722,6 +727,12 @@ export default function QuickRMAActionModal({
         set.add(s);
       }
     });
+    (supplierDirectoryService.getCachedDirectory() || []).forEach(c => {
+      const s = (c.supplier_name || '').trim();
+      if (s && s !== 'Pending Assignment' && s !== 'Unassigned' && s !== 'Warehouse') {
+        set.add(s);
+      }
+    });
     return Array.from(set).sort();
   }, [savedProductsList, recentReportsList]);
 
@@ -757,6 +768,18 @@ export default function QuickRMAActionModal({
       setAdminDrNumber(report.dr_number || report.invoice_dr_number || meta.dr_number || meta.invoice_dr_number || '');
       setAdminPoNumber(report.po_number || meta.po_number || '');
       setAdminSupplierName(resolvedInitSupplier);
+      const followUpMeta = (meta.follow_up && typeof meta.follow_up === 'object') ? meta.follow_up : {};
+      const dirMatch = resolvedInitSupplier ? supplierDirectoryService.findBySupplierName(resolvedInitSupplier) : null;
+      setAdminSupplierEmailTo(followUpMeta.supplier_email_to || pickup.supplier_email_to || dirMatch?.email_to || '');
+      setAdminSupplierEmailCc(followUpMeta.supplier_email_cc || pickup.supplier_email_cc || dirMatch?.email_cc || '');
+      supplierDirectoryService.loadDirectory().then(() => {
+        if (!resolvedInitSupplier) return;
+        const refreshed = supplierDirectoryService.findBySupplierName(resolvedInitSupplier);
+        if (refreshed) {
+          setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (refreshed.email_to || ''));
+          setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (refreshed.email_cc || ''));
+        }
+      }).catch(() => {});
       setAdminExpiryDate(report.expiry_date ? String(report.expiry_date).slice(0, 10) : '');
 
       // Super Admin Silent Restitution & Record Re-creation Hooks
@@ -812,6 +835,11 @@ export default function QuickRMAActionModal({
     const sup = String(item.supplierName || item.supplier_name || item.supplier || '').trim();
     if (sup && !/^(pending assignment|unassigned|warehouse|n\/a)$/i.test(sup)) {
       setAdminSupplierName(sup);
+      const dirMatch = supplierDirectoryService.findBySupplierName(sup);
+      if (dirMatch) {
+        setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (dirMatch.email_to || ''));
+        setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));
+      }
     }
     if (item.unitName || item.unit_name) {
       setAdminUnitName(item.unitName || item.unit_name);
@@ -935,6 +963,8 @@ export default function QuickRMAActionModal({
       const cleanPo = adminPoNumber.trim();
       const primaryDoc = cleanDr || cleanSi || cleanPo || null;
       const cleanSupplier = adminSupplierName.trim();
+      const cleanSupplierEmailTo = adminSupplierEmailTo.trim();
+      const cleanSupplierEmailCc = adminSupplierEmailCc.trim();
       const cleanExpiry = adminExpiryDate ? adminExpiryDate.slice(0, 10) : null;
       const cleanRmaNum = isSuperAdminRole && adminRmaNumber.trim() ? adminRmaNumber.trim() : report.rma_number;
       const cleanCreated = isSuperAdminRole && adminCreatedAt ? new Date(adminCreatedAt).toISOString() : report.created_at;
@@ -967,13 +997,33 @@ export default function QuickRMAActionModal({
         updates.supplier_name = cleanSupplier;
       }
 
+      const baseMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
+        ? { ...report.ai_document_metadata }
+        : {};
+      if (cleanSupplier || cleanSupplierEmailTo || cleanSupplierEmailCc) {
+        const prevFu = (baseMeta.follow_up && typeof baseMeta.follow_up === 'object') ? baseMeta.follow_up : {};
+        const prevPu = (baseMeta.supplier_pickup && typeof baseMeta.supplier_pickup === 'object') ? baseMeta.supplier_pickup : {};
+        baseMeta.follow_up = {
+          ...prevFu,
+          supplier_email_to: cleanSupplierEmailTo,
+          supplier_email_cc: cleanSupplierEmailCc
+        };
+        if (Object.keys(prevPu).length > 0 || cleanSupplierEmailTo || cleanSupplierEmailCc) {
+          baseMeta.supplier_pickup = {
+            ...prevPu,
+            ...(cleanSupplier ? { supplier_name: cleanSupplier } : {}),
+            supplier_email_to: cleanSupplierEmailTo,
+            supplier_email_cc: cleanSupplierEmailCc
+          };
+        }
+        updates.ai_document_metadata = baseMeta;
+      }
+
       if (isSuperAdminRole) {
         if (adminBarcode.trim()) updates.barcode = adminBarcode.trim();
         if (adminQuantity) updates.quantity = Number(adminQuantity) || 1;
 
-        const currentMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
-          ? { ...report.ai_document_metadata }
-          : {};
+        const currentMeta = { ...baseMeta };
         let currentNotes = report.notes || '';
         if (adminIsTest === false) {
           delete currentMeta.is_test;
@@ -1008,7 +1058,7 @@ export default function QuickRMAActionModal({
 
       const { error } = await Promise.race([
         updatePromise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Supabase update timeout')), 8000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Supabase update timeout')), 25000))
       ]);
 
       if (error) {
@@ -1028,7 +1078,7 @@ export default function QuickRMAActionModal({
         if (error.message.includes('batch_lot_number')) delete fallback.batch_lot_number;
         const { error: fbErr } = await Promise.race([
           supabase.from('rma_reports').update(fallback).eq('id', report.id),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Supabase fallback timeout')), 8000))
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Supabase fallback timeout')), 25000))
         ]);
         if (fbErr) throw fbErr;
       }
@@ -1067,6 +1117,14 @@ export default function QuickRMAActionModal({
         ...(adminPiecesPerCase ? { pieces_per_case: adminPiecesPerCase } : {}),
         ...(updatedItems ? { items: updatedItems } : {})
       };
+
+      if (cleanSupplier && (cleanSupplierEmailTo || cleanSupplierEmailCc)) {
+        supplierDirectoryService.upsertFromSubmission({
+          supplier_name: cleanSupplier,
+          supplier_email_to: cleanSupplierEmailTo,
+          supplier_email_cc: cleanSupplierEmailCc
+        }).catch(() => {});
+      }
 
       setReport(updatedReport);
       setIsEditingAiDetails(false);
@@ -1450,15 +1508,99 @@ export default function QuickRMAActionModal({
                     </span>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setIsEditingAiDetails(!isEditingAiDetails)}
-                    className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
-                  >
-                    <Edit3 className="w-3 h-3" />
-                    <span>{isEditingAiDetails ? 'Cancel Edit' : 'Edit Details & Documents'}</span>
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label
+                      className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 hover:underline cursor-pointer flex items-center gap-1"
+                      title="Upload an edited RMA Alert Mirror .xlsx file to apply updates"
+                    >
+                      <span>📤 Upload Edited .xlsx</span>
+                      <input
+                        type="file"
+                        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        className="hidden"
+                        disabled={isSyncingXlsx}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = '';
+                          if (!file) return;
+                          setIsSyncingXlsx(true);
+                          setXlsxSyncFeedback(null);
+                          try {
+                            const res = await notificationService.ingestEditedRmaXlsx({
+                              file,
+                              rmaNumber: report.rma_number,
+                              actorName: verifiedAdmin?.name || currentUser?.name || 'Admin'
+                            });
+                            if (res?.success) {
+                              if (res.report) {
+                                setReport(res.report);
+                                onReportUpdated?.(res.report);
+                              }
+                              onRefresh?.();
+                              setXlsxSyncFeedback({
+                                type: 'success',
+                                text: res.noChanges
+                                  ? `No changed cells detected in ${file.name} for ${res.rmaNumber}.`
+                                  : `Applied .xlsx edits to ${res.rmaNumber}: ${(res.changedFields || []).join(', ')}`
+                              });
+                            } else {
+                              setXlsxSyncFeedback({ type: 'error', text: res?.error || 'Could not ingest .xlsx updates.' });
+                            }
+                          } finally {
+                            setIsSyncingXlsx(false);
+                          }
+                        }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={isSyncingXlsx}
+                      onClick={async () => {
+                        setIsSyncingXlsx(true);
+                        setXlsxSyncFeedback(null);
+                        try {
+                          const res = await notificationService.syncEmailRepliesNow();
+                          if (res?.success) {
+                            onRefresh?.();
+                            setXlsxSyncFeedback({
+                              type: 'success',
+                              text: `Checked inbox: ${res.scannedUnseenWithXlsx || 0} unread email(s) with .xlsx, updated ${res.updatedCount || 0} RMA record(s).`
+                            });
+                          } else {
+                            setXlsxSyncFeedback({
+                              type: 'error',
+                              text: res?.message || res?.error || 'Could not sync email .xlsx replies.'
+                            });
+                          }
+                        } finally {
+                          setIsSyncingXlsx(false);
+                        }
+                      }}
+                      className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                      title="Poll incoming email replies carrying edited .xlsx workbooks"
+                    >
+                      <span>📩 Check Email .xlsx Replies</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingAiDetails(!isEditingAiDetails)}
+                      className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      <span>{isEditingAiDetails ? 'Cancel Edit' : 'Edit Details & Documents'}</span>
+                    </button>
+                  </div>
                 </div>
+
+                {xlsxSyncFeedback && (
+                  <div className={`p-2 rounded-xl border text-[11px] font-bold ${
+                    xlsxSyncFeedback.type === 'success'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200'
+                      : 'bg-rose-50 dark:bg-rose-950/50 border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-200'
+                  }`}>
+                    {xlsxSyncFeedback.text}
+                  </div>
+                )}
 
                 <div className="flex items-start gap-3 bg-violet-50/50 dark:bg-violet-950/20 p-2.5 rounded-2xl border border-violet-100 dark:border-violet-900/50">
                   {paperworkList.length > 0 && (
@@ -1550,6 +1692,30 @@ export default function QuickRMAActionModal({
                           <strong className="text-rose-600 dark:text-rose-400 font-bold">{formatDateYmd(adminExpiryDate || report.expiry_date) || adminExpiryDate || report.expiry_date}</strong>
                         </div>
                       )}
+                      {(() => {
+                        const mapUrl = getGpsMapUrl(report);
+                        const gpsAddr = getGpsAddressDisplay(report);
+                        if (!mapUrl && !gpsAddr) return null;
+                        return (
+                          <div className="flex items-center gap-1.5 sm:col-span-2">
+                            <span className="text-slate-400 text-[10px] uppercase font-bold">GPS Location:</span>
+                            {mapUrl ? (
+                              <a
+                                href={mapUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-bold truncate"
+                                title={gpsAddr || 'Open in Google Maps'}
+                              >
+                                <MapPin className="w-3 h-3 text-rose-500 shrink-0" />
+                                <span className="truncate">{gpsAddr || 'Open Google Maps'}</span>
+                              </a>
+                            ) : (
+                              <strong className="text-slate-700 dark:text-slate-200 truncate">{gpsAddr}</strong>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -1791,7 +1957,15 @@ export default function QuickRMAActionModal({
                             type="text"
                             list="admin-supplier-suggestions"
                             value={adminSupplierName}
-                            onChange={(e) => setAdminSupplierName(e.target.value)}
+                            onChange={(e) => {
+                              const nextVal = e.target.value;
+                              setAdminSupplierName(nextVal);
+                              const dirMatch = supplierDirectoryService.findBySupplierName(nextVal);
+                              if (dirMatch) {
+                                setAdminSupplierEmailTo((prev) => prev.trim() ? prev : (dirMatch.email_to || ''));
+                                setAdminSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));
+                              }
+                            }}
                             placeholder="e.g. Suy Sing Commercial Corp, Mondelez, URC..."
                             className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
                           />
@@ -1814,6 +1988,26 @@ export default function QuickRMAActionModal({
                               ISO (YYYY-MM-DD): {adminExpiryDate ? adminExpiryDate.slice(0, 10) : '—'}
                             </span>
                           </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (To)</label>
+                          <input
+                            type="text"
+                            value={adminSupplierEmailTo}
+                            onChange={(e) => setAdminSupplierEmailTo(e.target.value)}
+                            placeholder="claims@supplier.com (auto-fills from Directory)"
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Supplier Email (CC)</label>
+                          <input
+                            type="text"
+                            value={adminSupplierEmailCc}
+                            onChange={(e) => setAdminSupplierEmailCc(e.target.value)}
+                            placeholder="coordinator@supplier.com (Optional)"
+                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono"
+                          />
                         </div>
                       </div>
                     </div>
@@ -2054,7 +2248,7 @@ export default function QuickRMAActionModal({
                           className="px-3 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-xs font-black flex items-center gap-1.5 cursor-pointer"
                         >
                           <Clock className="w-3.5 h-3.5" />
-                          <span>{!wf.party.hasValidSupplier ? '+ Set Supplier & Email' : `${wf.step2.text} • Supplier SLA`}</span>
+                          <span>{!wf.party.hasValidSupplier ? '+ Set Supplier & Email' : 'Edit Supplier & Email'}</span>
                         </button>
                         {!wf.isClosed && (
                           <>
@@ -2132,6 +2326,12 @@ export default function QuickRMAActionModal({
                     {followUpFeedback.text}
                   </div>
                 )}
+
+                <FollowUpTimelineCard
+                  report={report}
+                  catalogProducts={savedProductsList}
+                  compact={true}
+                />
               </div>
 
               {/* (c) Split Qty Feature Intact */}

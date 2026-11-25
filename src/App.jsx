@@ -69,6 +69,7 @@ import { downloadCustomSizedStickerPng } from './utils/customStickerCanvas';
 import { catalogService } from './services/catalogService';
 import { creditMemoService } from './services/creditMemoService';
 import { supplierClaimService } from './services/supplierClaimService';
+import { supplierDirectoryService } from './services/supplierDirectoryService';
 import TablePagination from './components/TablePagination';
 import { authService } from './services/authService';
 import { supabase } from './supabaseClient';
@@ -100,6 +101,9 @@ import GatekeeperPinModal from './components/GatekeeperPinModal';
 import CustomerRMAInvitesModal from './components/CustomerRMAInvitesModal';
 import EmailRecipientsEditor from './components/EmailRecipientsEditor';
 import SupplierInput from './components/SupplierInput';
+import CameraCaptureModal from './components/CameraCaptureModal';
+import { stampWatermarkOnFiles } from './utils/cameraWatermark';
+import { getGpsAddressDisplay, getGpsMapUrl } from './utils/rmaHelpers';
 import { inviteService, formatRemainingCountdown, isPermanentInvite } from './services/inviteService';
 import { accessKeyService } from './services/accessKeyService';
 import { notificationService } from './services/notificationService';
@@ -326,8 +330,9 @@ export default function App() {
   });
   const [testSandboxEmail, setTestSandboxEmail] = useState(() => notificationService.getTestSandboxEmail());
 
-  // Load saved per-email recipient profiles & matrix config from Supabase on mount
+  // Load saved per-email recipient profiles, supplier directory & matrix config from Supabase on mount
   useEffect(() => {
+    supplierDirectoryService.loadDirectory().catch(() => {});
     notificationService.loadAllEmailProfilesFromDb()
       .then(({ profilesByType, testSandboxEmail: dbSandbox }) => {
         if (profilesByType?.new_rma) {
@@ -1749,7 +1754,16 @@ export default function App() {
   const [supaStatus, setSupaStatus] = useState({ checking: true, connected: false, rowsFound: 0 });
 
   // Accurate GPS Coordinates State (Only saved if accuracy <= 150m)
-  const [gpsLocation, setGpsLocation] = useState({ loading: true, latitude: null, longitude: null, accuracy: null, isAccurate: false });
+  const [gpsLocation, setGpsLocation] = useState({
+    loading: true,
+    latitude: null,
+    longitude: null,
+    accuracy: null,
+    isAccurate: false,
+    address: '',
+    addressParts: null,
+    addressLines: []
+  });
 
   // Reporter Intake Form State
   const [manifestItems, setManifestItems] = useState([]); // Queued return line items for Multi-Item Batch Return
@@ -1821,8 +1835,9 @@ export default function App() {
 
 
 
-  // Fullscreen Image Lightbox Modal State
+  // Fullscreen Image Lightbox & Live Watermarked Camera Modal State
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
+  const [cameraCaptureTarget, setCameraCaptureTarget] = useState(null); // null | 'item' | 'paperwork'
 
   const [coworkerQueueFilter, setCoworkerQueueFilter] = useState('all'); // 'all' | 'restock' | 'reorder' | 'scrap_no_reorder'
   const [updatingQueueId, setUpdatingQueueId] = useState(null);
@@ -2399,8 +2414,18 @@ export default function App() {
 
   // Accurate GPS Location capture (Filters out desktop IP geolocation with > 150m inaccuracies)
   const captureAccurateGps = () => {
+    const emptyGeo = {
+      loading: false,
+      latitude: null,
+      longitude: null,
+      accuracy: null,
+      isAccurate: false,
+      address: '',
+      addressParts: null,
+      addressLines: []
+    };
     if (!navigator.geolocation) {
-      setGpsLocation({ loading: false, latitude: null, longitude: null, accuracy: null, isAccurate: false });
+      setGpsLocation(emptyGeo);
       return;
     }
 
@@ -2409,20 +2434,47 @@ export default function App() {
         const acc = pos.coords.accuracy;
         // Real hardware GPS is usually within 10-100 meters
         if (acc <= 150) {
+          const lat = pos.coords.latitude;
+          const lon = pos.coords.longitude;
           setGpsLocation({
             loading: false,
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
+            latitude: lat,
+            longitude: lon,
             accuracy: Math.round(acc),
-            isAccurate: true
+            isAccurate: true,
+            address: '',
+            addressParts: null,
+            addressLines: []
           });
+
+          // Resolve exact street/barangay/city/ZIP non-blocking via server Nominatim proxy
+          fetch(`/api/v1/products/lookup?action=reverse-geocode&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((geoData) => {
+              if (geoData?.formatted) {
+                setGpsLocation((prev) => ({
+                  ...prev,
+                  address: geoData.formatted,
+                  addressParts: {
+                    street: geoData.street || '',
+                    barangay: geoData.barangay || '',
+                    city: geoData.city || '',
+                    region: geoData.region || '',
+                    zip: geoData.zip || '',
+                    formatted: geoData.formatted
+                  },
+                  addressLines: Array.isArray(geoData.lines) ? geoData.lines : [geoData.formatted]
+                }));
+              }
+            })
+            .catch(() => {});
         } else {
           // Desktop Wi-Fi IP geolocation is too inaccurate -> DO NOT RECORD FALSE DATA
-          setGpsLocation({ loading: false, latitude: null, longitude: null, accuracy: acc, isAccurate: false });
+          setGpsLocation({ ...emptyGeo, accuracy: acc });
         }
       },
       () => {
-        setGpsLocation({ loading: false, latitude: null, longitude: null, accuracy: null, isAccurate: false });
+        setGpsLocation(emptyGeo);
       },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
     );
@@ -2516,16 +2568,14 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 5000);
   };
 
-  // Add photos selected by user - starts background photo upload immediately for zero-lag submit
-  const handlePhotoSelect = (e) => {
-    const files = Array.from(e.target.files || []);
+  const appendStampedItemPhotos = async (incomingFiles) => {
+    const files = Array.from(incomingFiles || []).filter(Boolean);
     if (!files.length) return;
 
     // Enforce Max 10 photos for Damaged Product
     const availableSlots = 10 - photoFiles.length;
     if (availableSlots <= 0) {
       showToast('Maximum of 10 damaged item photos allowed.', 'warning');
-      if (e.target) e.target.value = '';
       return;
     }
 
@@ -2534,14 +2584,26 @@ export default function App() {
       showToast(`Added ${availableSlots} photo(s). Maximum 10 photos allowed.`, 'info');
     }
 
+    const stampedFiles = await stampWatermarkOnFiles(filesToProcess, {
+      addressText: gpsLocation?.address || '',
+      addressLines: gpsLocation?.addressLines || [],
+      tagText: currentUser?.name || reporterName.trim() || gateSession?.profileName || 'Reporter'
+    });
+
     // Keep photos local in browser until final report submission (prevents orphan Google Drive uploads)
-    const newPhotos = filesToProcess.map(file => ({
+    const newPhotos = stampedFiles.map(file => ({
       file,
       previewUrl: URL.createObjectURL(file)
     }));
 
     setPhotoFiles(prev => [...prev, ...newPhotos]);
+  };
+
+  // Add photos selected by user - stamps Manila time/address watermark & keeps local until submit
+  const handlePhotoSelect = async (e) => {
+    const files = Array.from(e.target.files || []);
     if (e.target) e.target.value = ''; // Reset input value so subsequent snaps fire onChange reliably
+    await appendStampedItemPhotos(files);
   };
 
   const removePhoto = (index) => {
@@ -2567,19 +2629,22 @@ export default function App() {
   };
 
   // Official Logistics Paperwork (DR / Invoice / PO) Photo Handler with Gemini Flash AI OCR (Multi-photo up to 3)
-  const handlePaperworkSelect = async (e) => {
-    const files = Array.from(e.target.files || []);
+  const processPaperworkFiles = async (incomingFiles) => {
+    const files = Array.from(incomingFiles || []).filter(Boolean);
     if (!files.length) return;
 
     // Enforce Max 3 photos for Official Paperwork
     const availableSlots = 3 - paperworkPhotos.length;
     if (availableSlots <= 0) {
       showToast('Maximum of 3 official paperwork photos allowed.', 'warning');
-      if (e.target) e.target.value = '';
       return;
     }
 
-    const filesToProcess = files.slice(0, availableSlots);
+    const filesToProcess = await stampWatermarkOnFiles(files.slice(0, availableSlots), {
+      addressText: gpsLocation?.address || '',
+      addressLines: gpsLocation?.addressLines || [],
+      tagText: currentUser?.name || reporterName.trim() || gateSession?.profileName || 'Reporter'
+    });
     if (files.length > availableSlots) {
       showToast(`Processing ${availableSlots} photo(s). Maximum 3 paperwork photos allowed.`, 'info');
     }
@@ -2654,8 +2719,13 @@ export default function App() {
       setIsInspectingPaperwork(false);
       setPaperworkInspectionProgress(null);
       paperworkAbortControllerRef.current = null;
-      if (e.target) e.target.value = '';
     }
+  };
+
+  const handlePaperworkSelect = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (e.target) e.target.value = '';
+    await processPaperworkFiles(files);
   };
 
   const removePaperworkPhoto = (index) => {
@@ -2952,7 +3022,7 @@ export default function App() {
       supplier: resolvedSupplierFromPortal,
       reason: primaryReason,
       explanation: primaryExplanation,
-      disposition: determinedRmaType === 'supplier_outbound' ? '3- Return to Vendor (RTV)' : 'Pending Triage',
+      disposition: 'Pending',
       status: 'pending',
       reporter_name: reporterName || 'Staff',
       reporter_contact: effectiveContact,
@@ -4042,31 +4112,44 @@ export default function App() {
                       <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
                         Capture Mode:
                       </span>
-                      <div className="inline-flex p-0.5 bg-slate-100 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs">
-                        <button
-                          type="button"
-                          onClick={() => setPhotoCaptureMode('single')}
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${photoCaptureMode === 'single'
-                            ? 'bg-rose-600 text-white shadow-xs'
-                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                          title="Direct camera snap (solo photo)"
-                        >
-                          <Camera className="w-3 h-3" />
-                          <span>Camera</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setPhotoCaptureMode('batch')}
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${photoCaptureMode === 'batch'
-                            ? 'bg-rose-600 text-white shadow-xs'
-                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                            }`}
-                          title="Select multiple photos from gallery"
-                        >
-                          <Upload className="w-3 h-3" />
-                          <span>Gallery (Batch)</span>
-                        </button>
+                      <div className="inline-flex items-center gap-1 flex-wrap">
+                        <div className="inline-flex p-0.5 bg-slate-100 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs">
+                          <button
+                            type="button"
+                            onClick={() => setPhotoCaptureMode('single')}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${photoCaptureMode === 'single'
+                              ? 'bg-rose-600 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                              }`}
+                            title="Direct camera snap (solo photo)"
+                          >
+                            <Camera className="w-3 h-3" />
+                            <span>Camera</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPhotoCaptureMode('batch')}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${photoCaptureMode === 'batch'
+                              ? 'bg-rose-600 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                              }`}
+                            title="Select multiple photos from gallery"
+                          >
+                            <Upload className="w-3 h-3" />
+                            <span>Gallery (Batch)</span>
+                          </button>
+                        </div>
+                        {photoFiles.length < 10 && (
+                          <button
+                            type="button"
+                            onClick={() => setCameraCaptureTarget('item')}
+                            className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1 cursor-pointer shadow-2xs"
+                            title="Open live watermarked camera viewfinder"
+                          >
+                            <Camera className="w-3 h-3" />
+                            <span>Live Cam</span>
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -4283,31 +4366,44 @@ export default function App() {
                         <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
                           Capture Mode:
                         </span>
-                        <div className="inline-flex p-0.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs">
-                          <button
-                            type="button"
-                            onClick={() => setPaperworkCaptureMode('single')}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${paperworkCaptureMode === 'single'
-                              ? 'bg-violet-600 text-white shadow-xs'
-                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                              }`}
-                            title="Direct camera snap (solo photo)"
-                          >
-                            <Camera className="w-3 h-3" />
-                            <span>Camera</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPaperworkCaptureMode('batch')}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${paperworkCaptureMode === 'batch'
-                              ? 'bg-violet-600 text-white shadow-xs'
-                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                              }`}
-                            title="Select multiple photos from gallery"
-                          >
-                            <Upload className="w-3 h-3" />
-                            <span>Gallery (Batch)</span>
-                          </button>
+                        <div className="inline-flex items-center gap-1 flex-wrap">
+                          <div className="inline-flex p-0.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-2xs">
+                            <button
+                              type="button"
+                              onClick={() => setPaperworkCaptureMode('single')}
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${paperworkCaptureMode === 'single'
+                                ? 'bg-violet-600 text-white shadow-xs'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                }`}
+                              title="Direct camera snap (solo photo)"
+                            >
+                              <Camera className="w-3 h-3" />
+                              <span>Camera</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPaperworkCaptureMode('batch')}
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${paperworkCaptureMode === 'batch'
+                                ? 'bg-violet-600 text-white shadow-xs'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                }`}
+                              title="Select multiple photos from gallery"
+                            >
+                              <Upload className="w-3 h-3" />
+                              <span>Gallery (Batch)</span>
+                            </button>
+                          </div>
+                          {paperworkPhotos.length < 3 && !isInspectingPaperwork && (
+                            <button
+                              type="button"
+                              onClick={() => setCameraCaptureTarget('paperwork')}
+                              className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1 cursor-pointer shadow-2xs"
+                              title="Open live watermarked camera viewfinder"
+                            >
+                              <Camera className="w-3 h-3" />
+                              <span>Live Cam</span>
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -4639,6 +4735,28 @@ export default function App() {
                     title="New RMA Email Alert Recipients"
                     extraHint="Assigned Product Account Executive (AE) email is added automatically to CC."
                   />
+                )}
+
+                {/* GPS Capture Status Pill (Public Portal) */}
+                {gpsLocation.isAccurate && (
+                  <div className="px-3 py-2 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/60 flex items-center justify-between gap-2 text-[11px]">
+                    <span className="font-semibold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5 min-w-0 truncate">
+                      <span>📍</span>
+                      <span className="truncate">
+                        {getGpsAddressDisplay(gpsLocation) || `Accurate GPS (${gpsLocation.accuracy}m)`}
+                      </span>
+                    </span>
+                    {getGpsMapUrl(gpsLocation) && (
+                      <a
+                        href={getGpsMapUrl(gpsLocation)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 dark:text-blue-400 hover:underline font-bold shrink-0"
+                      >
+                        Maps ↗
+                      </a>
+                    )}
+                  </div>
                 )}
 
                 {/* Submit Action Button */}
@@ -5661,6 +5779,27 @@ export default function App() {
         title={lightboxPhoto?.title}
         subtitle={lightboxPhoto?.subtitle}
         onClose={() => setLightboxPhoto(null)}
+      />
+
+      {/* Live Watermarked Camera Modal (Product / Paperwork Photos) */}
+      <CameraCaptureModal
+        isOpen={Boolean(cameraCaptureTarget)}
+        onClose={() => setCameraCaptureTarget(null)}
+        title={cameraCaptureTarget === 'paperwork' ? 'Paperwork Proof — Live Camera' : 'Damaged Item Photo — Live Camera'}
+        subtitle="Stamps live PHT timestamp, street/barangay/city/ZIP address & reporter tag"
+        gpsLocation={gpsLocation}
+        tagName={currentUser?.name || reporterName.trim() || gateSession?.profileName || 'Reporter'}
+        multiple={cameraCaptureTarget === 'paperwork' ? paperworkCaptureMode === 'batch' : photoCaptureMode === 'batch'}
+        onCapture={async (files) => {
+          const target = cameraCaptureTarget;
+          setCameraCaptureTarget(null);
+          if (!files?.length) return;
+          if (target === 'paperwork') {
+            await processPaperworkFiles(files);
+          } else {
+            await appendStampedItemPhotos(files);
+          }
+        }}
       />
 
       {/* Unified Printable RMA QR Card & Consolidated Multi-Select Studio */}

@@ -60,7 +60,9 @@ import {
   resolveBatchManifestLifecycle,
   formatDateYmd,
   doesCreditMemoLinkReport,
-  findConsolidatedRtvBatchReports
+  findConsolidatedRtvBatchReports,
+  getGpsAddressDisplay,
+  getGpsMapUrl
 } from '../utils/rmaHelpers';
 
 export default function CustomerHubTab({
@@ -1502,13 +1504,9 @@ export default function CustomerHubTab({
                               {outcome.label}
                             </span>
                             {outcome.choiceKey === 'scrap' && (
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border inline-block ${
-                                getItemNeedsReorder(item)
-                                  ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800'
-                                  : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                              }`}>
+                              <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
                                 {getItemNeedsReorder(item) ? '🛒 Re-Order: YES' : '❌ No Re-Order'}
-                              </span>
+                              </div>
                             )}
                           </div>
                         )}
@@ -1528,19 +1526,24 @@ export default function CustomerHubTab({
                       {/* 9. Date & GPS */}
                       <td className="py-3 px-3.5 text-right font-mono text-[11px] text-slate-500 dark:text-slate-400">
                         <div>{item.created_at ? formatDateYmd(item.created_at) : ''}</div>
-                        {item.gps_latitude && item.gps_longitude ? (
-                          <a
-                            href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 text-[10px] font-bold"
-                          >
-                            <MapPin className="w-3 h-3 text-rose-500" />
-                            <span>Map</span>
-                          </a>
-                        ) : (
-                          <span className="text-slate-300 dark:text-slate-600 text-[10px]">No GPS</span>
-                        )}
+                        {(() => {
+                          const mapUrl = getGpsMapUrl(item);
+                          const gpsAddr = getGpsAddressDisplay(item);
+                          return mapUrl ? (
+                            <a
+                              href={mapUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 text-[10px] font-bold max-w-[165px]"
+                              title={gpsAddr || 'View GPS Location on Google Maps'}
+                            >
+                              <MapPin className="w-3 h-3 text-rose-500 shrink-0" />
+                              <span className="truncate">{gpsAddr || 'Map'}</span>
+                            </a>
+                          ) : (
+                            <span className="text-slate-300 dark:text-slate-600 text-[10px]">No GPS</span>
+                          );
+                        })()}
                       </td>
 
                       {/* 10. Actions: 4-Choice / Pickup, Form, Split Qty / Details, Assign SKU, Credit Memo & Delete */}
@@ -2803,7 +2806,7 @@ export default function CustomerHubTab({
   </div>
     )}
 
-    {/* Supplier, Email & 10-Day SLA Follow-Up Modal */}
+    {/* Supplier & Email Details Modal */}
     <SupplierFollowUpModal
       isOpen={Boolean(followUpModalReport)}
       onClose={() => setFollowUpModalReport(null)}

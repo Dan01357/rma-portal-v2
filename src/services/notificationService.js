@@ -20,7 +20,9 @@ import {
   DEFAULT_FOLLOWUP_CONFIG,
   DEFAULT_MATRIX_SEND_TIME_PHT,
   normalizeSandboxEmail,
-  normalizeTimeHhmm
+  normalizeTimeHhmm,
+  computeFourStepWorkflow,
+  renderWorkflowStepsHtml
 } from '../utils/followUpWorkflow';
 import {
   isTestRecord,
@@ -31,9 +33,12 @@ import {
   getConsolidatedPickupItems,
   formatPeso,
   cleanExplanationText,
-  normalizePhotoUrlArray
+  normalizePhotoUrlArray,
+  getGpsAddressDisplay,
+  getGpsMapUrl
 } from '../utils/rmaHelpers';
 import { generatePickupFormPdfAttachment } from '../utils/pickupFormPdf';
+import { buildRmaAlertXlsxAttachment } from '../utils/rmaAlertXlsx';
 
 const splitEmailList = (raw) => {
   if (!raw) return [];
@@ -814,8 +819,10 @@ export const notificationService = {
       : (typeof report.photos === 'string' ? JSON.parse(report.photos || '[]') : []);
     const manifestItems = Array.isArray(report.items) ? report.items : [];
 
-    const hasGps = report.gps_latitude && report.gps_longitude;
-    const mapUrl = hasGps ? `https://www.google.com/maps?q=${report.gps_latitude},${report.gps_longitude}` : null;
+    const gpsAddress = getGpsAddressDisplay(report);
+    const mapUrl = getGpsMapUrl(report);
+    const hasGps = Boolean(mapUrl || gpsAddress);
+    const gpsAccNote = report.gps_accuracy ? ` (${Number(report.gps_accuracy).toFixed(0)}m accuracy)` : '';
     const editUrl = editorContext?.editUrl || '';
     const editorAuthorizedEmail = editorContext?.editorAuthorizedEmail || '';
     const editorAuthorizedEmails = Array.isArray(editorContext?.editorAuthorizedEmails) && editorContext.editorAuthorizedEmails.length > 0
@@ -929,9 +936,10 @@ export const notificationService = {
                 <div class="row">
                   <div class="col-label">GPS Location:</div>
                   <div class="col-val">
-                    <a href="${mapUrl}" target="_blank" style="color: #2563eb; text-decoration: underline;">
-                      📍 View on Google Maps (${Number(report.gps_accuracy || 0).toFixed(0)}m accuracy)
-                    </a>
+                    ${mapUrl
+                      ? `<a href="${mapUrl}" target="_blank" style="color: #2563eb; text-decoration: underline;">📍 ${escapeEmailHtml(gpsAddress || 'View on Google Maps')}${escapeEmailHtml(gpsAccNote)} ↗</a>`
+                      : `<span>📍 ${escapeEmailHtml(gpsAddress)}${escapeEmailHtml(gpsAccNote)}</span>`
+                    }
                   </div>
                 </div>` : ''}
               </div>
@@ -1084,11 +1092,24 @@ export const notificationService = {
         ? report.photos 
         : (typeof report.photos === 'string' ? JSON.parse(report.photos || '[]') : []);
 
-      // Attach proof images so Gmail provides built-in native in-page lightbox viewer
-      const attachments = photos.map((p, idx) => ({
+      // Attach mirror .xlsx worksheet + proof images so recipients can inspect or reply with edits
+      const photoAttachments = photos.map((p, idx) => ({
         filename: `proof_photo_${idx + 1}.jpg`,
         path: p
       }));
+      let xlsxMirrorAttachment = null;
+      try {
+        xlsxMirrorAttachment = buildRmaAlertXlsxAttachment(report, {
+          subject,
+          editUrl,
+          resolvedRecipients: { toList, ccList: finalCcList }
+        });
+      } catch (xlsxErr) {
+        console.warn('Notice generating RMA alert mirror .xlsx attachment:', xlsxErr?.message || xlsxErr);
+      }
+      const attachments = xlsxMirrorAttachment
+        ? [xlsxMirrorAttachment, ...photoAttachments]
+        : photoAttachments;
 
       console.log(`[RMA Email Dispatch] (TestMode: ${testActive}) Sending from "${config.senderEmail}" to "${toEmail}", CC: [${finalCcList.join(', ')}] with ${attachments.length} attachments`);
 
@@ -1101,6 +1122,7 @@ export const notificationService = {
         },
         body: JSON.stringify({
           from: config.senderEmail,
+          replyTo: config.senderEmail,
           fromName: testActive ? `[TEST] ${config.senderName}` : config.senderName,
           to: toEmail,
           cc: finalCcList,
@@ -1559,6 +1581,11 @@ export const notificationService = {
               </div>
             </div>` : ''}
 
+            <div class="section-title">Full 4-Step &amp; 10-Calendar-Day Pickup Timeline</div>
+            <div class="card" style="padding: 12px 14px;">
+              ${renderWorkflowStepsHtml(computeFourStepWorkflow(primaryReport, catalogProducts))}
+            </div>
+
             <div class="section-title">Itemized Return Breakdown (${itemsTable.length} line${itemsTable.length > 1 ? 's' : ''})</div>
             <table class="items">
               <thead>
@@ -1816,6 +1843,7 @@ export const notificationService = {
         effectiveReports.map((r) => String(r.store_branch || '').trim()).filter(Boolean)
       )).join(', ') || 'Warehouse / N/A';
 
+      const wfForText = computeFourStepWorkflow(primaryReport, catalogProducts);
       const plainTextLines = [
         `${testActive ? '[TEST] ' : ''}${baseSubject}`,
         `${isCustomerStream && isPickupEvent ? 'Customer / Outlet' : 'Supplier / Vendor'}: ${partyDisplay}`,
@@ -1829,6 +1857,14 @@ export const notificationService = {
               `Defect / Return Reason: ${primaryReport.reason || 'Damaged / Defective'}`,
               `Warehouse Location: ${primaryReport.warehouse_location || 'Receiving / Warehouse'}`
             ]),
+        `Workflow Timeline: Step 1 Report=${wfForText.step1.dateDisplay} | Step 2=${wfForText.step2.text} | Step 3 Picked Up=${wfForText.step3.dateDisplay} | Step 4=${wfForText.step4.dateDisplay}`,
+        ...(Array.isArray(wfForText.timelineDays)
+          ? wfForText.timelineDays.map((d) => (
+              d.day === 0
+                ? `  - Day 0 (Report Date): ${d.dateLabel} => ${d.statusText}`
+                : `  - Day ${d.day} (${d.dateLabel}) => ${d.statusText}`
+            ))
+          : []),
         ...(itemsTable.length > 0
           ? [
               `Items (${itemsTable.length} line${itemsTable.length > 1 ? 's' : ''}):`,
@@ -1984,6 +2020,90 @@ export const notificationService = {
         method: 'POST',
         headers,
         body: JSON.stringify(payload)
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return {
+          success: false,
+          status: res.status,
+          error: data?.message || data?.error || `HTTP ${res.status}`
+        };
+      }
+      return data || { success: false, error: 'Empty response from server.' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Poll Gmail IMAP UNSEEN replies with edited `.xlsx` attachments and apply RMA updates
+   */
+  async syncEmailRepliesNow() {
+    try {
+      let accessToken = '';
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        accessToken = session?.access_token || '';
+      } catch {}
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
+      const res = await fetch('/api/send-email?action=sync-email-replies', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ action: 'sync-email-replies' })
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return {
+          success: false,
+          status: res.status,
+          error: data?.message || data?.error || `HTTP ${res.status}`
+        };
+      }
+      return data || { success: false, error: 'Empty response from server.' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Manually upload an edited New RMA Alert `.xlsx` workbook to update its matching RMA ticket
+   */
+  async ingestEditedRmaXlsx({ file, rmaNumber = '', actorName = 'Admin' } = {}) {
+    if (!file) return { success: false, error: 'Please select a .xlsx file.' };
+    try {
+      const buf = await file.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+      }
+      const fileBase64 = btoa(binary);
+
+      let accessToken = '';
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        accessToken = session?.access_token || '';
+      } catch {}
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
+      const res = await fetch('/api/send-email?action=ingest-xlsx-reply', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'ingest-xlsx-reply',
+          fileBase64,
+          filename: file.name || 'edited-rma.xlsx',
+          rmaNumber,
+          actorName
+        })
       });
 
       const data = await res.json().catch(() => null);

@@ -96,12 +96,29 @@ export function formatMonthDayYear(dateInput) {
     return new Intl.DateTimeFormat('en-US', {
       timeZone: 'Asia/Manila',
       month: 'short',
-      day: 'numeric',
+      day: '2-digit',
       year: 'numeric'
     }).format(dt);
   } catch {
     return ymd;
   }
+}
+
+export function formatMonthDayYearHm(dateInput) {
+  if (!dateInput) return '';
+  const hm = formatDateTimeYmdHm(dateInput);
+  const ymd = hm ? hm.slice(0, 10) : formatDateYmd(dateInput);
+  const timePart = hm && hm.length >= 16 ? hm.slice(11, 16) : '';
+  const mdy = formatMonthDayYear(ymd);
+  if (!mdy) return hm || '';
+  return timePart ? `${mdy} ${timePart}` : mdy;
+}
+
+export function addManilaCalendarDaysYmd(ymd, offsetDays) {
+  if (!ymd || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return '';
+  const [y, m, d] = ymd.split('-').map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d + Number(offsetDays || 0)));
+  return utc.toISOString().slice(0, 10);
 }
 
 export function diffManilaCalendarDays(startVal, nowDate = new Date()) {
@@ -227,11 +244,11 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
 
   const autoDisposedAtIso =
     followUpMeta.auto_disposed_at ||
-    (['auto_disposed_after_10_days', 'auto_closed_10_days'].includes(followUpMeta.case_status)
+    (followUpMeta.case_status === 'auto_disposed_after_10_days'
       ? followUpMeta.case_closed_at
       : null);
 
-  const isAutoDisposed = Boolean(autoDisposedAtIso) || followUpMeta.case_status === 'auto_disposed_after_10_days';
+  const isAutoDisposed = Boolean(followUpMeta.auto_disposed_at) || followUpMeta.case_status === 'auto_disposed_after_10_days';
   const isAutoClosed = followUpMeta.case_status === 'auto_closed_10_days' || isAutoDisposed;
 
   const isRestocked = workflowRes === 'restocked' || statusLower === 'restocked';
@@ -275,10 +292,11 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
     followUpEnabled = Boolean(options.customerFollowUpDefaultEnabled);
   }
 
+  const reportDateIso = report?.created_at || followUpMeta.started_at || meta.simple_rtv_updated_at || report?.updated_at || nowDate.toISOString();
   const startedAtIso =
     followUpMeta.started_at ||
     (isSupplierStream && party.hasValidSupplier
-      ? (meta.simple_rtv_updated_at || report?.created_at || report?.updated_at || nowDate.toISOString())
+      ? (report?.created_at || meta.simple_rtv_updated_at || report?.updated_at || nowDate.toISOString())
       : (report?.created_at || report?.updated_at || nowDate.toISOString()));
 
   const calendarDay = diffManilaCalendarDays(startedAtIso, nowDate);
@@ -289,48 +307,140 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
   const alreadySentToday = lastSentPhtDate === todayManila;
   const sentCount = Number(followUpMeta.sent_count || 0);
 
+  // Build Day 0..Day 10 timeline matrix anchored on Manila calendar dates
+  const day0Ymd = getManilaDateYmd(reportDateIso) || getManilaDateYmd(startedAtIso);
+  const dispatchedPhtDates = new Set();
+  const dispatchedDays = new Set();
+  if (lastSentPhtDate) dispatchedPhtDates.add(lastSentPhtDate);
+  if (followUpMeta.last_sent_day !== undefined && followUpMeta.last_sent_day !== null) {
+    dispatchedDays.add(Number(followUpMeta.last_sent_day));
+  }
+  if (Array.isArray(report?.audit_trail)) {
+    report.audit_trail.forEach((entry) => {
+      if (entry?.action === 'FOLLOWUP_EMAIL_SENT' && entry?.timestamp) {
+        const y = getManilaDateYmd(entry.timestamp);
+        if (y) dispatchedPhtDates.add(y);
+      }
+    });
+  }
+
+  const pickedUpDayIdx = pickedUpAtIso && day0Ymd
+    ? diffManilaCalendarDays(`${day0Ymd}T00:00:00+08:00`, pickedUpAtIso)
+    : null;
+  const pickedUpDisplayHm = pickedUpAtIso ? formatMonthDayYearHm(pickedUpAtIso) : '';
+  const currentDayFromReport = day0Ymd
+    ? diffManilaCalendarDays(`${day0Ymd}T00:00:00+08:00`, nowDate)
+    : calendarDay;
+  const exceededAfter10 = !isPickedUp && (isAutoDisposed || (!isClosed && calendarDay > FOLLOW_UP_MAX_DAYS));
+
+  const timelineDays = [];
+  if (day0Ymd) {
+    const day0Display = formatMonthDayYearHm(reportDateIso) || formatMonthDayYear(day0Ymd);
+    timelineDays.push({
+      day: 0,
+      dateYmd: day0Ymd,
+      dateLabel: day0Display,
+      statusText: pickedUpAtIso && pickedUpDayIdx === 0
+        ? `Yes — Picked up on ${pickedUpDisplayHm}`
+        : `Report Logged (${day0Display})`,
+      state: pickedUpAtIso && pickedUpDayIdx === 0 ? 'picked_up' : 'reported'
+    });
+
+    for (let d = 1; d <= FOLLOW_UP_MAX_DAYS; d++) {
+      const dYmd = addManilaCalendarDaysYmd(day0Ymd, d);
+      const dDateLabel = formatMonthDayYear(`${dYmd}T12:00:00+08:00`) || dYmd;
+      const wasPickedUpOnDay = Boolean(pickedUpAtIso) && pickedUpDayIdx === d;
+      const wasPickedUpEarlier = Boolean(pickedUpAtIso) && pickedUpDayIdx !== null && pickedUpDayIdx < d;
+      const wasDispatched = dispatchedPhtDates.has(dYmd) || dispatchedDays.has(d);
+
+      let statusText = 'Upcoming';
+      let state = 'upcoming';
+
+      if (wasPickedUpOnDay) {
+        statusText = `Yes — Picked up on ${pickedUpDisplayHm}`;
+        state = 'picked_up';
+      } else if (wasPickedUpEarlier) {
+        statusText = `Halted — Picked up on ${pickedUpDisplayHm}`;
+        state = 'halted';
+      } else if (exceededAfter10) {
+        if (d === FOLLOW_UP_MAX_DAYS) {
+          statusText = 'Exceeded Day 10 — Auto-Scrapped & Case Closed';
+          state = 'expired';
+        } else {
+          statusText = wasDispatched ? 'No — Daily follow-up dispatched' : 'No — Not picked up';
+          state = 'past';
+        }
+      } else if (isClosed) {
+        statusText = `Halted — Case closed (${formatMonthDayYearHm(caseClosedAtIso || nowDate)})`;
+        state = 'halted';
+      } else if (d <= currentDayFromReport) {
+        if (wasDispatched) {
+          statusText = 'No — Daily follow-up dispatched';
+          state = 'dispatched';
+        } else {
+          statusText = 'No — Waiting for pickup';
+          state = 'waiting';
+        }
+      }
+
+      timelineDays.push({
+        day: d,
+        dateYmd: dYmd,
+        dateLabel: dDateLabel,
+        statusText,
+        state
+      });
+    }
+  }
+
   const step1 = {
     key: 'report_date',
     label: 'Step 1: Report Date',
-    dateIso: report?.created_at || startedAtIso,
-    dateYmd: formatDateYmd(report?.created_at || startedAtIso),
-    dateDisplay: formatMonthDayYear(report?.created_at || startedAtIso) || 'N/A',
+    dateIso: reportDateIso,
+    dateYmd: formatDateYmd(reportDateIso),
+    dateDisplay: formatMonthDayYearHm(reportDateIso) || 'N/A',
     done: true
   };
 
   const step2Text = isClosed
-    ? (isAutoDisposed ? 'Expired (>10 Days)' : isPickedUp ? 'Completed' : 'Closed')
+    ? (isAutoDisposed ? 'Exceeded Day 10 — Auto-Scrapped' : isPickedUp ? 'Completed (Picked Up)' : 'Closed')
     : !followUpEnabled
-      ? (isSupplierStream && !party.hasValidSupplier ? 'Needs Supplier & Email' : 'Follow-Up Paused')
+      ? (isSupplierStream && !party.hasValidSupplier ? 'Waiting Supplier Info' : 'Waiting Pickup Tracking')
       : calendarDay > FOLLOW_UP_MAX_DAYS
-        ? `Expired (Day ${calendarDay} > ${FOLLOW_UP_MAX_DAYS})`
+        ? `Exceeded Day 10 (Day ${calendarDay})`
         : `Day ${calendarDay} of ${FOLLOW_UP_MAX_DAYS}`;
 
   const step2 = {
     key: 'waiting_pickup',
-    label: isSupplierStream ? 'Step 2: Waiting for Pickup' : 'Step 2: Waiting for Handover',
+    label: isSupplierStream ? 'Step 2: Waiting For Pickup' : 'Step 2: Waiting For Handover',
     calendarDay,
     maxDays: FOLLOW_UP_MAX_DAYS,
     status: isClosed ? 'completed' : isExpiredAfter10Days ? 'expired' : (isCountdownActive ? 'active' : 'paused'),
     text: step2Text,
+    exceededAfter10,
+    timelineDays,
     lastSentPhtDate,
     sentCount,
     done: isClosed
   };
 
+  const step3DateDisplay = pickedUpAtIso
+    ? `Picked up on ${pickedUpDisplayHm}`
+    : (isAutoDisposed || isAutoClosed || isExpiredAfter10Days
+        ? 'Not Picked Up (Auto-Scrapped after Day 10)'
+        : 'Pending Pickup');
+
   const step3 = {
     key: 'pickup_date',
-    label: isSupplierStream ? 'Step 3: Picked Up Date' : 'Step 3: Handover Date',
+    label: 'Step 3: Driver Picked Up Date',
     dateIso: pickedUpAtIso,
     dateYmd: pickedUpAtIso ? formatDateYmd(pickedUpAtIso) : '',
-    dateDisplay: pickedUpAtIso
-      ? formatMonthDayYear(pickedUpAtIso)
-      : (isAutoClosed || isExpiredAfter10Days ? 'Expired (>10 Days)' : 'Pending'),
+    dateDisplay: step3DateDisplay,
     done: Boolean(pickedUpAtIso)
   };
 
   const step4Reason = isAutoDisposed
-    ? 'Auto-Disposed (>10 Days)'
+    ? 'Auto-Scrapped (>10 Days)'
     : followUpMeta.case_status === 'auto_closed_10_days'
       ? 'Auto-Closed (>10 Days)'
       : isPickedUp
@@ -345,12 +455,16 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
                 ? 'Case Closed'
                 : 'Open';
 
+  const step4Display = isClosed
+    ? `Case Closed (${formatMonthDayYearHm(caseClosedAtIso || nowDate)})`
+    : 'Open';
+
   const step4 = {
     key: 'case_close',
     label: 'Step 4: Case Close',
     dateIso: caseClosedAtIso,
     dateYmd: caseClosedAtIso ? formatDateYmd(caseClosedAtIso) : '',
-    dateDisplay: caseClosedAtIso ? formatMonthDayYear(caseClosedAtIso) : 'Open',
+    dateDisplay: step4Display,
     reason: step4Reason,
     done: isClosed
   };
@@ -360,10 +474,10 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
     ? `Step 4: ${step4Reason}`
     : isCountdownActive
       ? (calendarDay > FOLLOW_UP_MAX_DAYS
-          ? `Step 2: Expired (Day ${calendarDay} > 10)`
+          ? `Step 2: Exceeded Day 10 (Day ${calendarDay})`
           : `Step 2: Waiting (Day ${calendarDay} of 10)`)
       : (isSupplierStream && !party.hasValidSupplier
-          ? 'Step 2: Needs Supplier & Email'
+          ? 'Step 2: Waiting Supplier Info'
           : 'Step 2: Intake / Triage');
 
   return {
@@ -372,7 +486,7 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
     party,
     startedAtIso,
     startedAtYmd: formatDateYmd(startedAtIso),
-    startedAtDisplay: formatMonthDayYear(startedAtIso),
+    startedAtDisplay: formatMonthDayYearHm(startedAtIso),
     calendarDay,
     maxDays: FOLLOW_UP_MAX_DAYS,
     followUpEnabled,
@@ -395,6 +509,7 @@ export function computeFourStepWorkflow(report, catalogProducts = [], options = 
     caseClosedAtYmd: step4.dateYmd,
     activeStepNumber,
     stepSummary,
+    timelineDays,
     step1,
     step2,
     step3,
@@ -521,20 +636,22 @@ export function buildFollowUpEmailSubject({ report, supplierName, calendarDay, i
   return formatTestEmailSubject(base, isTestMode);
 }
 
-function renderWorkflowStepsHtml(wf) {
+export function renderWorkflowStepsHtml(wf) {
   const rows = [
-    { step: wf.step1.label, status: wf.step1.dateDisplay, detail: `ISO (YYYY-MM-DD): ${wf.step1.dateYmd || 'N/A'}` },
-    { step: wf.step2.label, status: wf.step2.text, detail: `Max Window: ${wf.maxDays} Calendar Days (Asia/Manila)` },
-    { step: wf.step3.label, status: wf.step3.dateDisplay, detail: wf.step3.dateYmd ? `ISO (YYYY-MM-DD): ${wf.step3.dateYmd}` : 'Not Yet Picked Up' },
-    { step: wf.step4.label, status: wf.step4.dateDisplay, detail: wf.step4.reason }
+    { step: 'Step 1: Report Date', status: wf.step1.dateDisplay, detail: `ISO (YYYY-MM-DD): ${wf.step1.dateYmd || 'N/A'}` },
+    { step: 'Step 2: Waiting For Pickup (10 Calendar Days Max)', status: wf.step2.text, detail: `Day ${Math.min(wf.calendarDay, wf.maxDays)} of ${wf.maxDays} Calendar Days (Asia/Manila)` },
+    { step: 'Step 3: Driver Picked Up Date', status: wf.step3.dateDisplay, detail: wf.step3.dateYmd ? `ISO (YYYY-MM-DD): ${wf.step3.dateYmd}` : 'Did the RMA get picked up yet?' },
+    { step: 'Step 4: Case Close', status: wf.step4.dateDisplay, detail: wf.step4.reason }
   ];
+
+  const days = Array.isArray(wf.timelineDays) ? wf.timelineDays : [];
 
   return `
     <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;">
       <thead>
         <tr>
-          <th style="background: #0f172a; color: #ffffff; text-align: left; padding: 8px; font-size: 11px; text-transform: uppercase;">Workflow Step</th>
-          <th style="background: #0f172a; color: #ffffff; text-align: left; padding: 8px; font-size: 11px; text-transform: uppercase;">Date / Progress</th>
+          <th style="background: #0f172a; color: #ffffff; text-align: left; padding: 8px; font-size: 11px; text-transform: uppercase;">4-Step Workflow Stage</th>
+          <th style="background: #0f172a; color: #ffffff; text-align: left; padding: 8px; font-size: 11px; text-transform: uppercase;">Status / Date &amp; Time</th>
           <th style="background: #0f172a; color: #ffffff; text-align: left; padding: 8px; font-size: 11px; text-transform: uppercase;">Details</th>
         </tr>
       </thead>
@@ -548,6 +665,40 @@ function renderWorkflowStepsHtml(wf) {
         `).join('')}
       </tbody>
     </table>
+
+    ${days.length > 0 ? `
+    <div style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #475569; margin: 14px 0 6px;">Step 2 Daily Pickup Tracker — Day 0 to Day 10 (Did the RMA get picked up?)</div>
+    <table style="width: 100%; border-collapse: collapse; font-size: 11px; border: 1px solid #e2e8f0;">
+      <thead>
+        <tr>
+          <th style="background: #f1f5f9; color: #334155; text-align: left; padding: 6px 8px; border-bottom: 1px solid #cbd5e1;">Day &amp; Manila Date</th>
+          <th style="background: #f1f5f9; color: #334155; text-align: left; padding: 6px 8px; border-bottom: 1px solid #cbd5e1;">Did the RMA get picked up?</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${days.map((d) => {
+          const badgeColor = d.state === 'picked_up'
+            ? '#065f46'
+            : d.state === 'expired'
+              ? '#9f1239'
+              : d.state === 'dispatched'
+                ? '#3730a3'
+                : d.state === 'waiting' || d.state === 'past'
+                  ? '#92400e'
+                  : '#64748b';
+          return `
+            <tr>
+              <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; font-family: monospace; font-weight: 700; color: #0f172a;">
+                ${escapeHtml(d.day === 0 ? `Day 0 (Report Date): ${d.dateLabel}` : `Day ${d.day} (${d.dateLabel})`)}
+              </td>
+              <td style="padding: 6px 8px; border-bottom: 1px solid #e2e8f0; font-weight: 700; color: ${badgeColor};">
+                ${escapeHtml(d.statusText)}
+              </td>
+            </tr>
+          `;
+        }).join('')}
+      </tbody>
+    </table>` : ''}
   `;
 }
 
@@ -685,11 +836,20 @@ export function buildFollowUpEmailContent({
     </html>
   `;
 
+  const timelineText = Array.isArray(wf.timelineDays)
+    ? wf.timelineDays.map((d) => (
+        d.day === 0
+          ? `  - Day 0 (Report Date): ${d.dateLabel} => ${d.statusText}`
+          : `  - Day ${d.day} (${d.dateLabel}) => ${d.statusText}`
+      ))
+    : [];
+
   const text = [
     subject,
     `${wf.isSupplierStream ? 'Supplier' : 'Party'}: ${partyName}`,
     warningText,
-    `Workflow Steps: Step 1 Report=${wf.step1.dateYmd} | Step 2=${wf.step2.text} | Step 3=${wf.step3.dateDisplay} | Step 4=${wf.step4.reason}`,
+    `Step 1 (Report Date): ${wf.step1.dateDisplay} | Step 2: ${wf.step2.text} | Step 3 (Driver Picked Up): ${wf.step3.dateDisplay} | Step 4 (Case Close): ${wf.step4.dateDisplay}`,
+    ...timelineText,
     ...rows.map((it) => `- ${it.name} (${it.totalPieces} ${it.unitName}) • ${it.reason || 'Damaged'}${it.explanation ? ` | ${it.explanation}` : ''}`),
     ...(photos.length > 0 ? [`Proof Photos: ${photos.join(', ')}`] : [])
   ].join('\n');

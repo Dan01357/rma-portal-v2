@@ -29,6 +29,26 @@ const EMAIL_RECIPIENTS_KEY = 'email_recipients';
 const EMAIL_RECIPIENTS_BY_TYPE_KEY = 'email_recipients_by_type';
 const DAILY_FOLLOWUP_CONFIG_KEY = 'daily_followup_config';
 const TEST_SANDBOX_EMAIL_KEY = 'test_sandbox_email';
+const SUPPLIER_DIRECTORY_KEY = 'supplier_directory_store';
+
+function normalizeDirKey(name) {
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function buildDirectoryLookupMap(rawDir) {
+  const map = new Map();
+  if (!Array.isArray(rawDir)) return map;
+  for (const entry of rawDir) {
+    if (!entry || typeof entry !== 'object') continue;
+    const k = normalizeDirKey(entry.supplier_name || entry.supplierName);
+    if (!k) continue;
+    map.set(k, {
+      emailToList: splitEmailStringOrList(entry.email_to || entry.supplier_email_to || ''),
+      emailCcList: splitEmailStringOrList(entry.email_cc || entry.supplier_email_cc || '')
+    });
+  }
+  return map;
+}
 
 async function safeUpdateRmaReport(reportId, updates) {
   let { data, error } = await supabase
@@ -121,7 +141,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
         EMAIL_RECIPIENTS_KEY,
         EMAIL_RECIPIENTS_BY_TYPE_KEY,
         DAILY_FOLLOWUP_CONFIG_KEY,
-        TEST_SANDBOX_EMAIL_KEY
+        TEST_SANDBOX_EMAIL_KEY,
+        SUPPLIER_DIRECTORY_KEY
       ]);
 
     if (Array.isArray(settingsRows)) {
@@ -185,6 +206,7 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
   const followUpProfile = recipientsByType?.supplier_followup || {};
   const followUpProfileTo = splitEmailStringOrList(followUpProfile?.to);
   const followUpProfileCc = splitEmailStringOrList(followUpProfile?.cc);
+  const directoryMap = buildDirectoryLookupMap(settingsMap.get(SUPPLIER_DIRECTORY_KEY));
 
   // 3. Prepare SMTP transport if sending real emails
   let transporter = null;
@@ -398,10 +420,14 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
       continue;
     }
 
+    const dirContact = directoryMap.get(normalizeDirKey(wf.party.supplierName)) || null;
     const overrideTo = splitEmailStringOrList(body.overrideToEmail);
+    const partyOrDirTo = wf.party.toEmails.length > 0
+      ? wf.party.toEmails
+      : (dirContact?.emailToList?.length ? dirContact.emailToList : []);
     const liveTo = overrideTo.length > 0
       ? overrideTo
-      : (wf.party.toEmails.length > 0 ? wf.party.toEmails : followUpProfileTo);
+      : (partyOrDirTo.length > 0 ? partyOrDirTo : followUpProfileTo);
 
     if (!isTestMode && liveTo.length === 0) {
       skippedItems.push({ rmaNumber, reason: 'NO_SUPPLIER_EMAIL' });
@@ -414,6 +440,7 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
       : Array.from(
           new Set([
             ...wf.party.ccEmails,
+            ...(dirContact?.emailCcList || []),
             ...followUpProfileTo,
             ...followUpProfileCc,
             ...(wf.party.aeEmail ? [wf.party.aeEmail] : [])

@@ -1,5 +1,6 @@
 import { handleDailyMatrixEmail } from './_lib/dailyMatrixEmailHandler.js';
 import { handleDailyFollowUp } from './_lib/dailyFollowUpHandler.js';
+import { handleSyncEmailReplies, handleIngestXlsxReply } from './_lib/imapReplySyncHandler.js';
 import { supabase } from './_lib/supabase.js';
 import {
   createSmtpTransport,
@@ -39,6 +40,12 @@ export default async function handler(req, res) {
     }
     if (requestedAction === 'daily-followup') {
       return await handleDailyFollowUp(req, res, payload);
+    }
+    if (requestedAction === 'sync-email-replies') {
+      return await handleSyncEmailReplies(req, res, payload);
+    }
+    if (requestedAction === 'ingest-xlsx-reply') {
+      return await handleIngestXlsxReply(req, res, payload);
     }
 
     const smtp = createSmtpTransport();
@@ -165,6 +172,7 @@ export default async function handler(req, res) {
 
     const mailOptions = {
       from: formattedFrom,
+      replyTo: payload?.replyTo || from || smtpUser,
       to: finalTo,
       cc: finalCc,
       subject: finalSubject,
@@ -178,12 +186,17 @@ export default async function handler(req, res) {
       info = await transporter.sendMail(mailOptions);
     } catch (sendErr) {
       if (mailOptions.attachments && mailOptions.attachments.length > 0) {
-        const pdfOnlyAttachments = mailOptions.attachments.filter(
-          (a) => a && (a.contentType === 'application/pdf' || String(a.filename || '').toLowerCase().endsWith('.pdf')) && !a.path
+        const inlineDocAttachments = mailOptions.attachments.filter(
+          (a) =>
+            a &&
+            !a.path &&
+            (a.contentType === 'application/pdf' ||
+              a.contentType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+              /\.(pdf|xlsx)$/i.test(String(a.filename || '')))
         );
-        if (pdfOnlyAttachments.length > 0 && pdfOnlyAttachments.length < mailOptions.attachments.length) {
-          console.warn('sendMail with remote image attachments failed, retrying with PDF attachment only:', sendErr.message);
-          mailOptions.attachments = pdfOnlyAttachments;
+        if (inlineDocAttachments.length > 0 && inlineDocAttachments.length < mailOptions.attachments.length) {
+          console.warn('sendMail with remote image attachments failed, retrying with PDF/XLSX attachments only:', sendErr.message);
+          mailOptions.attachments = inlineDocAttachments;
           try {
             info = await transporter.sendMail(mailOptions);
           } catch (pdfRetryErr) {

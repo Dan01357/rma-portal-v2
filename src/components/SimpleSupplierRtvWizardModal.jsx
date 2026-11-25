@@ -2,11 +2,13 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X, DollarSign, RefreshCw, Trash2, PackageCheck, Truck, Camera,
   Upload, CheckCircle2, AlertTriangle, Loader2, FileCheck2, Sparkles,
-  ArrowLeft, ArrowRight, Building2, UserCheck, Settings2, Clock, Mail
+  ArrowLeft, ArrowRight, Building2, UserCheck, Settings2, Clock, Mail,
+  Plus, Search
 } from 'lucide-react';
 import { catalogService } from '../services/catalogService';
 import { supplierClaimService } from '../services/supplierClaimService';
 import { notificationService } from '../services/notificationService';
+import { supplierDirectoryService, SUPPLIER_DIRECTORY_EVENT } from '../services/supplierDirectoryService';
 import {
   extractGoogleDriveFolderId,
   formatQuantityWithPackSize,
@@ -18,11 +20,18 @@ import {
   formatPeso,
   getConsolidatedPickupItems,
   isTestRecord,
+  isTrashedRecord,
+  isArchivedRecord,
+  isManifestSubItem,
   formatDateYmd,
-  normalizePhotoUrlArray
+  normalizePhotoUrlArray,
+  getGpsAddressDisplay
 } from '../utils/rmaHelpers';
+import { stampWatermarkOnFiles } from '../utils/cameraWatermark';
 import SupplierPickupFormModal from './SupplierPickupFormModal';
+import CameraCaptureModal from './CameraCaptureModal';
 import EmailRecipientsEditor from './EmailRecipientsEditor';
+import FollowUpTimelineCard from './FollowUpTimelineCard';
 
 function getFourOptions(isSupplierStream) {
   if (isSupplierStream) {
@@ -263,6 +272,10 @@ export default function SimpleSupplierRtvWizardModal({
   );
 
   const [step, setStep] = useState('choose'); // 'choose' | 'pickup' | 'done'
+  const [wizardReports, setWizardReports] = useState([]);
+  const [bundleSearchQuery, setBundleSearchQuery] = useState('');
+  const [showBundleDropdown, setShowBundleDropdown] = useState(false);
+  const [directoryContacts, setDirectoryContacts] = useState(() => supplierDirectoryService.getCachedDirectory());
   const [selectedOption, setSelectedOption] = useState(null);
   const [supplierName, setSupplierName] = useState('');
   const [supplierEmailTo, setSupplierEmailTo] = useState('');
@@ -289,6 +302,16 @@ export default function SimpleSupplierRtvWizardModal({
   const [savedReport, setSavedReport] = useState(null);
   const [savedBatchReports, setSavedBatchReports] = useState(null);
   const [showA4Form, setShowA4Form] = useState(false);
+  const [cameraSlotKey, setCameraSlotKey] = useState(null);
+
+  useEffect(() => {
+    const syncDir = (e) => {
+      if (Array.isArray(e?.detail)) setDirectoryContacts(e.detail);
+      else setDirectoryContacts(supplierDirectoryService.getCachedDirectory());
+    };
+    window.addEventListener(SUPPLIER_DIRECTORY_EVENT, syncDir);
+    return () => window.removeEventListener(SUPPLIER_DIRECTORY_EVENT, syncDir);
+  }, []);
 
   // Known suppliers list & customer/store branch list for autocomplete datalists
   const supplierSuggestions = useMemo(() => {
@@ -301,8 +324,12 @@ export default function SimpleSupplierRtvWizardModal({
       const s = String(r.supplier_name || '').trim();
       if (s && !isPendingSupplierName(s)) set.add(s);
     });
+    directoryContacts.forEach((c) => {
+      const s = String(c.supplier_name || '').trim();
+      if (s && !isPendingSupplierName(s)) set.add(s);
+    });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [catalogProducts, allReports]);
+  }, [catalogProducts, allReports, directoryContacts]);
 
   const customerBranchSuggestions = useMemo(() => {
     const set = new Set();
@@ -392,10 +419,21 @@ export default function SimpleSupplierRtvWizardModal({
           targetReport.reporter_name
         ];
     const initialSupplier = partyCandidates.find((s) => !isPendingSupplierName(s)) || '';
-    setSupplierName(String(initialSupplier).trim());
-    setSupplierEmailTo(pickup.supplier_email_to || '');
-    setSupplierEmailCc(pickup.supplier_email_cc || '');
+    const cleanInitSupplier = String(initialSupplier).trim();
+    const dirInitial = cleanInitSupplier ? supplierDirectoryService.findBySupplierName(cleanInitSupplier) : null;
+    setSupplierName(cleanInitSupplier);
+    setSupplierEmailTo(pickup.supplier_email_to || dirInitial?.email_to || '');
+    setSupplierEmailCc(pickup.supplier_email_cc || dirInitial?.email_cc || '');
     setConfirmUnifySupplier(false);
+
+    supplierDirectoryService.loadDirectory().then((dirList) => {
+      if (!isMounted || !cleanInitSupplier || !Array.isArray(dirList)) return;
+      const freshMatch = supplierDirectoryService.findBySupplierName(cleanInitSupplier);
+      if (freshMatch) {
+        setSupplierEmailTo((prev) => prev.trim() ? prev : (freshMatch.email_to || ''));
+        setSupplierEmailCc((prev) => prev.trim() ? prev : (freshMatch.email_cc || ''));
+      }
+    }).catch(() => {});
 
     const matchedOptId = resolveSavedOptionId(targetReport, reportIsSupplier);
     setSelectedOption(matchedOptId);
@@ -407,6 +445,9 @@ export default function SimpleSupplierRtvWizardModal({
     setTruckPlate(pickup.truck_plate || '');
 
     const activeBatchSnapshot = rawBatchReportsRef.current || [];
+    setWizardReports(activeBatchSnapshot);
+    setBundleSearchQuery('');
+    setShowBundleDropdown(false);
     const savedProcessor = String(
       pickup.processed_by ||
       meta.simple_rtv_updated_by ||
@@ -480,9 +521,14 @@ export default function SimpleSupplierRtvWizardModal({
 
   useEffect(() => () => clearObjectUrls(), []);
 
+  const workingBatchReports = useMemo(
+    () => (wizardReports.length > 0 ? wizardReports : rawBatchReports),
+    [wizardReports, rawBatchReports]
+  );
+
   const distinctSuppliersInBatch = useMemo(() => {
     const map = new Map();
-    rawBatchReports.forEach((r) => {
+    workingBatchReports.forEach((r) => {
       const cand = [
         r?.ai_document_metadata?.supplier_pickup?.supplier_name,
         r?.supplier_name,
@@ -496,7 +542,45 @@ export default function SimpleSupplierRtvWizardModal({
       }
     });
     return Array.from(map.values());
-  }, [rawBatchReports]);
+  }, [workingBatchReports]);
+
+  const wizardCurrentIsTest = useMemo(
+    () => workingBatchReports.some((r) => isTestRecord(r)),
+    [workingBatchReports]
+  );
+
+  const activeBatchIdsSet = useMemo(() => {
+    return new Set(
+      workingBatchReports
+        .map((r) => String(r?.rma_number || r?.rmaNumber || r?.id || '').trim())
+        .filter(Boolean)
+    );
+  }, [workingBatchReports]);
+
+  const bundleCandidateOptions = useMemo(() => {
+    if (!primaryInputReport) return [];
+    const primaryStream = primaryInputReport.rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
+    const q = bundleSearchQuery.trim().toLowerCase();
+    return (allReports || [])
+      .filter((r) => {
+        if (!r || isTrashedRecord(r) || isArchivedRecord(r) || isManifestSubItem(r, allReports)) return false;
+        if (Boolean(isTestRecord(r)) !== Boolean(wizardCurrentIsTest)) return false;
+        const rStream = r.rma_type === 'supplier_outbound' ? 'supplier_outbound' : 'customer_inbound';
+        if (rStream !== primaryStream) return false;
+        const key = String(r.rma_number || r.rmaNumber || r.id || '').trim();
+        if (!key || activeBatchIdsSet.has(key)) return false;
+        if (!q) return true;
+        return (
+          key.toLowerCase().includes(q) ||
+          String(r.name || '').toLowerCase().includes(q) ||
+          String(r.code || r.sku || '').toLowerCase().includes(q) ||
+          String(r.barcode || '').toLowerCase().includes(q) ||
+          String(r.supplier_name || '').toLowerCase().includes(q) ||
+          String(r.store_branch || '').toLowerCase().includes(q)
+        );
+      })
+      .slice(0, 20);
+  }, [allReports, primaryInputReport, wizardCurrentIsTest, activeBatchIdsSet, bundleSearchQuery]);
 
   const activeWizardEmailType = useMemo(() => {
     if (selectedOption === 'scrap') return 'rma_scrapped';
@@ -519,7 +603,43 @@ export default function SimpleSupplierRtvWizardModal({
 
   const activeBatchReports = (Array.isArray(savedBatchReports) && savedBatchReports.length > 0)
     ? savedBatchReports
-    : rawBatchReports;
+    : workingBatchReports;
+
+  const handlePartyNameChange = (nextVal) => {
+    setSupplierName(nextVal);
+    if (errorMsg) setErrorMsg('');
+    const dirMatch = supplierDirectoryService.findBySupplierName(nextVal);
+    if (dirMatch) {
+      setSupplierEmailTo((prev) => (prev.trim() ? prev : (dirMatch.email_to || '')));
+      setSupplierEmailCc((prev) => (prev.trim() ? prev : (dirMatch.email_cc || '')));
+    }
+  };
+
+  const handleAddBundledRma = (candidate) => {
+    if (!candidate) return;
+    const candKey = String(candidate.rma_number || candidate.rmaNumber || candidate.id || '').trim();
+    if (!candKey) return;
+    setWizardReports((prev) => {
+      const base = prev.length > 0 ? prev : rawBatchReports;
+      if (base.some((x) => String(x.rma_number || x.rmaNumber || x.id || '').trim() === candKey)) {
+        return base;
+      }
+      return [...base, candidate];
+    });
+    setSavedBatchReports(null);
+    setBundleSearchQuery('');
+    setShowBundleDropdown(false);
+    setErrorMsg('');
+  };
+
+  const handleRemoveBundledRma = (targetRmaNum) => {
+    setWizardReports((prev) => {
+      const base = prev.length > 0 ? prev : rawBatchReports;
+      if (base.length <= 1) return base;
+      return base.filter((x) => (x.rma_number || x.rmaNumber || String(x.id || '')) !== targetRmaNum);
+    });
+    setSavedBatchReports(null);
+  };
   const activeReport = savedReport || activeBatchReports[0];
   const isConsolidatedBatch = activeBatchReports.length > 1;
   const batchRmaNumbers = activeBatchReports.map((r) => r.rma_number || r.rmaNumber || String(r.id || '')).filter(Boolean);
@@ -586,7 +706,13 @@ export default function SimpleSupplierRtvWizardModal({
       setErrorMsg('');
     }
 
-    const newEntries = acceptedFiles.map((file, idx) => {
+    const reportGeoAddr = getGpsAddressDisplay(activeReport) || getGpsAddressDisplay(primaryInputReport);
+    const stampedFiles = await stampWatermarkOnFiles(acceptedFiles, {
+      addressText: reportGeoAddr,
+      tagText: processedBy.trim() || activeUser?.name || driverName.trim() || 'Warehouse Staff'
+    });
+
+    const newEntries = stampedFiles.map((file, idx) => {
       const previewUrl = URL.createObjectURL(file);
       objectUrlsRef.current.push(previewUrl);
       return {
@@ -881,15 +1007,6 @@ export default function SimpleSupplierRtvWizardModal({
 
     const cleanEmailTo = supplierEmailTo.trim();
     const cleanEmailCc = supplierEmailCc.trim();
-
-    const missingSlots = PICKUP_PHOTO_SLOTS.filter((slot) => {
-      const list = Array.isArray(photoSlots[slot.key]) ? photoSlots[slot.key] : [];
-      return !list.some((item) => Boolean(item?.file || item?.existingUrl));
-    });
-    if (missingSlots.length > 0) {
-      setErrorMsg(`Please upload at least 1 photo for each of the 5 required categories (missing: ${missingSlots.map((m) => m.title).join(', ')}).`);
-      return;
-    }
 
     const oversizedSlots = PICKUP_PHOTO_SLOTS.filter((slot) => (photoSlots[slot.key] || []).length > MAX_PHOTOS_PER_SLOT);
     if (oversizedSlots.length > 0) {
@@ -1272,26 +1389,113 @@ export default function SimpleSupplierRtvWizardModal({
           {/* Scrollable Body */}
           <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-5">
 
-            {/* Consolidated Batch Summary Banner */}
-            {isConsolidatedBatch && (
-              <div className="p-3.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border-2 border-indigo-300 dark:border-indigo-700 space-y-2">
+            {/* Interactive Add / Bundle Another RMA to This Pickup */}
+            {step !== 'done' && (
+              <div className="p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 space-y-2.5">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="text-xs sm:text-sm font-black text-indigo-950 dark:text-indigo-100">
-                    ⚡ Consolidated Batch: {activeBatchReports.length} RMAs Selected
+                  <div className="text-xs font-black text-indigo-950 dark:text-indigo-100 flex items-center gap-1.5">
+                    <Plus className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <span>➕ Add / Bundle Another RMA to This Pickup</span>
+                    <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-mono">
+                      {activeBatchReports.length} RMA{activeBatchReports.length === 1 ? '' : 's'}
+                    </span>
                   </div>
-                  <div className="text-xs font-mono font-black text-indigo-800 dark:text-indigo-200">
+                  <div className="text-[11px] font-mono font-black text-indigo-800 dark:text-indigo-200">
                     {batchSummary.items.length} Line(s) • {grandBatchPieces.toLocaleString()} pcs • {formatPeso(grandBatchValue)}
                   </div>
                 </div>
+
+                {/* Removable Bundled RMA Chips */}
                 <div className="flex flex-wrap gap-1.5">
-                  {batchRmaNumbers.map((num) => (
-                    <span
-                      key={num}
-                      className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 font-mono text-[10px] font-bold text-indigo-800 dark:text-indigo-200"
-                    >
-                      {num}
-                    </span>
-                  ))}
+                  {activeBatchReports.map((rep, repIdx) => {
+                    const num = rep.rma_number || rep.rmaNumber || String(rep.id || '');
+                    const canRemove = activeBatchReports.length > 1;
+                    return (
+                      <span
+                        key={num || repIdx}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-700 font-mono text-[11px] font-bold text-indigo-900 dark:text-indigo-100"
+                      >
+                        <span>{num}</span>
+                        {rep.supplier_name && rep.supplier_name !== 'Pending Assignment' && (
+                          <span className="font-sans text-[10px] text-slate-500 font-normal">({rep.supplier_name})</span>
+                        )}
+                        {canRemove && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveBundledRma(num)}
+                            className="ml-0.5 w-4 h-4 rounded-full bg-slate-200 hover:bg-rose-600 hover:text-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center text-[10px] font-black cursor-pointer transition-colors"
+                            aria-label={`Remove ${num} from bundle`}
+                            title={`Remove ${num} from this pickup`}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
+
+                {/* Searchable Combobox */}
+                <div className="relative">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-indigo-500 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={bundleSearchQuery}
+                      onFocus={() => setShowBundleDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowBundleDropdown(false), 180)}
+                      onChange={(e) => {
+                        setBundleSearchQuery(e.target.value);
+                        setShowBundleDropdown(true);
+                      }}
+                      placeholder={`Search ${wizardCurrentIsTest ? 'Sandbox Test ' : 'Live '}${isSupplierStream ? 'Supplier RTV' : 'Customer Hub'} RMA#, SKU, or product name to bundle...`}
+                      className="w-full pl-8 pr-3 py-2 rounded-xl border border-indigo-200 dark:border-indigo-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  {showBundleDropdown && (
+                    <div className="absolute left-0 right-0 top-full mt-1 z-40 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-700 rounded-xl shadow-xl max-h-52 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                      {bundleCandidateOptions.length === 0 ? (
+                        <div className="p-3 text-[11px] text-slate-500 text-center">
+                          No matching active {wizardCurrentIsTest ? 'Sandbox ' : 'Live '}RMAs found to bundle.
+                        </div>
+                      ) : (
+                        bundleCandidateOptions.map((cand) => {
+                          const cNum = cand.rma_number || cand.rmaNumber || String(cand.id || '');
+                          return (
+                            <button
+                              key={cNum}
+                              type="button"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                handleAddBundledRma(cand);
+                              }}
+                              className="w-full text-left px-3 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 flex items-center justify-between gap-2 text-xs cursor-pointer"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-mono font-black text-indigo-700 dark:text-indigo-300">{cNum}</span>
+                                  {(cand.code || cand.sku) && (
+                                    <span className="font-mono text-[10px] text-slate-500">SKU: {cand.code || cand.sku}</span>
+                                  )}
+                                  {cand.supplier_name && cand.supplier_name !== 'Pending Assignment' && (
+                                    <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-700 dark:text-slate-300">
+                                      {cand.supplier_name}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-slate-700 dark:text-slate-300 truncate font-medium">
+                                  {cand.name || cand.barcode} • {formatQuantityWithPackSize(cand.quantity || 1, cand.unit_name || 'pc', cand.pieces_per_case)}
+                                </div>
+                              </div>
+                              <span className="px-2 py-0.5 rounded-md bg-indigo-600 text-white text-[10px] font-black shrink-0">
+                                + Add
+                              </span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1416,6 +1620,15 @@ export default function SimpleSupplierRtvWizardModal({
               )}
             </div>
 
+            {/* Full 4-Step & 10-Calendar-Day Pickup Timeline */}
+            {step !== 'pickup' && (
+              <FollowUpTimelineCard
+                report={activeReport}
+                catalogProducts={catalogProducts}
+                compact={true}
+              />
+            )}
+
             {/* Step 1: Party Name (Supplier OR Customer / Store Branch) * & Manual Processed By * fields */}
             {step === 'choose' && (
               <div className="space-y-3">
@@ -1437,7 +1650,7 @@ export default function SimpleSupplierRtvWizardModal({
                     type="text"
                     list="supplier-rtv-company-list"
                     value={supplierName}
-                    onChange={(e) => setSupplierName(e.target.value)}
+                    onChange={(e) => handlePartyNameChange(e.target.value)}
                     placeholder={
                       isSupplierStream
                         ? 'Type or pick the Supplier Company Name (e.g. Century Pacific Food, Nestle)...'
@@ -1664,14 +1877,14 @@ export default function SimpleSupplierRtvWizardModal({
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
                         <Truck className="w-5 h-5 text-amber-600" />
-                        <span>Driver Pickup Verification ({completedPhotoCount}/5 Slots)</span>
+                        <span>Driver Pickup Verification ({completedPhotoCount}/5 Optional Slots)</span>
                       </h3>
                       <span className="px-2.5 py-0.5 rounded-full bg-slate-900 dark:bg-slate-700 text-white text-[11px] font-mono font-black">
-                        Total: {totalPhotoCount}/{MAX_TOTAL_PICKUP_PHOTOS} photos
+                        Total: {totalPhotoCount}/{MAX_TOTAL_PICKUP_PHOTOS} photos (Optional)
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Purpose: <strong className="text-slate-800 dark:text-slate-200">{chosenOptionObj?.title}</strong> • Max {MAX_PHOTOS_PER_SLOT} photos per slot ({MAX_TOTAL_PICKUP_PHOTOS} max total) — all auto-save into this RMA&apos;s Google Drive folder.
+                      Purpose: <strong className="text-slate-800 dark:text-slate-200">{chosenOptionObj?.title}</strong> • All 5 photo categories are <strong>(Optional)</strong> (max {MAX_PHOTOS_PER_SLOT}/slot, {MAX_TOTAL_PICKUP_PHOTOS} total). Upload ID Front / Truck Plate to auto-fill with AI OCR, or submit directly.
                     </p>
                   </div>
                   <button
@@ -1713,7 +1926,7 @@ export default function SimpleSupplierRtvWizardModal({
                       type="text"
                       list="supplier-rtv-company-list-step2"
                       value={supplierName}
-                      onChange={(e) => setSupplierName(e.target.value)}
+                      onChange={(e) => handlePartyNameChange(e.target.value)}
                       placeholder={
                         isSupplierStream
                           ? 'Type or pick the Supplier Company Name...'
@@ -1822,7 +2035,8 @@ export default function SimpleSupplierRtvWizardModal({
                                 {slot.stepNum}
                               </span>
                               <span className="text-xs font-black text-slate-900 dark:text-white">
-                                {slot.title} *
+                                {slot.title}{' '}
+                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">(Optional)</span>
                               </span>
                             </div>
                             <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
@@ -1872,8 +2086,8 @@ export default function SimpleSupplierRtvWizardModal({
                           </div>
                         )}
 
-                        <div className="grid grid-cols-2 gap-2 mt-auto">
-                          <label className={`px-2.5 py-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                        <div className="grid grid-cols-3 gap-1.5 mt-auto">
+                          <label className={`px-2 py-2 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1 transition-colors ${
                             atSlotLimit
                               ? 'cursor-not-allowed bg-slate-300 dark:bg-slate-800 text-slate-500 opacity-60'
                               : 'cursor-pointer bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white'
@@ -1892,7 +2106,22 @@ export default function SimpleSupplierRtvWizardModal({
                             />
                           </label>
 
-                          <label className={`px-2.5 py-2 rounded-lg border text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                          <button
+                            type="button"
+                            disabled={atSlotLimit}
+                            onClick={() => setCameraSlotKey(slot.key)}
+                            className={`px-2 py-2 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1 transition-colors ${
+                              atSlotLimit
+                                ? 'cursor-not-allowed bg-slate-200 dark:bg-slate-800 text-slate-400 opacity-60'
+                                : 'cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white'
+                            }`}
+                            title="Open Live Watermarked Camera"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>Live Cam</span>
+                          </button>
+
+                          <label className={`px-2 py-2 rounded-lg border text-[10.5px] font-bold flex items-center justify-center gap-1 transition-colors ${
                             atSlotLimit
                               ? 'cursor-not-allowed bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 opacity-60'
                               : 'cursor-pointer bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200'
@@ -2033,7 +2262,9 @@ export default function SimpleSupplierRtvWizardModal({
                         ? (newPendingPhotoCount > 0
                           ? `Upload ${newPendingPhotoCount} New Photo${newPendingPhotoCount === 1 ? '' : 's'}, Save Updates & Open Letter Form`
                           : 'Save Updates & Open Letter Form (No Duplicate Claim ID)')
-                        : `Upload ${totalPhotoCount} Photo${totalPhotoCount === 1 ? '' : 's'} to RMA Drive, Mark PICKED UP & Print Letter Form`}
+                        : totalPhotoCount > 0
+                          ? `Upload ${totalPhotoCount} Photo${totalPhotoCount === 1 ? '' : 's'} to RMA Drive, Mark PICKED UP & Print Letter Form`
+                          : 'Mark PICKED UP & Print Letter Form (0 Photos Optional)'}
                   </span>
                 </button>
               </div>
@@ -2097,6 +2328,28 @@ export default function SimpleSupplierRtvWizardModal({
         reports={activeBatchReports}
         allReports={allReports}
         catalogProducts={catalogProducts}
+      />
+
+      {/* Live Watermarked Camera Modal for Pickup Slots */}
+      <CameraCaptureModal
+        isOpen={Boolean(cameraSlotKey)}
+        onClose={() => setCameraSlotKey(null)}
+        title={`Live Camera — ${PICKUP_PHOTO_SLOTS.find((s) => s.key === cameraSlotKey)?.title || 'Pickup Proof'}`}
+        subtitle="Stamps live PHT timestamp, clear GPS street/city address & processor tag"
+        gpsLocation={{
+          address: getGpsAddressDisplay(activeReport) || getGpsAddressDisplay(primaryInputReport),
+          latitude: activeReport?.gps_latitude ?? primaryInputReport?.gps_latitude ?? null,
+          longitude: activeReport?.gps_longitude ?? primaryInputReport?.gps_longitude ?? null
+        }}
+        tagName={processedBy.trim() || activeUser?.name || driverName.trim() || 'Warehouse Staff'}
+        multiple={true}
+        onCapture={async (files) => {
+          const targetSlot = cameraSlotKey;
+          setCameraSlotKey(null);
+          if (targetSlot && files?.length) {
+            await handleSelectPhotos(targetSlot, files);
+          }
+        }}
       />
     </>
   );

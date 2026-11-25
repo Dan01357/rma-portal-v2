@@ -130,7 +130,7 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       await page.getByRole('button', { name: /Edit Choice \/ Details/i }).click();
       await page.getByRole('button', { name: /Customer Credit Memo \/ Return Handover/i }).click();
       await page.getByRole('button', { name: /Driver Is Here — Upload Photos & Print Letter/i }).click();
-      await expect(page.getByText(/Driver Pickup Verification \(0\/5 Slots\)/i)).toBeVisible();
+      await expect(page.getByText(/Driver Pickup Verification \(0\/5(?: Optional)? Slots\)/i)).toBeVisible();
       await expect(page.getByText(/Total:\s*0\/50 photos/i)).toBeVisible();
       await page.getByRole('button', { name: /^Back$/i }).click();
       await page.locator('button[aria-label="Close modal"]').first().click();
@@ -304,11 +304,12 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
 
       // 2. Process Consolidated Batch (2 RMAs) -> Debit Claim multi-photo pickup & manual Processed By
       await page.getByRole('button', { name: /Process Consolidated Batch \(2 RMAs\)/i }).click();
-      await expect(page.getByText(/Consolidated Batch: 2 RMAs Selected/i)).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText(/2 RMAs/i).first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText(/Add \/ Bundle Another RMA to This Pickup/i).first()).toBeVisible();
       await expect(page.locator('#wizard-processed-by-step1')).toHaveValue('');
       await page.getByRole('button', { name: /Return to supplier for Debit Claim/i }).click();
       await page.getByRole('button', { name: /Driver Is Here — Upload Photos & Print Letter/i }).click();
-      await expect(page.getByText(/Driver Pickup Verification \(0\/5 Slots\)/i)).toBeVisible();
+      await expect(page.getByText(/Driver Pickup Verification \(0\/5(?: Optional)? Slots\)/i)).toBeVisible();
       await expect(page.getByText(/Total:\s*0\/50 photos/i)).toBeVisible();
       await expect(page.locator('#wizard-processed-by-step2')).toHaveValue('');
 
@@ -330,7 +331,7 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
           buffer: PNG_BUFFER
         });
       }
-      await expect(page.getByText(/Driver Pickup Verification \(5\/5 Slots\)/i)).toBeVisible();
+      await expect(page.getByText(/Driver Pickup Verification \(5\/5(?: Optional)? Slots\)/i)).toBeVisible();
       await expect(page.getByText(/Total:\s*6\/50 photos/i)).toBeVisible();
       await expect(page.getByText('(2/10)').first()).toBeVisible();
 
@@ -360,7 +361,8 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
         await expect(combineToggle).toContainText('ON');
       }
 
-      // Toggle Separated Full Pages <-> Combined 1-Page & exercise customizable copy counts
+      // Toggle Separated Full Pages <-> Combined 1-Page & exercise customizable copy counts & Prepared Date & Time
+      await expect(page.getByText(/Prepared Date & Time/i).first()).toBeVisible();
       const separatedBtn = page.getByRole('button', { name: /Separated Full Pages \(Dedicated Paper per Copy\)/i });
       if (await separatedBtn.isVisible().catch(() => false)) {
         await separatedBtn.click();
@@ -418,8 +420,9 @@ test.describe('Suite 06: QR Scanner Cross-Mode Isolation, 4-Option Wizard & Mult
       sharedClaimNumber = claimMatch[1];
 
       // Click Edit Claim / Open 4-Choice on sup1B -> opens whole 2-RMA batch -> update truck plate -> preserve sharedClaimNumber!
-      await batchBadgeRow.locator('button[title*="Edit" i], button[title*="4-Choice" i]').first().click();
-      await expect(page.getByText(/Consolidated Batch: 2 RMAs Selected/i)).toBeVisible({ timeout: 10_000 });
+      await batchBadgeRow.getByRole('button', { name: /Edit Claim \/ 4-Choice|4-Choice \/ Pickup/i }).first().click();
+      await expect(page.getByText(/Add \/ Bundle Another RMA to This Pickup/i).first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText(/2 RMAs/i).first()).toBeVisible();
       await expect(page.locator('#wizard-processed-by-step1')).toHaveValue('Playwright Batch Staff');
       const editChoiceBtn = page.getByRole('button', { name: /Edit Choice \/ Details/i });
       if (await editChoiceBtn.isVisible({ timeout: 2000 }).catch(() => false)) {

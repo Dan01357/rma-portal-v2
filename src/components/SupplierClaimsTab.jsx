@@ -19,7 +19,8 @@ import {
   QrCode,
   Send,
   Clock,
-  ShieldCheck
+  ShieldCheck,
+  BookOpen
 } from 'lucide-react';
 import { exportSupplierOutboundClaimsToXlsx } from '../utils/exportCsv';
 import { catalogService } from '../services/catalogService';
@@ -27,6 +28,7 @@ import { notificationService } from '../services/notificationService';
 import TablePagination from './TablePagination';
 import ImageLightboxModal from './ImageLightboxModal';
 import SupplierFollowUpModal from './SupplierFollowUpModal';
+import SupplierDirectoryModal from './SupplierDirectoryModal';
 import { supplierClaimService } from '../services/supplierClaimService';
 import {
   getCleanHumanWorkflowStatus,
@@ -52,7 +54,9 @@ import {
   cleanExplanationText,
   formatFourChoiceOutcome,
   formatDateYmd,
-  findConsolidatedRtvBatchReports
+  findConsolidatedRtvBatchReports,
+  getGpsAddressDisplay,
+  getGpsMapUrl
 } from '../utils/rmaHelpers';
 
 export default function SupplierClaimsTab({
@@ -86,37 +90,8 @@ export default function SupplierClaimsTab({
   const [sortField, setSortField] = useState('created_at');
   const [updatingQueueId, setUpdatingQueueId] = useState(null);
   const [followUpModalReport, setFollowUpModalReport] = useState(null);
-  const [isRunningFollowUpBatch, setIsRunningFollowUpBatch] = useState(false);
+  const [isDirectoryOpen, setIsDirectoryOpen] = useState(false);
   const [followUpBanner, setFollowUpBanner] = useState(null);
-
-  const handleRunAllFollowUps = async () => {
-    setIsRunningFollowUpBatch(true);
-    setFollowUpBanner(null);
-    try {
-      const res = await notificationService.runDailyFollowUpNow({
-        isTestMode: Boolean(isTestMode),
-        operation: 'run_all',
-        force: false
-      });
-      if (res?.success) {
-        const s = res.summary || {};
-        setFollowUpBanner({
-          type: 'success',
-          text: `SLA Follow-Up Check complete: ${s.followUpsSent || 0} reminder(s) dispatched, ${s.autoDisposed || 0} overdue (>10d) auto-disposed.`
-        });
-        if (onRefresh) onRefresh();
-      } else {
-        setFollowUpBanner({
-          type: 'error',
-          text: res?.error || res?.errors?.[0]?.message || 'Could not complete follow-up check.'
-        });
-      }
-    } catch (err) {
-      setFollowUpBanner({ type: 'error', text: err?.message || 'Follow-up check failed.' });
-    } finally {
-      setIsRunningFollowUpBatch(false);
-    }
-  };
 
   const handleRowSendFollowUp = async (report) => {
     const statusInfo = getCleanHumanWorkflowStatus(report, savedProductsList);
@@ -432,7 +407,7 @@ export default function SupplierClaimsTab({
             price_with_vat: childPrice,
             supplier_name: resolvedChildSupplier,
             warehouse_location: child.warehouse_location || r.warehouse_location || 'DOCK',
-            disposition: child.disposition || r.disposition || '3- Return to Vendor (RTV)',
+            disposition: child.disposition || r.disposition || 'Pending',
             reason: child.reason || r.reason || 'Damaged',
             explanation: child.explanation || child.notes || r.explanation || null,
             photos: childPhotos
@@ -825,6 +800,16 @@ export default function SupplierClaimsTab({
             </p>
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={() => setIsDirectoryOpen(true)}
+          className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white border border-slate-700 text-xs font-black flex items-center gap-1.5 shadow-sm cursor-pointer shrink-0 self-start sm:self-auto"
+          title="Open Persistent Supplier Emails Directory (Add, Edit, Search, Delete contacts)"
+        >
+          <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+          <span>📒 Supplier Emails Directory</span>
+        </button>
       </div>
 
       {/* Filter Controls Bar (Dropdowns + Search) */}
@@ -1015,17 +1000,6 @@ export default function SupplierClaimsTab({
           </div>
 
           <div className="flex items-center gap-2 ml-auto flex-wrap">
-            <button
-              type="button"
-              onClick={handleRunAllFollowUps}
-              disabled={isRunningFollowUpBatch}
-              className="text-xs text-amber-900 dark:text-amber-200 hover:bg-amber-200/70 dark:hover:bg-amber-900/50 flex items-center gap-1.5 font-black cursor-pointer bg-amber-100 dark:bg-amber-950/70 border border-amber-300 dark:border-amber-700 px-3 py-1.5 rounded-xl shadow-2xs transition-all disabled:opacity-50"
-              title="Run 10-Calendar-Day Pickup Follow-Up Emails & Auto-Dispose Check Now"
-            >
-              <Clock className="w-3.5 h-3.5 text-amber-700 dark:text-amber-300" />
-              <span>{isRunningFollowUpBatch ? 'Running Follow-Ups...' : 'Run Follow-Ups & 10-Day Check Now'}</span>
-            </button>
-
             {onOpenMatrixExport && (
               <button
                 type="button"
@@ -1296,19 +1270,23 @@ export default function SupplierClaimsTab({
                           </div>
                           <div className="text-[10px] text-slate-400 flex items-center gap-1.5 flex-wrap">
                             <span>{r.created_at ? formatDateYmd(r.created_at) : ''}</span>
-                            {r.gps_latitude && r.gps_longitude && (
-                              <a
-                                href={`https://www.google.com/maps?q=${r.gps_latitude},${r.gps_longitude}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 font-bold"
-                                title="View GPS Location on Google Maps"
-                              >
-                                <MapPin className="w-2.5 h-2.5 text-rose-500" />
-                                <span>Map</span>
-                              </a>
-                            )}
+                            {(() => {
+                              const mapUrl = getGpsMapUrl(r);
+                              const gpsAddr = getGpsAddressDisplay(r);
+                              return mapUrl ? (
+                                <a
+                                  href={mapUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 font-bold max-w-[160px]"
+                                  title={gpsAddr || 'View GPS Location on Google Maps'}
+                                >
+                                  <MapPin className="w-2.5 h-2.5 text-rose-500 shrink-0" />
+                                  <span className="truncate">{gpsAddr || 'Map'}</span>
+                                </a>
+                              ) : null;
+                            })()}
                           </div>
                           {(r.si_number || r.dr_number || r.po_number || r.invoice_dr_number) && (
                             <div className="flex items-center gap-1 flex-wrap mt-1 text-[9px] font-mono leading-tight">
@@ -1423,7 +1401,7 @@ export default function SupplierClaimsTab({
                                 type="button"
                                 onClick={() => setFollowUpModalReport(r)}
                                 className="px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[10px] font-black cursor-pointer whitespace-nowrap"
-                                title="Set Supplier Name, Follow-Up Emails (TO/CC), and 10-Day Countdown SLA"
+                                title="Set Supplier Name and Follow-Up Emails (TO/CC)"
                               >
                                 + Set Supplier &amp; Email
                               </button>
@@ -1432,7 +1410,7 @@ export default function SupplierClaimsTab({
                                 type="button"
                                 onClick={() => setFollowUpModalReport(r)}
                                 className="px-1.5 py-0.2 rounded-md bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9.5px] font-mono cursor-pointer truncate max-w-[155px]"
-                                title="Configure Supplier Name, Follow-Up Emails & 10-Day Countdown SLA"
+                                title="Edit Supplier Name and Follow-Up Emails (TO/CC)"
                               >
                                 📧 {wf.party.toEmails[0]}
                               </button>
@@ -1476,27 +1454,20 @@ export default function SupplierClaimsTab({
                           </div>
                         </td>
 
-                        {/* 4-Choice Outcome & Date/Time + Reporter Explanation */}
+                        {/* Single Clean Triage Status Badge + Reporter Explanation */}
                         <td className="p-3 max-w-[240px]">
                           <div className="space-y-1">
                             <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border inline-block whitespace-nowrap shadow-2xs ${outcome.badgeColor}`}>
                               {outcome.label}
                             </span>
-                            <div className="flex items-center gap-1 flex-wrap">
-                              <span className={`px-2 py-0.5 rounded-full text-[9.5px] font-black border inline-flex items-center gap-1 whitespace-nowrap ${statusInfo.badgeColor}`}>
-                                <Clock className="w-2.5 h-2.5 shrink-0" />
-                                <span>{wf.isCountdownActive ? wf.step2.text : statusInfo.label}</span>
-                              </span>
-                            </div>
+                            {wf.isCountdownActive && !wf.isClosed && (
+                              <div className="text-[10px] font-mono font-bold text-amber-700 dark:text-amber-300">
+                                {wf.step2.text}
+                              </div>
+                            )}
                             {outcome.choiceKey === 'scrap' && (
-                              <div className="text-[10px] font-bold">
-                                <span className={`px-1.5 py-0.5 rounded border inline-block ${
-                                  getItemNeedsReorder(r)
-                                    ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800'
-                                    : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                                }`}>
-                                  {getItemNeedsReorder(r) ? '🛒 Re-Order: YES' : '❌ No Re-Order'}
-                                </span>
+                              <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
+                                {getItemNeedsReorder(r) ? '🛒 Re-Order: YES' : '❌ No Re-Order'}
                               </div>
                             )}
                             {r.reason && (
@@ -1954,7 +1925,7 @@ export default function SupplierClaimsTab({
         />
       )}
 
-      {/* Supplier, Email & 10-Day SLA Follow-Up Modal */}
+      {/* Supplier & Email Details Modal */}
       <SupplierFollowUpModal
         isOpen={Boolean(followUpModalReport)}
         onClose={() => setFollowUpModalReport(null)}
@@ -1966,6 +1937,12 @@ export default function SupplierClaimsTab({
           if (onRefresh) onRefresh();
           window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'followup-updated' } }));
         }}
+      />
+
+      {/* Persistent Supplier Emails Directory Modal */}
+      <SupplierDirectoryModal
+        isOpen={isDirectoryOpen}
+        onClose={() => setIsDirectoryOpen(false)}
       />
 
     </div>

@@ -13,8 +13,10 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import SupplierInput from './SupplierInput';
+import FollowUpTimelineCard from './FollowUpTimelineCard';
 import { catalogService } from '../services/catalogService';
 import { notificationService } from '../services/notificationService';
+import { supplierDirectoryService } from '../services/supplierDirectoryService';
 import { formatQuantityWithPackSize, isTestRecord } from '../utils/rmaHelpers';
 import {
   computeFourStepWorkflow,
@@ -44,20 +46,37 @@ export default function SupplierFollowUpModal({
 
   useEffect(() => {
     if (!isOpen || !report) return;
+    let active = true;
     const party = resolveReportPartyAndEmails(report, catalogProducts);
     const defaultCfg = notificationService.getDailyFollowUpConfig();
     const wf = computeFourStepWorkflow(report, catalogProducts, {
       customerFollowUpDefaultEnabled: defaultCfg.customerFollowUpDefaultEnabled
     });
-    setSupplierName(isPlaceholderSupplier(party.supplierName) ? '' : party.supplierName);
-    setSupplierEmailTo(party.supplierEmailTo || '');
-    setSupplierEmailCc(party.supplierEmailCc || '');
+    const cleanSup = isPlaceholderSupplier(party.supplierName) ? '' : party.supplierName;
+    const dirMatch = cleanSup ? supplierDirectoryService.findBySupplierName(cleanSup) : null;
+
+    setSupplierName(cleanSup);
+    setSupplierEmailTo(party.supplierEmailTo || dirMatch?.email_to || '');
+    setSupplierEmailCc(party.supplierEmailCc || dirMatch?.email_cc || '');
     setFollowUpEnabled(
       party.followUpMeta.enabled !== undefined
         ? Boolean(party.followUpMeta.enabled)
         : (report.rma_type === 'supplier_outbound' ? true : wf.followUpEnabled)
     );
     setFeedback(null);
+
+    supplierDirectoryService.loadDirectory().then(() => {
+      if (!active || !cleanSup) return;
+      const freshMatch = supplierDirectoryService.findBySupplierName(cleanSup);
+      if (freshMatch) {
+        setSupplierEmailTo((prev) => prev.trim() ? prev : (freshMatch.email_to || ''));
+        setSupplierEmailCc((prev) => prev.trim() ? prev : (freshMatch.email_cc || ''));
+      }
+    }).catch(() => { });
+
+    return () => {
+      active = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, report?.id, report?.rma_number]);
 
@@ -93,6 +112,15 @@ export default function SupplierFollowUpModal({
   const actorName = currentUser?.full_name || currentUser?.email || 'Admin';
   const sandboxEmail = notificationService.getTestSandboxEmail();
 
+  const handleSupplierNameChange = (nextVal) => {
+    setSupplierName(nextVal);
+    const dirMatch = supplierDirectoryService.findBySupplierName(nextVal);
+    if (dirMatch) {
+      setSupplierEmailTo((prev) => prev.trim() ? prev : (dirMatch.email_to || ''));
+      setSupplierEmailCc((prev) => prev.trim() ? prev : (dirMatch.email_cc || ''));
+    }
+  };
+
   const handleSave = async () => {
     const cleanSup = supplierName.trim();
     if (!cleanSup) {
@@ -109,15 +137,20 @@ export default function SupplierFollowUpModal({
         followUpEnabled,
         actorName
       });
+      await supplierDirectoryService.upsertFromSubmission({
+        supplier_name: cleanSup,
+        supplier_email_to: supplierEmailTo.trim(),
+        supplier_email_cc: supplierEmailCc.trim()
+      }).catch(() => { });
       setFeedback({
         type: 'success',
-        message: `Saved supplier "${cleanSup}"${followUpEnabled ? ' — 10-Calendar-Day follow-up countdown active.' : ' — Auto daily follow-up paused.'}`
+        message: `Saved supplier "${cleanSup}" and contact email(s)${followUpEnabled ? ' — 10-Calendar-Day follow-up countdown active.' : ' — Auto daily follow-up paused.'}`
       });
-      onShowToast?.(`Updated supplier & follow-up settings for ${report.rma_number}`, 'success');
+      onShowToast?.(`Updated supplier & email details for ${report.rma_number}`, 'success');
       onUpdated?.(saved);
       return saved;
     } catch (err) {
-      setFeedback({ type: 'error', message: err?.message || 'Failed to save supplier & follow-up settings.' });
+      setFeedback({ type: 'error', message: err?.message || 'Failed to save supplier & email details.' });
       return null;
     } finally {
       setIsSaving(false);
@@ -144,7 +177,11 @@ export default function SupplierFollowUpModal({
         followUpEnabled: true,
         actorName
       });
-      setFollowUpEnabled(true);
+      await supplierDirectoryService.upsertFromSubmission({
+        supplier_name: cleanSup,
+        supplier_email_to: supplierEmailTo.trim(),
+        supplier_email_cc: supplierEmailCc.trim()
+      }).catch(() => { });
 
       const res = await notificationService.runDailyFollowUpNow({
         isTestMode: recordIsTest,
@@ -186,7 +223,6 @@ export default function SupplierFollowUpModal({
         reason: wfPreview.isSupplierStream ? 'Picked Up — Case Closed' : 'Handover Completed — Case Closed',
         actorName
       });
-      setFollowUpEnabled(false);
       setFeedback({ type: 'success', message: `${report.rma_number} marked Picked Up / Case Closed. Countdown stopped.` });
       onShowToast?.(`${report.rma_number} Case Closed.`, 'success');
       onUpdated?.(saved);
@@ -199,7 +235,7 @@ export default function SupplierFollowUpModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-3xl max-w-xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-3xl max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50/70 dark:bg-slate-950/60">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -214,7 +250,7 @@ export default function SupplierFollowUpModal({
             </div>
             <h3 className="text-base font-black text-slate-900 dark:text-white mt-1 flex items-center gap-2">
               <Building2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              <span>Set Supplier, Email &amp; 10-Day Pickup Follow-Up</span>
+              <span>Set Supplier &amp; Email Details</span>
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-md">
               {report.name || report.barcode} • {formatQuantityWithPackSize(report.quantity || 1, report.unit_name || 'pc', report.pieces_per_case)}
@@ -231,31 +267,6 @@ export default function SupplierFollowUpModal({
         </div>
 
         <div className="p-5 space-y-4 overflow-y-auto text-xs">
-          {/* 4-Step Workflow Status Tracker */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {[wfPreview.step1, wfPreview.step2, wfPreview.step3, wfPreview.step4].map((st, idx) => (
-              <div
-                key={st.key}
-                className={`p-2.5 rounded-2xl border ${
-                  st.done
-                    ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
-                    : st.status === 'expired'
-                      ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-700'
-                      : idx === 1 && wfPreview.isCountdownActive
-                        ? 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700'
-                        : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'
-                }`}
-              >
-                <div className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400">
-                  {st.label}
-                </div>
-                <div className="font-bold text-slate-900 dark:text-white mt-0.5 leading-snug">
-                  {st.text || st.dateDisplay}
-                </div>
-              </div>
-            ))}
-          </div>
-
           {/* Supplier Name */}
           <div>
             <label className="block text-[11px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300 mb-1.5">
@@ -265,7 +276,7 @@ export default function SupplierFollowUpModal({
               id="followup-modal-supplier-input"
               name="followUpSupplierName"
               value={supplierName}
-              onChange={setSupplierName}
+              onChange={handleSupplierNameChange}
               placeholder="Search or type vendor / manufacturer (e.g. Mondelez, URC)..."
               className="w-full"
             />
@@ -275,7 +286,7 @@ export default function SupplierFollowUpModal({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300 mb-1.5">
-                Supplier Primary Email(s) (TO)
+                Supplier Email (To)
               </label>
               <input
                 type="text"
@@ -288,7 +299,7 @@ export default function SupplierFollowUpModal({
             </div>
             <div>
               <label className="block text-[11px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300 mb-1.5">
-                Supplier CC Email(s) (Optional)
+                Supplier Email (CC) (Optional)
               </label>
               <input
                 type="text"
@@ -300,6 +311,10 @@ export default function SupplierFollowUpModal({
               />
             </div>
           </div>
+
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+            Saved values automatically populate whenever you open Debit Claim or Replacement in the 4-Choice Wizard, and are stored in the persistent Supplier Emails Directory.
+          </p>
 
           {/* 10-Calendar-Day SLA Toggle */}
           <label className="flex items-start gap-3 p-3.5 rounded-2xl border border-amber-200 dark:border-amber-800/70 bg-amber-50/70 dark:bg-amber-950/30 cursor-pointer">
@@ -321,6 +336,14 @@ export default function SupplierFollowUpModal({
             </div>
           </label>
 
+          {/* Full 4-Step & 10-Day Timeline */}
+          <FollowUpTimelineCard
+            report={report}
+            catalogProducts={catalogProducts}
+            workflow={wfPreview}
+            compact={true}
+          />
+
           {wfPreview.isExpiredAfter10Days && !wfPreview.isClosed && (
             <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-700 text-rose-900 dark:text-rose-200 flex items-start gap-2 font-bold">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
@@ -331,11 +354,10 @@ export default function SupplierFollowUpModal({
           )}
 
           {feedback && (
-            <div className={`p-3 rounded-2xl border font-bold flex items-center gap-2 ${
-              feedback.type === 'success'
-                ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
-                : 'bg-rose-50 dark:bg-rose-950/50 border-rose-300 dark:border-rose-700 text-rose-900 dark:text-rose-200'
-            }`}>
+            <div className={`p-3 rounded-2xl border font-bold flex items-center gap-2 ${feedback.type === 'success'
+              ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+              : 'bg-rose-50 dark:bg-rose-950/50 border-rose-300 dark:border-rose-700 text-rose-900 dark:text-rose-200'
+              }`}>
               <ShieldCheck className="w-4 h-4 shrink-0" />
               <span>{feedback.message}</span>
             </div>

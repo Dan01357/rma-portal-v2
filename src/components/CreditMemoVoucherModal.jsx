@@ -5,6 +5,7 @@ import { buildPickupFormCopiesList } from '../utils/pickupFormPdf';
 import {
   formatDateYmd,
   formatDateTimeYmdHm,
+  formatSaveFileTimestamp,
   stripCreditMemoMetaTag,
   getCreditMemoConsolidatedItems,
   getCreditMemoRmaNumbers
@@ -54,9 +55,10 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
 
   const handlePrint = () => {
     if (totalSheetsCount === 0) return;
-    const docTitle = (memosToRender.length === 1 && memosToRender[0]?.credit_memo_number)
+    const baseTitle = (memosToRender.length === 1 && memosToRender[0]?.credit_memo_number)
       ? `Credit-Memo-${memosToRender[0].credit_memo_number}`
       : `Batch-Credit-Memos-${memosToRender.length}-Vouchers`;
+    const docTitle = `${baseTitle} ${formatSaveFileTimestamp(new Date())}`;
 
     printIsolatedElement({
       elementId: 'credit-memo-voucher-print-root',
@@ -452,7 +454,7 @@ export default function CreditMemoVoucherModal({ isOpen, onClose, creditMemo, cr
                           Finance Head
                         </span>
                         <span className="text-[10px] text-black font-mono block">
-                          {memo.credit_issued_at ? `${formatDateTimeYmdHm(memo.credit_issued_at)} (YYYY-MM-DD HH:mm)` : ''}
+                          Prepared Date &amp; Time (YYYY-MM-DD HH:mm): {formatDateTimeYmdHm(memo.credit_issued_at || memo.created_at || new Date())}
                         </span>
                       </div>
 

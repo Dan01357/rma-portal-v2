@@ -31,6 +31,7 @@ async function seedTestModeManifestCustomerRma(page) {
   await expect(page.getByText('Recognized Product')).toBeVisible({ timeout: 45_000 });
   const fileInput = page.locator('input[type="file"][accept="image/*"]').first();
   await fileInput.setInputFiles({ name: 'pw-mf-1.png', mimeType: 'image/png', buffer: PNG_BUFFER });
+  await expect(page.getByText('1/10 photos')).toBeVisible({ timeout: 10_000 });
   await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({ name: 'pw-mf-1b.png', mimeType: 'image/png', buffer: PNG_BUFFER });
   await expect(page.getByText('2/10 photos')).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: /\+ Add Another Item to Return/i }).click();
@@ -144,7 +145,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       ]);
       assertValidXlsxFile(liveCustMatrix, await liveCustMatrix.path());
       expect(liveCustMatrix.suggestedFilename()).toMatch(
-        /^Overall_RMA_Matrix_Report_\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2} \d{4}\.xlsx$/
+        /^Overall_RMA_Matrix_Report_\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2} [A-Z][a-z]{2} \d{2}, \d{4} \d{4}\.xlsx$/
       );
       await page.getByRole('button', { name: 'Close', exact: true }).click();
 
@@ -298,7 +299,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
         page.waitForEvent('download'),
         multiQrModal.getByRole('button', { name: /Save QR \(PNG\)/i }).click()
       ]);
-      expect(multiSheetPng.suggestedFilename()).toMatch(/2-QRs-letter-Page-1\.png/i);
+      expect(multiSheetPng.suggestedFilename()).toMatch(/2-QRs-letter-Page-1 [A-Z][a-z]{2} \d{2}, \d{4} \d{4}\.png/i);
 
       const multiPrintBefore = await page.evaluate(() => window.__pwPrintCount || 0);
       await multiQrModal.getByRole('button', { name: /Print 2 QRs/i }).click();

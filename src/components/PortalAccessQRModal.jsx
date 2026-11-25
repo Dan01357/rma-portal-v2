@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { downloadPortalPosterPng, downloadQrCodePng, printPortalPoster } from '../utils/qrDownload';
 import { copyTextSafe } from '../utils/clipboard';
+import { formatSaveFileTimestamp } from '../utils/rmaHelpers';
 
 export default function PortalAccessQRModal({ isOpen, onClose }) {
   const [isCopied, setIsCopied] = useState(false);
@@ -43,7 +44,7 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
       await downloadPortalPosterPng({
         svgElementOrId: 'portal-access-qr-svg',
         portalUrl,
-        filename: 'RMA-Public-Reporting-Poster.png'
+        filename: `RMA-Public-Reporting-Poster ${formatSaveFileTimestamp(new Date())}.png`
       });
     } catch (err) {
       console.error('Error downloading poster:', err);
@@ -61,7 +62,7 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
         rmaNumber: 'PUBLIC-RMA-PORTAL',
         productName: 'Scan to Report Returned Merchandise',
         barcode: portalUrl,
-        filename: 'RMA-Portal-Access-QR.png'
+        filename: `RMA-Portal-Access-QR ${formatSaveFileTimestamp(new Date())}.png`
       });
     } catch (err) {
       console.error('Error downloading QR code:', err);
@@ -77,7 +78,7 @@ export default function PortalAccessQRModal({ isOpen, onClose }) {
       await printPortalPoster({
         svgElementOrId: 'portal-access-qr-svg',
         portalUrl,
-        documentTitle: 'RMA-Public-Reporting-Poster'
+        documentTitle: `RMA-Public-Reporting-Poster ${formatSaveFileTimestamp(new Date())}`
       });
     } catch (err) {
       console.error('Error printing poster:', err);

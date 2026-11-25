@@ -27,6 +27,8 @@ import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import SupplierInput from './SupplierInput';
 import ProductAutoSuggest from './ProductAutoSuggest';
+import CameraCaptureModal from './CameraCaptureModal';
+import { stampWatermarkOnImage } from '../utils/cameraWatermark';
 import { supabase } from '../supabaseClient';
 
 export default function PendingBarcodesModal({ isOpen, onClose, pendingList = [], onUpdated, currentUser }) {
@@ -59,6 +61,7 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     imageUrl: ''
   });
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState(null);
   const [skuError, setSkuError] = useState(null);
@@ -136,13 +139,15 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     setSkuError(null);
   };
 
-  const handleImageFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const uploadWatermarkedProductFile = async (rawFile) => {
+    if (!rawFile) return;
 
     setIsUploadingImage(true);
     try {
-      const url = await catalogService.uploadPhoto(file, null, 'product', {
+      const stamped = await stampWatermarkOnImage(rawFile, {
+        tagText: currentUser?.name || 'Admin Catalog'
+      });
+      const url = await catalogService.uploadPhoto(stamped, null, 'product', {
         sku: formData.code?.trim() || formData.barcode?.trim(),
         name: formData.name?.trim()
       });
@@ -154,6 +159,13 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
     } finally {
       setIsUploadingImage(false);
     }
+  };
+
+  const handleImageFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (e.target) e.target.value = '';
+    if (!file) return;
+    await uploadWatermarkedProductFile(file);
   };
 
   const [deletingId, setDeletingId] = useState(null);
@@ -690,6 +702,16 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
                         className="hidden"
                       />
                     </label>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsCameraOpen(true)}
+                      disabled={isUploadingImage}
+                      className="py-2 px-3 bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Live Camera</span>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -798,6 +820,19 @@ export default function PendingBarcodesModal({ isOpen, onClose, pendingList = []
         title={lightboxPhoto?.title}
         subtitle={lightboxPhoto?.subtitle}
         onClose={() => setLightboxPhoto(null)}
+      />
+
+      <CameraCaptureModal
+        isOpen={isCameraOpen}
+        onClose={() => setIsCameraOpen(false)}
+        title="Pending SKU Photo — Live Camera"
+        tagName={currentUser?.name || 'Admin Catalog'}
+        onCapture={async (files) => {
+          if (files?.[0]) {
+            await uploadWatermarkedProductFile(files[0]);
+            setIsCameraOpen(false);
+          }
+        }}
       />
     </div>
   );

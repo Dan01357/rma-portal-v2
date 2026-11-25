@@ -221,6 +221,7 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await page.locator('input[aria-label="Our Company Copies"]').fill('2');
       await page.locator('input[aria-label="Customer Copies"]').fill('2');
       await expect(page.getByText('Total Output: 4 Papers')).toBeVisible();
+      await expect(page.getByText(/Prepared Date & Time/i).first()).toBeVisible();
       await expect(page.locator('#credit-memo-voucher-print-root .voucher-sheet')).toHaveCount(4);
       await expect(page.getByText(/^COPY 4 OF 4 — CUSTOMER COPY/i)).toBeVisible();
       await expect(consolVoucherPrintBtn).toBeEnabled();
@@ -371,8 +372,11 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await page.getByRole('button', { name: /Custom Date Range/i }).click();
       await page.getByRole('button', { name: /Save Matrix Config/i }).click();
       await expect(page.getByText(/Overall Matrix schedule, date range & scope saved/i)).toBeVisible({ timeout: 10_000 });
-      await page.getByRole('button', { name: /Save Follow-Up SLA/i }).click();
+      await page.getByRole('button', { name: /Save Follow-Up (?:SLA|Time)/i }).click();
       await expect(page.getByText(/10-Day Pickup Follow-Up schedule .* saved to cloud/i)).toBeVisible({ timeout: 15_000 });
+
+      await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Supplier (?:Emails )?Directory/i }).first()).toBeVisible();
 
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.getByText('Pingcon RMA Operations')).toBeVisible({ timeout: 45_000 });
@@ -386,8 +390,11 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await page.getByRole('button', { name: /Rolling Days/i }).click();
       await page.getByRole('button', { name: /Save Matrix Config/i }).click();
       await expect(page.getByText(/Overall Matrix schedule, date range & scope saved/i)).toBeVisible({ timeout: 10_000 });
-      await page.getByRole('button', { name: /Save Follow-Up SLA/i }).click();
+      await page.getByRole('button', { name: /Save Follow-Up (?:SLA|Time)/i }).click();
       await expect(page.getByText(/10-Day Pickup Follow-Up schedule .* saved to cloud/i)).toBeVisible({ timeout: 15_000 });
+
+      await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Supplier (?:Emails )?Directory/i }).first()).toBeVisible();
 
       await page.getByRole('button', { name: /View & Download Poster/i }).click();
       await expect(page.getByRole('button', { name: 'Close', exact: true })).toBeVisible({ timeout: 10_000 });

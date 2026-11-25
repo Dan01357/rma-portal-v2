@@ -16,7 +16,7 @@ import {
   formatManilaHhmm,
   formatManilaTimestampDisplay
 } from '../../src/utils/exportMatrixXlsx.js';
-import { isTestRecord } from '../../src/utils/rmaHelpers.js';
+import { isTestRecord, formatSaveFileTimestamp } from '../../src/utils/rmaHelpers.js';
 import {
   normalizeTimeHhmm,
   formatTime12hFromHhmm,
@@ -370,8 +370,9 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
     const finalTo = requestedTestMode ? sandboxEmail : configuredTo;
     const finalCc = requestedTestMode ? [] : configuredCc;
 
-    const hhmm = formatManilaHhmm(new Date());
-    const generatedManila = formatManilaTimestampDisplay(new Date());
+    const nowDate = new Date();
+    const ts = formatSaveFileTimestamp(nowDate);
+    const generatedManila = formatManilaTimestampDisplay(nowDate);
     const streamSlug = resolvedStream === 'supplier_outbound'
       ? 'Supplier_RTV_Matrix_Report'
       : resolvedStream === 'customer_inbound'
@@ -382,7 +383,7 @@ export async function handleDailyMatrixEmail(req, res, payload = {}) {
       : resolvedStream === 'customer_inbound'
         ? 'Customer Hub Matrix Report'
         : 'Overall RMA Matrix Report';
-    const filename = `${requestedTestMode ? 'TEST_' : ''}${streamSlug}_${startDate}_to_${endDate} ${hhmm}.xlsx`;
+    const filename = `${requestedTestMode ? 'TEST_' : ''}${streamSlug}_${startDate}_to_${endDate} ${ts}.xlsx`;
 
     const baseSubject = `[Daily RMA Matrix Report] ${streamTitle} (${startDate} to ${endDate}) — ${dataset.grandTotalPcs} pcs`;
     const finalSubject = formatTestEmailSubject(baseSubject, requestedTestMode);

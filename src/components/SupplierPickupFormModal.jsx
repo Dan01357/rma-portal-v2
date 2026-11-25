@@ -6,6 +6,8 @@ import {
   formatPeso,
   getConsolidatedPickupItems,
   formatFourChoiceOutcome,
+  formatDateTimeYmdHm,
+  formatSaveFileTimestamp,
   isTestRecord,
   getPickupPhotosSummary
 } from '../utils/rmaHelpers';
@@ -100,6 +102,12 @@ export default function SupplierPickupFormModal({
   const meta = primaryReport.ai_document_metadata || {};
   const pickup = meta.supplier_pickup || {};
   const outcome = formatFourChoiceOutcome(primaryReport);
+  const preparedDateTime = formatDateTimeYmdHm(
+    pickup.updated_at ||
+    pickup.picked_up_at ||
+    meta.simple_rtv_updated_at ||
+    new Date()
+  );
 
   const isBatch = effectiveReports.length > 1;
   const rmaNumbersList = effectiveReports
@@ -318,7 +326,7 @@ export default function SupplierPickupFormModal({
 
     printIsolatedElement({
       elementId: 'letter-supplier-pickup-form',
-      documentTitle: `${docSlug}-${claimNumber || rmaNumber}`,
+      documentTitle: `${docSlug}-${claimNumber || rmaNumber} ${formatSaveFileTimestamp(new Date())}`,
       pageSize: 'letter portrait',
       pageMargin: isCompactMode ? '0' : '0.4in',
       allowMultiPage: !isCompactMode,
@@ -511,6 +519,9 @@ export default function SupplierPickupFormModal({
             title="Click to edit Prepared By name"
           />
           <div className="text-[8px] text-black mt-0.5">Printed Name &amp; Date</div>
+          <div className="text-[7.5px] font-mono font-bold text-black mt-0.5">
+            Prepared Date &amp; Time (YYYY-MM-DD HH:mm): {preparedDateTime}
+          </div>
         </div>
 
         <div className={`border border-black bg-white ${isCompactMode ? 'p-1.5' : 'p-2'}`}>

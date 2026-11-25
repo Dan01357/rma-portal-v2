@@ -12,7 +12,7 @@ import {
   ChevronDown,
   Hash
 } from 'lucide-react';
-import { formatPeso, getEmailRoutingPayload, formatDateYmd } from '../utils/rmaHelpers';
+import { formatPeso, getEmailRoutingPayload, formatDateYmd, formatSaveFileTimestamp } from '../utils/rmaHelpers';
 import { downloadTableXlsx } from '../utils/exportXlsx';
 
 export default function TicketsVaultTab({ 
@@ -103,7 +103,7 @@ export default function TicketsVaultTab({
 
     downloadTableXlsx({
       sheetName: 'RMA Vault',
-      filename: `RMA_Vault_Export_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      filename: `RMA_Vault_Export ${formatSaveFileTimestamp(new Date())}.xlsx`,
       columns,
       rows
     });

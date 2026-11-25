@@ -67,7 +67,8 @@ export const SupplierPickupMetadataSchema = z.object({
   photos: PickupPhotoSlotsSchema,
   ourCopyCount: z.number().int().min(0).max(10).optional().openapi({ example: 2, description: 'Customizable Our Company copy count for US Letter B&W Pickup/Handover & Credit Memo forms' }),
   counterpartyCopyCount: z.number().int().min(0).max(10).optional().openapi({ example: 2, description: 'Customizable Customer/Supplier copy count for US Letter B&W Pickup/Handover & Credit Memo forms' }),
-  pageLayout: z.enum(['separated', 'combined']).optional().openapi({ example: 'separated', description: 'US Letter B&W form pagination: separated full pages vs combined 50% cut dual-copy sheet' }),
+  pageLayout: z.enum(['separated', 'combined', 'repeating']).optional().openapi({ example: 'separated', description: 'US Letter B&W form pagination: separated full pages vs combined 50% cut dual-copy sheet' }),
+  prepared_at: z.string().datetime().nullable().optional().openapi({ description: 'Manual Prepared Date & Time (Asia/Manila) rendered directly beneath Prepared By on US Letter B&W printables' }),
   picked_up_at: z.string().datetime().nullable().optional()
 }).passthrough().openapi('SupplierPickupMetadata');
 
@@ -114,6 +115,9 @@ export const RMAReportSchema = z.object({
   dr_number: z.string().nullable().optional().openapi({ example: 'DR-2026-8891' }),
   po_number: z.string().nullable().optional().openapi({ example: 'PO-2026-4401' }),
   expiry_date: z.string().nullable().optional().openapi({ example: '2026-12-31', description: 'ISO YYYY-MM-DD expiry date (required for Supplier RTV & Test Mode; optional for Live Customer Hub)' }),
+  gps_latitude: z.number().nullable().optional().openapi({ example: 14.5764 }),
+  gps_longitude: z.number().nullable().optional().openapi({ example: 121.0851 }),
+  gps_address: z.string().nullable().optional().openapi({ example: '42 Jose Rizal St, Brgy. Bagong Ilog, Pasig, Metro Manila, 1600', description: 'Nominatim reverse-geocoded street/barangay/city/ZIP address' }),
   is_parent: z.boolean().default(false).openapi({ example: false, description: 'True if this report is a batch return manifest container' }),
   parent_rma_id: z.number().int().nullable().optional().openapi({ example: null, description: 'Parent report ID if this is a line item inside a batch return manifest' }),
   items: z.array(z.any()).default([]).openapi({ example: [], description: 'Line item breakdown objects for multi-item return manifests' }),
@@ -624,13 +628,13 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
   registry.registerPath({
     method: 'get',
     path: '/api/send-email',
-    summary: 'Execute Scheduled Daily 10-Day Pickup Follow-Up (?action=daily-followup) or Daily Matrix (.xlsx) (?action=daily-matrix)',
-    description: 'Vercel Cron / GitHub Actions endpoint (protected by CRON_SECRET or Admin Bearer JWT under 12-function cap). Respects adjustable `autoSendTimePht` (`respectSchedule=true`) in `Asia/Manila` (`08:00` default Follow-Up, `13:00` default Matrix) and enforces Test Sandbox isolation (`mgan@pingconmarketing.com` + `[TEST] ` subject prefix).',
+    summary: 'Execute Scheduled Daily 10-Day Pickup Follow-Up (?action=daily-followup), Daily Matrix (?action=daily-matrix), or IMAP Email .xlsx Reply Sync (?action=sync-email-replies)',
+    description: 'Vercel Cron / GitHub Actions endpoint (protected by CRON_SECRET or Admin Bearer JWT under 12-function cap). Respects adjustable `autoSendTimePht` (`respectSchedule=true`) in `Asia/Manila` (`08:00` default Follow-Up, `13:00` default Matrix), enforces Test Sandbox isolation (`mgan@pingconmarketing.com` + `[TEST] ` subject prefix), and polls UNSEEN Gmail `.xlsx` reply attachments via `?action=sync-email-replies`.',
     tags: ['Automation & Email'],
     security: [{ BearerAuth: [] }],
     request: {
       query: z.object({
-        action: z.enum(['daily-followup', 'daily-matrix']).openapi({ example: 'daily-followup' }),
+        action: z.enum(['daily-followup', 'daily-matrix', 'sync-email-replies']).openapi({ example: 'daily-followup' }),
         respectSchedule: z.enum(['true', 'false', '1']).optional().openapi({ example: 'true' }),
         force: z.enum(['true', 'false', '1']).optional(),
         dryRun: z.enum(['true', 'false', '1']).optional(),
@@ -648,16 +652,17 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
   registry.registerPath({
     method: 'post',
     path: '/api/send-email',
-    summary: 'Dispatch RMA Email, Lifecycle PDF, Daily Matrix (.xlsx), or 10-Day SLA Follow-Up (?action=daily-followup)',
-    description: `Unified serverless mailer preserving Vercel's 12-function cap:
-- **Standard / Lifecycle Emails**: Routes via \`email_recipients_by_type\` (multi-TO + CC). \`pickup_debit_claim\` omits \`Store / Branch:\` and \`Warehouse Location:\` while embedding \`Explanation / Defect Notes:\`, all 5-category pickup photos (max 50), and \`Debit-Claim-Form-*.pdf\` / \`Customer-Credit-Handover-Form-*.pdf\`.
-- **\`?action=daily-followup\`**: Runs 4-Step Workflow & 10-Calendar-Day Pickup Follow-Up SLA (Day 1..10 reminders w/ 4-Step HTML table & health warning; stops immediately when Picked Up / Case Closed; auto-disposes >10 calendar days unclaimed to \`Disposal / Scrap Area\` w/ \`workflow_resolution: "scrapped_no_reorder"\` and notifies \`new_rma\` recipients).
-- **\`?action=daily-matrix\`**: Generates and emails the strict OOXML Overall RMA Matrix (\`.xlsx\`) using \`daily_matrix_config\` (Rolling Days or Custom \`YYYY-MM-DD\`, scope, \`includeZeroCatalogSkus\`, editable \`autoSendTimePht\`).`,
+    summary: 'Dispatch RMA Email (with Mirror .xlsx), Lifecycle PDF, Daily Matrix (.xlsx), 10-Day SLA Follow-Up, or 2-Way .xlsx Reply Sync',
+    description: `Unified serverless mailer & 2-way .xlsx reply processor preserving Vercel's 12-function cap:
+- **Standard / Lifecycle Emails**: Routes via \`email_recipients_by_type\` (multi-TO + CC). New RMA alerts attach an editable \`Field | Value\` + \`MANIFEST LINE ITEMS\` mirror \`.xlsx\` workbook (matching email subject + \`formatSaveFileTimestamp\`) and set \`replyTo\`. \`pickup_debit_claim\` omits \`Store / Branch:\` and \`Warehouse Location:\` while embedding \`Explanation / Defect Notes:\`, optional 5-slot pickup photos (max 50), and \`Debit-Claim-Form-*.pdf\` / \`Customer-Credit-Handover-Form-*.pdf\`.
+- **\`?action=daily-followup\`**: Runs 4-Step Workflow & Day 0..10 Pickup Follow-Up SLA (Day 1..10 reminders w/ 4-Step HTML table & health warning; stops immediately when Picked Up / Case Closed; auto-disposes >10 calendar days unclaimed to \`Disposal / Scrap Area\` w/ \`workflow_resolution: "scrapped_no_reorder"\` and notifies \`new_rma\` recipients).
+- **\`?action=daily-matrix\`**: Generates and emails the strict OOXML Overall RMA Matrix (\`.xlsx\`) using \`daily_matrix_config\` (Rolling Days or Custom \`YYYY-MM-DD\`, scope, \`includeZeroCatalogSkus\`, editable \`autoSendTimePht\`).
+- **\`?action=sync-email-replies\` / \`?action=ingest-xlsx-reply\`**: Polls unread Gmail IMAP \`.xlsx\` replies (or accepts base64 \`.xlsx\` uploads from Quick Actions / webhook), verifies sender & Live/Test isolation, updates \`rma_reports\` + \`rma_settings.supplier_directory_store\`, and appends \`EMAIL_XLSX_REPLY_UPDATE\` to \`audit_trail\`.`,
     tags: ['Automation & Email'],
     security: [{ BearerAuth: [] }],
     request: {
       query: z.object({
-        action: z.enum(['daily-followup', 'daily-matrix']).optional()
+        action: z.enum(['daily-followup', 'daily-matrix', 'sync-email-replies', 'ingest-xlsx-reply']).optional()
       }),
       body: {
         required: true,
@@ -665,6 +670,10 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
           'application/json': {
             schema: z.object({
               action: z.string().optional().openapi({ example: 'daily-followup' }),
+              fileBase64: z.string().optional().openapi({ description: 'Base64-encoded .xlsx workbook bytes for action=ingest-xlsx-reply' }),
+              filename: z.string().optional().openapi({ example: '[RMA Alert] RMA-2026-0001 Nov 25, 2026 0832.xlsx' }),
+              senderEmail: z.string().optional().openapi({ example: 'mgan@pingconmarketing.com' }),
+              replyTo: z.string().optional(),
               operation: z.enum(['run_all', 'send_single', 'check_dispose_only']).optional().openapi({ example: 'run_all' }),
               rmaNumber: z.string().optional().openapi({ example: 'RMA-2026-0001-6TYH' }),
               respectSchedule: z.boolean().optional().openapi({ example: true }),

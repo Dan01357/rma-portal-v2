@@ -28,7 +28,7 @@ import {
 import ImageLightboxModal from './ImageLightboxModal';
 import TablePagination from './TablePagination';
 import { exportRMAReportsToXlsx } from '../utils/exportCsv';
-import { formatFourChoiceOutcome, formatLifecycleStage, getRealPhotos, normalizeWarehouseLocation, formatDateYmd, formatDateTimeYmdHm } from '../utils/rmaHelpers';
+import { formatFourChoiceOutcome, formatLifecycleStage, getRealPhotos, normalizeWarehouseLocation, formatDateYmd, formatDateTimeYmdHm, getGpsAddressDisplay, getGpsMapUrl } from '../utils/rmaHelpers';
 
 export default function RMAReportsModal({ 
   isOpen, 
@@ -730,19 +730,24 @@ export default function RMAReportsModal({
                         {/* 9. Date & GPS */}
                         <td className="py-3 px-3.5 text-right font-mono text-[11px] text-slate-500 dark:text-slate-400">
                           <div>{item.created_at ? formatDateYmd(item.created_at) : ''}</div>
-                          {item.gps_latitude && item.gps_longitude ? (
-                            <a
-                              href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 text-[10px] font-bold"
-                            >
-                              <MapPin className="w-3 h-3 text-rose-500" />
-                              <span>Map</span>
-                            </a>
-                          ) : (
-                            <span className="text-slate-300 dark:text-slate-600 text-[10px]">No GPS</span>
-                          )}
+                          {(() => {
+                            const mapUrl = getGpsMapUrl(item);
+                            const gpsAddr = getGpsAddressDisplay(item);
+                            return mapUrl ? (
+                              <a
+                                href={mapUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 text-[10px] font-bold max-w-[170px]"
+                                title={gpsAddr || 'View GPS Location on Google Maps'}
+                              >
+                                <MapPin className="w-3 h-3 text-rose-500 shrink-0" />
+                                <span className="truncate">{gpsAddr || 'Map'}</span>
+                              </a>
+                            ) : (
+                              <span className="text-slate-300 dark:text-slate-600 text-[10px]">No GPS</span>
+                            );
+                          })()}
                         </td>
 
                         {/* 10. Actions: Assign SKU / Save Product, Credit Memo & Delete */}
@@ -1024,19 +1029,24 @@ export default function RMAReportsModal({
 
                       <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
                         <span className="font-mono">{item.created_at ? `${formatDateTimeYmdHm(item.created_at)} (YYYY-MM-DD HH:mm)` : ''}</span>
-                        {item.gps_latitude && item.gps_longitude ? (
-                          <a
-                            href={`https://www.google.com/maps?q=${item.gps_latitude},${item.gps_longitude}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 font-bold"
-                          >
-                            <MapPin className="w-3 h-3 text-rose-500" />
-                            <span>View GPS Location</span>
-                          </a>
-                        ) : (
-                          <span className="text-slate-400 dark:text-slate-500">GPS: Blank</span>
-                        )}
+                        {(() => {
+                          const mapUrl = getGpsMapUrl(item);
+                          const gpsAddr = getGpsAddressDisplay(item);
+                          return mapUrl ? (
+                            <a
+                              href={mapUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 font-bold max-w-[210px]"
+                              title={gpsAddr || 'View GPS Location on Google Maps'}
+                            >
+                              <MapPin className="w-3 h-3 text-rose-500 shrink-0" />
+                              <span className="truncate">{gpsAddr || 'View GPS Location'}</span>
+                            </a>
+                          ) : (
+                            <span className="text-slate-400 dark:text-slate-500">GPS: Blank</span>
+                          );
+                        })()}
                       </div>
 
                       {/* Proof Photos with Click-to-Zoom Lightbox */}

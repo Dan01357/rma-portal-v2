@@ -35,15 +35,18 @@ export const CreateProductSchema = z.object({
 }).openapi('CreateProductRequest');
 
 export function registerProductRoutes(registry) {
-  // GET /api/v1/products/lookup (Public Serverless Proxy)
+  // GET /api/v1/products/lookup (Public Serverless Proxy + Reverse Geocode)
   registry.registerPath({
     method: 'get',
     path: '/api/v1/products/lookup',
-    summary: 'Public Barcode & Product Lookup Proxy',
-    description: 'Secure server-side product lookup proxy. Resolves barcodes across Supabase, ERPLY POS/ERP live catalog, and wholesale verified catalog without requiring client credentials.',
+    summary: 'Public Barcode/Product Lookup & GPS Reverse-Geocode Proxy',
+    description: 'Secure server-side proxy resolving barcodes/SKUs across Supabase & ERPLY catalog OR reverse-geocoding dock GPS coordinates (`?action=reverse-geocode&lat=...&lon=...`) via OpenStreetMap Nominatim into Street, Barangay, City, Region & ZIP without adding extra serverless endpoints (`API_ROUTE_COUNT === 12`).',
     tags: ['Products & Catalog'],
     request: {
       query: z.object({
+        action: z.enum(['reverse-geocode']).optional().openapi({ description: 'Set to `reverse-geocode` with `lat` and `lon` to resolve human-readable address details', example: 'reverse-geocode' }),
+        lat: z.string().optional().openapi({ description: 'GPS latitude for reverse-geocode action', example: '14.5764' }),
+        lon: z.string().optional().openapi({ description: 'GPS longitude for reverse-geocode action', example: '121.0851' }),
         barcode: z.string().optional().openapi({ description: 'Barcode or SKU code to scan and resolve', example: '4800016644833' }),
         search: z.string().optional().openapi({ description: 'Keyword search across product names and SKUs', example: 'Bonita' }),
         limit: z.string().optional().openapi({ description: 'Maximum products to return', example: '25' })
@@ -51,7 +54,7 @@ export function registerProductRoutes(registry) {
     },
     responses: {
       200: {
-        description: 'Lookup result',
+        description: 'Product lookup or reverse-geocode result',
         content: {
           'application/json': {
             schema: z.object({
@@ -59,7 +62,14 @@ export function registerProductRoutes(registry) {
               found: z.boolean().optional().openapi({ example: true }),
               source: z.string().optional().openapi({ example: 'erply_api' }),
               product: ProductSchema.nullable().optional(),
-              products: z.array(ProductSchema).optional()
+              products: z.array(ProductSchema).optional(),
+              street: z.string().optional().openapi({ example: '42 Jose Rizal St' }),
+              barangay: z.string().optional().openapi({ example: 'Brgy. Bagong Ilog' }),
+              city: z.string().optional().openapi({ example: 'Pasig' }),
+              region: z.string().optional().openapi({ example: 'Metro Manila' }),
+              zip: z.string().optional().openapi({ example: '1600' }),
+              formatted: z.string().optional().openapi({ example: '42 Jose Rizal St, Brgy. Bagong Ilog, Pasig, Metro Manila, 1600' }),
+              lines: z.array(z.string()).optional()
             })
           }
         }

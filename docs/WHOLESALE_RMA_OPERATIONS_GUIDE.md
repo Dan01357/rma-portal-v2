@@ -670,5 +670,24 @@ Legacy 5/6 triage cards, Condition Grade dropdowns, Automated Lifecycle Stage ca
 - **New RMA Alert Email Editor Button**: Every New RMA Alert email embeds a never-expiring (`expires_at = null`, manually revocable by Admin) Google Identity-locked **`✏️ Edit RMA Details & Documents`** button authorized for **ALL active `To` + `CC` recipients** on that email in Live Mode (`mgan@pingconmarketing.com` or Sandbox override in Test Mode), backed by `CustomerRMAInvitesModal` (`✏️ RMA Details Editor` w/ `Never Expires`), `GatekeeperPinModal`, `RmaEmailEditorView`, and `/api/v1/rma-email-edit`.
 - **Auto Daily PHT Matrix & 10-Calendar-Day Follow-Up SLA (`dailyMatrixEmailHandler.js` & `dailyFollowUpHandler.js`)**: Both `/api/send-email?action=daily-matrix` and `/api/send-email?action=daily-followup` respect Settings-configurable `HH:mm Asia/Manila` schedules (defaults `13:00` Matrix / `08:00` Follow-Up), dispatched via GitHub Actions (every 15 min) + `vercel.json` Cron + Admin browser scheduler while preserving `API_ROUTE_COUNT === 12`. Follow-ups track 4 steps (`Report Date -> Waiting Day N of 10 -> Picked Up/Handover Date -> Case Close`), stop on pickup/`✓ Case Close`, and auto-dispose >10-day unclaimed RMAs to `Scrapped / Disposed` (`Disposal / Scrap Area`).
 
+---
+
+## Chapter 13: 2-Way Mirror `.xlsx` Email Replies, Reverse-Geocoded GPS & Watermarked Capture
+
+### 13.1 New RMA Mirror `.xlsx` Attachment & Automated Reply Sync
+- **Mirror Workbook (`src/utils/rmaAlertXlsx.js`)**: Every New RMA Alert email (`sendRMANotification`) attaches an editable `.xlsx` workbook matching the alert email subject + `formatSaveFileTimestamp()` (`MMM DD, YYYY HHmm`). It includes the complete `Field | Value` table (Store/Branch, Supplier Name/Emails, SKU, Name, Qty, Pricing, Defect/Notes, SI/DR/PO, Batch/Lot, Expiry `YYYY-MM-DD`, Location, Clear GPS Address/Maps Link) and the full `MANIFEST LINE ITEMS` grid for multi-item returns.
+- **2-Way Email Reply Ingestion (`api/_lib/imapReplySyncHandler.js`)**:
+  - Scheduled via `.github/workflows/rma-scheduler.yml` and manually runnable via **📩 Check Email .xlsx Replies** (`SettingsTab` & `QuickRMAActionModal`) calling `/api/send-email?action=sync-email-replies`, alongside direct file upload **📤 Upload Edited .xlsx** (`?action=ingest-xlsx-reply`).
+  - Zero-dependency ZIP/XML reader (`zlib.inflateRawSync` supporting Deflate & Stored entries + `xl/sharedStrings.xml`), strict sender authorization (`admin_users`, configured `email_recipients`, AE/reporter, or internal company domains), Test (`RMA-TEST-`) vs Live (`RMA-`) isolation, idempotent `processed_reply_message_ids` tracking, and `EMAIL_XLSX_REPLY_UPDATE` audit logs.
+
+### 13.2 Reverse-Geocoded GPS & Live Watermarked Cameras
+- **Server Proxy (`/api/v1/products/lookup?action=reverse-geocode`)**: Converts `lat`/`lon` coordinates into clean `street`, `barangay`, `city`, `region`, and `zip` via OpenStreetMap Nominatim (saved on `gps_address` + `ai_document_metadata.gps_address`), driving readable address labels and Google Maps search URLs across intake badges, Hub tables, `QuickRMAActionModal`, `RMAReportsModal`, `.xlsx` exports, and emails.
+- **Live Camera Watermarks (`CameraCaptureModal.jsx` & `cameraWatermark.js`)**: Every intake photo, paperwork document, catalog product photo, and Wizard pickup slot photo stamps the Asia/Manila timestamp (`YYYY-MM-DD HH:mm:ss PHT`), resolved street/city address, and operator hashtag cleanly in the bottom-left corner without obscuring commercial IDs, plates, or receipt numbers.
+
+### 13.3 Persistent Supplier Directory, Strict 4-Choice Statuses & Timestamped Printables
+- **Strict `Pending` Default & Day 0..10 Timeline (`FollowUpTimelineCard.jsx`)**: New intake reports start strictly at `Pending`, never falsely inferred as `Scrapped`, display `Status (YYYY-MM-DD HH:mm)`, and render Day 0..10 calendars + optional 5 pickup photo uploads with `+ Bundle Additional RMAs` inside the Wizard.
+- **Supplier Directory & Prepared Timestamps**: `rma_settings.supplier_directory_store` (`SupplierDirectoryModal.jsx`) auto-fills supplier emails across Wizard, Quick Actions, and Follow-Up emails; US Letter B&W forms display manual `Prepared By` + `Prepared Date & Time`, print reliably offline (`iframe.srcdoc` inline styles), and save all exports/PDFs/PNGs with unique `formatSaveFileTimestamp()` names.
+
+
 
 

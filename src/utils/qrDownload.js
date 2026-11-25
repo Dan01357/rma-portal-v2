@@ -2,7 +2,13 @@
  * QR Code & Box Sticker Download Utility
  * Client-side high-resolution PNG & SVG generation for mobile and desktop devices.
  */
-import { formatQuantityWithPackSize, formatManifestBreakdown, formatDateYmd, formatDateTimeYmdHm } from './rmaHelpers';
+import {
+  formatQuantityWithPackSize,
+  formatManifestBreakdown,
+  formatDateYmd,
+  formatDateTimeYmdHm,
+  appendSaveTimestampToFilename
+} from './rmaHelpers';
 import { drawUnifiedRmaQrCard, normalizeRmaQrCardData } from './customStickerCanvas';
 
 /**
@@ -214,7 +220,7 @@ export async function downloadQrCodePng({
       { widthMm: clampedW, heightMm: clampedH }
     );
 
-    const finalFilename = filename || `${rmaNumber}-QR.png`;
+    const finalFilename = appendSaveTimestampToFilename(filename || `${rmaNumber}-QR.png`);
     canvas.toBlob((blob) => {
       if (blob) {
         triggerDownload(blob, finalFilename);
@@ -223,7 +229,7 @@ export async function downloadQrCodePng({
       }
     }, 'image/png');
 
-    return true;
+    return finalFilename;
   } finally {
     URL.revokeObjectURL(blobUrl);
   }
@@ -576,7 +582,9 @@ export async function generateBoxStickerCanvas({
  */
 export async function downloadBoxStickerPng(options) {
   const canvas = await generateBoxStickerCanvas(options);
-  const finalFilename = options.filename || `${options.rmaNumber || 'RMA'}-Sticker-Label.png`;
+  const finalFilename = appendSaveTimestampToFilename(
+    options.filename || `${options.rmaNumber || 'RMA'}-Sticker-Label.png`
+  );
   canvas.toBlob((blob) => {
     if (blob) {
       triggerDownload(blob, finalFilename);
@@ -584,7 +592,7 @@ export async function downloadBoxStickerPng(options) {
       triggerDownload(canvas.toDataURL('image/png'), finalFilename);
     }
   }, 'image/png');
-  return true;
+  return finalFilename;
 }
 
 /**
@@ -593,7 +601,9 @@ export async function downloadBoxStickerPng(options) {
  */
 export async function printBoxSticker(options) {
   const canvas = await generateBoxStickerCanvas(options);
-  const documentTitle = options.documentTitle || `RMA-Verification-Label-${options.rmaNumber || 'Ticket'}`;
+  const documentTitle = appendSaveTimestampToFilename(
+    options.documentTitle || `RMA-Verification-Label-${options.rmaNumber || 'Ticket'}`
+  );
   await printHighResCanvas(canvas, documentTitle);
   return true;
 }
@@ -757,15 +767,16 @@ export async function downloadPortalPosterPng({
   portalUrl = 'https://rma-portal-v2.vercel.app',
   filename = 'RMA-Scan-To-Report-Poster.png'
 }) {
+  const finalFilename = appendSaveTimestampToFilename(filename);
   const canvas = await generatePortalPosterCanvas({ svgElementOrId, portalUrl });
   canvas.toBlob((blob) => {
     if (blob) {
-      triggerDownload(blob, filename);
+      triggerDownload(blob, finalFilename);
     } else {
-      triggerDownload(canvas.toDataURL('image/png'), filename);
+      triggerDownload(canvas.toDataURL('image/png'), finalFilename);
     }
   }, 'image/png');
-  return true;
+  return finalFilename;
 }
 
 /**
@@ -778,20 +789,23 @@ export async function printPortalPoster({
   documentTitle = 'RMA-Public-Reporting-Poster'
 }) {
   const canvas = await generatePortalPosterCanvas({ svgElementOrId, portalUrl });
-  await printHighResCanvas(canvas, documentTitle);
+  await printHighResCanvas(canvas, appendSaveTimestampToFilename(documentTitle));
   return true;
 }
 
 /**
- * Mount and print a high-resolution canvas element directly in an isolated iframe.
- * Eliminates background page bleeding and guarantees exactly 1 page output.
+ * Mount and print a high-resolution canvas element directly in an isolated iframe via srcdoc.
+ * Eliminates document.write() and blind fixed timeouts.
  */
 export async function printHighResCanvas(canvas, documentTitle = 'Print Document') {
   if (typeof document === 'undefined') return;
 
   const dataUrl = canvas.toDataURL('image/png');
+  const safeTitle = String(documentTitle || 'Print Document')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 
-  // Remove existing print iframe if any
   let iframe = document.getElementById('canvas-isolated-print-iframe');
   if (iframe) iframe.remove();
 
@@ -800,85 +814,101 @@ export async function printHighResCanvas(canvas, documentTitle = 'Print Document
   iframe.style.position = 'fixed';
   iframe.style.top = '-9999px';
   iframe.style.left = '-9999px';
-  iframe.style.width = '0px';
-  iframe.style.height = '0px';
+  iframe.style.width = '1024px';
+  iframe.style.height = '1320px';
   iframe.style.border = '0';
-  iframe.style.visibility = 'hidden';
-  document.body.appendChild(iframe);
+  iframe.style.opacity = '0';
+  iframe.style.pointerEvents = 'none';
+  iframe.setAttribute('aria-hidden', 'true');
 
-  const doc = iframe.contentWindow.document;
-  doc.open();
-  doc.write(`
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <title>${documentTitle}</title>
-        <style>
-          @page {
-            size: letter portrait;
-            margin: 0;
-          }
-          *, *::before, *::after {
-            box-sizing: border-box !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          html, body {
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100% !important;
-            height: 100% !important;
-            background: #ffffff !important;
-            overflow: hidden !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-          }
-          img {
-            display: block !important;
-            margin: auto !important;
-            max-width: 7.7in !important;
-            max-height: 10.2in !important;
-            width: auto !important;
-            height: auto !important;
-            object-fit: contain !important;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-          }
-        </style>
-      </head>
-      <body>
-        <img src="${dataUrl}" alt="${documentTitle}" />
-      </body>
-    </html>
-  `);
-  doc.close();
+  const html = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>${safeTitle}</title>
+    <style>
+      @page {
+        size: letter portrait;
+        margin: 0;
+      }
+      *, *::before, *::after {
+        box-sizing: border-box !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        background: #ffffff !important;
+        overflow: hidden !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+      img {
+        display: block !important;
+        margin: auto !important;
+        max-width: 7.7in !important;
+        max-height: 10.2in !important;
+        width: auto !important;
+        height: auto !important;
+        object-fit: contain !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+    </style>
+  </head>
+  <body>
+    <img src="${dataUrl}" alt="${safeTitle}" />
+  </body>
+</html>`;
 
-  const img = doc.querySelector('img');
-  const trigger = () => {
-    try {
-      iframe.contentWindow.focus();
-      iframe.contentWindow.print();
-    } catch (e) {
-      console.warn('Canvas print error:', e);
-    } finally {
-      setTimeout(() => {
-        if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
-      }, 3000);
-    }
+  let printed = false;
+  const triggerPrintOnce = () => {
+    if (printed) return;
+    printed = true;
+    const raf = window.requestAnimationFrame || ((cb) => setTimeout(cb, 16));
+    const doc = iframe.contentDocument;
+    const img = doc?.querySelector('img');
+    const waitImg = img && !img.complete
+      ? new Promise((resolve) => {
+          img.onload = resolve;
+          img.onerror = resolve;
+          setTimeout(resolve, 400);
+        })
+      : Promise.resolve();
+
+    waitImg.then(() => {
+      raf(() => {
+        raf(() => {
+          try {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+          } catch (e) {
+            console.warn('Canvas print error:', e);
+          } finally {
+            setTimeout(() => {
+              if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+            }, 3000);
+          }
+        });
+      });
+    });
   };
 
-  if (img && img.complete) {
-    setTimeout(trigger, 100);
-  } else if (img) {
-    img.onload = () => setTimeout(trigger, 100);
-    img.onerror = () => setTimeout(trigger, 100);
-  } else {
-    setTimeout(trigger, 150);
-  }
+  iframe.onload = triggerPrintOnce;
+  iframe.srcdoc = html;
+  document.body.appendChild(iframe);
+
+  setTimeout(() => {
+    if (!printed && iframe.contentDocument?.readyState === 'complete') {
+      triggerPrintOnce();
+    }
+  }, 450);
 }
 
 /**
@@ -893,7 +923,8 @@ export function downloadQrSvg(svgElementOrId, filename = 'rma-qr-code.svg') {
 
   const xml = new XMLSerializer().serializeToString(svgEl);
   const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
-  triggerDownload(blob, filename.endsWith('.svg') ? filename : `${filename}.svg`);
+  const datedBase = appendSaveTimestampToFilename(filename.endsWith('.svg') ? filename : `${filename}.svg`);
+  triggerDownload(blob, datedBase);
   return true;
 }
 

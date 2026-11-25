@@ -332,11 +332,13 @@ export default function GatekeeperPinModal({
     }
 
     const checkToken = async () => {
+      const startedAt = Date.now();
       try {
         let res = await inviteService.validateInviteToken(token);
         // Fix false "Link Expired / Authorization Unavailable":
-        // If token was just generated or had a transient network error, re-fetch after 700ms
-        if (!res?.valid && (res?.error === 'NOT_FOUND' || res?.error === 'NETWORK_ERROR')) {
+        // If token was just generated or had a fast transient error, re-fetch after 700ms (skip doubling if DB already waited >2.5s)
+        const elapsedMs = Date.now() - startedAt;
+        if (!res?.valid && ((res?.error === 'NOT_FOUND' && elapsedMs < 2500) || (res?.error === 'NETWORK_ERROR' && elapsedMs < 8000))) {
           await new Promise(r => setTimeout(r, 700));
           if (!isMounted) return;
           res = await inviteService.validateInviteToken(token);
@@ -391,7 +393,7 @@ export default function GatekeeperPinModal({
 
     // Active polling every 4 seconds to catch real-time admin revocation while gatekeeper is open
     const pollInterval = setInterval(async () => {
-      if (!isMounted || isRedirectingToGoogleRef.current) return;
+      if (!isMounted || isRedirectingToGoogleRef.current || !hasValidatedRef.current) return;
       try {
         const fresh = await inviteService.validateInviteToken(token);
         // Never overwrite valid state on transient network hiccups
@@ -594,7 +596,7 @@ export default function GatekeeperPinModal({
       <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden p-6 sm:p-8 space-y-6 text-center">
 
         {/* 1. Loading State */}
-        {isValidatingToken || isCheckingAuth ? (
+        {isValidatingToken || isCheckingAuth || (token && !validationResult) ? (
           <div className="py-12 space-y-4">
             <RefreshCw className="w-10 h-10 text-blue-600 animate-spin mx-auto" />
             <div className="text-sm font-bold text-slate-700 dark:text-slate-300">

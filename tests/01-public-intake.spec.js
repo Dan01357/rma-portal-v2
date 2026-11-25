@@ -411,6 +411,17 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
       await expect(page.getByText(/Verified Sales Invoice/i).first()).toBeVisible({ timeout: 10_000 });
       await expect(page.locator('input[value="SI-2026-8841"], input[placeholder*="SI-" i]').first()).toHaveValue('SI-2026-8841');
 
+      // Open Live Watermarked Camera Modal & verify HUD timestamp, address, tag, Front/Back switch & fallback upload
+      const liveCamBtn = page.getByRole('button', { name: /Live Cam/i }).first();
+      await expect(liveCamBtn).toBeVisible();
+      await liveCamBtn.click();
+      const camHud = page.getByTestId('camera-watermark-hud');
+      await expect(camHud).toBeVisible({ timeout: 5_000 });
+      await expect(camHud).toContainText(/PHT/);
+      await page.locator('button[title="Switch Front / Back Camera"]').click();
+      await page.getByRole('button', { name: 'Done', exact: true }).click();
+      await expect(camHud).toBeHidden();
+
       // Remove paperwork photo and clear SI/DR/PO to prove blank docs submit cleanly
       const removePaperBtn = page.locator('button[title="Remove paperwork photo"]').first();
       if (await removePaperBtn.isVisible().catch(() => false)) {
@@ -467,7 +478,7 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
         page.waitForEvent('download'),
         page.getByRole('button', { name: /Save QR \(PNG\)/i }).click()
       ]);
-      expect(directPngDownload.suggestedFilename()).toContain(`${createdRmaNumber}-QR.png`);
+      expect(directPngDownload.suggestedFilename()).toMatch(new RegExp(`^${createdRmaNumber}-QR .*\\.png$`));
 
       await page.getByRole('button', { name: /Resize \/ Print QR/i }).click();
       const qrModal = page.locator('div.fixed', { hasText: 'Print RMA QR Code' });
@@ -504,7 +515,7 @@ test.describe('Suite 01: Public Intake, Gatekeeper Lock, Identity Verification, 
         page.waitForEvent('download'),
         qrModal.getByRole('button', { name: /Save QR \(PNG\)/i }).click()
       ]);
-      expect(qrPngDownload.suggestedFilename()).toContain(`${createdRmaNumber}-QR.png`);
+      expect(qrPngDownload.suggestedFilename()).toMatch(new RegExp(`^${createdRmaNumber}-QR .*\\.png$`));
 
       const printsBefore = await page.evaluate(() => window.__pwPrintCount || 0);
       await qrModal.getByRole('button', { name: /Print QR \(/i }).click();

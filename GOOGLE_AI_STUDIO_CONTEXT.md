@@ -254,6 +254,9 @@ All endpoints below reside under `https://rma-portal-v2.vercel.app`:
 | `PATCH`| `/api/v1/rma-email-edit`| **Google JWT + Invite** | Save scoped RMA product/SKU/price/expiry/SI/DR/PO/manifest updates (routed via `/api/v1/rma?action=email-edit`) |
 | `GET`/`POST` | `/api/send-email?action=daily-matrix` | **Cron Secret / Admin JWT** | Daily 1:00 PM PHT (`05:00 UTC` / editable `HH:mm Asia/Manila`) automated & manual Overall RMA Matrix (`.xlsx`) email dispatcher (`API_ROUTE_COUNT === 12`) |
 | `GET`/`POST` | `/api/send-email?action=daily-followup` | **Cron Secret / Admin JWT** | 10-Calendar-Day follow-up email dispatcher (`Day 1..10 Asia/Manila`), pickup case-close stopper, and >10-day unclaimed auto-dispose (`API_ROUTE_COUNT === 12`) |
+| `GET`/`POST` | `/api/send-email?action=sync-email-replies` | **Cron Secret / Admin JWT** | Polls Gmail IMAP `UNSEEN` replies carrying edited RMA Alert mirror `.xlsx` workbooks & applies authorized updates (`API_ROUTE_COUNT === 12`) |
+| `POST` | `/api/send-email?action=ingest-xlsx-reply` | **Admin JWT / Cron Secret** | Parses & applies manual/webhook uploaded edited RMA Alert mirror `.xlsx` bytes directly to `rma_reports` (`API_ROUTE_COUNT === 12`) |
+| `GET` | `/api/v1/products/lookup?action=reverse-geocode` | Public | Reverse-geocodes GPS `lat` & `lon` via OpenStreetMap Nominatim into Street, Barangay, City, Region & ZIP (`gps_address`) |
 | `POST` | `/api/upload-photo` | **Public / Session** | Photo upload + Gemini Vision OCR endpoints (`?action=inspect-paperwork`, `?action=inspect-driver-id`, `?action=inspect-plate`) |
 | `GET` | `/api/v1/api-keys` | Admin | List all registered API keys (masked) |
 | `POST` | `/api/v1/api-keys` | Admin | Generate a new API key (shows secret once) |

@@ -12,6 +12,16 @@ import {
   getTrashDaysRemaining 
 } from '../utils/rmaHelpers';
 import { isPlaceholderSupplier } from '../utils/followUpWorkflow';
+import { supplierDirectoryService } from './supplierDirectoryService';
+
+// Serialize Trash / Archive / Restore / Hard-Delete DB read-modify-write operations in FIFO order
+// so rapid consecutive clicks (e.g., Archive -> Restore) never overwrite newer state on Postgres.
+const _lifecycleQueue = { promise: Promise.resolve() };
+function enqueueLifecycleOp(task) {
+  const next = _lifecycleQueue.promise.then(task, task);
+  _lifecycleQueue.promise = next.catch(() => {});
+  return next;
+}
 
 /**
  * Safe test mode resolution:
@@ -1397,6 +1407,15 @@ export const catalogService = {
     const mergedMetadata = {
       ...(ai_document_metadata || {}),
       ...(isUnlabeled ? { is_unlabeled: true, provisional_barcode: finalBarcode } : {}),
+      ...(isAccurateGps && (gps?.address || gps?.addressParts)
+        ? {
+            gps_address: {
+              formatted: String(gps.address || gps.addressParts?.formatted || '').trim(),
+              ...(gps.addressParts || {}),
+              lines: Array.isArray(gps.addressLines) ? gps.addressLines : (gps.addressParts?.lines || [])
+            }
+          }
+        : {}),
       follow_up: existingFollowUpMeta
     };
 
@@ -1417,7 +1436,7 @@ export const catalogService = {
       unit_name: hasItems
         ? (items.every(it => (it.unit_name || it.unit) === (items[0].unit_name || items[0].unit)) ? (items[0].unit_name || items[0].unit || 'pc') : 'mixed')
         : (isKnown ? (resolvedProduct.unit_name || resolvedProduct.unitName || 'pc') : (resolvedProduct?.unit_name || 'pc')),
-      status: isUnlabeled ? 'pending_admin_details' : (isBatch ? 'pending' : (isKnown || (hasItems && items.every(it => Number(it.price) > 0)) ? 'pending' : 'pending_admin_details')),
+      status: 'pending',
       reason: reason || (hasItems && items.length > 1 ? `Multi-Item Defect (${items.length} items)` : 'Damaged Box / Crushed Packaging'),
       explanation: explanation || null,
       photos: allPhotos,
@@ -1443,7 +1462,7 @@ export const catalogService = {
       ae_email: isKnown ? (resolvedProduct.ae_email || resolvedProduct.aeEmail || null) : null,
       company: isKnown ? (resolvedProduct.company || null) : null,
       condition_grade: effectiveGrade,
-      disposition: effectiveRmaType === 'supplier_outbound' ? '3- Return to Vendor (RTV)' : 'Pending Triage',
+      disposition: 'Pending',
       warehouse_location: null,
       inspected_by: null,
       inspected_at: null,
@@ -1493,6 +1512,7 @@ export const catalogService = {
       if (errMsg.includes('parent_rma_id')) delete fallbackRow.parent_rma_id;
       if (errMsg.includes('total_items')) delete fallbackRow.total_items;
       if (errMsg.includes('total_quantity')) delete fallbackRow.total_quantity;
+      if (errMsg.includes('gps_address')) delete fallbackRow.gps_address;
 
       const retry = await supabase.from('rma_reports').insert([fallbackRow]).select().single();
       if (!retry.error) {
@@ -1695,7 +1715,7 @@ export const catalogService = {
           items: data.items.map(it => ({
             ...it,
             rma_type: cleanType,
-            disposition: disposition || it.disposition || (cleanType === 'supplier_outbound' ? '1 - Pending Vendor Pickup' : '1- Pending Triage')
+            disposition: disposition || it.disposition || 'Pending'
           }))
         };
         const itemsCascade = supabase.from('rma_reports').update(itemsUpdate).eq('id', data.id).select().single();
@@ -2695,69 +2715,71 @@ export const catalogService = {
    * while leaving split children (e.g. -B, -C with distinct rma_number) untouched.
    */
   async _updateReportLifecycleState(id, rmaNumber, { buildMeta, auditAction, auditStage, auditNotes, eventName }) {
-    if (!id && !rmaNumber) return false;
-    const cleanId = id && /^\d+$/.test(String(id)) ? parseInt(id, 10) : null;
+    return enqueueLifecycleOp(async () => {
+      if (!id && !rmaNumber) return false;
+      const cleanId = id && /^\d+$/.test(String(id)) ? parseInt(id, 10) : null;
 
-    let seedRows = [];
-    if (cleanId) {
-      const { data } = await supabase
-        .from('rma_reports')
-        .select('id, rma_number, parent_rma_id, ai_document_metadata, audit_trail')
-        .eq('id', cleanId)
-        .limit(1);
-      if (Array.isArray(data)) seedRows = data;
-    }
-
-    const resolvedRma = rmaNumber || seedRows[0]?.rma_number || null;
-    const isManifestChildOnly = Boolean(seedRows[0]?.parent_rma_id && seedRows[0]?.rma_number === resolvedRma);
-    let targetRows = seedRows;
-    if (resolvedRma && !isManifestChildOnly) {
-      const { data: siblingRows } = await supabase
-        .from('rma_reports')
-        .select('id, rma_number, parent_rma_id, ai_document_metadata, audit_trail')
-        .eq('rma_number', resolvedRma)
-        .limit(25);
-      if (Array.isArray(siblingRows) && siblingRows.length > 0) {
-        targetRows = siblingRows;
+      let seedRows = [];
+      if (cleanId) {
+        const { data } = await supabase
+          .from('rma_reports')
+          .select('id, rma_number, parent_rma_id, ai_document_metadata, audit_trail')
+          .eq('id', cleanId)
+          .limit(1);
+        if (Array.isArray(data)) seedRows = data;
       }
-    }
 
-    const now = new Date();
-    const nowIso = now.toISOString();
-    const auditEntry = {
-      timestamp: nowIso,
-      action: auditAction,
-      stage: auditStage,
-      actor: auditNotes?.actor || 'Staff',
-      notes: typeof auditNotes === 'string' ? auditNotes : auditNotes?.text || ''
-    };
+      const resolvedRma = rmaNumber || seedRows[0]?.rma_number || null;
+      const isManifestChildOnly = Boolean(seedRows[0]?.parent_rma_id && seedRows[0]?.rma_number === resolvedRma);
+      let targetRows = seedRows;
+      if (resolvedRma && !isManifestChildOnly) {
+        const { data: siblingRows } = await supabase
+          .from('rma_reports')
+          .select('id, rma_number, parent_rma_id, ai_document_metadata, audit_trail')
+          .eq('rma_number', resolvedRma)
+          .limit(25);
+        if (Array.isArray(siblingRows) && siblingRows.length > 0) {
+          targetRows = siblingRows;
+        }
+      }
 
-    for (const row of targetRows) {
-      const updatedMeta = buildMeta(row.ai_document_metadata || {}, now, nowIso);
-      const existingAudit = Array.isArray(row.audit_trail) ? row.audit_trail : [];
-      const { error } = await supabase
-        .from('rma_reports')
-        .update({
-          ai_document_metadata: updatedMeta,
-          audit_trail: [...existingAudit, auditEntry]
-        })
-        .eq('id', row.id);
-      if (error) throw error;
-    }
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const auditEntry = {
+        timestamp: nowIso,
+        action: auditAction,
+        stage: auditStage,
+        actor: auditNotes?.actor || 'Staff',
+        notes: typeof auditNotes === 'string' ? auditNotes : auditNotes?.text || ''
+      };
 
-    if (targetRows.length === 0 && resolvedRma) {
-      const { error } = await supabase
-        .from('rma_reports')
-        .update({
-          ai_document_metadata: buildMeta({}, now, nowIso),
-          audit_trail: [auditEntry]
-        })
-        .eq('rma_number', resolvedRma);
-      if (error) throw error;
-    }
+      for (const row of targetRows) {
+        const updatedMeta = buildMeta(row.ai_document_metadata || {}, now, nowIso);
+        const existingAudit = Array.isArray(row.audit_trail) ? row.audit_trail : [];
+        const { error } = await supabase
+          .from('rma_reports')
+          .update({
+            ai_document_metadata: updatedMeta,
+            audit_trail: [...existingAudit, auditEntry]
+          })
+          .eq('id', row.id);
+        if (error) throw error;
+      }
 
-    this.notifyChange(eventName, { id: cleanId || targetRows[0]?.id, rmaNumber: resolvedRma });
-    return true;
+      if (targetRows.length === 0 && resolvedRma) {
+        const { error } = await supabase
+          .from('rma_reports')
+          .update({
+            ai_document_metadata: buildMeta({}, now, nowIso),
+            audit_trail: [auditEntry]
+          })
+          .eq('rma_number', resolvedRma);
+        if (error) throw error;
+      }
+
+      this.notifyChange(eventName, { id: cleanId || targetRows[0]?.id, rmaNumber: resolvedRma });
+      return true;
+    });
   },
 
   /**
@@ -2849,7 +2871,7 @@ export const catalogService = {
    * PERMANENT HARD-DELETE: Clean up from database and delete storage photos
    */
   async permanentlyDeleteReport(id, rmaNumber, item = null) {
-    return this.deleteReport(id, rmaNumber, item);
+    return enqueueLifecycleOp(() => this.deleteReport(id, rmaNumber, item));
   },
 
   /**
@@ -3092,6 +3114,19 @@ export const catalogService = {
 
     const savedRow = Array.isArray(savedRows) && savedRows.length > 0 ? savedRows[0] : null;
 
+    try {
+      const supForDir = updates.supplier_name || existing?.supplier_name;
+      const toForDir = updatedMeta?.supplier_pickup?.supplier_email_to;
+      const ccForDir = updatedMeta?.supplier_pickup?.supplier_email_cc;
+      if (supForDir && (toForDir || ccForDir)) {
+        supplierDirectoryService.upsertFromSubmission({
+          supplier_name: supForDir,
+          supplier_email_to: toForDir,
+          supplier_email_cc: ccForDir
+        }).catch(() => {});
+      }
+    } catch {}
+
     // Sync child rows only if this record is a multi-item parent manifest
     if (resolvedId && (existing?.is_parent === true || (Array.isArray(existing?.items) && existing.items.length > 0))) {
       try {
@@ -3206,6 +3241,16 @@ export const catalogService = {
     }
 
     const savedRow = Array.isArray(savedRows) && savedRows.length > 0 ? savedRows[0] : null;
+    try {
+      const supForDir = cleanSupplier || existing?.supplier_name;
+      if (supForDir && (toEmailStr || ccEmailStr)) {
+        supplierDirectoryService.upsertFromSubmission({
+          supplier_name: supForDir,
+          supplier_email_to: toEmailStr,
+          supplier_email_cc: ccEmailStr
+        }).catch(() => {});
+      }
+    } catch {}
     this.notifyChange('triage-updated', { id: resolvedId, rmaNumber, status: savedRow?.status || existing?.status });
     return savedRow || { ...existing, ...updates, id: resolvedId };
   },

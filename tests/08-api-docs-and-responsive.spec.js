@@ -49,6 +49,20 @@ test.describe('Suite 08: REST API Endpoints, /docs & /api/context, Date Format A
       expect(openapiRawStr).toContain('ourCopyCount');
       expect(openapiRawStr).toContain('Credit Memos Ledger');
       expect(openapiRawStr).toContain('mgan@pingconmarketing.com');
+      expect(openapiRawStr).toContain('sync-email-replies');
+      expect(openapiRawStr).toContain('ingest-xlsx-reply');
+      expect(openapiRawStr).toContain('reverse-geocode');
+      expect(openapiRawStr).toContain('gps_address');
+      expect(openapiRawStr).toContain('prepared_at');
+
+      // Reverse-Geocode Proxy validation (400 invalid coords + 200 structured street/city response)
+      const badGeoRes = await request.get('/api/v1/products/lookup?action=reverse-geocode&lat=999&lon=999');
+      expect(badGeoRes.status()).toBe(400);
+      const okGeoRes = await request.get('/api/v1/products/lookup?action=reverse-geocode&lat=14.5764&lon=121.0851', { timeout: 25_000 });
+      expect(okGeoRes.status()).toBe(200);
+      const okGeoJson = await okGeoRes.json();
+      expect(typeof okGeoJson.formatted).toBe('string');
+      expect(okGeoJson.formatted.length).toBeGreaterThan(3);
 
       const ctxApiRes = await request.get('/api/context');
       expect(ctxApiRes.status()).toBe(200);

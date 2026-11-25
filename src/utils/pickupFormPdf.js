@@ -1,6 +1,8 @@
 import {
   formatPeso,
   formatFourChoiceOutcome,
+  formatDateTimeYmdHm,
+  formatSaveFileTimestamp,
   isTestRecord,
   getConsolidatedPickupItems,
   getPickupPhotosSummary
@@ -554,19 +556,30 @@ function drawTotalRow(ctx, tableX, y, tableW, cols, info, compact = false) {
   return y + h;
 }
 
-function drawSignatures(ctx, innerX, y, innerW, preparedBy, compact = false, isCustomerStream = false) {
+function drawSignatures(ctx, innerX, y, innerW, preparedBy, compact = false, isCustomerStream = false, preparedDateTime = '') {
   const gap = 20;
   const boxW = (innerW - gap * 2) / 3;
-  const boxH = compact ? 102 : 124;
+  const boxH = compact ? 112 : 134;
 
   const boxes = [
-    { title: 'PREPARED BY (LOGISTICS / WAREHOUSE)', name: preparedBy, footer: 'Printed Name & Date' },
+    {
+      title: 'PREPARED BY (LOGISTICS / WAREHOUSE)',
+      name: preparedBy,
+      footer: 'Printed Name & Date',
+      preparedDateTime: preparedDateTime || ''
+    },
     {
       title: isCustomerStream ? "CUSTOMER / RECEIVING DRIVER'S SIGNATURE" : "SUPPLIER DRIVER'S SIGNATURE",
       name: '',
-      footer: 'Signature Over Printed Name & Date'
+      footer: 'Signature Over Printed Name & Date',
+      preparedDateTime: ''
     },
-    { title: "RELEASING STAFF'S SIGNATURE", name: '', footer: 'Verified & Released (Sign & Date)' }
+    {
+      title: "RELEASING STAFF'S SIGNATURE",
+      name: '',
+      footer: 'Verified & Released (Sign & Date)',
+      preparedDateTime: ''
+    }
   ];
 
   boxes.forEach((b, idx) => {
@@ -577,23 +590,28 @@ function drawSignatures(ctx, innerX, y, innerW, preparedBy, compact = false, isC
     ctx.fillStyle = '#000000';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.font = `700 ${compact ? 13 : 14}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(b.title, bx + boxW / 2, y + (compact ? 10 : 12), boxW - 14);
+    ctx.font = `700 ${compact ? 12.5 : 13.5}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(b.title, bx + boxW / 2, y + (compact ? 9 : 11), boxW - 14);
 
     if (b.name) {
-      ctx.font = `700 ${compact ? 17 : 19}px Arial, Helvetica, sans-serif`;
-      ctx.fillText(b.name, bx + boxW / 2, y + (compact ? 42 : 52), boxW - 20);
+      ctx.font = `700 ${compact ? 16 : 18}px Arial, Helvetica, sans-serif`;
+      ctx.fillText(b.name, bx + boxW / 2, y + (compact ? 30 : 38), boxW - 20);
     }
 
-    const lineY = y + boxH - (compact ? 30 : 34);
+    const lineY = b.preparedDateTime ? (y + boxH - (compact ? 42 : 48)) : (y + boxH - (compact ? 30 : 34));
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(bx + 18, lineY);
     ctx.lineTo(bx + boxW - 18, lineY);
     ctx.stroke();
 
-    ctx.font = `500 ${compact ? 13 : 14}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(b.footer, bx + boxW / 2, lineY + 6, boxW - 14);
+    ctx.font = `500 ${compact ? 12 : 13}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(b.footer, bx + boxW / 2, lineY + 5, boxW - 14);
+
+    if (b.preparedDateTime) {
+      ctx.font = `700 ${compact ? 11.5 : 12.5}px "Courier New", Courier, monospace`;
+      ctx.fillText(`Prepared: ${b.preparedDateTime}`, bx + boxW / 2, lineY + (compact ? 21 : 24), boxW - 14);
+    }
   });
 
   return y + boxH;
@@ -634,7 +652,7 @@ function renderCompactDualCopyPage(info, copiesList = []) {
     }
     drawTotalRow(ctx, innerX, curY, innerW, cols, info, true);
 
-    drawSignatures(ctx, innerX, y + boxH - pad - 102, innerW, info.preparedBy, true, info.isCustomerStream);
+    drawSignatures(ctx, innerX, y + boxH - pad - 112, innerW, info.preparedBy, true, info.isCustomerStream, info.preparedDateTime);
   });
 
   // Dead-center cut line
@@ -692,7 +710,7 @@ function renderFullPageCopy(info, copyTitle) {
     const showRowRma = showRmaSub || (it.rmaNumbers?.length > 1);
     const rowH = measureItemRowHeight(ctx, it, cols, false, showRowRma);
     const isLast = i === info.normalizedItems.length - 1;
-    const reserveAfter = isLast ? (42 + 16 + 124) : 0;
+    const reserveAfter = isLast ? (42 + 16 + 134) : 0;
 
     if (curY + rowH + reserveAfter > bottomLimit) {
       pageObj = createBlankPageCanvas();
@@ -718,7 +736,7 @@ function renderFullPageCopy(info, copyTitle) {
   }
 
   curY = drawTotalRow(ctx, innerX, curY, innerW, cols, info, false);
-  drawSignatures(ctx, innerX, curY + 18, innerW, info.preparedBy, false, info.isCustomerStream);
+  drawSignatures(ctx, innerX, curY + 18, innerW, info.preparedBy, false, info.isCustomerStream, info.preparedDateTime);
 
   return canvases;
 }
@@ -821,6 +839,12 @@ export function generatePickupFormPdfAttachment({
       pickup.processed_by ||
       ''
     ).replace(/\s*\([^)]*\)/g, '').trim();
+    const preparedDateTime = formatDateTimeYmdHm(
+      pickup.updated_at ||
+      pickup.picked_up_at ||
+      meta.simple_rtv_updated_at ||
+      new Date()
+    );
 
     const pickupPhotosStats = getPickupPhotosSummary(pickup.photos);
 
@@ -848,6 +872,7 @@ export function generatePickupFormPdfAttachment({
       driverIdType: pickup.driver_id_type || '',
       driverLicense: pickup.driver_license_no || '',
       preparedBy,
+      preparedDateTime,
       normalizedItems,
       grandTotalPieces: normalizedItems.reduce((s, it) => s + it.totalPieces, 0),
       grandTotalValue: normalizedItems.reduce((s, it) => s + it.lineTotal, 0)
@@ -886,13 +911,14 @@ export function generatePickupFormPdfAttachment({
     }
 
     const safeRef = sanitizeFilenamePart(claimNumber || rmaNumber);
+    const saveTs = formatSaveFileTimestamp(new Date());
     const filename = isCustomerStream
       ? (isReplacementForm
-        ? `Customer-Buffer-Replacement-Form-${safeRef}.pdf`
-        : `Customer-Credit-Handover-Form-${safeRef}.pdf`)
+        ? `Customer-Buffer-Replacement-Form-${safeRef} ${saveTs}.pdf`
+        : `Customer-Credit-Handover-Form-${safeRef} ${saveTs}.pdf`)
       : (isReplacementForm
-        ? `Replacement-Form-${safeRef}.pdf`
-        : `Debit-Claim-Form-${safeRef}.pdf`);
+        ? `Replacement-Form-${safeRef} ${saveTs}.pdf`
+        : `Debit-Claim-Form-${safeRef} ${saveTs}.pdf`);
 
     return {
       filename,

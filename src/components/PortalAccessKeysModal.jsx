@@ -29,6 +29,7 @@ import { accessKeyService, DEFAULT_ACCESS_PROFILES } from '../services/accessKey
 import { downloadPortalPosterPng, downloadQrCodePng, printPortalPoster } from '../utils/qrDownload';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
 import { copyTextSafe } from '../utils/clipboard';
+import { formatSaveFileTimestamp } from '../utils/rmaHelpers';
 
 export function formatDurationLabel(hours) {
   const h = Number(hours || 0);
@@ -410,7 +411,7 @@ export default function PortalAccessKeysModal({ isOpen, onClose, currentUser, on
 
     printIsolatedElement({
       elementId: 'portal-poster-print-mount',
-      documentTitle: `RMA-QR-${selectedProfile?.access_slug || 'Station'}-${printSize}`,
+      documentTitle: `RMA-QR-${selectedProfile?.access_slug || 'Station'}-${printSize} ${formatSaveFileTimestamp(new Date())}`,
       pageSize: sizeConfig.pageSize,
       pageMargin: sizeConfig.pageMargin,
       scale: sizeConfig.scale,

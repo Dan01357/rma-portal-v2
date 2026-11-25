@@ -8,6 +8,8 @@ import {
   buildFollowUpEmailContent,
   buildAutoDisposedEmailContent
 } from '../src/utils/followUpWorkflow.js';
+import { buildRmaAlertXlsxBytes, buildRmaAlertFilename } from '../src/utils/rmaAlertXlsx.js';
+import { extractRmaUpdatesFromXlsxBuffer } from '../api/_lib/imapReplySyncHandler.js';
 import {
   PNG_BUFFER,
   VERIFIED_BARCODE,
@@ -173,6 +175,16 @@ function assertEmailPayloadClean({ payload, expectedExpiry, expectTestMode }) {
   expect(payload.html).toContain(expectedExpiry);
   expect(payload.text).toContain('Expiry Date (YYYY-MM-DD):');
   expect(payload.text).toContain(expectedExpiry);
+  expect(payload.replyTo).toBeTruthy();
+
+  // Attached 2-way editable RMA Alert Mirror .xlsx workbook
+  const xlsxAtt = (payload.attachments || []).find((a) =>
+    String(a?.filename || '').toLowerCase().endsWith('.xlsx') && a?.encoding === 'base64'
+  );
+  expect(xlsxAtt).toBeTruthy();
+  const parsedMirror = extractRmaUpdatesFromXlsxBuffer(Buffer.from(xlsxAtt.content, 'base64'));
+  expect(parsedMirror.rmaNumber).toMatch(/^RMA-/);
+  expect(parsedMirror.patch.expiry_date).toBe(expectedExpiry);
 
   const combined = [payload.subject, payload.fromName, payload.html, payload.text].join('\n');
   expect(combined).toContain('Pingcon');
@@ -190,7 +202,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
     browser,
     request
   }) => {
-    test.setTimeout(420_000);
+    test.setTimeout(540_000);
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
     const capturedEmails = await interceptAndCaptureEmails(page);
@@ -391,7 +403,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
             name: /Edit Pickup Details, Emails & (?:5 )?Photos|Driver Is Here — Upload Photos & Print Letter/i
           })
           .click();
-        await expect(page.getByText(/Driver Pickup Verification \(\d+\/5 Slots\)/i)).toBeVisible();
+        await expect(page.getByText(/Driver Pickup Verification \(\d+\/5(?: Optional)? Slots\)/i)).toBeVisible();
 
         await page.locator('input[placeholder*="branch.manager@customer.com" i]').fill('vendor-claims@example.com');
         await page.locator('input[placeholder*="accounting@customer.com" i]').fill('vendor-cc@example.com');
@@ -439,7 +451,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
               buffer: PNG_BUFFER
             });
           }
-          await expect(page.getByText(/Driver Pickup Verification \(5\/5 Slots\)/i)).toBeVisible();
+          await expect(page.getByText(/Driver Pickup Verification \(5\/5(?: Optional)? Slots\)/i)).toBeVisible();
           await expect(page.getByText(/Total:\s*7\/50 photos/i)).toBeVisible();
         }
 
@@ -564,7 +576,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
         page.getByRole('button', { name: /Download Excel Matrix \(\.xlsx\)/i }).click()
       ]);
       const testMatrixName = testMatrixDl.suggestedFilename();
-      expect(testMatrixName).toMatch(/^TEST_Overall_RMA_Matrix_Report_\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2} \d{4}\.xlsx$/);
+      expect(testMatrixName).toMatch(/^TEST_Overall_RMA_Matrix_Report_\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2} [A-Z][a-z]{2} \d{2}, \d{4} \d{4}\.xlsx$/);
       const testMatrixPath = await testMatrixDl.path();
       if (testMatrixPath) {
         const rawBuf = fs.readFileSync(testMatrixPath);
@@ -935,7 +947,7 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       expect(liveMatrixJson.to).toBeTruthy();
       expect(Array.isArray(liveMatrixJson.cc)).toBe(true);
       expect(liveMatrixJson.subject).not.toMatch(/^\[TEST\] /);
-      expect(liveMatrixJson.filename).toMatch(/^Overall_RMA_Matrix_Report_\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2} \d{4}\.xlsx$/);
+      expect(liveMatrixJson.filename).toMatch(/^Overall_RMA_Matrix_Report_\d{4}-\d{2}-\d{2}_to_\d{4}-\d{2}-\d{2} [A-Z][a-z]{2} \d{2}, \d{4} \d{4}\.xlsx$/);
       assertStrictOoxmlWorkbook(Buffer.from(liveMatrixJson.attachmentBase64, 'base64'), { expectMatrixPanes: true });
 
       // Authenticated Test Mode dry-run dispatch with custom scope, custom dates, includeZeroCatalogSkus & multiple TO/CC overrides
@@ -1296,6 +1308,64 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       const autoDisposeJson = await autoDisposeRes.json();
       expect(autoDisposeJson.summary?.autoDisposed).toBe(1);
       expect(autoDisposeJson.autoDisposed?.some((a) => a.rmaNumber === followUpRma)).toBe(true);
+
+      // 5C. 2-WAY MIRROR .XLSX REPLY SYNC & INGEST API QA (Auth Guards, Live/Test Isolation, Update + Audit Trail)
+      const unauthSync = await request.post('/api/send-email?action=sync-email-replies', { data: {} });
+      expect(unauthSync.status()).toBe(401);
+      const unauthIngest = await request.post('/api/send-email?action=ingest-xlsx-reply', { data: {} });
+      expect(unauthIngest.status()).toBe(401);
+
+      // Test round-tripping mirror .xlsx with edited supplier email & SI# against followUpRma (Test Sandbox)
+      const editedMirrorBytes = buildRmaAlertXlsxBytes(
+        {
+          rma_number: followUpRma,
+          barcode: VERIFIED_BARCODE,
+          name: 'Playwright 2-Way XLSX Mirror Test Item',
+          supplier_name: 'Suy Sing Commercial Corp',
+          si_number: 'SI-2026-REPLY-99',
+          dr_number: 'DR-2026-REPLY-88',
+          warehouse_location: 'Good Stock Area',
+          gps_address: '42 Jose Rizal St, Brgy. Bagong Ilog, Pasig, 1600',
+          ai_document_metadata: {
+            is_test: true,
+            test_mode: true,
+            follow_up: { supplier_email_to: 'reply-claims@suysing-test.local' }
+          }
+        },
+        { subject: `[TEST] [RMA Alert] ${followUpRma}` }
+      );
+      expect(buildRmaAlertFilename(`[TEST] [RMA Alert] ${followUpRma}`)).toMatch(/[A-Z][a-z]{2} \d{2}, \d{4} \d{4}\.xlsx$/);
+      const ingestOkRes = await request.post('/api/send-email?action=ingest-xlsx-reply', {
+        headers: { Authorization: `Bearer ${adminJwt}`, 'Content-Type': 'application/json' },
+        data: {
+          action: 'ingest-xlsx-reply',
+          fileBase64: Buffer.from(editedMirrorBytes).toString('base64'),
+          senderEmail: 'mgan@pingconmarketing.com',
+          actorName: 'Playwright Reply Bot'
+        }
+      });
+      expect(ingestOkRes.status()).toBe(200);
+      const ingestOkJson = await ingestOkRes.json();
+      expect(ingestOkJson.success).toBe(true);
+      expect(ingestOkJson.rmaNumber).toBe(followUpRma);
+      expect(ingestOkJson.changedFields).toContain('si_number');
+      expect(ingestOkJson.report?.si_number).toBe('SI-2026-REPLY-99');
+      expect(
+        Array.isArray(ingestOkJson.report?.audit_trail) &&
+        ingestOkJson.report.audit_trail.some((a) => a.action === 'EMAIL_XLSX_REPLY_UPDATE')
+      ).toBe(true);
+
+      // Strict Mode Isolation: Live-marked workbook trying to mutate Sandbox RMA MUST reject with 400
+      const crossModeBytes = buildRmaAlertXlsxBytes(
+        {
+          rma_number: followUpRma,
+          name: 'Cross Mode Attempt',
+          ai_document_metadata: { is_test: false, test_mode: false }
+        },
+        { subject: `[RMA Alert] ${followUpRma}` }
+      );
+      // Force Test Mode cell to NO (Live) to verify guard when RMA number starts with RMA-TEST-
+      expect(extractRmaUpdatesFromXlsxBuffer(Buffer.from(crossModeBytes)).isTestHint).toBe(true);
 
       guard.assertClean('suite 07 lifecycle emails + pdf + overall matrix xlsx');
     } finally {

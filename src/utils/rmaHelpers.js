@@ -7,7 +7,7 @@
 export function generateTicketId(existingCount = 0) {
   const currentYear = new Date().getFullYear(); // e.g. 2026
   const seqNum = String(existingCount + 1).padStart(4, '0');
-  
+
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; // exclude ambiguous 0,1,I,O
   let randomSuffix = '';
   for (let i = 0; i < 4; i++) {
@@ -128,7 +128,7 @@ export function applyEmailTestMode(email, isTestMode, sandboxEmail = 'mgan@pingc
  */
 export function getEmailRoutingPayload(ticket, isTestMode = false) {
   const isGroup1 = ticket.group && ticket.group.includes('KEYSYS');
-  
+
   // Group 1 Routing
   if (isGroup1) {
     const sender = 'finance2@a2z2go.net';
@@ -204,8 +204,8 @@ export function isSplitChildTicket(item) {
   if (!item) return false;
   const num = String(item.rma_number || '');
   const hasSplitSuffix = /-[B-Z]$/i.test(num);
-  const hasSplitNote = String(item.explanation || '').toLowerCase().includes('split from') || 
-                       String(item.notes || '').toLowerCase().includes('split from parent');
+  const hasSplitNote = String(item.explanation || '').toLowerCase().includes('split from') ||
+    String(item.notes || '').toLowerCase().includes('split from parent');
   return Boolean(hasSplitSuffix || (item.parent_rma_id && hasSplitNote));
 }
 
@@ -284,7 +284,7 @@ export function getReportManifestItems(report, allReports = []) {
     try {
       const parsed = JSON.parse(report.items);
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    } catch (e) {}
+    } catch (e) { }
   }
   if (Array.isArray(allReports) && allReports.length > 0 && report.id) {
     const children = allReports.filter(r => (
@@ -477,8 +477,136 @@ export function formatDateTimeMinute(val) {
 }
 
 /**
+ * Format current or given Date strictly as "YYYY-MM-DD HH:mm:ss PHT" (Asia/Manila)
+ * for live camera viewfinders and stamped photo corner watermarks.
+ */
+export function formatCameraTimestamp(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date || Date.now());
+  const valid = Number.isNaN(d.getTime()) ? new Date() : d;
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(valid);
+    const map = {};
+    parts.forEach((p) => {
+      if (p.type !== 'literal') map[p.type] = p.value;
+    });
+    const hh = map.hour === '24' ? '00' : String(map.hour || '00').padStart(2, '0');
+    return `${map.year}-${map.month}-${map.day} ${hh}:${map.minute}:${map.second} PHT`;
+  } catch {
+    return `${formatDateTimeYmdHm(valid)}:00 PHT`;
+  }
+}
+
+/**
+ * Extracts clean street/barangay/city/ZIP address string stored on a report or GPS object.
+ */
+export function getGpsAddressDisplay(record) {
+  if (!record || typeof record !== 'object') return '';
+  const direct = record.gps_address ?? record.address ?? '';
+  if (typeof direct === 'string' && direct.trim()) return direct.trim();
+  if (direct && typeof direct === 'object' && typeof direct.formatted === 'string' && direct.formatted.trim()) {
+    return direct.formatted.trim();
+  }
+  const meta = (record.ai_document_metadata && typeof record.ai_document_metadata === 'object')
+    ? record.ai_document_metadata
+    : {};
+  const metaAddr = meta.gps_address;
+  if (typeof metaAddr === 'string' && metaAddr.trim()) return metaAddr.trim();
+  if (metaAddr && typeof metaAddr === 'object' && typeof metaAddr.formatted === 'string' && metaAddr.formatted.trim()) {
+    return metaAddr.formatted.trim();
+  }
+  return '';
+}
+
+/**
+ * Returns formatted raw decimal GPS coordinates if present on the record.
+ */
+export function getGpsCoordinatesText(record) {
+  const lat = Number(record?.gps_latitude ?? record?.latitude);
+  const lng = Number(record?.gps_longitude ?? record?.longitude);
+  if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
+    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  }
+  return '';
+}
+
+/**
+ * Builds the Google Maps URL preferring the reverse-geocoded street/city/ZIP search query
+ * and falling back to coordinates only when offline / no resolved address exists.
+ */
+export function getGpsMapUrl(record) {
+  const addr = getGpsAddressDisplay(record);
+  if (addr) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`;
+  }
+  const lat = Number(record?.gps_latitude ?? record?.latitude);
+  const lng = Number(record?.gps_longitude ?? record?.longitude);
+  if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
+    return `https://www.google.com/maps?q=${lat},${lng}`;
+  }
+  return null;
+}
+
+/**
+ * Formats a date/time as "Nov 25, 2026 0832" (Asia/Manila, zero colons)
+ * so downloaded PDF, XLSX, and PNG files never collide on local drives.
+ */
+export function formatSaveFileTimestamp(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date || Date.now());
+  const valid = Number.isNaN(d.getTime()) ? new Date() : d;
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Manila',
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).formatToParts(valid);
+    const map = {};
+    parts.forEach((p) => {
+      if (p.type !== 'literal') map[p.type] = p.value;
+    });
+    const hh = map.hour === '24' ? '00' : String(map.hour || '00').padStart(2, '0');
+    const min = String(map.minute || '00').padStart(2, '0');
+    const dd = String(map.day || '01').padStart(2, '0');
+    return `${map.month || 'Jan'} ${dd}, ${map.year || valid.getFullYear()} ${hh}${min}`;
+  } catch {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const m = months[valid.getMonth()] || 'Jan';
+    const dd = String(valid.getDate()).padStart(2, '0');
+    const hh = String(valid.getHours()).padStart(2, '0');
+    const min = String(valid.getMinutes()).padStart(2, '0');
+    return `${m} ${dd}, ${valid.getFullYear()} ${hh}${min}`;
+  }
+}
+
+export function appendSaveTimestampToFilename(filename, date = new Date()) {
+  const raw = String(filename || 'Export').trim();
+  const ts = formatSaveFileTimestamp(date);
+  if (/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{2},\s+\d{4}\s+\d{4}\b/.test(raw)) {
+    return raw;
+  }
+  const m = raw.match(/^(.*?)(\.[a-z0-9]{2,5})$/i);
+  if (m) {
+    return `${m[1]} ${ts}${m[2]}`;
+  }
+  return `${raw} ${ts}`;
+}
+
+/**
  * Formats an RMA report's 4-Choice decision / pickup status into a human-readable label
  * with exact YYYY-MM-DD HH:mm date/time and normalized metadata flags.
+ * Strictly avoids inferring Scrapped from condition_grade or intake reason.
  */
 export function formatFourChoiceOutcome(item) {
   const meta = (item?.ai_document_metadata && typeof item.ai_document_metadata === 'object')
@@ -487,6 +615,7 @@ export function formatFourChoiceOutcome(item) {
   const pickup = (meta.supplier_pickup && typeof meta.supplier_pickup === 'object')
     ? meta.supplier_pickup
     : {};
+  const isCustomerStream = item?.rma_type !== 'supplier_outbound';
 
   const simpleDisp = String(meta.simple_rtv_disposition || '').trim();
   const rawDisp = String(simpleDisp || pickup.disposition || item?.disposition || '').trim();
@@ -495,7 +624,12 @@ export function formatFourChoiceOutcome(item) {
   const workflowResolution = String(meta.workflow_resolution || '').toLowerCase().trim();
 
   const pickedUpAt = pickup.picked_up_at || null;
-  const isPickedUp = Boolean(pickedUpAt) || statusLower === 'picked_up' || statusLower === 'picked_up_by_supplier';
+  const isPickedUp =
+    Boolean(pickedUpAt) ||
+    statusLower === 'picked_up' ||
+    statusLower === 'picked_up_by_supplier' ||
+    statusLower === 'buffer_replacement_dispatched' ||
+    statusLower === 'buffer_dispatched';
 
   const notesMatch = String(item?.notes || '').match(/\[(?:RTV|BUF):\s*([^\]]+)\]/i);
   const auditRtv = Array.isArray(item?.audit_trail)
@@ -505,13 +639,19 @@ export function formatFourChoiceOutcome(item) {
 
   const decisionTs =
     pickedUpAt ||
+    pickup.updated_at ||
     meta.simple_rtv_updated_at ||
     meta.resolved_at ||
     item?.inspected_at ||
     item?.updated_at ||
+    item?.created_at ||
     null;
   const formattedTime = formatDateTimeMinute(decisionTs);
   const tsSuffix = formattedTime ? ` (${formattedTime})` : '';
+
+  const pendingTs = item?.created_at || item?.updated_at || null;
+  const pendingFormattedTime = formatDateTimeMinute(pendingTs);
+  const pendingTsSuffix = pendingFormattedTime ? ` (${pendingFormattedTime})` : '';
 
   if (workflowResolution === 'restocked' || statusLower === 'restocked') {
     return {
@@ -554,9 +694,11 @@ export function formatFourChoiceOutcome(item) {
     dispLower.includes('debit claim') ||
     dispLower.includes('vendor credit') ||
     dispLower.includes('ap deduction') ||
-    dispLower.includes('debit / credit')
+    dispLower.includes('debit / credit') ||
+    dispLower.includes('credit return')
   ) {
     if (isPickedUp) {
+      const shortStatus = isCustomerStream ? 'Credit Return Handover' : 'Picked Up — Debit Claim';
       return {
         choiceKey: 'debit',
         formType: 'debit',
@@ -565,11 +707,12 @@ export function formatFourChoiceOutcome(item) {
         claimNumber,
         timestamp: decisionTs,
         formattedTime,
-        shortStatus: 'Picked Up for Debit Claim',
-        label: `Picked Up for Debit Claim${tsSuffix}`,
+        shortStatus,
+        label: `${shortStatus}${tsSuffix}`,
         badgeColor: 'bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-700'
       };
     }
+    const shortStatus = isCustomerStream ? 'Credit Return Pending' : 'Waiting Pickup — Debit Claim';
     return {
       choiceKey: 'debit',
       formType: null,
@@ -578,8 +721,8 @@ export function formatFourChoiceOutcome(item) {
       claimNumber,
       timestamp: decisionTs,
       formattedTime,
-      shortStatus: 'Waiting Driver (Debit Claim)',
-      label: 'Waiting Driver (Debit Claim)',
+      shortStatus,
+      label: `${shortStatus}${tsSuffix}`,
       badgeColor: 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-700'
     };
   }
@@ -591,6 +734,7 @@ export function formatFourChoiceOutcome(item) {
     dispLower.includes('exchange')
   ) {
     if (isPickedUp) {
+      const shortStatus = isCustomerStream ? 'Buffer Replaced' : 'Picked Up — Replacement';
       return {
         choiceKey: 'replacement',
         formType: 'replacement',
@@ -599,11 +743,12 @@ export function formatFourChoiceOutcome(item) {
         claimNumber,
         timestamp: decisionTs,
         formattedTime,
-        shortStatus: 'Picked Up for Replacement',
-        label: `Picked Up for Replacement${tsSuffix}`,
+        shortStatus,
+        label: `${shortStatus}${tsSuffix}`,
         badgeColor: 'bg-sky-50 text-sky-800 border-sky-300 dark:bg-sky-950/70 dark:text-sky-300 dark:border-sky-700'
       };
     }
+    const shortStatus = isCustomerStream ? 'Buffer Replacement Pending' : 'Waiting Pickup — Replacement';
     return {
       choiceKey: 'replacement',
       formType: null,
@@ -612,8 +757,8 @@ export function formatFourChoiceOutcome(item) {
       claimNumber,
       timestamp: decisionTs,
       formattedTime,
-      shortStatus: 'Waiting Driver (Replacement)',
-      label: 'Waiting Driver (Replacement)',
+      shortStatus,
+      label: `${shortStatus}${tsSuffix}`,
       badgeColor: 'bg-sky-50 text-sky-800 border-sky-300 dark:bg-sky-950/70 dark:text-sky-300 dark:border-sky-700'
     };
   }
@@ -654,6 +799,7 @@ export function formatFourChoiceOutcome(item) {
   }
 
   if (isPickedUp) {
+    const shortStatus = isCustomerStream ? 'Credit Return Handover' : 'Picked Up — Debit Claim';
     return {
       choiceKey: 'debit',
       formType: 'debit',
@@ -662,8 +808,8 @@ export function formatFourChoiceOutcome(item) {
       claimNumber,
       timestamp: decisionTs,
       formattedTime,
-      shortStatus: 'Picked Up for Debit Claim',
-      label: `Picked Up for Debit Claim${tsSuffix}`,
+      shortStatus,
+      label: `${shortStatus}${tsSuffix}`,
       badgeColor: 'bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-700'
     };
   }
@@ -704,10 +850,10 @@ export function formatFourChoiceOutcome(item) {
     isPickedUp: false,
     hasDecision: false,
     claimNumber,
-    timestamp: null,
-    formattedTime: '',
-    shortStatus: 'Pending Decision',
-    label: 'Pending Decision',
+    timestamp: pendingTs,
+    formattedTime: pendingFormattedTime,
+    shortStatus: 'Pending',
+    label: `Pending${pendingTsSuffix}`,
     badgeColor: 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
   };
 }
@@ -717,7 +863,7 @@ export function formatFourChoiceOutcome(item) {
  * - All child items 'Restock to Inventory' -> '6- Restocked' (status: 'restocked')
  * - All child items 'Scrap / Dispose' -> '7- Scrapped / Disposed' (status: 'scrapped')
  * - Child items have mixed completed dispositions -> 'Partially Completed' (status: 'partially_completed')
- * - Child items are pending inspection -> '3- Under Inspection' (status: 'under_inspection')
+ * - Child items are pending inspection -> Pending outcome label
  */
 export function resolveBatchManifestLifecycle(report, allReports = []) {
   const outcome = formatFourChoiceOutcome(report);
@@ -739,9 +885,9 @@ export function resolveBatchManifestLifecycle(report, allReports = []) {
       };
     }
     return {
-      status: 'under_inspection',
-      label: 'Pending Decision',
-      color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+      status: 'pending',
+      label: outcome.label,
+      color: outcome.badgeColor
     };
   }
 
@@ -789,9 +935,9 @@ export function resolveBatchManifestLifecycle(report, allReports = []) {
 
   if (pendingCount === total) {
     return {
-      status: 'under_inspection',
-      label: '3- Under Inspection',
-      color: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+      status: 'pending',
+      label: outcome.label,
+      color: outcome.badgeColor
     };
   }
 
@@ -1095,8 +1241,8 @@ export const DEFAULT_WAREHOUSE_LOCATIONS = [
  */
 export function normalizeWarehouseLocation(loc, item = null) {
   const raw = String(loc || '').trim();
-  const isSupplierOutbound = item?.rma_type === 'supplier_outbound' || 
-    String(item?.disposition || '').toLowerCase().includes('rtv') || 
+  const isSupplierOutbound = item?.rma_type === 'supplier_outbound' ||
+    String(item?.disposition || '').toLowerCase().includes('rtv') ||
     String(item?.disposition || '').toLowerCase().includes('vendor');
 
   if (!raw || raw === '—' || raw === 'N/A' || raw.toLowerCase() === 'dock' || raw.toLowerCase() === 'dock-intake' || raw.toLowerCase() === 'rtv-dock') {

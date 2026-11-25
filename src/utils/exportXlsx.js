@@ -304,7 +304,27 @@ export function buildTableXlsxBytes({ sheetName = 'Export', title = '', subtitle
  */
 export function downloadTableXlsx({ sheetName = 'Export', title = '', subtitle = '', filename, columns = [], rows = [] }) {
   const bytes = buildTableXlsxBytes({ sheetName, title, subtitle, columns, rows });
-  const safeFilename = String(filename || 'Export.xlsx').replace(/\.(csv|xlsx)$/i, '') + '.xlsx';
+  const rawBase = String(filename || 'Export.xlsx').replace(/\.(csv|xlsx)$/i, '');
+  let safeFilename = `${rawBase}.xlsx`;
+  if (!/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{2},\s+\d{4}\s+\d{4}\b/.test(rawBase)) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Manila',
+        month: 'short',
+        day: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).formatToParts(new Date());
+      const m = {};
+      parts.forEach((p) => { if (p.type !== 'literal') m[p.type] = p.value; });
+      const hh = m.hour === '24' ? '00' : String(m.hour || '00').padStart(2, '0');
+      safeFilename = `${rawBase} ${m.month || 'Jan'} ${String(m.day || '01').padStart(2, '0')}, ${m.year || new Date().getFullYear()} ${hh}${String(m.minute || '00').padStart(2, '0')}.xlsx`;
+    } catch {
+      safeFilename = `${rawBase}.xlsx`;
+    }
+  }
   const blob = new Blob([bytes], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   });

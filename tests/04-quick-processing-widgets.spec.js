@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { buildRmaAlertXlsxBytes } from '../src/utils/rmaAlertXlsx.js';
 import {
   attachStrictGuards,
   installPrintStubs,
@@ -167,11 +168,39 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
       await customerStreamBtn.click();
       await expect(page.getByRole('button', { name: /\+ Issue Credit Memo/i })).toBeVisible({ timeout: 10_000 });
 
-      // 7. Customer Credit Memo launch & Cancel + RMA Audit Trail check + Done / Close
+      // 7. Customer Credit Memo launch & Cancel + Day 0..10 Workflow Timeline + Upload Edited .xlsx + Audit Trail + Done / Close
       await page.getByRole('button', { name: /\+ Issue Credit Memo/i }).click();
       await expect(page.getByText(/Issue Finance Credit Memo/i)).toBeVisible({ timeout: 10_000 });
       await page.getByRole('button', { name: 'Cancel', exact: true }).last().click();
       await expect(page.getByText('RMA Details & Quick Actions')).toBeVisible({ timeout: 10_000 });
+
+      // Assert Day 0..10 Step 1-4 Workflow Timeline & Check Email / Upload Edited .xlsx controls
+      await expect(page.getByText(/Day 0/i).first()).toBeVisible();
+      await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toBeVisible();
+      const xlsxReplyBuf = Buffer.from(
+        buildRmaAlertXlsxBytes(
+          {
+            rma_number: activeRmaNumber,
+            barcode: '4805358373037',
+            name: 'Magnolia Playwright Updated Item',
+            supplier_name: 'Playwright Master Vendor',
+            si_number: 'SI-2026-XLSX-1',
+            reason: 'Updated via Mirror .xlsx Upload',
+            ai_document_metadata: { is_test: true, test_mode: true }
+          },
+          { subject: `[TEST] [RMA Alert] ${activeRmaNumber}` }
+        )
+      );
+      await page
+        .locator('label:has-text("Upload Edited .xlsx") input[type="file"]')
+        .setInputFiles({
+          name: 'pw-edited-mirror.xlsx',
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          buffer: xlsxReplyBuf
+        });
+      await expect(page.getByText(new RegExp(`Applied \\.xlsx edits to ${activeRmaNumber}`, 'i'))).toBeVisible({
+        timeout: 25_000
+      });
 
       const auditHeading = page.getByText(/RMA Audit Trail & Lifecycle Timeline/i).first();
       await expect(auditHeading).toBeVisible();

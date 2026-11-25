@@ -1943,6 +1943,35 @@ Each test scenario defines:
 
 ---
 
+## Section 26: Phase 26 — RMA Alert Mirror `.xlsx` 2-Way Replies, Reverse-Geocoded GPS & Watermarks, Day 0..10 Timeline, Supplier Directory & Offline Printables
+
+- [ ] **TC-P26-01 (New RMA Alert Mirror `.xlsx` Email Attachment & 2-Way Reply / Upload Ingestion)**
+  * **Location**: `rmaAlertXlsx.js`, `notificationService.js`, `api/send-email.js`, `api/_lib/imapReplySyncHandler.js`, `QuickRMAActionModal`, `SettingsTab`, `.github/workflows/rma-scheduler.yml`
+  * **Expected Behavior**:
+    1. Every New RMA Alert email attaches a `.xlsx` worksheet (`buildRmaAlertFilename` using subject + `formatSaveFileTimestamp`) containing the complete `Field | Value` table + `MANIFEST LINE ITEMS` (for multi-item batches), keeps `✏️ Edit RMA Details & Documents`, and passes `replyTo`.
+    2. Editing cells in the `.xlsx` and uploading via **📤 Upload Edited .xlsx** (`POST /api/send-email?action=ingest-xlsx-reply`) or replying via Gmail IMAP (`?action=sync-email-replies`) validates authorization + Live/Test isolation, updates `rma_reports` + `supplier_directory_store`, and appends `EMAIL_XLSX_REPLY_UPDATE` to `audit_trail`.
+
+- [ ] **TC-P26-02 (Reverse-Geocoded Street/Barangay/City/ZIP GPS & Live Watermarked Cameras)**
+  * **Location**: `/api/v1/products/lookup?action=reverse-geocode`, `cameraWatermark.js`, `CameraCaptureModal.jsx`, `App.jsx`, `SimpleSupplierRtvWizardModal`, `ProductEditModal`, `PendingBarcodesModal`, `exportCsv.js`
+  * **Expected Behavior**:
+    1. Accurate GPS capture (`<= 150m`) resolves clean Street/Barangay/City/Region/ZIP via OpenStreetMap Nominatim (`gps_address` + `ai_document_metadata.gps_address` dual persistence with `PGRST204` safety) and drives human-readable address links (`https://www.google.com/maps/search/?api=1&query=...`) across Customer Hub, Supplier Hub, `RMAReportsModal`, `QuickRMAActionModal`, Excel exports, and emails.
+    2. Clicking **Live Cam** / **Live Camera** opens `CameraCaptureModal` showing ticking PHT timestamp (`YYYY-MM-DD HH:mm:ss PHT`), resolved address, and `#User` HUD overlay, stamping a crisp compact corner watermark on captured and file-selected images without hiding Driver IDs, Truck Plates, or paperwork text.
+
+- [ ] **TC-P26-03 (Strict `Pending` Default, `(YYYY-MM-DD HH:mm)` Badges, Day 0..10 Workflow Timeline & Optional 5 Pickup Photos)**
+  * **Location**: `catalogService.js`, `rmaHelpers.js`, `FollowUpTimelineCard.jsx`, `SimpleSupplierRtvWizardModal`, `QuickRMAActionModal`, `CustomerHubTab`, `SupplierClaimsTab`
+  * **Expected Behavior**:
+    1. Newly created RMAs default strictly to `Pending` (`pending`) and never appear falsely `Scrapped` due to condition grade or intake reason; resolved pills display `Status (YYYY-MM-DD HH:mm)`.
+    2. `FollowUpTimelineCard` renders Step 1–4 progress + Day 0 through Day 10 daily schedule grid clearly in Wizard Step 1 and `QuickRMAActionModal`.
+    3. Pickup photos are optional across all 5 categories, and `+ Bundle Additional RMAs` inside the 4-Choice Wizard lets operators group extra same-stream RMAs directly in-flow.
+
+- [ ] **TC-P26-04 (Persistent Supplier Emails Directory, Offline US Letter Printables, `Prepared Date & Time` & Unique Timestamped Filenames)**
+  * **Location**: `supplierDirectoryService.js`, `SupplierDirectoryModal.jsx`, `printIsolatedElement.js`, `SupplierPickupFormModal`, `CreditMemoVoucherModal`, `ReturnQRModal`, `PortalAccessQRModal`, `exportCsv.js`, `exportMatrixXlsx.js`
+  * **Expected Behavior**:
+    1. Supplier Directory (`rma_settings.supplier_directory_store`) supports Add/Edit/Delete and auto-fills `supplier_email_to`/`supplier_email_cc` across Wizard, Quick Actions, Follow-Up, and Matrix exports.
+    2. `printIsolatedElement.js` renders crisp `iframe.srcdoc` print documents with inlined `@page` / layout rules cleanly offline without Tailwind CDN dependencies; US Letter B&W Pickup & Credit Memo forms display `Prepared Date & Time` below manual `Prepared By`, and all XLSX/PDF/PNG artifacts append unique `formatSaveFileTimestamp()` (`Nov 25, 2026 HHmm`) suffixes.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -1956,4 +1985,5 @@ Each test scenario defines:
 | **Phase 7–23: Core Infrastructure, Queues, AI OCR, `.xlsx`** | Full Platform & Supabase | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
 | **Phase 24: Streamlined UI, US Letter B&W, 4 PDF Emails, Matrix & Consolidation** | End-to-End Platform & Docs | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
 | **Phase 25: OpenAPI Sync, 4-Choice Customer Hub, 5x10 Photos, Plate OCR, 10-Day SLA** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
+| **Phase 26: Mirror `.xlsx` 2-Way Replies, Reverse-Geocode & Watermark, Day 0..10, Supplier Directory** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
 

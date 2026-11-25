@@ -134,6 +134,103 @@ export default async function handler(req, res) {
     return sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: `Method ${req.method} not allowed.` });
   }
 
+  const actionParam = String(req.query?.action || '').trim().toLowerCase();
+  if (actionParam === 'reverse-geocode') {
+    const rawLat = Number(req.query?.lat ?? req.query?.latitude);
+    const rawLon = Number(req.query?.lon ?? req.query?.lng ?? req.query?.longitude);
+
+    if (!Number.isFinite(rawLat) || !Number.isFinite(rawLon) || rawLat < -90 || rawLat > 90 || rawLon < -180 || rawLon > 180) {
+      return sendJson(res, 400, {
+        success: false,
+        error: 'INVALID_COORDINATES',
+        message: 'Provide valid numeric lat (-90..90) and lon (-180..180) parameters.'
+      });
+    }
+
+    const fallbackFormatted = `${rawLat.toFixed(5)}, ${rawLon.toFixed(5)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5500);
+
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(rawLat)}&lon=${encodeURIComponent(rawLon)}&addressdetails=1&zoom=18`;
+      const geoRes = await fetch(url, {
+        headers: {
+          'User-Agent': 'Wholesale-RMA-Portal/2.0 (finance2@keysysincorporated.com)',
+          Accept: 'application/json',
+          'Accept-Language': 'en'
+        },
+        signal: controller.signal
+      });
+
+      if (!geoRes.ok) {
+        throw new Error(`Nominatim responded HTTP ${geoRes.status}`);
+      }
+
+      const data = await geoRes.json();
+      const addr = data?.address || {};
+      const street = [
+        addr.house_number,
+        addr.road || addr.pedestrian || addr.residential || addr.footway || addr.path || addr.building
+      ].filter(Boolean).join(' ').trim();
+      const barangay = String(addr.suburb || addr.quarter || addr.village || addr.hamlet || addr.neighbourhood || addr.city_district || '').trim();
+      const city = String(addr.city || addr.town || addr.municipality || addr.county || '').trim();
+      const region = String(addr.state || addr.region || '').trim();
+      const zip = String(addr.postcode || '').trim();
+      const country = String(addr.country || '').trim();
+
+      const uniqueParts = [];
+      for (const part of [street, barangay, city, region, zip]) {
+        const clean = String(part || '').trim();
+        if (!clean) continue;
+        if (!uniqueParts.some((existing) => existing.toLowerCase() === clean.toLowerCase())) {
+          uniqueParts.push(clean);
+        }
+      }
+
+      const formatted = uniqueParts.join(', ') || String(data?.display_name || '').trim() || fallbackFormatted;
+      const line1 = street || barangay || city || formatted;
+      const line2 = [
+        street ? barangay : '',
+        city && city !== line1 ? city : '',
+        region && region !== city && region !== line1 ? region : '',
+        zip
+      ].filter(Boolean).join(', ');
+      const lines = [line1, line2].filter(Boolean);
+
+      return sendJson(res, 200, {
+        success: true,
+        latitude: rawLat,
+        longitude: rawLon,
+        street,
+        barangay,
+        city,
+        region,
+        zip,
+        country,
+        formatted,
+        lines: lines.length > 0 ? lines : [formatted],
+        display_name: data?.display_name || formatted
+      });
+    } catch (err) {
+      return sendJson(res, 200, {
+        success: false,
+        fallback: true,
+        error: err?.message || 'Reverse geocode unavailable',
+        latitude: rawLat,
+        longitude: rawLon,
+        street: '',
+        barangay: '',
+        city: '',
+        region: '',
+        zip: '',
+        formatted: fallbackFormatted,
+        lines: [fallbackFormatted]
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   const barcodeParam = req.query.barcode || req.query.code || req.query.ean_code;
   const searchParam = req.query.search || req.query.q;
   const limitParam = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);

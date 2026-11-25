@@ -9,6 +9,8 @@ import {
   formatManifestBreakdown,
   formatDateYmd,
   formatDateTimeYmdHm,
+  formatSaveFileTimestamp,
+  appendSaveTimestampToFilename,
   isTestRecord
 } from './rmaHelpers';
 
@@ -621,7 +623,7 @@ export async function downloadCustomSizedStickerPng(options = {}) {
       heightMm: clampedH
     });
 
-    const outName = filename || `${data.rmaNumber}-QR.png`;
+    const outName = appendSaveTimestampToFilename(filename || `${data.rmaNumber}-QR.png`);
     await triggerBlobOrDataUrlDownload(canvas, outName);
     return outName;
   } finally {
@@ -650,6 +652,7 @@ export async function downloadConsolidatedQrPagesPng({
   const canvasW = Math.round(paperWidthMm * targetPxPerMm);
   const canvasH = Math.round(paperHeightMm * targetPxPerMm);
   const count = totalQrCount || pages.reduce((sum, p) => sum + p.length, 0);
+  const saveTs = formatSaveFileTimestamp(new Date());
   const savedFilenames = [];
 
   for (let pIdx = 0; pIdx < pages.length; pIdx++) {
@@ -685,7 +688,7 @@ export async function downloadConsolidatedQrPagesPng({
         );
       }
 
-      const fileName = `${count}-QRs-${paperSlug}-Page-${pIdx + 1}.png`;
+      const fileName = `${count}-QRs-${paperSlug}-Page-${pIdx + 1} ${saveTs}.png`;
       await triggerBlobOrDataUrlDownload(canvas, fileName);
       savedFilenames.push(fileName);
       if (pIdx < pages.length - 1) {

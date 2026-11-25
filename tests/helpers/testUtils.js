@@ -44,6 +44,10 @@ export async function installPrintStubs(context) {
         window.print = () => {
           try {
             window.top.__pwPrintCount = (window.top.__pwPrintCount || 0) + 1;
+            const html = document.documentElement?.outerHTML || '';
+            if (html && Array.isArray(window.top.__pwPrintHtmls)) {
+              window.top.__pwPrintHtmls.push(html);
+            }
           } catch {}
         };
         return;
@@ -61,32 +65,38 @@ export async function installPrintStubs(context) {
       Node.prototype.appendChild = function (child) {
         const res = origAppendChild.call(this, child);
         try {
-          if (child && child.tagName === 'IFRAME' && child.contentWindow) {
+          if (child && child.tagName === 'IFRAME') {
+            if (child.srcdoc && typeof child.srcdoc === 'string') {
+              window.__pwPrintHtmls.push(child.srcdoc);
+            }
             const cw = child.contentWindow;
-            let iframeHtml = '';
-            cw.print = () => {
-              window.__pwPrintCount += 1;
-              if (iframeHtml) window.__pwPrintHtmls.push(iframeHtml);
-            };
-            const doc = cw.document;
-            if (doc && typeof doc.open === 'function') {
-              const origOpen = doc.open.bind(doc);
-              const origWrite = doc.write.bind(doc);
-              doc.open = function (...args) {
-                iframeHtml = '';
-                const r = origOpen(...args);
-                try {
-                  cw.print = () => {
-                    window.__pwPrintCount += 1;
-                    if (iframeHtml) window.__pwPrintHtmls.push(iframeHtml);
-                  };
-                } catch {}
-                return r;
+            if (cw) {
+              let iframeHtml = child.srcdoc || '';
+              cw.print = () => {
+                window.__pwPrintCount += 1;
+                const finalHtml = iframeHtml || child.srcdoc || '';
+                if (finalHtml) window.__pwPrintHtmls.push(finalHtml);
               };
-              doc.write = function (chunk) {
-                iframeHtml += String(chunk || '');
-                return origWrite(chunk);
-              };
+              const doc = cw.document;
+              if (doc && typeof doc.open === 'function') {
+                const origOpen = doc.open.bind(doc);
+                const origWrite = doc.write.bind(doc);
+                doc.open = function (...args) {
+                  iframeHtml = '';
+                  const r = origOpen(...args);
+                  try {
+                    cw.print = () => {
+                      window.__pwPrintCount += 1;
+                      if (iframeHtml) window.__pwPrintHtmls.push(iframeHtml);
+                    };
+                  } catch {}
+                  return r;
+                };
+                doc.write = function (chunk) {
+                  iframeHtml += String(chunk || '');
+                  return origWrite(chunk);
+                };
+              }
             }
           }
         } catch {}
@@ -139,7 +149,7 @@ export async function interceptAndCaptureEmails(page) {
   await page.route('**/api/send-email**', async (route) => {
     const req = route.request();
     const url = req.url();
-    if (url.includes('action=test-connection')) {
+    if (url.includes('action=test-connection') || url.includes('action=ingest-xlsx-reply') || url.includes('action=sync-email-replies')) {
       return route.continue();
     }
     if (req.method() === 'POST') {

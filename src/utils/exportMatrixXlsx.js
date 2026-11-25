@@ -14,6 +14,7 @@ import {
   formatDateTimeYmdHm,
   formatDateYmd,
   formatFourChoiceOutcome,
+  formatSaveFileTimestamp,
   getCleanSku,
   getCreditMemoRmaNumbers,
   getItemNeedsReorder,
@@ -896,13 +897,13 @@ export function downloadRmaMatrixXlsx(options) {
   });
 
   const prefix = options.isTestMode ? 'TEST_' : '';
-  const hhmm = formatManilaHhmm(new Date());
+  const ts = formatSaveFileTimestamp(new Date());
   const streamTag = dataset.stream === 'supplier_outbound'
     ? 'Supplier_RTV_Matrix_Report'
     : dataset.stream === 'customer_inbound'
       ? 'Customer_Hub_Matrix_Report'
       : 'Overall_RMA_Matrix_Report';
-  const filename = `${prefix}${streamTag}_${dataset.startDate}_to_${dataset.endDate} ${hhmm}.xlsx`;
+  const filename = `${prefix}${streamTag}_${dataset.startDate}_to_${dataset.endDate} ${ts}.xlsx`;
 
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

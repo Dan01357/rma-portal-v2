@@ -1,17 +1,17 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { 
-  Receipt, 
-  Search, 
-  Plus, 
-  Printer, 
-  Edit3, 
-  Trash2, 
-  DollarSign, 
-  Package, 
-  ArrowUpDown, 
-  ArrowUp, 
-  ArrowDown, 
-  Download, 
+import {
+  Receipt,
+  Search,
+  Plus,
+  Printer,
+  Edit3,
+  Trash2,
+  DollarSign,
+  Package,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Download,
   RotateCcw,
   Building2,
   Calendar,
@@ -26,6 +26,7 @@ import { formatFilenameDateTime } from '../utils/exportCsv';
 import { downloadTableXlsx } from '../utils/exportXlsx';
 import {
   formatDateYmd,
+  formatSaveFileTimestamp,
   getCreditMemoConsolidatedItems,
   getCreditMemoRmaNumbers
 } from '../utils/rmaHelpers';
@@ -313,11 +314,12 @@ export default function CreditMemosTab({
       ];
     });
 
+    const saveTs = formatSaveFileTimestamp(new Date());
     downloadTableXlsx({
       sheetName: isTestMode ? 'Test Credit Memos' : 'Finance Credit Memos',
       title: `${isTestMode ? 'TEST MODE SANDBOX — ' : ''}PINGCON FINANCE CREDIT MEMOS REPORT`,
-      subtitle: `Generated: ${formatFilenameDateTime()} (Asia/Manila) | Total Credit Memos: ${rows.length}`,
-      filename: `${isTestMode ? 'Sandbox_' : ''}Finance_Credit_Memos ${formatFilenameDateTime()}.xlsx`,
+      subtitle: `Generated: ${saveTs} (Asia/Manila) | Total Credit Memos: ${rows.length}`,
+      filename: `${isTestMode ? 'Sandbox_' : ''}Finance_Credit_Memos ${saveTs}.xlsx`,
       columns,
       rows
     });
@@ -325,7 +327,7 @@ export default function CreditMemosTab({
 
   return (
     <div className="space-y-4 animate-in fade-in">
-      
+
       {/* Financial Summary KPI Strip: Fluid responsive grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 shadow-sm">
@@ -387,7 +389,7 @@ export default function CreditMemosTab({
 
       {/* Main Table Card */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 w-full min-w-0 box-border">
-        
+
         {/* Title and Top Actions */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full min-w-0">
           <div className="min-w-0">
@@ -634,7 +636,7 @@ export default function CreditMemosTab({
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-50/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    
+
                     {/* Header Select All Checkbox */}
                     <th className="py-3 px-3 text-center w-10">
                       <input
@@ -650,7 +652,7 @@ export default function CreditMemosTab({
                       SN
                     </th>
 
-                    <th 
+                    <th
                       onClick={() => handleSort('credit_memo_number')}
                       className="py-3 px-3 font-black text-slate-900 dark:text-white cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
@@ -661,7 +663,7 @@ export default function CreditMemosTab({
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
                       </div>
                     </th>
-                    <th 
+                    <th
                       onClick={() => handleSort('rma_number')}
                       className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
@@ -672,7 +674,7 @@ export default function CreditMemosTab({
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
                       </div>
                     </th>
-                    <th 
+                    <th
                       onClick={() => handleSort('product_name')}
                       className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
@@ -683,7 +685,7 @@ export default function CreditMemosTab({
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
                       </div>
                     </th>
-                    <th 
+                    <th
                       onClick={() => handleSort('quantity')}
                       className="py-3 px-3 font-bold text-center cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
@@ -694,7 +696,7 @@ export default function CreditMemosTab({
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
                       </div>
                     </th>
-                    <th 
+                    <th
                       onClick={() => handleSort('gross_amount')}
                       className="py-3 px-3 text-right font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
@@ -705,7 +707,7 @@ export default function CreditMemosTab({
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
                       </div>
                     </th>
-                    <th 
+                    <th
                       onClick={() => handleSort('pull_out_ref')}
                       className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
@@ -716,7 +718,7 @@ export default function CreditMemosTab({
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
                       </div>
                     </th>
-                    <th 
+                    <th
                       onClick={() => handleSort('credit_amount')}
                       className="py-3 px-3.5 font-black text-right cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
@@ -727,7 +729,7 @@ export default function CreditMemosTab({
                         ) : <ArrowUpDown className="w-3 h-3 text-slate-300" />}
                       </div>
                     </th>
-                    <th 
+                    <th
                       onClick={() => handleSort('credit_issued_by')}
                       className="py-3 px-3.5 font-bold cursor-pointer select-none hover:text-emerald-600 transition-colors"
                     >
@@ -745,7 +747,7 @@ export default function CreditMemosTab({
                   {paginatedMemos.map((memo, idx) => {
                     const isSelected = selectedMemoNumbers.has(memo.credit_memo_number);
                     return (
-                      <tr 
+                      <tr
                         key={memo.credit_memo_number}
                         className={`transition-colors ${isSelected ? 'bg-emerald-50/50 dark:bg-emerald-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/50'}`}
                       >
