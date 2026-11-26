@@ -54,6 +54,10 @@ test.describe('Suite 08: REST API Endpoints, /docs & /api/context, Date Format A
       expect(openapiRawStr).toContain('reverse-geocode');
       expect(openapiRawStr).toContain('gps_address');
       expect(openapiRawStr).toContain('prepared_at');
+      expect(openapiRawStr).toContain('rma-qr-batch-sheet-root');
+      expect(openapiRawStr).toContain('Per-Item QRs');
+      expect(openapiRawStr).toContain('13:00');
+      expect(openapiRawStr).toContain('Supplier Name');
 
       // Reverse-Geocode Proxy validation (400 invalid coords + 200 structured street/city response)
       const badGeoRes = await request.get('/api/v1/products/lookup?action=reverse-geocode&lat=999&lon=999');

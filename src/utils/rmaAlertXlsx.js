@@ -101,7 +101,7 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     ['RMA Number', rmaNumber, 'Identifier — do not rename'],
     ['Test Mode', isTest ? 'YES (Sandbox)' : 'NO (Live)', 'Test vs Live isolation guard'],
     ['Logistics Stream', isSupplierStream ? 'supplier_outbound' : 'customer_inbound', 'customer_inbound or supplier_outbound'],
-    ['Store / Branch', report.store_branch || '', 'Editable text'],
+    ...(isSupplierStream ? [] : [['Store / Branch', report.store_branch || '', 'Editable text']]),
     ['Supplier / Vendor Name', report.supplier_name || report.supplierName || '', 'Editable supplier / updates Supplier Directory'],
     ['Supplier Email (To)', followUpMeta.supplier_email_to || '', 'Comma-separated emails for auto follow-ups'],
     ['Supplier Email (CC)', followUpMeta.supplier_email_cc || '', 'Comma-separated CC emails'],
@@ -168,7 +168,7 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     rIdx += 1;
     rowsXml.push(`<row r="${rIdx}" ht="22" customHeight="1">${makeCellXml(`A${rIdx}`, `MANIFEST LINE ITEMS (${items.length})`, 1)}${makeCellXml(`B${rIdx}`, '', 1)}${makeCellXml(`C${rIdx}`, '', 1)}${makeCellXml(`D${rIdx}`, '', 1)}</row>`);
     rIdx += 1;
-    const mHeaders = ['Serial No.', 'Barcode', 'Assigned SKU', 'Product Description', 'Quantity', 'Packaging Unit', 'Expiry Date (YYYY-MM-DD)', 'Defect Reason', 'Explanation'];
+    const mHeaders = ['Serial No.', 'Supplier Name', 'Barcode', 'Assigned SKU', 'Product Description', 'Quantity', 'Packaging Unit', 'Expiry Date (YYYY-MM-DD)', 'Defect Reason', 'Explanation'];
     rowsXml.push(
       `<row r="${rIdx}" ht="22" customHeight="1">` +
       mHeaders.map((h, i) => makeCellXml(`${colToLetter(i)}${rIdx}`, h, 3, 'text')).join('') +
@@ -178,6 +178,7 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     items.forEach((it, idx) => {
       const vals = [
         [idx + 1, 'number', 2],
+        [it.supplier_name || it.supplierName || report.supplier_name || '', 'text', 5],
         [it.barcode || '', 'text', 2],
         [it.code || it.sku || '', 'text', 5],
         [it.name || it.productName || '', 'text', 5],
@@ -196,9 +197,9 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     });
   }
 
-  const maxCols = items.length > 1 ? 9 : 4;
+  const maxCols = items.length > 1 ? 10 : 4;
   const maxRow = rIdx - 1;
-  const colWidths = [11, 34, 48, 42, 14, 16, 22, 26, 36].slice(0, maxCols);
+  const colWidths = [11, 32, 46, 40, 36, 12, 16, 22, 24, 34].slice(0, maxCols);
   const colsXml = `<cols>${colWidths.map((w, idx) => `<col min="${idx + 1}" max="${idx + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>`;
 
   const sheetXml = [

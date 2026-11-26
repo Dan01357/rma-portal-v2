@@ -40,7 +40,6 @@ export default function SupplierFollowUpModal({
   const [supplierEmailCc, setSupplierEmailCc] = useState('');
   const [followUpEnabled, setFollowUpEnabled] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isSending, setIsSending] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
@@ -154,63 +153,6 @@ export default function SupplierFollowUpModal({
       return null;
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleSendFollowUpNow = async () => {
-    const cleanSup = supplierName.trim() || (isPlaceholderSupplier(wfPreview.party.supplierName) ? '' : wfPreview.party.supplierName);
-    if (!cleanSup) {
-      setFeedback({ type: 'error', message: 'Please set a Supplier / Vendor Name before sending a follow-up.' });
-      return;
-    }
-    if (!recordIsTest && !supplierEmailTo.trim()) {
-      setFeedback({ type: 'error', message: 'Enter at least one Supplier Primary Email (TO) before dispatching a Live follow-up.' });
-      return;
-    }
-    setIsSending(true);
-    setFeedback(null);
-    try {
-      const saved = await catalogService.saveSupplierAndFollowUpSettings(report, {
-        supplier_name: cleanSup,
-        supplier_email_to: supplierEmailTo.trim(),
-        supplier_email_cc: supplierEmailCc.trim(),
-        followUpEnabled: true,
-        actorName
-      });
-      await supplierDirectoryService.upsertFromSubmission({
-        supplier_name: cleanSup,
-        supplier_email_to: supplierEmailTo.trim(),
-        supplier_email_cc: supplierEmailCc.trim()
-      }).catch(() => { });
-
-      const res = await notificationService.runDailyFollowUpNow({
-        isTestMode: recordIsTest,
-        force: true,
-        rmaNumber: report.rma_number,
-        operation: 'send_single',
-        overrideToEmail: supplierEmailTo.trim()
-      });
-
-      if (!res?.success && (res?.errors?.length > 0 || res?.error)) {
-        const msg = res?.error || res?.errors?.[0]?.message || 'Failed to send follow-up email.';
-        setFeedback({ type: 'error', message: msg });
-        onShowToast?.(msg, 'error');
-      } else if (res?.skippedItems?.length > 0 && (res?.summary?.followUpsSent || 0) === 0 && (res?.summary?.autoDisposed || 0) === 0) {
-        const reason = res.skippedItems[0]?.reason || 'SKIPPED';
-        setFeedback({ type: 'error', message: `Follow-up not sent: ${reason}` });
-      } else {
-        const disposed = (res?.summary?.autoDisposed || 0) > 0;
-        const msg = disposed
-          ? `Day >${FOLLOW_UP_MAX_DAYS} threshold reached — ${report.rma_number} auto-disposed & notification sent.`
-          : `Sent Day ${wfPreview.calendarDay} of ${FOLLOW_UP_MAX_DAYS} pickup follow-up${recordIsTest ? ` cleanly to ${sandboxEmail}` : ` to ${supplierEmailTo.trim()}`}.`;
-        setFeedback({ type: 'success', message: msg });
-        onShowToast?.(msg, 'success');
-      }
-      onUpdated?.(saved);
-    } catch (err) {
-      setFeedback({ type: 'error', message: err?.message || 'Error sending follow-up email.' });
-    } finally {
-      setIsSending(false);
     }
   };
 
@@ -378,7 +320,7 @@ export default function SupplierFollowUpModal({
               <button
                 type="button"
                 onClick={handleCloseCase}
-                disabled={isClosing || isSaving || isSending}
+                disabled={isClosing || isSaving}
                 className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
                 {isClosing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
@@ -388,18 +330,8 @@ export default function SupplierFollowUpModal({
 
             <button
               type="button"
-              onClick={handleSendFollowUpNow}
-              disabled={isSending || isSaving || isClosing || wfPreview.isClosed}
-              className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-            >
-              {isSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-              <span>📧 Send Follow-Up</span>
-            </button>
-
-            <button
-              type="button"
               onClick={handleSave}
-              disabled={isSaving || isSending || isClosing}
+              disabled={isSaving || isClosing}
               className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
               {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}

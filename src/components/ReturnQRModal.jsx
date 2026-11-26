@@ -15,7 +15,13 @@ import {
   downloadConsolidatedQrPagesPng
 } from '../utils/customStickerCanvas';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
-import { buildPortalQrPayload, formatSaveFileTimestamp, isTestRecord, isTrashedRecord } from '../utils/rmaHelpers';
+import {
+  buildPortalQrPayload,
+  formatSaveFileTimestamp,
+  getReportManifestItems,
+  isTestRecord,
+  isTrashedRecord
+} from '../utils/rmaHelpers';
 
 const clampNum = (val, min, max, fallback) => {
   const n = Number(val);
@@ -66,6 +72,7 @@ export default function ReturnQRModal({
   const [orientation, setOrientation] = useState('portrait');
   const [marginMm, setMarginMm] = useState(8);
   const [layoutMode, setLayoutMode] = useState('one_page');
+  const [qrSplitMode, setQrSplitMode] = useState('consolidated'); // 'consolidated' | 'per_item'
   const [sizesByKey, setSizesByKey] = useState({});
   const [activeKey, setActiveKey] = useState(null);
 
@@ -86,6 +93,7 @@ export default function ReturnQRModal({
     setActiveKey(baseEntries[0]?.key || null);
     setDownloadNotice(null);
     setLayoutMode('one_page');
+    setQrSplitMode('consolidated');
   }, [isOpen, batchSignature]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const modalIsTestScope = useMemo(
@@ -153,10 +161,89 @@ export default function ReturnQRModal({
     return out;
   }, [sessionReports, availableReports, modalIsTestScope, visibleRmaKeysSet, addSearchQuery]);
 
-  // Default card size: Medium 90x105mm for single QR, balanced 62x74mm for multi-select consolidated QRs
+  const manifestLookupPool = useMemo(
+    () => [
+      ...(Array.isArray(sessionReports) ? sessionReports : []),
+      ...(Array.isArray(availableReports) ? availableReports : [])
+    ],
+    [sessionReports, availableReports]
+  );
+
+  const hasMultiItemRma = useMemo(() => {
+    return visibleEntries.some((entry) => {
+      const rep = entry.report;
+      const resolvedItems = getReportManifestItems(rep, manifestLookupPool);
+      return resolvedItems.length > 1 || (Array.isArray(rep?.items) && rep.items.length > 1);
+    });
+  }, [visibleEntries, manifestLookupPool]);
+
+  const expandedEntries = useMemo(() => {
+    const out = [];
+    visibleEntries.forEach((entry) => {
+      const rep = entry.report;
+      const resolvedItems = getReportManifestItems(rep, manifestLookupPool);
+      const effectiveItems = resolvedItems.length > 1
+        ? resolvedItems
+        : (Array.isArray(rep?.items) && rep.items.length > 1 ? rep.items : null);
+
+      if (qrSplitMode === 'per_item' && effectiveItems && effectiveItems.length > 1) {
+        effectiveItems.forEach((it, itemIdx) => {
+          const itemKey = `${entry.key}__item-${itemIdx + 1}`;
+          if (removedKeys.has(itemKey)) return;
+          const itemBarcode = String(it?.barcode || rep.barcode || '').trim();
+          const itemSku = String(it?.code || it?.sku || '').trim();
+          const itemName = String(it?.name || it?.productName || it?.product_name || rep.name || 'Returned Merchandise').trim();
+          const itemQty = Number(it?.quantity ?? it?.qty) || 1;
+          const itemUnit = String(it?.unit_name || it?.unit || rep.unit_name || 'pc').trim() || 'pc';
+          out.push({
+            key: itemKey,
+            parentKey: entry.key,
+            itemIndex: itemIdx + 1,
+            totalLines: effectiveItems.length,
+            isPerItemSplit: true,
+            report: {
+              ...rep,
+              items: [{ ...it }],
+              total_items: 1,
+              totalItems: 1,
+              name: itemName,
+              productName: itemName,
+              barcode: itemBarcode || rep.barcode,
+              code: itemSku,
+              sku: itemSku,
+              quantity: itemQty,
+              total_quantity: itemQty,
+              unit_name: itemUnit,
+              unit: itemUnit,
+              pieces_per_case: Number(it?.pieces_per_case ?? it?.piecesPerCase ?? rep.pieces_per_case) || 1,
+              expiry_date: it?.expiry_date || rep.expiry_date || '',
+              reason: it?.reason || rep.reason || '',
+              explanation: it?.explanation || rep.explanation || '',
+              _manifestLineIndex: itemIdx + 1,
+              _manifestTotalLines: effectiveItems.length
+            }
+          });
+        });
+      } else {
+        out.push({
+          key: entry.key,
+          parentKey: entry.key,
+          itemIndex: null,
+          totalLines: null,
+          isPerItemSplit: false,
+          report: effectiveItems && effectiveItems.length > 1 && (!Array.isArray(rep?.items) || rep.items.length <= 1)
+            ? { ...rep, items: effectiveItems, total_items: effectiveItems.length }
+            : rep
+        });
+      }
+    });
+    return out;
+  }, [visibleEntries, manifestLookupPool, qrSplitMode, removedKeys]);
+
+  // Default card size: Medium 90x105mm for single QR, balanced 62x74mm for multi-select consolidated or per-item QRs
   const defaultCardSize = useMemo(
-    () => (visibleEntries.length <= 1 ? { widthMm: 90, heightMm: 105 } : { widthMm: 62, heightMm: 74 }),
-    [visibleEntries.length]
+    () => (expandedEntries.length <= 1 ? { widthMm: 90, heightMm: 105 } : { widthMm: 62, heightMm: 74 }),
+    [expandedEntries.length]
   );
 
   // Compute physical page dimensions based on Paper Preset + Orientation + Margins
@@ -195,12 +282,16 @@ export default function ReturnQRModal({
 
   // Build normalized cards list with stable SVG DOM IDs and per-card mm dimensions
   const cards = useMemo(() => {
-    return visibleEntries.map((entry, idx) => {
+    return expandedEntries.map((entry, idx) => {
       const cardData = normalizeRmaQrCardData(entry.report);
       const custom = sizesByKey[entry.key] || defaultCardSize;
       const safeSvgSlug = entry.key.replace(/[^a-zA-Z0-9_-]/g, '_');
       return {
         key: entry.key,
+        parentKey: entry.parentKey,
+        itemIndex: entry.itemIndex,
+        totalLines: entry.totalLines,
+        isPerItemSplit: Boolean(entry.isPerItemSplit),
         index: idx,
         report: entry.report,
         cardData,
@@ -210,7 +301,7 @@ export default function ReturnQRModal({
         heightMm: clampNum(custom.heightMm, 40, 280, defaultCardSize.heightMm)
       };
     });
-  }, [visibleEntries, sizesByKey, defaultCardSize]);
+  }, [expandedEntries, sizesByKey, defaultCardSize]);
 
   const activeCard = useMemo(
     () => cards.find((c) => c.key === activeKey) || cards[0] || null,
@@ -446,10 +537,25 @@ export default function ReturnQRModal({
     }
   };
 
+  const handleChangeSplitMode = (nextMode) => {
+    const normalized = nextMode === 'per_item' ? 'per_item' : 'consolidated';
+    if (normalized === qrSplitMode) return;
+    setQrSplitMode(normalized);
+    setSizesByKey({});
+    setRemovedKeys((prev) => {
+      const next = new Set();
+      prev.forEach((k) => {
+        if (!String(k).includes('__item-')) next.add(k);
+      });
+      return next;
+    });
+    setDownloadNotice(null);
+  };
+
   const handlePrint = () => {
     setIsPrinting(true);
     try {
-      const rootEl = document.getElementById('rma-qr-print-root');
+      const rootEl = document.getElementById('rma-qr-batch-sheet-root');
       if (!rootEl) {
         setDownloadNotice({ type: 'error', msg: 'QR print canvas not ready.' });
         return;
@@ -462,13 +568,13 @@ export default function ReturnQRModal({
       const docTitle = `${baseTitle} ${formatSaveFileTimestamp(new Date())}`;
 
       printIsolatedElement({
-        elementId: 'rma-qr-print-root',
+        elementId: 'rma-qr-batch-sheet-root',
         documentTitle: docTitle,
         pageSize: pageSizeCss,
         pageMargin: '0',
         allowMultiPage: layoutMode === 'multi_page' || packedLayout.pages.length > 1,
         customStyles: `
-          :root, #rma-qr-print-root {
+          :root, #rma-qr-batch-sheet-root {
             --u: 1mm !important;
           }
           .no-print-qr {
@@ -665,6 +771,42 @@ export default function ReturnQRModal({
               />
               <span className="text-slate-400">mm</span>
             </label>
+
+            {/* Multi-Item Batch RMA QR Mode Toggle: Consolidated vs Single / Per-Item */}
+            {hasMultiItemRma && (
+              <div
+                role="group"
+                aria-label="Multi-Item QR Split Mode"
+                className="flex items-center rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 p-0.5 text-[11px] font-bold shadow-2xs"
+              >
+                <button
+                  type="button"
+                  onClick={() => handleChangeSplitMode('consolidated')}
+                  aria-pressed={qrSplitMode === 'consolidated'}
+                  className={`px-2.5 py-0.5 rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                    qrSplitMode === 'consolidated'
+                      ? 'bg-indigo-600 text-white'
+                      : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                  title="Print or download 1 consolidated QR card per RMA ticket"
+                >
+                  📦 Consolidated (1 QR per RMA)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleChangeSplitMode('per_item')}
+                  aria-pressed={qrSplitMode === 'per_item'}
+                  className={`px-2.5 py-0.5 rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                    qrSplitMode === 'per_item'
+                      ? 'bg-indigo-600 text-white'
+                      : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                  title="Expand multi-item RMAs into 1 separate QR card per individual line item"
+                >
+                  🏷️ Single / Per-Item QRs (1 QR per Item)
+                </button>
+              </div>
+            )}
 
             {/* Sheet Packing Mode (1 Page Consolidated vs Multiple Pages Multi-Up) */}
             <div className="flex items-center rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 p-0.5 text-[11px] font-bold">
@@ -906,7 +1048,7 @@ export default function ReturnQRModal({
         {/* Live WYSIWYG Consolidated Paper Sheet(s) Canvas Area */}
         <div className="flex-1 overflow-auto p-4 sm:p-6 bg-slate-200/80 dark:bg-slate-950/90 print:p-0 print:bg-white print:overflow-visible">
           <div
-            id="rma-qr-print-root"
+            id="rma-qr-batch-sheet-root"
             style={{ '--u': `${previewPxPerMm}px` }}
             className="flex flex-col items-center gap-6 print:block print:gap-0"
           >
@@ -943,7 +1085,7 @@ export default function ReturnQRModal({
 
                   {/* Placed Printable QR Cards on this page */}
                   {pageCards.map((placed) => {
-                    const { cardData, svgId, qrPayload, wMm, hMm, xMm, yMm, key } = placed;
+                    const { cardData, svgId, qrPayload, wMm, hMm, xMm, yMm, key, itemIndex } = placed;
                     const isSelectedCard = isMulti && activeCard?.key === key;
                     // Smooth proportional scaling relative to 90x105mm baseline
                     const s = Math.min(wMm / 90, hMm / 105);
@@ -953,6 +1095,8 @@ export default function ReturnQRModal({
                       <div
                         key={key}
                         data-rma-qr-card={cardData.rmaNumber}
+                        data-rma-qr-key={key}
+                        {...(itemIndex ? { 'data-rma-qr-item-index': String(itemIndex) } : {})}
                         onClick={() => isMulti && setActiveKey(key)}
                         style={{
                           left: `calc(${effectivePaper.marginMm + xMm} * var(--u))`,

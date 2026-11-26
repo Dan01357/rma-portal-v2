@@ -1,5 +1,6 @@
 import { supabase } from './supabase.js';
 import { authorizeCronOrAdmin } from './cronAuth.js';
+import { syncEmailRepliesInternal } from './imapReplySyncHandler.js';
 import {
   createSmtpTransport,
   DEFAULT_EMAIL_RECIPIENTS,
@@ -102,12 +103,19 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
 
   const operation = String(body.operation || req.query?.operation || 'run_all').trim().toLowerCase();
   const targetRmaNumber = String(body.rmaNumber || req.query?.rmaNumber || '').trim();
-  const isTestMode = Boolean(
-    body.isTestMode === true ||
-    body.isTestMode === 'true' ||
-    req.query?.testMode === 'true' ||
-    req.query?.test === '1' ||
-    targetRmaNumber.toUpperCase().startsWith('TEST-')
+  const isTestMode =
+    auth.callerType !== 'cron' &&
+    Boolean(
+      body.isTestMode === true ||
+      body.isTestMode === 'true' ||
+      req.query?.testMode === 'true' ||
+      req.query?.test === '1' ||
+      targetRmaNumber.toUpperCase().startsWith('TEST-')
+    );
+  const alsoSyncReplies = Boolean(
+    req.query?.syncReplies === '1' ||
+    req.query?.syncReplies === 'true' ||
+    body.syncReplies === true
   );
   const force = Boolean(
     body.force === true ||
@@ -168,8 +176,17 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
     ...(rawFollowUpCfg && typeof rawFollowUpCfg === 'object' ? rawFollowUpCfg : {})
   };
   const autoEnabled = followUpConfig.autoEnabled !== false;
-  const targetTimePht = normalizeTimeHhmm(followUpConfig.autoSendTimePht, '08:00');
+  const targetTimePht = normalizeTimeHhmm(followUpConfig.autoSendTimePht, '13:00');
   const customerFollowUpDefaultEnabled = Boolean(followUpConfig.customerFollowUpDefaultEnabled);
+
+  let replySyncSummary = null;
+  if (alsoSyncReplies && !dryRun) {
+    try {
+      replySyncSummary = await syncEmailRepliesInternal();
+    } catch (syncErr) {
+      replySyncSummary = { success: false, error: syncErr?.message || 'Reply sync failed' };
+    }
+  }
 
   if (respectSchedule && operation === 'run_all' && !force) {
     if (!autoEnabled) {
@@ -179,7 +196,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
         reason: 'AUTO_DISABLED',
         phtDate: todayManila,
         phtTime: currentHhmm,
-        targetTimePht
+        targetTimePht,
+        ...(replySyncSummary ? { emailReplySync: replySyncSummary } : {})
       });
     }
     if (!hasReachedManilaSchedule(targetTimePht, nowDate)) {
@@ -189,7 +207,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
         reason: 'BEFORE_SCHEDULED_TIME',
         phtDate: todayManila,
         phtTime: currentHhmm,
-        targetTimePht
+        targetTimePht,
+        ...(replySyncSummary ? { emailReplySync: replySyncSummary } : {})
       });
     }
   }
@@ -586,6 +605,7 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
     followUpsSent,
     autoDisposed,
     skippedItems,
-    errors
+    errors,
+    ...(replySyncSummary ? { emailReplySync: replySyncSummary } : {})
   });
 }

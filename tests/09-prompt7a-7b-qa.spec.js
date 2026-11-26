@@ -223,7 +223,9 @@ test.describe('Suite 09: Serial No. Exports, Admin-Only Test Recipients, Pinpoin
       const mirrorRows = extractSheetRowsText(Buffer.from(mirrorBytes));
       const mirrorHeaderRow = mirrorRows.find((r) => r.B === 'Field' && r.C === 'Value');
       expect(mirrorHeaderRow?.A).toBe('Serial No.');
-      const manifestHeaderRow = mirrorRows.find((r) => r.B === 'Barcode' && r.C === 'Assigned SKU');
+      const manifestHeaderRow = mirrorRows.find(
+        (r) => r.B === 'Supplier Name' && r.C === 'Barcode' && r.D === 'Assigned SKU'
+      );
       expect(manifestHeaderRow?.A).toBe('Serial No.');
 
       // Backward-compatible legacy reply parsing AND shifted Serial No. column reply parsing

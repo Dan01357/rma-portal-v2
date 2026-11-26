@@ -10,8 +10,8 @@
       "schedule": "0 5 * * *"
     },
     {
-      "path": "/api/send-email?action=daily-followup&respectSchedule=true",
-      "schedule": "0 0 * * *"
+      "path": "/api/send-email?action=daily-followup&respectSchedule=true&syncReplies=1",
+      "schedule": "0 5 * * *"
     }
   ],
   "rewrites": [

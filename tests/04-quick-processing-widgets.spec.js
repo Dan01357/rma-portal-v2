@@ -168,15 +168,17 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
       await customerStreamBtn.click();
       await expect(page.getByRole('button', { name: /\+ Issue Credit Memo/i })).toBeVisible({ timeout: 10_000 });
 
-      // 7. Customer Credit Memo launch & Cancel + Day 0..10 Workflow Timeline + Upload Edited .xlsx + Audit Trail + Done / Close
+      // 7. Customer Credit Memo launch & Cancel + Day 0..10 Workflow Timeline + Verify Manual .xlsx UI Buttons Removed + Backend .xlsx Ingest + Audit Trail + Done / Close
       await page.getByRole('button', { name: /\+ Issue Credit Memo/i }).click();
       await expect(page.getByText(/Issue Finance Credit Memo/i)).toBeVisible({ timeout: 10_000 });
       await page.getByRole('button', { name: 'Cancel', exact: true }).last().click();
       await expect(page.getByText('RMA Details & Quick Actions')).toBeVisible({ timeout: 10_000 });
 
-      // Assert Day 0..10 Step 1-4 Workflow Timeline & Check Email / Upload Edited .xlsx controls
+      // Assert Day 0..10 Step 1-4 Workflow Timeline & verify removed manual Check Email / Upload Edited .xlsx / Send Follow-Up UI controls
       await expect(page.getByText(/Day 0/i).first()).toBeVisible();
-      await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toHaveCount(0);
+      await expect(page.getByText(/Upload Edited \.xlsx/i)).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /Send Follow-Up/i })).toHaveCount(0);
       const xlsxReplyBuf = Buffer.from(
         buildRmaAlertXlsxBytes(
           {
@@ -191,16 +193,29 @@ test.describe('Suite 04: Streamlined QuickRMAActionModal (Stream Switch, 4-Choic
           { subject: `[TEST] [RMA Alert] ${activeRmaNumber}` }
         )
       );
-      await page
-        .locator('label:has-text("Upload Edited .xlsx") input[type="file"]')
-        .setInputFiles({
-          name: 'pw-edited-mirror.xlsx',
-          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          buffer: xlsxReplyBuf
-        });
-      await expect(page.getByText(new RegExp(`Applied \\.xlsx edits to ${activeRmaNumber}`, 'i'))).toBeVisible({
-        timeout: 25_000
-      });
+      const ingestResult = await page.evaluate(
+        async ({ b64, targetRma }) => {
+          const supaKey = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'));
+          const token = supaKey ? JSON.parse(localStorage.getItem(supaKey))?.access_token : '';
+          const res = await fetch('/api/send-email?action=ingest-xlsx-reply', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify({
+              fileBase64: b64,
+              rmaNumber: targetRma,
+              actorName: 'Playwright Quick Action Check'
+            })
+          });
+          return { status: res.status, json: await res.json().catch(() => null) };
+        },
+        { b64: xlsxReplyBuf.toString('base64'), targetRma: activeRmaNumber }
+      );
+      expect(ingestResult.status).toBe(200);
+      expect(ingestResult.json?.success).toBe(true);
+      expect(ingestResult.json?.changedFields || []).toContain('si_number');
 
       const auditHeading = page.getByText(/RMA Audit Trail & Lifecycle Timeline/i).first();
       await expect(auditHeading).toBeVisible();

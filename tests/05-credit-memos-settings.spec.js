@@ -294,7 +294,7 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await expect(page.getByText(/mgan@pingconmarketing\.com/).first()).toBeVisible();
       await expect(page.locator('input[aria-label="Test Mode Sandbox Email Override"]')).toHaveValue(/mgan@pingconmarketing\.com/i);
       await expect(page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('13:00');
-      await expect(page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('08:00');
+      await expect(page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]')).toHaveValue('13:00');
       await expect(page.locator('input[aria-label="Auto Daily Matrix Email Enabled"]')).toBeVisible();
       await expect(page.locator('input[aria-label="Auto Daily Follow-Up Enabled"]')).toBeVisible();
       await expect(page.locator('input[aria-label="Customer Hub Default Follow-Up Enabled"]')).toBeVisible();
@@ -375,7 +375,7 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
       await page.getByRole('button', { name: /Save Follow-Up (?:SLA|Time)/i }).click();
       await expect(page.getByText(/10-Day Pickup Follow-Up schedule .* saved to cloud/i)).toBeVisible({ timeout: 15_000 });
 
-      await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toHaveCount(0);
       await expect(page.getByRole('button', { name: /Supplier (?:Emails )?Directory/i }).first()).toBeVisible();
 
       await page.reload({ waitUntil: 'domcontentloaded' });
@@ -386,14 +386,14 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
 
       // Restore clean corporate default schedules & Rolling Days
       await page.locator('input[aria-label="Matrix Auto-Send Time (Asia/Manila HH:mm)"]').fill('13:00');
-      await page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]').fill('08:00');
+      await page.locator('input[aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"]').fill('13:00');
       await page.getByRole('button', { name: /Rolling Days/i }).click();
       await page.getByRole('button', { name: /Save Matrix Config/i }).click();
       await expect(page.getByText(/Overall Matrix schedule, date range & scope saved/i)).toBeVisible({ timeout: 10_000 });
       await page.getByRole('button', { name: /Save Follow-Up (?:SLA|Time)/i }).click();
       await expect(page.getByText(/10-Day Pickup Follow-Up schedule .* saved to cloud/i)).toBeVisible({ timeout: 15_000 });
 
-      await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Check Email \.xlsx Replies/i })).toHaveCount(0);
       await expect(page.getByRole('button', { name: /Supplier (?:Emails )?Directory/i }).first()).toBeVisible();
 
       await page.getByRole('button', { name: /View & Download Poster/i }).click();
@@ -492,7 +492,7 @@ test.describe('Suite 05: Single & Consolidated Credit Memos (US Letter B&W, VAT,
                     await fetch(`${url}/rest/v1/rma_settings?key=eq.daily_followup_config`, {
                       method: 'PATCH',
                       headers: hdrs,
-                      body: JSON.stringify({ value: { ...row.value, autoSendTimePht: '08:00' } })
+                      body: JSON.stringify({ value: { ...row.value, autoSendTimePht: '13:00' } })
                     });
                   }
                 }

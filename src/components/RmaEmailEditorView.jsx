@@ -234,7 +234,7 @@ export default function RmaEmailEditorView({
             price: parseFloat(price) || 0,
             price_with_vat: parseFloat(priceWithVat) || 0,
             expiry_date: expiryDate ? expiryDate.slice(0, 10) : '',
-            store_branch: storeBranch.trim(),
+            ...(loadedReport?.rma_type === 'supplier_outbound' ? { store_branch: null } : { store_branch: storeBranch.trim() }),
             si_number: siNumber.trim(),
             dr_number: drNumber.trim(),
             po_number: poNumber.trim(),
@@ -565,7 +565,7 @@ export default function RmaEmailEditorView({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+            <div className={`grid grid-cols-1 ${loadedReport?.rma_type === 'supplier_outbound' ? 'sm:grid-cols-2' : 'sm:grid-cols-3'} gap-3 pt-1`}>
               <div>
                 <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Supplier Name</label>
                 <input
@@ -582,16 +582,18 @@ export default function RmaEmailEditorView({
                   ))}
                 </datalist>
               </div>
-              <div>
-                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Store / Customer Branch</label>
-                <input
-                  type="text"
-                  value={storeBranch}
-                  onChange={(e) => setStoreBranch(e.target.value)}
-                  placeholder="Branch / Account Name"
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
-                />
-              </div>
+              {loadedReport?.rma_type !== 'supplier_outbound' && (
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Store / Customer Branch</label>
+                  <input
+                    type="text"
+                    value={storeBranch}
+                    onChange={(e) => setStoreBranch(e.target.value)}
+                    placeholder="Branch / Account Name"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+              )}
               <div>
                 <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Expiry Date (YYYY-MM-DD)</label>
                 <div className="flex items-center gap-2">

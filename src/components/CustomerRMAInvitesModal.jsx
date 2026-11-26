@@ -231,19 +231,20 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     if (!window.confirm('Are you sure you want to revoke this authorization link? Access will be blocked immediately.')) {
       return;
     }
+    loadSeqRef.current += 1;
+    setInvites((prev) =>
+      prev.map((inv) => ((inv.token === token || inv.id === token) ? { ...inv, status: 'revoked' } : inv))
+    );
+    showToast('Invite link revoked.');
+    if (generatedInvite?.token === token) {
+      setGeneratedInvite(null);
+    }
     try {
       await inviteService.revokeInvite(token);
-      loadSeqRef.current += 1;
-      setInvites((prev) =>
-        prev.map((inv) => ((inv.token === token || inv.id === token) ? { ...inv, status: 'revoked' } : inv))
-      );
-      showToast('Invite link revoked.');
       loadInvites();
-      if (generatedInvite?.token === token) {
-        setGeneratedInvite(null);
-      }
     } catch (err) {
       alert(`Failed to revoke invite: ${err.message}`);
+      loadInvites();
     }
   };
 
@@ -256,17 +257,20 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
 
     const tokenKey = inv.token || inv.id;
     setDeletingToken(tokenKey);
+    loadSeqRef.current += 1;
+    setInvites((prev) =>
+      prev.filter((item) => !((inv.token && item.token === inv.token) || (inv.id && item.id === inv.id)))
+    );
+    if (generatedInvite?.token === inv.token) {
+      setGeneratedInvite(null);
+    }
     try {
       await inviteService.deleteInvite(tokenKey);
-      loadSeqRef.current += 1;
-      setInvites((prev) => prev.filter((item) => (item.token || item.id) !== tokenKey));
       showToast('Invite record deleted successfully.');
       loadInvites();
-      if (generatedInvite?.token === inv.token) {
-        setGeneratedInvite(null);
-      }
     } catch (err) {
       alert(`Failed to delete invite: ${err.message}`);
+      loadInvites();
     } finally {
       setDeletingToken(null);
     }

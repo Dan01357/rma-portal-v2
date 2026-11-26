@@ -114,10 +114,12 @@ export function normalizeRmaQrCardData(input = {}) {
   const unit = String(input.unit || input.unit_name || 'pc').trim() || 'pc';
   const piecesPerCase = Number(input.piecesPerCase ?? input.pieces_per_case ?? manifestItems[0]?.pieces_per_case ?? manifestItems[0]?.piecesPerCase) || 1;
   const supplier = String(input.supplier || input.supplier_name || '').trim();
-  const storeBranch = String(input.storeBranch || input.store_branch || input.store || '').trim();
   const streamType = input.streamType === 'supplier_outbound' || input.rma_type === 'supplier_outbound'
     ? 'supplier_outbound'
     : 'customer_inbound';
+  const storeBranch = streamType === 'supplier_outbound'
+    ? ''
+    : String(input.storeBranch || input.store_branch || input.store || '').trim();
   const reason = String(input.reason || input.defect_category || '').trim();
   const reporter = String(input.reporter || input.reporter_name || input.reported_by || '').trim();
 
@@ -152,13 +154,19 @@ export function normalizeRmaQrCardData(input = {}) {
     : itemName;
 
   const isPortalAccess = rmaNumber === 'PUBLIC-RMA-PORTAL';
-  const headerTitle = isPortalAccess
+  const lineIndexNum = Number(input._manifestLineIndex || input.manifestLineIndex || 0);
+  const totalLinesNum = Number(input._manifestTotalLines || input.manifestTotalLines || 0);
+  const perItemSuffix = !isManifest && lineIndexNum > 0 && totalLinesNum > 1
+    ? ` • ITEM ${lineIndexNum}/${totalLinesNum}`
+    : '';
+  const baseHeaderTitle = isPortalAccess
     ? 'PUBLIC RMA PORTAL QR'
     : isTest
       ? 'TEST SANDBOX QR'
       : streamType === 'supplier_outbound'
         ? 'SUPPLIER RTV QR'
         : 'WHOLESALE RMA QR';
+  const headerTitle = `${baseHeaderTitle}${perItemSuffix}`;
 
   const entityLabel = supplier && storeBranch && supplier !== storeBranch
     ? `${supplier} • ${storeBranch}`

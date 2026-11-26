@@ -94,44 +94,6 @@ export default function SupplierClaimsTab({
   const [isDirectoryOpen, setIsDirectoryOpen] = useState(false);
   const [followUpBanner, setFollowUpBanner] = useState(null);
 
-  const handleRowSendFollowUp = async (report) => {
-    const statusInfo = getCleanHumanWorkflowStatus(report, savedProductsList);
-    const wf = statusInfo.workflow;
-    if (wf.isClosed) return;
-    if (!wf.party.hasValidSupplier || (!isTestMode && !isTestRecord(report) && wf.party.toEmails.length === 0)) {
-      setFollowUpModalReport(report);
-      return;
-    }
-    const rowKey = report.id || report.rma_number;
-    setUpdatingQueueId(rowKey);
-    setFollowUpBanner(null);
-    try {
-      const res = await notificationService.runDailyFollowUpNow({
-        isTestMode: Boolean(isTestMode || isTestRecord(report)),
-        force: true,
-        rmaNumber: report.rma_number,
-        operation: 'send_single'
-      });
-      if (res?.success) {
-        const disposed = (res?.summary?.autoDisposed || 0) > 0;
-        setFollowUpBanner({
-          type: 'success',
-          text: disposed
-            ? `${report.rma_number} exceeded Day 10 and was auto-disposed & closed.`
-            : `Sent Day ${wf.calendarDay} of 10 follow-up for ${report.rma_number}.`
-        });
-        if (onRefresh) onRefresh();
-      } else {
-        setFollowUpBanner({
-          type: 'error',
-          text: res?.error || res?.errors?.[0]?.message || `Could not send follow-up for ${report.rma_number}.`
-        });
-      }
-    } finally {
-      setUpdatingQueueId(null);
-    }
-  };
-
   const handleRowCloseCase = async (report) => {
     const rowKey = report.id || report.rma_number;
     setUpdatingQueueId(rowKey);
@@ -1564,29 +1526,17 @@ export default function SupplierClaimsTab({
                               </button>
                             )}
 
-                            {/* 1B. Daily 10-Day Pickup Follow-Up & Case Close Controls */}
+                            {/* 1B. Daily 10-Day Pickup Follow-Up Case Close Control */}
                             {!wf.isClosed && (
-                              <>
-                                <button
-                                  type="button"
-                                  disabled={updatingQueueId === (r.id || r.rma_number)}
-                                  onClick={() => handleRowSendFollowUp(r)}
-                                  className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
-                                  title="Send 10-Calendar-Day Pickup Follow-Up Email now"
-                                >
-                                  <Send className="w-2.5 h-2.5" />
-                                  <span>📧 Send Follow-Up</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={updatingQueueId === (r.id || r.rma_number)}
-                                  onClick={() => handleRowCloseCase(r)}
-                                  className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
-                                  title="Mark Picked Up & Close 4-Step Workflow Case (stops 10-day countdown)"
-                                >
-                                  <span>✓ Case Close</span>
-                                </button>
-                              </>
+                              <button
+                                type="button"
+                                disabled={updatingQueueId === (r.id || r.rma_number)}
+                                onClick={() => handleRowCloseCase(r)}
+                                className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                title="Mark Picked Up & Close 4-Step Workflow Case (stops 10-day countdown)"
+                              >
+                                <span>✓ Case Close</span>
+                              </button>
                             )}
 
                             {/* 2. View / Print Debit Claim or Replacement Form when generated */}
@@ -1835,7 +1785,12 @@ export default function SupplierClaimsTab({
                                             #{cIdx + 1}
                                           </td>
                                           <td className="py-2 px-3 font-bold text-slate-900 dark:text-white truncate max-w-xs" title={childName}>
-                                            {childName}
+                                            <div className="truncate">{childName}</div>
+                                            {child.supplier_name && (
+                                              <div className="text-[10px] text-amber-700 dark:text-amber-300 font-semibold truncate" title={`Supplier: ${child.supplier_name}`}>
+                                                Supplier: {child.supplier_name}
+                                              </div>
+                                            )}
                                           </td>
                                           <td className="py-2 px-3 font-mono text-slate-700 dark:text-slate-300 font-bold">
                                             {childBarcode || '—'}

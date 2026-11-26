@@ -2008,6 +2008,50 @@ Each test scenario defines:
 
 ---
 
+## Section 28: Phase 28 — Multi-Item QR Consolidated vs Per-Item Studio, Zero `store_branch` on Supplier RTV, `13:00` PHT Automated Follow-Ups & Per-Item `.xlsx` Reply Sync
+
+- [ ] **TC-P28-01 (Public & Admin `ReturnQRModal` Consolidated vs Single/Per-Item QRs & Isolated Iframe Print)**
+  * **Location**: `/` Public Submission Success screen & `/admin` -> `ReturnQRModal.jsx` (`#rma-qr-batch-sheet-root`), `printIsolatedElement.js`, `customStickerCanvas.js`
+  * **Action**:
+    1. Submit a 2+ item Batch Manifest RMA on `/` (or open any multi-item RMA in Admin).
+    2. Click `Resize / Print QR`.
+    3. Verify toolbar shows the `Consolidated (1 QR per RMA)` *(default active)* and `Single / Per-Item QRs (1 QR per Item)` segmented buttons.
+    4. Switch to `Single / Per-Item QRs (1 QR per Item)`, then click `Print` and `Save QR (PNG)`.
+  * **Expected Behavior**:
+    1. Default `Consolidated` renders **1** QR card (`Batch Manifest (N SKUs)`).
+    2. Switching to `Single / Per-Item QRs` expands into `N` separate `.rma-qr-card` items showing each item's own Name, Barcode/SKU, **Qty & Unit**, Expiry Date, and `• ITEM X/N`.
+    3. Clicking `Print` injects **only** `#rma-qr-batch-sheet-root` into an isolated `iframe.srcdoc` with `--u: 1mm !important` — NEVER calling main-window `window.print()` or printing the website header/form (`#root`).
+    4. Both `Print` and `Save QR (PNG)` respect whichever mode is active (`Consolidated` vs `Per-Item`).
+
+- [ ] **TC-P28-02 (Complete Removal of `Store Branch` from Supplier RTV `supplier_outbound`)**
+  * **Location**: `App.jsx` (`handleSubmitReport` + Success screen), `SupplierClaimsTab.jsx`, `QuickRMAActionModal.jsx`, `RmaEmailEditorView.jsx`, `notificationService.js`, `rmaAlertXlsx.js`, `exportMatrixXlsx.js`, `customStickerCanvas.js`
+  * **Action**:
+    1. Submit a `supplier_outbound` (Supplier RTV) RMA (with a Vendor Name typed in Section 3).
+    2. Inspect the Supabase `rma_reports` row, Public Success screen, New RMA Alert `.xlsx`, `SupplierClaimsTab`, `QuickRMAActionModal`, `RmaEmailEditorView`, lifecycle emails, and Supplier Claims `.xlsx` / Matrix export.
+  * **Expected Behavior**:
+    1. Submitted `supplier_outbound` report saves `store_branch: null` in `rma_reports` (Vendor Name is never stored in `store_branch`).
+    2. `Store Branch` / `Store / Customer Branch` labels, inputs, rows, and columns are strictly hidden/omitted across all Supplier RTV UI views, emails, and `.xlsx` files, while remaining active for Customer Hub (`customer_inbound`).
+
+- [ ] **TC-P28-03 (Removal of Manual `Send Follow-Up` & `.xlsx` Sync Buttons + Default `13:00` PHT Follow-Up Time)**
+  * **Location**: `QuickRMAActionModal.jsx`, `SupplierClaimsTab.jsx`, `CustomerHubTab.jsx`, `SupplierFollowUpModal.jsx`, `SettingsTab.jsx`, `followUpWorkflow.js`, `dailyFollowUpHandler.js`, `vercel.json`, `App.jsx`
+  * **Action**: Open `Settings & SMTP`, `Customer Hub`, `Supplier Hub`, `Quick Actions Modal`, and `Supplier Follow-Up Modal`.
+  * **Expected Behavior**:
+    1. Zero `Send Follow-Up`, `Upload Edited .xlsx`, or `Check Email .xlsx Replies` buttons are rendered anywhere in the UI (`✓ Case Close` remains visible on open cases).
+    2. `Follow-Up Auto-Send Time (Asia/Manila HH:mm)` defaults to **`13:00`** (1:00 PM PHT), remains editable & persists to `rma_settings.daily_followup_config`, and `vercel.json` runs `daily-followup` on `"0 5 * * *"` (`13:00 PHT`) with `&syncReplies=1`.
+    3. Admin View polls `/api/send-email?action=sync-email-replies` automatically every 60 seconds and calls `refreshAllData()` whenever `updatedCount > 0`.
+
+- [ ] **TC-P28-04 (Automatic Per-Item `.xlsx` Reply Ingestion in Multi-Item Batch RMAs & Test Mode)**
+  * **Location**: `src/utils/rmaAlertXlsx.js`, `api/_lib/imapReplySyncHandler.js` (`/api/send-email?action=sync-email-replies` & `?action=ingest-xlsx-reply`)
+  * **Action**:
+    1. Generate a 2-item Test Mode Batch RMA `.xlsx` (`RMA-TEST-...`, Item 1 `Gains Group Inc`, Item 2 `Marina Sales Inc`).
+    2. Edit **only** Item 1's `Supplier Name` column inside `MANIFEST LINE ITEMS` to `Suy Sing Commercial Corp`, keeping Item 2 as `Marina Sales Inc`.
+    3. Feed via `imapReplySyncHandler` (`UID SEARCH SINCE` 2-day recursive MIME pipeline or `ingest-xlsx-reply`).
+  * **Expected Behavior**:
+    1. `rmaAlertXlsx.js` renders `'Serial No.'` in Column A and per-item `Supplier Name` in `MANIFEST LINE ITEMS`.
+    2. `imapReplySyncHandler.js` searches `INBOX` via `UID SEARCH SINCE <2 days ago>` (including already-opened emails, deduped via `processed_reply_message_ids`), extracts `.xlsx` inside nested `multipart/*` regardless of MIME content type, matches Item 1 by Barcode/SKU/`Serial No.`, and updates **only** Item 1's `supplier_name` to `Suy Sing Commercial Corp` across `parent.items[0]`, child `rma_reports`, and `rma_items` while leaving Item 2 untouched as `Marina Sales Inc` and preserving `[TEST_MODE]` + `ai_document_metadata.is_test = true`.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -2022,5 +2066,6 @@ Each test scenario defines:
 | **Phase 24: Streamlined UI, US Letter B&W, 4 PDF Emails, Matrix & Consolidation** | End-to-End Platform & Docs | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
 | **Phase 25: OpenAPI Sync, 4-Choice Customer Hub, 5x10 Photos, Plate OCR, 10-Day SLA** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
 | **Phase 26: Mirror `.xlsx` 2-Way Replies, Reverse-Geocode & Watermark, Day 0..10, Supplier Directory** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
-| **Phase 27: `Serial No.` Exports, Test Mode Recipients/Sync, Multi-QR Sheet, Full Reset, Pinpoint GPS & Live Cam** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
+| **Phase 27: `Serial No.` Exports, Test Mode Recipients/Sync, Multi-QR Sheet, Full Reset, Pinpoint GPS & Live Cam** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-09)` | *Lead QA Director* |
+| **Phase 28: QR Consolidated vs Per-Item Toggle, Zero `store_branch` on RTV, `13:00` Auto Follow-Up & Per-Item `.xlsx` Sync** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-10)` | *Lead QA Director* |
 

@@ -119,43 +119,6 @@ export default function CustomerHubTab({
     return () => window.removeEventListener('rma-settings-changed', syncCfg);
   }, []);
 
-  const handleCustomerSendFollowUp = async (item) => {
-    const statusInfo = getCleanHumanWorkflowStatus(item, savedProductsList, {
-      customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled
-    });
-    const wf = statusInfo.workflow;
-    if (wf.isClosed) return;
-    if (!wf.party.hasValidSupplier || (!isTestMode && wf.party.toEmails.length === 0)) {
-      setFollowUpModalReport(item);
-      return;
-    }
-    const key = item.id || item.rma_number;
-    setCustomerRowBusyId(key);
-    setCustomerFollowUpBanner(null);
-    try {
-      const res = await notificationService.runDailyFollowUpNow({
-        isTestMode: Boolean(isTestMode),
-        force: true,
-        rmaNumber: item.rma_number,
-        operation: 'send_single'
-      });
-      if (res?.success) {
-        setCustomerFollowUpBanner({
-          type: 'success',
-          text: `Dispatched Day ${wf.calendarDay} of 10 handover follow-up for ${item.rma_number}.`
-        });
-        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'followup-sent', rmaNumber: item.rma_number } }));
-      } else {
-        setCustomerFollowUpBanner({
-          type: 'error',
-          text: res?.error || res?.errors?.[0]?.message || `Could not send follow-up for ${item.rma_number}.`
-        });
-      }
-    } finally {
-      setCustomerRowBusyId(null);
-    }
-  };
-
   const handleCustomerCloseCase = async (item) => {
     const key = item.id || item.rma_number;
     setCustomerRowBusyId(key);
@@ -1583,29 +1546,17 @@ export default function CustomerHubTab({
                             </button>
                           )}
 
-                          {/* Follow-Up & Case Close Quick Actions */}
+                          {/* Follow-Up Case Close Quick Action */}
                           {!computeFourStepWorkflow(item, savedProductsList, { customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled }).isClosed && (
-                            <>
-                              <button
-                                type="button"
-                                disabled={customerRowBusyId === (item.id || item.rma_number)}
-                                onClick={() => handleCustomerSendFollowUp(item)}
-                                className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
-                                title="Send 10-Day Pickup / Handover Follow-Up Email now"
-                              >
-                                <Send className="w-2.5 h-2.5" />
-                                <span>📧 Send Follow-Up</span>
-                              </button>
-                              <button
-                                type="button"
-                                disabled={customerRowBusyId === (item.id || item.rma_number)}
-                                onClick={() => handleCustomerCloseCase(item)}
-                                className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap disabled:opacity-50"
-                                title="Close 4-Step Workflow Case & Stop 10-Day Countdown"
-                              >
-                                <span>✓ Case Close</span>
-                              </button>
-                            </>
+                            <button
+                              type="button"
+                              disabled={customerRowBusyId === (item.id || item.rma_number)}
+                              onClick={() => handleCustomerCloseCase(item)}
+                              className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap disabled:opacity-50"
+                              title="Close 4-Step Workflow Case & Stop 10-Day Countdown"
+                            >
+                              <span>✓ Case Close</span>
+                            </button>
                           )}
 
                           {/* Split Qty / Details */}
@@ -1932,6 +1883,11 @@ export default function CustomerHubTab({
                                           {/* Product Description: min-w-[200px] with truncate and title={it.name} */}
                                           <td className="py-2 px-3 font-bold text-slate-900 dark:text-white min-w-[200px] truncate" title={childName}>
                                             <div className="truncate">{childName}</div>
+                                            {child.supplier_name && (
+                                              <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold truncate" title={`Supplier: ${child.supplier_name}`}>
+                                                Supplier: {child.supplier_name}
+                                              </div>
+                                            )}
                                             {child.defect_details && (
                                               <div className="text-[10px] text-slate-400 font-normal italic truncate" title={child.defect_details}>{child.defect_details}</div>
                                             )}
@@ -2325,14 +2281,6 @@ export default function CustomerHubTab({
                             + Set Supplier &amp; Email
                           </button>
                         )}
-                        <button
-                          type="button"
-                          disabled={customerRowBusyId === (item.id || item.rma_number)}
-                          onClick={() => handleCustomerSendFollowUp(item)}
-                          className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap disabled:opacity-50"
-                        >
-                          📧 Send Follow-Up
-                        </button>
                         <button
                           type="button"
                           disabled={customerRowBusyId === (item.id || item.rma_number)}

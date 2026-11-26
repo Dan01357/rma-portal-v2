@@ -924,7 +924,7 @@ export default function App() {
         const followCfg = notificationService.getDailyFollowUpConfig();
         if (
           followCfg.autoEnabled !== false &&
-          hasReachedManilaSchedule(normalizeTimeHhmm(followCfg.autoSendTimePht, '08:00'))
+          hasReachedManilaSchedule(normalizeTimeHhmm(followCfg.autoSendTimePht, '13:00'))
         ) {
           const lastFollowDay = localStorage.getItem('rma_bg_followup_sent_ymd');
           if (lastFollowDay !== todayYmd) {
@@ -947,6 +947,42 @@ export default function App() {
       clearInterval(intervalId);
     };
   }, [isAdminView, currentUser?.role, isTestMode]);
+
+  // Automatic 60-second Gmail IMAP `.xlsx` reply poller while Admin View is active (Live & Test Sandbox isolation preserved server-side)
+  useEffect(() => {
+    const role = currentUser?.role;
+    if (!isAdminView || !['admin', 'super_admin'].includes(role)) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+    const runReplySyncTick = async () => {
+      if (cancelled || inFlight) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      inFlight = true;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const expMs = session?.expires_at ? session.expires_at * 1000 : 0;
+        if (!session?.access_token || expMs <= Date.now() + 30000) {
+          return;
+        }
+        const res = await notificationService.syncEmailRepliesNow();
+        if (!cancelled && res?.success && Number(res?.updatedCount) > 0) {
+          refreshAllData();
+        }
+      } catch {
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const syncIntervalId = setInterval(runReplySyncTick, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(syncIntervalId);
+    };
+  }, [isAdminView, currentUser?.role]);
 
   // Simple 4-Option Supplier RTV Wizard, Letter Pickup Validation Form & Daily Matrix Exporter State
   const [simpleRtvWizard, setSimpleRtvWizard] = useState({ isOpen: false, report: null, reports: [], initialMode: 'wizard' });
@@ -1676,6 +1712,7 @@ export default function App() {
         refreshAllData();
       } else if (deleteModalState.type === 'report') {
         const { id, rmaNumber, item } = deleteModalState;
+        mutationEpochRef.current += 1;
         setRecentReportsList(prev => prev.map(r => {
           if ((id && r.id === id) || (rmaNumber && r.rma_number === rmaNumber)) {
             return {
@@ -1709,6 +1746,7 @@ export default function App() {
         const items = deleteModalState.items || [];
         const idSet = new Set(items.map(r => r.id).filter(Boolean));
         const rmaSet = new Set(items.map(r => r.rma_number).filter(Boolean));
+        mutationEpochRef.current += 1;
         setRecentReportsList(prev => prev.map(r => {
           if (idSet.has(r.id) || (r.rma_number && rmaSet.has(r.rma_number))) {
             return {
@@ -1732,6 +1770,7 @@ export default function App() {
         refreshAllData();
       } else if (deleteModalState.type === 'credit_memo') {
         const memo = deleteModalState.item;
+        mutationEpochRef.current += 1;
         setCreditMemosList(prev => prev.filter(m => m.credit_memo_number !== memo.credit_memo_number));
         await creditMemoService.deleteCreditMemo(memo.credit_memo_number, memo.report_id);
         mutationEpochRef.current += 1;
@@ -1741,6 +1780,7 @@ export default function App() {
         const items = deleteModalState.items || [];
         const memoNumbers = items.map(m => m.credit_memo_number);
         const numSet = new Set(memoNumbers);
+        mutationEpochRef.current += 1;
         setCreditMemosList(prev => prev.filter(m => !numSet.has(m.credit_memo_number)));
         await creditMemoService.deleteMultipleCreditMemos(memoNumbers);
         mutationEpochRef.current += 1;
@@ -2789,7 +2829,7 @@ export default function App() {
         if (latestValidResult.dr_number) setDrNumber(latestValidResult.dr_number);
         if (latestValidResult.po_number) setPoNumber(latestValidResult.po_number);
         if (latestValidResult.invoice_dr_number) setInvoiceDrNumber(latestValidResult.invoice_dr_number);
-        if (latestValidResult.store_branch) setStoreBranch(latestValidResult.store_branch);
+        if (latestValidResult.store_branch && !isSupplierRtvPortal) setStoreBranch(latestValidResult.store_branch);
 
         const detectedNum = latestValidResult.si_number || latestValidResult.dr_number || latestValidResult.po_number || latestValidResult.invoice_dr_number || 'Detected';
         showToast(`✓ Verified ${latestValidResult.document_type || 'Paperwork'} (${detectedNum})`, 'success');
@@ -3044,10 +3084,11 @@ export default function App() {
     const isExplicitNA = /^n\/?a$/i.test(rawBranchInput);
     const cleanBranchInput = (!rawBranchInput || isExplicitNA) ? '' : rawBranchInput;
     const isSuperAdminSupplierOutbound = Boolean(currentUser?.role === 'super_admin' && !gateSession && testModeStreamType === 'supplier_outbound');
-    const isSupplierStream = isSupplierRtvPortal || isSuperAdminSupplierOutbound || gateSession?.stream_type === 'supplier_outbound';
-    const resolvedBranch = isExplicitNA
+    const isSupplierStream = isSupplierRtvPortal || isSuperAdminSupplierOutbound || gateSession?.stream_type === 'supplier_outbound' || (!gateSession?.stream_type && gateSession?.type === 'internal_warehouse');
+    // Supplier Outbound RTV never stores a Customer Store Branch
+    const resolvedBranch = isSupplierStream
       ? null
-      : (cleanBranchInput || (!isSupplierStream ? (inviteEntity || null) : null));
+      : (isExplicitNA ? null : (cleanBranchInput || inviteEntity || null));
     const isPlaceholderSup = (val) => {
       const s = String(val || '').trim().toLowerCase();
       return !s || s === 'warehouse' || s === 'pending assignment' || s === 'unassigned' || s === 'n/a';
@@ -3179,8 +3220,8 @@ export default function App() {
       try {
         const photoMeta = {
           rmaType: determinedRmaType,
-          customerName: capturedStoreBranch,
-          storeBranch: capturedStoreBranch,
+          customerName: determinedRmaType === 'supplier_outbound' ? null : capturedStoreBranch,
+          storeBranch: determinedRmaType === 'supplier_outbound' ? null : capturedStoreBranch,
           supplierName: capturedItems[0]?.supplier_name,
           is_unlabeled: isUnlabeledItem || isUnlabeledBarcode(primaryBarcode)
         };
@@ -3602,10 +3643,12 @@ export default function App() {
                           {formatManifestBreakdown(submitSuccessReport.items, true)}
                         </strong>
                       </div>
-                      <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
-                        <span className="text-slate-500 dark:text-slate-400">Store / Branch:</span>
-                        <strong className="text-slate-800 dark:text-slate-200">{submitSuccessReport.store_branch || 'N/A'}</strong>
-                      </div>
+                      {submitSuccessReport.rma_type !== 'supplier_outbound' && (
+                        <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
+                          <span className="text-slate-500 dark:text-slate-400">Store / Branch:</span>
+                          <strong className="text-slate-800 dark:text-slate-200">{submitSuccessReport.store_branch || 'N/A'}</strong>
+                        </div>
+                      )}
                       <div className="pt-1 space-y-1">
                         <span className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 block">
                           Included Manifest Items:
@@ -3680,7 +3723,7 @@ export default function App() {
                             submitSuccessReport.items?.[0]?.pieces_per_case || submitSuccessReport.items?.[0]?.piecesPerCase
                           )}
                       </span>
-                      {submitSuccessReport.store_branch && (
+                      {submitSuccessReport.rma_type !== 'supplier_outbound' && submitSuccessReport.store_branch && (
                         <span className="text-[10px] text-blue-700 dark:text-blue-300 font-bold truncate">
                           • {submitSuccessReport.store_branch}
                         </span>
@@ -3702,7 +3745,7 @@ export default function App() {
                       <div>Reported by: <strong className="text-slate-700 dark:text-slate-300">{submitSuccessReport.reporter_name || 'Staff'}</strong></div>
                       {submitSuccessReport.reporter_contact && <div>Contact: <strong className="font-mono text-slate-700 dark:text-slate-300">{submitSuccessReport.reporter_contact}</strong></div>}
                       {submitSuccessReport.invoice_dr_number && (
-                        <div>DR/Invoice #: <strong className="font-mono text-violet-700 dark:text-violet-300">{submitSuccessReport.invoice_dr_number}</strong> {submitSuccessReport.store_branch ? `(${submitSuccessReport.store_branch})` : ''}</div>
+                        <div>DR/Invoice #: <strong className="font-mono text-violet-700 dark:text-violet-300">{submitSuccessReport.invoice_dr_number}</strong> {submitSuccessReport.rma_type !== 'supplier_outbound' && submitSuccessReport.store_branch ? `(${submitSuccessReport.store_branch})` : ''}</div>
                       )}
                       <div>Date &amp; Time (YYYY-MM-DD HH:mm): <span className="font-mono">{formatDateTimeYmdHm(submitSuccessReport.created_at || Date.now())}</span></div>
                     </div>
@@ -3750,7 +3793,7 @@ export default function App() {
                           reporter: submitSuccessReport.reporter_name || submitSuccessReport.reporter || 'Staff',
                           reporterContact: submitSuccessReport.reporter_contact || '',
                           dateTimeFormatted: dateFormatted,
-                          storeBranch: submitSuccessReport.store_branch,
+                          storeBranch: submitSuccessReport.rma_type === 'supplier_outbound' ? null : submitSuccessReport.store_branch,
                           totalItems: submitSuccessReport.total_items,
                           totalQuantity: submitSuccessReport.total_quantity,
                           items: submitSuccessReport.items,

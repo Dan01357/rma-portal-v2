@@ -19,7 +19,7 @@ import {
 export const FOLLOW_UP_MAX_DAYS = 10;
 export const DEFAULT_SANDBOX_EMAIL = 'mgan@pingconmarketing.com';
 export const DEFAULT_MATRIX_SEND_TIME_PHT = '13:00';
-export const DEFAULT_FOLLOWUP_SEND_TIME_PHT = '08:00';
+export const DEFAULT_FOLLOWUP_SEND_TIME_PHT = '13:00';
 
 export const DEFAULT_FOLLOWUP_CONFIG = {
   autoEnabled: true,

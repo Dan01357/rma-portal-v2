@@ -232,11 +232,13 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
     const headerRow = Array.from(rows[manifestHeaderRowIdx] || [], (h) => String(h ?? '').trim().toLowerCase());
     const colMap = {
       line: headerRow.findIndex((h) => h && (h.includes('serial') || h.includes('line') || h === 'sn')),
+      supplier_name: headerRow.findIndex((h) => h.includes('supplier') || h.includes('vendor')),
       barcode: headerRow.findIndex((h) => h.includes('barcode')),
-      code: headerRow.findIndex((h) => h.includes('sku')),
+      code: headerRow.findIndex((h) => h.includes('sku') || h.includes('item code')),
       name: headerRow.findIndex((h) => h.includes('description') || h.includes('product')),
       quantity: headerRow.findIndex((h) => h.includes('qty') || h.includes('quantity')),
       unit_name: headerRow.findIndex((h) => h.includes('unit')),
+      price: headerRow.findIndex((h) => h.includes('price')),
       expiry_date: headerRow.findIndex((h) => h.includes('expiry')),
       reason: headerRow.findIndex((h) => h.includes('reason')),
       explanation: headerRow.findIndex((h) => h.includes('explanation'))
@@ -245,13 +247,21 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
     for (let r = manifestHeaderRowIdx + 1; r < rows.length; r += 1) {
       const row = rows[r] || [];
       if (!row.some((c) => String(c ?? '').trim())) continue;
+      const rawSerial = colMap.line >= 0 ? parseInt(row[colMap.line], 10) : NaN;
+      const serialNo = Number.isFinite(rawSerial) && rawSerial > 0 ? rawSerial : (manifestUpdates.length + 1);
+      const rawPrice = colMap.price >= 0 && String(row[colMap.price] ?? '').trim() !== ''
+        ? Number(String(row[colMap.price]).replace(/[,\s]/g, ''))
+        : undefined;
       manifestUpdates.push({
-        lineIndex: colMap.line >= 0 ? Math.max(0, (parseInt(row[colMap.line], 10) || 1) - 1) : manifestUpdates.length,
+        serialNo,
+        lineIndex: serialNo - 1,
+        supplier_name: colMap.supplier_name >= 0 ? String(row[colMap.supplier_name] ?? '').trim() : '',
         barcode: colMap.barcode >= 0 ? String(row[colMap.barcode] ?? '').trim() : '',
         code: colMap.code >= 0 ? String(row[colMap.code] ?? '').trim() : '',
         name: colMap.name >= 0 ? String(row[colMap.name] ?? '').trim() : '',
-        quantity: colMap.quantity >= 0 ? Number(row[colMap.quantity]) : undefined,
+        quantity: colMap.quantity >= 0 && String(row[colMap.quantity] ?? '').trim() !== '' ? Number(row[colMap.quantity]) : undefined,
         unit_name: colMap.unit_name >= 0 ? String(row[colMap.unit_name] ?? '').trim() : '',
+        price: Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : undefined,
         expiry_date: colMap.expiry_date >= 0 ? normalizeYmdInput(row[colMap.expiry_date]) : null,
         reason: colMap.reason >= 0 ? String(row[colMap.reason] ?? '').trim() : '',
         explanation: colMap.explanation >= 0 ? String(row[colMap.explanation] ?? '').trim() : ''
@@ -386,8 +396,41 @@ function isSenderAuthorizedForReport(senderEmail, report, adminEmailsSet, { live
   return ['pingconmarketing.com', 'a2z2go.net', 'keysysincorporated.com'].includes(domain);
 }
 
+async function safeUpdateTableRow(table, rowId, rowUpdates) {
+  if (!rowId || !rowUpdates || Object.keys(rowUpdates).length === 0) return null;
+  let candidate = { ...rowUpdates };
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (Object.keys(candidate).length === 0) return null;
+    const { data, error } = await supabase
+      .from(table)
+      .update(candidate)
+      .eq('id', rowId)
+      .select();
+    if (!error) {
+      return Array.isArray(data) && data[0] ? data[0] : null;
+    }
+    const errMsg = String(error.message || '');
+    const colM =
+      errMsg.match(/Could not find the '([^']+)' column/i) ||
+      errMsg.match(/column [a-zA-Z0-9_.]*\.([a-zA-Z0-9_]+) does not exist/i);
+    if (colM?.[1] && colM[1] in candidate) {
+      delete candidate[colM[1]];
+      continue;
+    }
+    if (table === 'rma_items') {
+      return null;
+    }
+    throw new Error(errMsg);
+  }
+  return null;
+}
+
+function normMatchKey(val) {
+  return String(val ?? '').trim().toUpperCase();
+}
+
 /**
- * Applies parsed `.xlsx` reply changes onto Supabase `rma_reports` + `supplier_directory_store`.
+ * Applies parsed `.xlsx` reply changes onto Supabase `rma_reports`, child `rma_reports`, `rma_items`, and `supplier_directory_store`.
  */
 export async function applyRmaXlsxUpdates({
   buffer,
@@ -404,7 +447,7 @@ export async function applyRmaXlsxUpdates({
   }
 
   const [{ data: matchedRows, error: fetchErr }, { data: adminRows }, { data: settingsRows }] = await Promise.all([
-    supabase.from('rma_reports').select('*').ilike('rma_number', targetRma).limit(5),
+    supabase.from('rma_reports').select('*').ilike('rma_number', targetRma).limit(20),
     supabase.from('admin_users').select('email, is_active'),
     supabase
       .from('rma_settings')
@@ -450,6 +493,11 @@ export async function applyRmaXlsxUpdates({
     };
   }
 
+  const [{ data: childReportRows }, { data: rmaItemRows }] = await Promise.all([
+    supabase.from('rma_reports').select('*').eq('parent_rma_id', existing.id),
+    supabase.from('rma_items').select('*').eq('rma_report_id', existing.id)
+  ]);
+
   const patch = parsed.patch || {};
   const updates = {};
   const changedFields = [];
@@ -464,7 +512,9 @@ export async function applyRmaXlsxUpdates({
     }
   };
 
-  compareAssignStr('store_branch', patch.store_branch);
+  if (existing.rma_type !== 'supplier_outbound') {
+    compareAssignStr('store_branch', patch.store_branch);
+  }
   compareAssignStr('supplier_name', patch.supplier_name);
   compareAssignStr('code', patch.code);
   compareAssignStr('name', patch.name);
@@ -528,29 +578,109 @@ export async function applyRmaXlsxUpdates({
     }
   }
 
-  // Apply Manifest Line Item edits if present
-  if (parsed.manifestUpdates.length > 0 && Array.isArray(existing.items) && existing.items.length > 0) {
-    const nextItems = existing.items.map((item, idx) => {
-      const m = parsed.manifestUpdates[idx];
-      if (!m) return item;
-      return {
-        ...item,
-        code: m.code || item.code,
-        sku: m.code || item.sku,
-        name: m.name || item.name,
-        productName: m.name || item.productName,
-        quantity: Number.isFinite(m.quantity) && m.quantity > 0 ? m.quantity : item.quantity,
-        unit_name: m.unit_name || item.unit_name,
-        unit: m.unit_name || item.unit,
-        expiry_date: m.expiry_date || item.expiry_date,
-        reason: m.reason || item.reason,
-        explanation: m.explanation || item.explanation
-      };
-    });
-    if (JSON.stringify(nextItems) !== JSON.stringify(existing.items)) {
-      updates.items = nextItems;
+  // Apply per-item Manifest Line Item edits independently (by Barcode, SKU, or 1-based Serial No. index)
+  const baseItemsList = Array.isArray(existing.items) && existing.items.length > 0
+    ? existing.items
+    : (Array.isArray(childReportRows) && childReportRows.length > 0 ? childReportRows : []);
+  const editedManifestEntries = [];
+
+  if (parsed.manifestUpdates.length > 0 && baseItemsList.length > 0) {
+    const nextItems = baseItemsList.map((it) => ({ ...it }));
+    const usedIndices = new Set();
+
+    for (const m of parsed.manifestUpdates) {
+      let matchIdx = -1;
+      const mBarcode = normMatchKey(m.barcode);
+      const mSku = normMatchKey(m.code);
+
+      if (mBarcode) {
+        const barcodeMatches = [];
+        nextItems.forEach((it, idx) => {
+          if (!usedIndices.has(idx) && normMatchKey(it.barcode) === mBarcode) barcodeMatches.push(idx);
+        });
+        if (barcodeMatches.length === 1) {
+          matchIdx = barcodeMatches[0];
+        } else if (barcodeMatches.length > 1) {
+          matchIdx = barcodeMatches.includes(m.lineIndex) ? m.lineIndex : barcodeMatches[0];
+        }
+      }
+
+      if (matchIdx === -1 && mSku) {
+        const skuMatches = [];
+        nextItems.forEach((it, idx) => {
+          if (!usedIndices.has(idx) && normMatchKey(it.code || it.sku) === mSku) skuMatches.push(idx);
+        });
+        if (skuMatches.length === 1) {
+          matchIdx = skuMatches[0];
+        } else if (skuMatches.length > 1) {
+          matchIdx = skuMatches.includes(m.lineIndex) ? m.lineIndex : skuMatches[0];
+        }
+      }
+
+      if (matchIdx === -1 && Number.isFinite(m.lineIndex) && m.lineIndex >= 0 && m.lineIndex < nextItems.length && !usedIndices.has(m.lineIndex)) {
+        matchIdx = m.lineIndex;
+      }
+
+      if (matchIdx === -1) continue;
+      usedIndices.add(matchIdx);
+
+      const origItem = nextItems[matchIdx];
+      const itemPatch = {};
+      if (m.supplier_name && m.supplier_name !== String(origItem.supplier_name || origItem.supplierName || '').trim()) {
+        itemPatch.supplier_name = m.supplier_name;
+        itemPatch.supplierName = m.supplier_name;
+        itemPatch.supplier = m.supplier_name;
+      }
+      if (m.code && m.code !== String(origItem.code || origItem.sku || '').trim()) {
+        itemPatch.code = m.code;
+        itemPatch.sku = m.code;
+      }
+      if (m.name && m.name !== String(origItem.name || origItem.productName || origItem.product_name || '').trim()) {
+        itemPatch.name = m.name;
+        itemPatch.productName = m.name;
+      }
+      if (Number.isFinite(m.quantity) && m.quantity > 0 && m.quantity !== Number(origItem.quantity ?? origItem.qty ?? 1)) {
+        itemPatch.quantity = m.quantity;
+      }
+      if (m.unit_name && m.unit_name !== String(origItem.unit_name || origItem.unit || '').trim()) {
+        itemPatch.unit_name = m.unit_name;
+        itemPatch.unit = m.unit_name;
+      }
+      if (Number.isFinite(m.price) && m.price >= 0 && m.price !== Number(origItem.price ?? 0)) {
+        itemPatch.price = m.price;
+      }
+      if (m.expiry_date && m.expiry_date !== String(origItem.expiry_date || '').slice(0, 10)) {
+        itemPatch.expiry_date = m.expiry_date;
+      }
+      if (m.reason && m.reason !== String(origItem.reason || '').trim()) {
+        itemPatch.reason = m.reason;
+      }
+      if (m.explanation && m.explanation !== String(origItem.explanation || '').trim()) {
+        itemPatch.explanation = m.explanation;
+      }
+
+      if (Object.keys(itemPatch).length > 0) {
+        const updatedItem = { ...origItem, ...itemPatch };
+        nextItems[matchIdx] = updatedItem;
+        editedManifestEntries.push({
+          idx: matchIdx,
+          serialNo: m.serialNo || matchIdx + 1,
+          origItem,
+          updatedItem,
+          itemPatch
+        });
+      }
+    }
+
+    if (editedManifestEntries.length > 0) {
+      if (Array.isArray(existing.items) && existing.items.length > 0) {
+        updates.items = nextItems;
+      }
       updates.total_quantity = nextItems.reduce((s, it) => s + (Number(it.quantity) || 1), 0);
       changedFields.push('items');
+      editedManifestEntries.forEach((e) => {
+        if (e.itemPatch.supplier_name) changedFields.push(`item_${e.serialNo}_supplier_name`);
+      });
     }
   }
 
@@ -596,19 +726,80 @@ export async function applyRmaXlsxUpdates({
     }
   ];
 
-  let { data: savedRows, error: updateErr } = await supabase
-    .from('rma_reports')
-    .update(updates)
-    .eq('id', existing.id)
-    .select();
+  const savedParent = await safeUpdateTableRow('rma_reports', existing.id, updates);
 
-  if (updateErr) {
-    const fallback = { ...updates };
-    const colM = String(updateErr.message || '').match(/Could not find the '([^']+)' column/i);
-    if (colM?.[1] && colM[1] in fallback) delete fallback[colM[1]];
-    const retry = await supabase.from('rma_reports').update(fallback).eq('id', existing.id).select();
-    if (retry.error) throw new Error(retry.error.message);
-    savedRows = retry.data;
+  // Sync per-item changes onto ONLY the matching child rows in `rma_reports` (parent_rma_id) and `rma_items` (rma_report_id)
+  if (editedManifestEntries.length > 0) {
+    const usedChildReportIds = new Set();
+    const usedRmaItemIds = new Set();
+    const childReportsSorted = Array.isArray(childReportRows) ? childReportRows : [];
+    const rmaItemsSorted = Array.isArray(rmaItemRows) ? rmaItemRows : [];
+
+    for (const entry of editedManifestEntries) {
+      const { idx, origItem, updatedItem, itemPatch } = entry;
+      const origBc = normMatchKey(origItem.barcode || updatedItem.barcode);
+      const origSku = normMatchKey(origItem.code || origItem.sku || updatedItem.code || updatedItem.sku);
+
+      // 1. Matching child row in rma_reports (`parent_rma_id = existing.id`)
+      let matchedChild = childReportsSorted.find((c) => !usedChildReportIds.has(c.id) && origBc && normMatchKey(c.barcode) === origBc);
+      if (!matchedChild && origSku) {
+        matchedChild = childReportsSorted.find((c) => !usedChildReportIds.has(c.id) && normMatchKey(c.code || c.sku) === origSku);
+      }
+      if (!matchedChild && idx < childReportsSorted.length && !usedChildReportIds.has(childReportsSorted[idx]?.id)) {
+        matchedChild = childReportsSorted[idx];
+      }
+      if (matchedChild?.id) {
+        usedChildReportIds.add(matchedChild.id);
+        const childUpdate = {};
+        if ('updated_at' in matchedChild) childUpdate.updated_at = nowIso;
+        if (itemPatch.supplier_name) childUpdate.supplier_name = itemPatch.supplier_name;
+        if (itemPatch.code) childUpdate.code = itemPatch.code;
+        if (itemPatch.name) childUpdate.name = itemPatch.name;
+        if (itemPatch.quantity !== undefined) childUpdate.quantity = itemPatch.quantity;
+        if (itemPatch.unit_name) childUpdate.unit_name = itemPatch.unit_name;
+        if (itemPatch.price !== undefined) childUpdate.price = itemPatch.price;
+        if (itemPatch.expiry_date) childUpdate.expiry_date = itemPatch.expiry_date;
+        if (itemPatch.reason) childUpdate.reason = itemPatch.reason;
+        if (itemPatch.explanation) childUpdate.explanation = itemPatch.explanation;
+        if (existingIsTest) {
+          const prevChildMeta = (matchedChild.ai_document_metadata && typeof matchedChild.ai_document_metadata === 'object')
+            ? matchedChild.ai_document_metadata
+            : {};
+          childUpdate.ai_document_metadata = { ...prevChildMeta, is_test: true, test_mode: true };
+          const cNotes = String(matchedChild.notes || '').trim();
+          if (!cNotes.includes('[TEST_MODE]')) childUpdate.notes = cNotes ? `[TEST_MODE] ${cNotes}` : '[TEST_MODE]';
+        }
+        await safeUpdateTableRow('rma_reports', matchedChild.id, childUpdate).catch(() => {});
+      }
+
+      // 2. Matching child row in rma_items (`rma_report_id = existing.id`)
+      let matchedRmaItem = rmaItemsSorted.find((it) => !usedRmaItemIds.has(it.id) && origBc && normMatchKey(it.barcode) === origBc);
+      if (!matchedRmaItem && origSku) {
+        matchedRmaItem = rmaItemsSorted.find((it) => !usedRmaItemIds.has(it.id) && normMatchKey(it.sku || it.code) === origSku);
+      }
+      if (!matchedRmaItem && idx < rmaItemsSorted.length && !usedRmaItemIds.has(rmaItemsSorted[idx]?.id)) {
+        matchedRmaItem = rmaItemsSorted[idx];
+      }
+      if (matchedRmaItem?.id) {
+        usedRmaItemIds.add(matchedRmaItem.id);
+        const rmaItemUpdate = {};
+        if (itemPatch.supplier_name) rmaItemUpdate.supplier_name = itemPatch.supplier_name;
+        if (itemPatch.code) rmaItemUpdate.sku = itemPatch.code;
+        if (itemPatch.name) {
+          if ('product_name' in matchedRmaItem) rmaItemUpdate.product_name = itemPatch.name;
+          else rmaItemUpdate.name = itemPatch.name;
+        }
+        if (itemPatch.quantity !== undefined) rmaItemUpdate.quantity = itemPatch.quantity;
+        if (itemPatch.unit_name) rmaItemUpdate.unit_name = itemPatch.unit_name;
+        if (itemPatch.price !== undefined) rmaItemUpdate.price = itemPatch.price;
+        if (itemPatch.expiry_date) rmaItemUpdate.expiry_date = itemPatch.expiry_date;
+        if (itemPatch.reason) rmaItemUpdate.reason = itemPatch.reason;
+        if (itemPatch.explanation) rmaItemUpdate.explanation = itemPatch.explanation;
+        if (Object.keys(rmaItemUpdate).length > 0) {
+          await safeUpdateTableRow('rma_items', matchedRmaItem.id, rmaItemUpdate).catch(() => {});
+        }
+      }
+    }
   }
 
   // Upsert Supplier Directory entry if supplier email(s) updated
@@ -642,7 +833,7 @@ export async function applyRmaXlsxUpdates({
     success: true,
     rmaNumber: targetRma,
     changedFields,
-    report: Array.isArray(savedRows) && savedRows[0] ? savedRows[0] : { ...existing, ...updates }
+    report: savedParent || { ...existing, ...updates }
   };
 }
 
@@ -678,34 +869,95 @@ function parseMimeHeaders(headerText) {
   return headers;
 }
 
+function decodeQuotedPrintableToBuffer(str) {
+  const cleaned = String(str || '').replace(/=\r?\n/g, '');
+  const bytes = [];
+  for (let i = 0; i < cleaned.length; i += 1) {
+    if (cleaned[i] === '=' && /^[0-9A-Fa-f]{2}$/.test(cleaned.slice(i + 1, i + 3))) {
+      bytes.push(parseInt(cleaned.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else {
+      bytes.push(cleaned.charCodeAt(i) & 0xff);
+    }
+  }
+  return Buffer.from(bytes);
+}
+
+function extractMimeFilename(cdisp, ctype) {
+  const combined = `${cdisp}; ${ctype}`;
+  const rfc2231Parts = [];
+  const segRe = /(?:filename|name)\*(\d+)\*?\s*=\s*(?:"([^"]*)"|([^;\s]*))/gi;
+  let sm;
+  while ((sm = segRe.exec(combined)) !== null) {
+    const idx = parseInt(sm[1], 10);
+    const val = (sm[3] ?? sm[4] ?? '').replace(/^[A-Za-z0-9_-]+''/, '');
+    rfc2231Parts[idx] = val;
+  }
+  if (rfc2231Parts.length > 0) {
+    const joined = rfc2231Parts.filter((v) => v !== undefined).join('');
+    try {
+      return decodeMimeHeader(decodeURIComponent(joined));
+    } catch {
+      return decodeMimeHeader(joined);
+    }
+  }
+  const nameM = combined.match(/(?:filename|name)\*?\s*=\s*(?:[A-Za-z0-9_-]+'')?(?:"([^"]+)"|([^;\s]+))/i);
+  const rawName = nameM ? (nameM[1] || nameM[2] || '') : '';
+  if (!rawName) return '';
+  try {
+    return decodeMimeHeader(decodeURIComponent(rawName));
+  } catch {
+    return decodeMimeHeader(rawName);
+  }
+}
+
 function extractXlsxAttachmentsFromMime(rawMessage) {
   const results = [];
   const walkPart = (partStr) => {
+    if (!partStr) return;
     const { headerText, bodyText } = splitHeadersAndBody(partStr);
     const headers = parseMimeHeaders(headerText);
     const ctype = headers['content-type'] || '';
+    const ctypeLower = ctype.toLowerCase();
     const cdisp = headers['content-disposition'] || '';
     const cenc = (headers['content-transfer-encoding'] || '').toLowerCase();
 
+    // Recursively walk nested multipart/* containers (mixed -> related / alternative -> leaf parts)
     const boundaryM = ctype.match(/boundary=(?:"([^"]+)"|([^;\s]+))/i);
-    if (boundaryM) {
-      const boundary = boundaryM[1] || boundaryM[2];
-      const sections = bodyText.split(`--${boundary}`);
-      for (let i = 1; i < sections.length; i += 1) {
-        const sec = sections[i];
-        if (sec.startsWith('--')) break;
-        walkPart(sec.replace(/^\n/, '').replace(/\n$/, ''));
+    if (boundaryM || ctypeLower.startsWith('multipart/')) {
+      const boundary = boundaryM ? (boundaryM[1] || boundaryM[2]) : '';
+      if (boundary) {
+        const sections = bodyText.split(`--${boundary}`);
+        for (let i = 1; i < sections.length; i += 1) {
+          const sec = sections[i];
+          if (sec.startsWith('--')) break;
+          walkPart(sec.replace(/^\r?\n/, '').replace(/\r?\n$/, ''));
+        }
+        return;
       }
+    }
+
+    // Handle forwarded/embedded RFC822 message parts recursively
+    if (ctypeLower.includes('message/rfc822') && bodyText) {
+      walkPart(bodyText);
       return;
     }
 
-    const nameM = (cdisp + ';' + ctype).match(/(?:filename|name)\*?=(?:UTF-8'')?(?:"([^"]+)"|([^;\s]+))/i);
-    const filename = nameM ? decodeURIComponent(nameM[1] || nameM[2] || '') : '';
-    if (/\.xlsx$/i.test(filename) || ctype.toLowerCase().includes('spreadsheetml.sheet')) {
-      const buf = cenc.includes('base64')
-        ? Buffer.from(bodyText.replace(/\s+/g, ''), 'base64')
-        : Buffer.from(bodyText, 'binary');
-      results.push({ filename: filename || 'reply.xlsx', buffer: buf });
+    const filename = extractMimeFilename(cdisp, ctype);
+    const hasXlsxExt = /\.xlsx$/i.test(filename);
+    const hasXlsxMime = ctypeLower.includes('spreadsheetml.sheet');
+    if (hasXlsxExt || hasXlsxMime) {
+      let decodedBuf;
+      if (cenc.includes('base64')) {
+        decodedBuf = Buffer.from(bodyText.replace(/\s+/g, ''), 'base64');
+      } else if (cenc.includes('quoted-printable')) {
+        decodedBuf = decodeQuotedPrintableToBuffer(bodyText);
+      } else {
+        decodedBuf = Buffer.from(bodyText, 'latin1');
+      }
+      if (decodedBuf && decodedBuf.length > 0 && (hasXlsxExt || (decodedBuf[0] === 0x50 && decodedBuf[1] === 0x4b))) {
+        results.push({ filename: filename || 'reply.xlsx', buffer: decodedBuf });
+      }
     }
   };
 
@@ -717,10 +969,31 @@ function quoteImapStr(str) {
   return `"${String(str || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-async function fetchUnseenImapXlsxReplies({ host, port, user, pass, onMarkSeen }) {
+function extractImapLiteralPayload(payloadBuf) {
+  const rawStr = payloadBuf.toString('latin1');
+  const litM = /\{(\d+)\}\r\n/.exec(rawStr);
+  if (litM) {
+    const litLen = parseInt(litM[1], 10);
+    const startByte = rawStr.indexOf(litM[0]) + litM[0].length;
+    return payloadBuf.subarray(startByte, startByte + litLen).toString('latin1');
+  }
+  return rawStr;
+}
+
+const IMAP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatImapSinceDate(daysAgo = 2) {
+  const d = new Date(Date.now() - Math.max(0, daysAgo) * 24 * 60 * 60 * 1000);
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mon = IMAP_MONTHS[d.getUTCMonth()] || 'Jan';
+  const yyyy = d.getUTCFullYear();
+  return `${dd}-${mon}-${yyyy}`;
+}
+
+async function fetchRecentImapXlsxReplies({ host, port, user, pass, processedSet, onProcessMessages }) {
   return await new Promise((resolve, reject) => {
     const socket = tls.connect({ host, port, rejectUnauthorized: true });
-    socket.setTimeout(15000);
+    socket.setTimeout(25000);
 
     let buf = Buffer.alloc(0);
     let tagCounter = 1;
@@ -785,45 +1058,60 @@ async function fetchUnseenImapXlsxReplies({ host, port, user, pass, onMarkSeen }
       });
       await sendCommand(`LOGIN ${quoteImapStr(user)} ${quoteImapStr(pass)}`);
       await sendCommand('SELECT INBOX');
-      const searchRes = await sendCommand('UID SEARCH UNSEEN');
+      const sinceStr = formatImapSinceDate(2);
+      const searchRes = await sendCommand(`UID SEARCH SINCE ${sinceStr}`);
       const searchText = searchRes.payload.toString('utf8');
       const searchLine = (searchText.match(/\* SEARCH([^\r\n]*)/i)?.[1] || '').trim();
       const uids = searchLine ? searchLine.split(/\s+/).filter((u) => /^\d+$/.test(u)) : [];
 
       const messages = [];
-      for (const uid of uids.slice(0, 20)) {
-        const fetchRes = await sendCommand(`UID FETCH ${uid} (BODY.PEEK[])`);
-        const rawStr = fetchRes.payload.toString('latin1');
-        const litM = /\{(\d+)\}\r\n/.exec(rawStr);
-        let rfc822 = '';
-        if (litM) {
-          const litLen = parseInt(litM[1], 10);
-          const startByte = rawStr.indexOf(litM[0]) + litM[0].length;
-          rfc822 = fetchRes.payload.subarray(startByte, startByte + litLen).toString('utf8');
-        } else {
-          rfc822 = rawStr;
+      const scannedNonXlsxKeys = [];
+      const recentUids = uids.slice(-35).reverse();
+
+      for (const uid of recentUids) {
+        // Lightweight header probe first so already-processed messages skip downloading attachments
+        const hdrRes = await sendCommand(`UID FETCH ${uid} (BODY.PEEK[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT)])`);
+        const hdrStr = extractImapLiteralPayload(hdrRes.payload);
+        const hdrs = parseMimeHeaders(hdrStr);
+        const msgIdHeader = String(hdrs['message-id'] || '').trim();
+        const hdrFrom = cleanEmailAddr(hdrs.from || '');
+        const dedupeKey = msgIdHeader || `uid-${uid}-${hdrFrom}`;
+        if (processedSet?.has(dedupeKey)) {
+          continue;
         }
+
+        const fetchRes = await sendCommand(`UID FETCH ${uid} (BODY.PEEK[])`);
+        const rfc822 = extractImapLiteralPayload(fetchRes.payload);
         const { headerText } = splitHeadersAndBody(rfc822);
         const headers = parseMimeHeaders(headerText);
+        const messageId = String(headers['message-id'] || msgIdHeader || '').trim();
+        const from = cleanEmailAddr(headers.from || hdrFrom || '');
+        const fullKey = messageId || dedupeKey;
         const attachments = extractXlsxAttachmentsFromMime(rfc822);
         if (attachments.length > 0) {
           messages.push({
             uid,
-            messageId: String(headers['message-id'] || '').trim(),
-            from: cleanEmailAddr(headers.from || ''),
-            subject: headers.subject || '',
+            dedupeKey: fullKey,
+            messageId,
+            from,
+            subject: headers.subject || hdrs.subject || '',
             attachments
           });
+        } else if (messageId) {
+          scannedNonXlsxKeys.push(messageId);
         }
       }
 
-      const processedUids = await onMarkSeen(messages);
+      const processedUids = await onProcessMessages(messages, scannedNonXlsxKeys);
       if (processedUids.length > 0) {
-        await sendCommand(`UID STORE ${processedUids.join(',')} +FLAGS.SILENT (\\Seen)`);
+        await sendCommand(`UID STORE ${processedUids.join(',')} +FLAGS.SILENT (\\Seen)`).catch(() => {});
       }
       await sendCommand('LOGOUT').catch(() => {});
       cleanup();
-      return messages.length;
+      return {
+        scannedRecentMessages: recentUids.length,
+        messagesWithXlsx: messages.length
+      };
     };
 
     socket.on('data', (chunk) => {
@@ -882,30 +1170,22 @@ export async function handleIngestXlsxReply(req, res, payload = {}) {
 }
 
 /**
- * Automated Gmail IMAP UNSEEN `.xlsx` reply poller (`GET`/`POST /api/send-email?action=sync-email-replies`).
+ * Reusable internal Gmail IMAP SINCE `.xlsx` reply poller (searches recent INBOX messages,
+ * including read/opened replies, deduplicated via `processed_reply_message_ids`).
  */
-export async function handleSyncEmailReplies(req, res, payload = {}) {
-  const auth = await authorizeCronOrAdmin(req);
-  if (!auth?.authorized) {
-    return res.status(401).json({
-      success: false,
-      error: 'UNAUTHORIZED',
-      message: 'Unauthorized IMAP sync caller. Provide CRON_SECRET or Admin JWT.'
-    });
-  }
-
+export async function syncEmailRepliesInternal() {
   const smtpUser = String(process.env.SMTP_USER || process.env.GMAIL_USER || '').trim();
   const cleanPass = String(process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD || '').replace(/\s+/g, '').trim();
   const imapHost = String(process.env.IMAP_HOST || 'imap.gmail.com').trim();
   const imapPort = Number(process.env.IMAP_PORT || 993);
 
   if (!smtpUser || !cleanPass) {
-    return res.status(200).json({
+    return {
       success: false,
       skipped: true,
       configured: false,
       message: 'Gmail IMAP/SMTP credentials not configured in server environment.'
-    });
+    };
   }
 
   try {
@@ -923,18 +1203,23 @@ export async function handleSyncEmailReplies(req, res, payload = {}) {
       } catch {}
     }
     const processedSet = new Set(processedIds);
+    const initialSize = processedSet.size;
 
     const results = [];
     const seenUidsToMark = [];
 
-    const totalMsgsWithXlsx = await fetchUnseenImapXlsxReplies({
+    const scanStats = await fetchRecentImapXlsxReplies({
       host: imapHost,
       port: imapPort,
       user: smtpUser,
       pass: cleanPass,
-      onMarkSeen: async (messages) => {
+      processedSet,
+      onProcessMessages: async (messages, nonXlsxKeys = []) => {
+        nonXlsxKeys.forEach((k) => {
+          if (k) processedSet.add(k);
+        });
         for (const msg of messages) {
-          const dedupeKey = msg.messageId || `uid-${msg.uid}-${msg.from}`;
+          const dedupeKey = msg.dedupeKey || msg.messageId || `uid-${msg.uid}-${msg.from}`;
           if (processedSet.has(dedupeKey)) {
             seenUidsToMark.push(msg.uid);
             continue;
@@ -959,24 +1244,42 @@ export async function handleSyncEmailReplies(req, res, payload = {}) {
       }
     });
 
-    if (seenUidsToMark.length > 0) {
-      const nextList = Array.from(processedSet).slice(-250);
+    if (seenUidsToMark.length > 0 || processedSet.size !== initialSize) {
+      const nextList = Array.from(processedSet).slice(-400);
       await supabase
         .from('rma_settings')
         .upsert({ key: 'processed_reply_message_ids', value: JSON.stringify(nextList) }, { onConflict: 'key' });
     }
 
-    return res.status(200).json({
+    return {
       success: true,
-      scannedUnseenWithXlsx: totalMsgsWithXlsx,
+      scannedUnseenWithXlsx: scanStats?.messagesWithXlsx || 0,
+      scannedRecentMessages: scanStats?.scannedRecentMessages || 0,
       updatedCount: results.filter((r) => r.success && !r.noChanges).length,
       results
-    });
+    };
   } catch (err) {
     console.error('[IMAP Reply Sync Error]:', err);
-    return res.status(200).json({
+    return {
       success: false,
       error: err?.message || 'IMAP reply sync encountered a network/auth error.'
+    };
+  }
+}
+
+/**
+ * Automated Gmail IMAP SINCE `.xlsx` reply poller (`GET`/`POST /api/send-email?action=sync-email-replies`).
+ */
+export async function handleSyncEmailReplies(req, res, payload = {}) {
+  const auth = await authorizeCronOrAdmin(req);
+  if (!auth?.authorized) {
+    return res.status(401).json({
+      success: false,
+      error: 'UNAUTHORIZED',
+      message: 'Unauthorized IMAP sync caller. Provide CRON_SECRET or Admin JWT.'
     });
   }
+
+  const syncResult = await syncEmailRepliesInternal();
+  return res.status(200).json(syncResult);
 }

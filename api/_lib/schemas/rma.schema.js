@@ -109,7 +109,7 @@ export const RMAReportSchema = z.object({
   reporter_name: z.string().nullable().optional().openapi({ example: 'Juan Dela Cruz' }),
   reporter_contact: z.string().nullable().optional().openapi({ example: '09171234567' }),
   reported_by: z.string().openapi({ example: 'Jarmen (API)' }),
-  store_branch: z.string().nullable().optional().openapi({ example: 'Savemore Taguig - Branch 14' }),
+  store_branch: z.string().nullable().optional().openapi({ example: 'Savemore Taguig - Branch 14', description: 'Customer store / branch (Customer Hub customer_inbound only; always null/omitted on Supplier RTV supplier_outbound)' }),
   invoice_dr_number: z.string().nullable().optional().openapi({ example: 'DR-2026-8891' }),
   si_number: z.string().nullable().optional().openapi({ example: 'SI-2026-9021' }),
   dr_number: z.string().nullable().optional().openapi({ example: 'DR-2026-8891' }),
@@ -161,7 +161,7 @@ export const CreateRMAReportSchema = z.object({
   photos: z.array(z.string().url()).optional().default([]).openapi({ example: ['https://example.com/box1.jpg'] }),
   reporter_name: z.string().optional().openapi({ example: 'Warehouse Lead' }),
   reporter_contact: z.string().optional().openapi({ example: '09170001122' }),
-  store_branch: z.string().optional().openapi({ example: 'Savemore Taguig - Branch 14' }),
+  store_branch: z.string().optional().openapi({ example: 'Savemore Taguig - Branch 14', description: 'Customer Hub (customer_inbound) branch only; null/ignored for supplier_outbound' }),
   invoice_dr_number: z.string().optional().openapi({ example: 'DR-2026-8891' }),
   si_number: z.string().optional().openapi({ example: 'SI-2026-9021' }),
   dr_number: z.string().optional().openapi({ example: 'DR-2026-8891' }),
@@ -190,7 +190,7 @@ export const UpdateRMAReportSchema = z.object({
   hold_reason: z.string().optional().openapi({ example: 'Packaging seal torn during transit' }),
   rejection_reason: z.string().optional().openapi({ example: 'Outside return window' }),
   quantity: z.number().int().min(1).optional().openapi({ example: 3 }),
-  store_branch: z.string().optional().openapi({ example: 'Savemore Taguig - Branch 14' }),
+  store_branch: z.string().optional().openapi({ example: 'Savemore Taguig - Branch 14', description: 'Customer Hub (customer_inbound) branch only; null/ignored for supplier_outbound' }),
   invoice_dr_number: z.string().optional().openapi({ example: 'DR-2026-8891' }),
   si_number: z.string().optional().openapi({ example: 'SI-2026-9021' }),
   dr_number: z.string().optional().openapi({ example: 'DR-2026-8891' }),
@@ -611,8 +611,8 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
     skipped: z.boolean().optional(),
     reason: z.string().optional().openapi({ example: 'BEFORE_SCHEDULED_TIME' }),
     phtDate: z.string().optional().openapi({ example: '2026-11-24' }),
-    phtTime: z.string().optional().openapi({ example: '08:05' }),
-    targetTimePht: z.string().optional().openapi({ example: '08:00', description: 'Editable HH:mm Asia/Manila target schedule persisted in rma_settings' }),
+    phtTime: z.string().optional().openapi({ example: '13:05' }),
+    targetTimePht: z.string().optional().openapi({ example: '13:00', description: 'Editable HH:mm Asia/Manila target schedule persisted in rma_settings (default 13:00 for both Follow-Up & Matrix)' }),
     isTestMode: z.boolean().optional(),
     sandboxEmail: z.string().optional().openapi({ example: 'mgan@pingconmarketing.com' }),
     summary: z.object({
@@ -629,7 +629,7 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
     method: 'get',
     path: '/api/send-email',
     summary: 'Execute Scheduled Daily 10-Day Pickup Follow-Up (?action=daily-followup), Daily Matrix (?action=daily-matrix), or IMAP Email .xlsx Reply Sync (?action=sync-email-replies)',
-    description: 'Vercel Cron / GitHub Actions endpoint (protected by CRON_SECRET or Admin Bearer JWT under 12-function cap). Respects adjustable `autoSendTimePht` (`respectSchedule=true`) in `Asia/Manila` (`08:00` default Follow-Up, `13:00` default Matrix), enforces Test Sandbox isolation (`mgan@pingconmarketing.com` + `[TEST] ` subject prefix), and polls UNSEEN Gmail `.xlsx` reply attachments via `?action=sync-email-replies`.',
+    description: 'Vercel Cron / GitHub Actions endpoint (protected by CRON_SECRET or Admin Bearer JWT under 12-function cap). Respects adjustable `autoSendTimePht` (`respectSchedule=true`) in `Asia/Manila` (`13:00` default Follow-Up & Matrix, zero manual Send Follow-Up UI button), enforces Test Sandbox isolation (`mgan@pingconmarketing.com` + `[TEST] ` subject prefix), and polls recent Gmail `SINCE` (2-day window, recursive MIME) `.xlsx` reply attachments via `?action=sync-email-replies` (plus optional `?syncReplies=1` on cron).',
     tags: ['Automation & Email'],
     security: [{ BearerAuth: [] }],
     request: {
@@ -655,9 +655,9 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
     summary: 'Dispatch RMA Email (with Mirror .xlsx), Lifecycle PDF, Daily Matrix (.xlsx), 10-Day SLA Follow-Up, or 2-Way .xlsx Reply Sync',
     description: `Unified serverless mailer & 2-way .xlsx reply processor preserving Vercel's 12-function cap:
 - **Standard, Lifecycle & Admin-Only Test Mode Emails**: Routes Live notifications via \`rma_settings.email_recipients_by_type\` and Test Mode notifications via Admin-only \`rma_settings.test_email_recipients\` / \`test_email_recipients_by_type\` (**never exposed on public \`/\`**), enforcing \`[TEST] \` as the first subject word and Sandbox isolation (default \`mgan@pingconmarketing.com\`). New RMA alerts attach an editable \`Serial No. | Field | Value | Format / Notes\` + \`MANIFEST LINE ITEMS\` (\`Serial No.\` Column A) mirror \`.xlsx\` workbook (matching subject + \`formatSaveFileTimestamp\`) and set \`replyTo\`. \`pickup_debit_claim\` omits \`Store / Branch:\` and \`Warehouse Location:\` while embedding \`Explanation / Defect Notes:\`, optional 5-slot pickup photos (max 50), and \`Debit-Claim-Form-*.pdf\` / \`Customer-Credit-Handover-Form-*.pdf\`.
-- **\`?action=daily-followup\`**: Runs 4-Step Workflow & Day 0..10 Pickup Follow-Up SLA (Day 1..10 reminders w/ 4-Step HTML table & health warning; stops immediately when Picked Up / Case Closed; can be fully reset back to \`Pending\` via \`resetReportToPending\`; auto-disposes >10 calendar days unclaimed to \`Disposal / Scrap Area\` w/ \`workflow_resolution: "scrapped_no_reorder"\` and notifies \`new_rma\` recipients).
+- **\`?action=daily-followup\`**: Runs automated 4-Step Workflow & Day 0..10 Pickup Follow-Up SLA (default \`13:00\` PHT; manual UI \`Send Follow-Up\` buttons removed; stops immediately on Picked Up / \`✓ Case Close\`; resettable via \`resetReportToPending\`; auto-disposes >10 calendar days unclaimed to \`Disposal / Scrap Area\` w/ \`workflow_resolution: "scrapped_no_reorder"\` and notifies \`new_rma\` recipients).
 - **\`?action=daily-matrix\`**: Generates and emails the strict OOXML Overall RMA Matrix (\`.xlsx\`) using \`daily_matrix_config\` (Rolling Days or Custom \`YYYY-MM-DD\`, scope, \`includeZeroCatalogSkus\`, editable \`autoSendTimePht\`).
-- **\`?action=sync-email-replies\` / \`?action=ingest-xlsx-reply\`**: Polls unread Gmail IMAP \`.xlsx\` replies (or accepts base64 \`.xlsx\` uploads from Quick Actions / webhook), supports both standardized \`Serial No.\` Column A workbooks and legacy Column A \`Field | Value\` layouts, validates sender authorization & strict Test (\`RMA-TEST-...\`) vs Live (\`RMA-...\`) isolation, preserves \`[TEST_MODE]\`, updates \`rma_reports\` + \`rma_settings.supplier_directory_store\`, and appends \`EMAIL_XLSX_REPLY_UPDATE\` to \`audit_trail\`.`,
+- **\`?action=sync-email-replies\` / \`?action=ingest-xlsx-reply\`**: Automatically polls recent Gmail IMAP \`.xlsx\` replies via \`UID SEARCH SINCE\` + recursive nested MIME parsing (manual Upload/Check UI buttons removed; Admin UI polls every 60s), supports per-item \`Supplier Name\` updates inside \`MANIFEST LINE ITEMS\` (matching Barcode, SKU, or 1-based \`Serial No.\` across \`parentReport.items\`, child \`rma_reports\`, and \`rma_items\` without overwriting siblings), supports legacy headers, enforces strict Test (\`RMA-TEST-...\`) vs Live (\`RMA-...\`) isolation, preserves \`[TEST_MODE]\`, updates \`rma_settings.supplier_directory_store\`, and appends \`EMAIL_XLSX_REPLY_UPDATE\` to \`audit_trail\`.`,
     tags: ['Automation & Email'],
     security: [{ BearerAuth: [] }],
     request: {

@@ -20,6 +20,7 @@ export default defineConfig({
       args: [
         '--disable-quic',
         '--disable-http2',
+        '--disable-features=AsyncDns',
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
       ],

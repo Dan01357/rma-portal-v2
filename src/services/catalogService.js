@@ -599,7 +599,7 @@ export const catalogService = {
 
   async findProduct(barcodeOrQuery) {
     const clean = String(barcodeOrQuery || '').trim();
-    if (!clean) return null;
+    if (!clean || /^(RMA-|MANIFEST|NO-?LABEL-)/i.test(clean)) return null;
 
     // Fast-path: return cached lookup instantly if available
     if (this._productLookupCache && this._productLookupCache.has(clean)) {
@@ -1327,7 +1327,7 @@ export const catalogService = {
 
     // Auto-resolve product from database if not passed in (skip synthetic MANIFEST / RMA- / NO-LABEL- keys)
     let resolvedProduct = product;
-    const isSyntheticKey = isBatch || is_parent || /^(RMA-|MANIFEST|NO-LABEL-)/i.test(cleanBarcode);
+    const isSyntheticKey = isBatch || is_parent || /^(RMA-|MANIFEST|NO-?LABEL-)/i.test(cleanBarcode);
     if (!isSyntheticKey && (!resolvedProduct || !resolvedProduct.name || resolvedProduct.name.startsWith('Unidentified Item'))) {
       try {
         const found = await this.findProduct(cleanBarcode);

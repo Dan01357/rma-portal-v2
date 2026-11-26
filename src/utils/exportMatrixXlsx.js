@@ -360,7 +360,7 @@ export function buildRmaMatrixDataset({
         barcode: bc,
         dateReported,
         expiryDate,
-        storeBranch: report.store_branch || '',
+        storeBranch: report.rma_type === 'supplier_outbound' ? '' : (report.store_branch || ''),
         reason: line.reason || report.reason || '',
         workflowOutcome: outcome.hasDecision ? outcome.label : 'Pending Decision',
         reordered: isReordered ? 'Yes' : 'No',

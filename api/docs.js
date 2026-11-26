@@ -78,7 +78,7 @@ export default function handler(req, res) {
     <title>Wholesale RMA Portal v2 | Interactive REST API & SLA Automation Docs</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="OpenAPI 3.1 interactive reference covering Multi-System REST API v1, 4-Choice Customer Hub & Supplier RTV workflows, Day 0..10 SLA Follow-Ups & Full Timeline Reset, Daily Matrix (.xlsx), Standardized Serial No. Exports, 2-Way RMA Alert Mirror .xlsx Reply Sync, Admin-Only Test Email Recipients, Pinpoint Geofence & Street+ZIP Reverse-Geocode, Add More RMA QRs Multi-Print & Truck Plate OCR." />
+    <meta name="description" content="OpenAPI 3.1 interactive reference covering Multi-System REST API v1, 4-Choice Customer Hub & Supplier RTV workflows (zero store_branch on Supplier RTV), Consolidated vs Per-Item QR Studio (#rma-qr-batch-sheet-root), automated 13:00 PHT 10-Day SLA Follow-Ups, Daily Matrix (.xlsx), Standardized Serial No. Exports, and Automatic Per-Item Mirror .xlsx Reply Sync." />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231d6fce' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 7V5a2 2 0 0 1 2-2h2'/><path d='M17 3h2a2 2 0 0 1 2 2v2'/><path d='M21 17v2a2 2 0 0 1-2 2h-2'/><path d='M7 21H5a2 2 0 0 1-2-2v-2'/><rect width='10' height='8' x='7' y='8' rx='1'/></svg>" />
     <style>
       body {

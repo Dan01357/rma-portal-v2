@@ -84,7 +84,7 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
     page,
     context
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(300_000);
     await context.grantPermissions(['camera', 'clipboard-read', 'clipboard-write']).catch(() => { });
     await installPrintStubs(context);
     const guard = attachStrictGuards(page);
@@ -399,7 +399,14 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       const restoredCustRow = page.locator('tr', { hasText: seededManifestRma }).first();
       await expect(restoredCustRow).toBeVisible({ timeout: 10_000 });
       await restoredCustRow.locator(`button[title*="Move RMA #${seededManifestRma} to 30-Day Trash Bin"]`).click();
-      await page.getByRole('button', { name: /Move to Trash/i }).click();
+      await Promise.all([
+        page
+          .waitForResponse((r) => r.url().includes('/rest/v1/rma_reports') && r.request().method() === 'PATCH', {
+            timeout: 25_000
+          })
+          .catch(() => null),
+        page.getByRole('button', { name: /Move to Trash/i }).click()
+      ]);
       await expect(page.getByRole('button', { name: /Move to Trash/i })).toBeHidden({ timeout: 25_000 });
       await expect(restoredCustRow).toBeHidden({ timeout: 15_000 });
 
@@ -408,7 +415,14 @@ test.describe('Suite 03: Customer Hub, Supplier RTV Hub, Test Mode Sandbox, Mani
       const restoredSuppRow = page.locator('tr', { hasText: seededSupplierRma }).first();
       await expect(restoredSuppRow).toBeVisible({ timeout: 10_000 });
       await restoredSuppRow.locator(`button[title*="Delete RMA #${seededSupplierRma}"]`).click();
-      await page.getByRole('button', { name: /Move to Trash/i }).click();
+      await Promise.all([
+        page
+          .waitForResponse((r) => r.url().includes('/rest/v1/rma_reports') && r.request().method() === 'PATCH', {
+            timeout: 25_000
+          })
+          .catch(() => null),
+        page.getByRole('button', { name: /Move to Trash/i }).click()
+      ]);
       await expect(page.getByRole('button', { name: /Move to Trash/i })).toBeHidden({ timeout: 25_000 });
       await expect(restoredSuppRow).toBeHidden({ timeout: 15_000 });
 

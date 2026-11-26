@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-25T07:04:47.758Z
+Generated At: 2026-11-26T04:34:22.678Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -74,9 +74,13 @@ rma-portal-v2/
 │   │   └── WHOLESALE_RMA_OPERATIONS_GUIDE.md
 ├── playwright-report/
 │   │   ├── data/
-│   │   │   │   ├── 2bc6c7ee0fc5a5e91b0e5025b580526305365011.png
-│   │   │   │   ├── 9c8e33e79021894582b3c69fee9cb8007ba2c1b6.zip
-│   │   │   │   └── b2f3790dd4d63171cfbb4e7596063db53fb0067e.md
+│   │   │   │   ├── 369de6eeab8ee0930e16e874eb980577041a5745.md
+│   │   │   │   ├── 8d9bbb62d0ece4b219bad806fde0c5a4e7ddb9fe.zip
+│   │   │   │   ├── 95c821fe8b5948c2aaaf37cb5feea9914bee1eb2.png
+│   │   │   │   ├── aa5c489b47c14c0188a7928552ac39f92a22ab73.md
+│   │   │   │   ├── eba874408f0da95db67138e5f871ac22b01b373a.png
+│   │   │   │   ├── f40d14b66a26b50d4d5c2b8e16ffa57baa6c1dc9.png
+│   │   │   │   └── f66d13f0b6850211c007edd3ce31342a4df3207b.zip
 │   │   ├── trace/
 │   │   │   │   ├── assets/
 │   │   │   │   │   │   ├── codeMirrorModule-DNqxPF-E.js
@@ -204,7 +208,11 @@ rma-portal-v2/
 │   │   ├── main.jsx
 │   │   └── supabaseClient.js
 ├── test-results/
-│   │   ├── 09-prompt7a-7b-qa-Suite-09-3f023-n-Test-xlsx-reply-ingestion/
+│   │   ├── 05-credit-memos-settings-S-595d8-tter-B-W-Voucher-Void-Reset/
+│   │   │   │   ├── error-context.md
+│   │   │   │   ├── test-failed-1.png
+│   │   │   │   └── trace.zip
+│   │   ├── 05-credit-memos-settings-S-d5aa4-s-Poster-API-Keys-docs-link/
 │   │   │   │   ├── error-context.md
 │   │   │   │   ├── test-failed-1.png
 │   │   │   │   └── trace.zip
@@ -222,7 +230,8 @@ rma-portal-v2/
 │   │   ├── 06-portal-qr-scanner-wizard.spec.js
 │   │   ├── 07-email-and-xlsx-qa.spec.js
 │   │   ├── 08-api-docs-and-responsive.spec.js
-│   │   └── 09-prompt7a-7b-qa.spec.js
+│   │   ├── 09-prompt7a-7b-qa.spec.js
+│   │   └── 10-prompt8a-qa.spec.js
 ├── video/
 │   │   ├── watch this 1.mp4
 │   │   ├── watch this 2.mp4
@@ -1334,11 +1343,11 @@ The system operates across several affiliated wholesale distribution and manufac
   - Volume controls: `[-]` and `[+]` buttons plus direct numerical input.
 - **Unified Live Timestamped Camera & Paperwork AI**: All photo sections expose strictly **`Take Photo`** (opening full-bleed `object-cover` `<CameraCaptureModal />` stamping live PHT time, Street/ZIP GPS & operator tag) and **`Upload from Gallery`** (zero 3-way `Capture Mode` toggles or raw `capture="environment"` triggers). Paperwork Zone 2 validates SI/DR/PO documents via Gemini Flash AI.
 - **Pinpoint Dock GPS & Maps Pins**: Captures geolocation (`latitude`, `longitude`, `accuracy <= 150m`), resolves Priority 1 `known_gps_locations` geofence anchors (default Pingcon Warehouse: `64 Mendez Rd, Baesa, Quezon City, Metro Manila 1106`), Priority 2 Google Geocoding, or Priority 3 Nominatim `zoom=18` via `/api/v1/products/lookup?action=reverse-geocode`, and builds `/maps/place/{address}/@{lat},{lng},18z` links via `getGpsMapUrl`.
-- **Unified Printable QR Card & Multi-QR Studio (`ReturnQRModal.jsx`)**: Uses ONE unified centered B&W QR Card design across preview, **`Save QR (PNG)`** download, and **`Resize / Print QR` / `Print Selected QRs`** printing — displaying Item Name, Barcode/SKU, **Quantity & Unit**, Defect Reason, and Reporter (no redundant Supplier clutter), with per-QR mm/zoom resizing, **`➕ Add More RMA QRs to Sheet`** + `Add Recent Session QRs` (strictly session/mode isolated), dynamic paper sizing defaulting to **US Letter (`8.5in x 11in`)**, and Multi-QR **`Auto-Fit All to 1 Page`** or **`Multiple Pages`** modes.
+- **Unified Printable QR Card & Multi-QR Studio (`ReturnQRModal.jsx`)**: Uses ONE unified centered B&W QR Card design inside `#rma-qr-batch-sheet-root` and isolated `iframe.srcdoc` printing (`printIsolatedElement`, never `window.print()`) across preview, **`Save QR (PNG)`** download, and **`Resize / Print QR` / `Print Selected QRs`** printing — displaying Item Name, Barcode/SKU, **Quantity & Unit**, Defect Reason, and Reporter (no redundant Supplier clutter), with **`Consolidated (1 QR per RMA)` *(default)* vs `Single / Per-Item QRs (1 QR per Item)`** segmented toggle on multi-item RMAs, per-QR mm/zoom resizing, **`➕ Add More RMA QRs to Sheet`** + `Add Recent Session QRs` (strictly session/mode isolated), dynamic paper sizing defaulting to **US Letter (`8.5in x 11in`)**, and Multi-QR **`Auto-Fit All to 1 Page`** or **`Multiple Pages`** modes.
 
 ### B. Admin & Streamlined Operational Hubs (`/admin`)
-- **Gate Authentication & Admin-Only Test Recipients**: Super Admin Test Mode / Live Mode OTP verification and Google Identity Lock invite gatekeeper (`GatekeeperPinModal.jsx`). Admin-only Test Mode recipients (`rma_settings.test_email_recipients` & `test_email_recipients_by_type`, editable in Settings & Matrix Modal, never exposed on `/`) route Sandbox dispatches with **`[TEST] `** as the first subject word (`RMA-TEST-`, `CM-TEST-`, `RTV-TEST-`, `[TEST_MODE]`, default Sandbox `mgan@pingconmarketing.com`).
-- **4-Step Workflow, 10-Calendar-Day SLA & Full Timeline Reset (`followUpWorkflow.js` + `dailyFollowUpHandler.js`)**: Tracks Step 1 Report Date, Step 2 Waiting for Pickup/Handover (`Day N of 10` Asia/Manila), Step 3 Picked Up/Handover Date, and Step 4 Case Close across both Supplier RTV and Customer Hub; auto-disposes unclaimed >10-day items (`status: 'resolved'`, `5- Scrap / Dispose`, `Disposal / Scrap Area`); supports editable `HH:mm Asia/Manila` schedules for both Daily Matrix and Daily Follow-Ups via `/api/send-email?action=daily-followup`; and provides **`resetReportToPending`** (`🔄 Reset Timeline` / `↩️ Reset to Pending`) to clear 4-Choice/pickup/closed flags back to `Pending` while preserving Supplier Name & Emails. All non-Matrix Excel downloads & RMA Alert mirror `.xlsx` attachments use **`'Serial No.'`** strictly as Column A, and `/api/send-email?action=sync-email-replies|ingest-xlsx-reply` parses both shifted Column A `Serial No.` and legacy formats with strict Test (`RMA-TEST-`) vs Live isolation.
+- **Gate Authentication & Admin-Only Test Recipients**: Super Admin Test Mode / Live Mode OTP verification and Google Identity Lock invite gatekeeper (`GatekeeperPinModal.jsx`). Admin-only Test Mode recipients (`rma_settings.test_email_recipients` & `test_email_recipients_by_type`, editable in Settings & Matrix Modal, never exposed on `/`) route Sandbox dispatches with **`[TEST] `** as the first subject word (`RMA-TEST-`, `CM-TEST-`, `RTV-TEST-`, `[TEST_MODE]`, default Sandbox `mgan@pingconmarketing.com`). **`store_branch` is strictly `null`/omitted across all Supplier RTV (`supplier_outbound`) submissions, UI (`SupplierClaimsTab`, `QuickRMAActionModal`, `RmaEmailEditorView`), emails, and `.xlsx` exports.**
+- **4-Step Workflow, 10-Calendar-Day SLA & Automatic Per-Item `.xlsx` Sync (`followUpWorkflow.js` + `dailyFollowUpHandler.js` + `imapReplySyncHandler.js`)**: Tracks Step 1 Report Date, Step 2 Waiting for Pickup/Handover (`Day N of 10` Asia/Manila), Step 3 Picked Up/Handover Date, and Step 4 Case Close across both Supplier RTV and Customer Hub; auto-disposes unclaimed >10-day items (`status: 'resolved'`, `5- Scrap / Dispose`, `Disposal / Scrap Area`); automatically sends daily follow-ups & matrices at configurable `HH:mm Asia/Manila` schedules (default **`13:00` PHT**; zero manual `Send Follow-Up`, `Upload Edited .xlsx`, or `Check Email .xlsx Replies` UI buttons); provides **`resetReportToPending`** (`🔄 Reset Timeline` / `↩️ Reset to Pending`) preserving Supplier Name & Emails; uses `'Serial No.'` as Column A plus per-item **`Supplier Name`** inside `MANIFEST LINE ITEMS`; and polls Gmail every 60s in Admin & via cron (`UID SEARCH SINCE` 2-day window, recursive nested MIME `.xlsx` extractor) updating only each edited item's `supplier_name` across `parent.items[idx]`, child `rma_reports`, and `rma_items` with strict Test (`RMA-TEST-`) vs Live isolation.
 - **Streamlined Quick Actions Modal (`QuickRMAActionModal.jsx`)**:
   - Focused strictly on **Stream Switcher** (`Customer Hub` <-> `Supplier RTV`), prominent **4-Choice Outcome & Pickup Banner** (`Open 4-Choice / Pickup Window`), **Split Qty** (`-B`, `-C` tickets), **Edit Details & Documents** (with real-time `ProductAutoSuggest`), **Credit Memo Launch**, and **RMA Audit Trail** (deprecated Condition Grade, Quarantine locks, 5/6 triage cards, Buffer Slips, Driver QR Widget, and Gate Passes removed).
 - **Customer Hub 4-Choice, 5x10 Multi-Photo Pickup, Plate OCR & US Letter Copy Controls (`SimpleSupplierRtvWizardModal.jsx` + `SupplierPickupFormModal.jsx`)**:
@@ -1506,9 +1515,9 @@ All endpoints below reside under `https://rma-portal-v2.vercel.app`:
 | `GET` | `/api/v1/rma-email-edit`| **Google JWT + Invite** | Load scoped RMA record for multi-recipient (`To` + `CC`) never-expiring email editor link (enforces Live/Test isolation) |
 | `PATCH`| `/api/v1/rma-email-edit`| **Google JWT + Invite** | Save scoped RMA product/SKU/price/expiry/SI/DR/PO/manifest updates (routed via `/api/v1/rma?action=email-edit`) |
 | `GET`/`POST` | `/api/send-email?action=daily-matrix` | **Cron Secret / Admin JWT** | Daily 1:00 PM PHT (`05:00 UTC` / editable `HH:mm Asia/Manila`) automated & manual Overall RMA Matrix (`.xlsx`) email dispatcher (`API_ROUTE_COUNT === 12`) |
-| `GET`/`POST` | `/api/send-email?action=daily-followup` | **Cron Secret / Admin JWT** | 10-Calendar-Day follow-up email dispatcher (`Day 1..10 Asia/Manila`), pickup case-close stopper, and >10-day unclaimed auto-dispose (`API_ROUTE_COUNT === 12`) |
-| `GET`/`POST` | `/api/send-email?action=sync-email-replies` | **Cron Secret / Admin JWT** | Polls Gmail IMAP `UNSEEN` replies carrying edited RMA Alert mirror `.xlsx` workbooks (`Serial No.` Column A + legacy), preserving `[TEST_MODE]` isolation (`API_ROUTE_COUNT === 12`) |
-| `POST` | `/api/send-email?action=ingest-xlsx-reply` | **Admin JWT / Cron Secret** | Parses & applies uploaded edited RMA Alert mirror `.xlsx` bytes directly to `rma_reports` (`Serial No.` + legacy headers, Test vs Live guarded, `API_ROUTE_COUNT === 12`) |
+| `GET`/`POST` | `/api/send-email?action=daily-followup` | **Cron Secret / Admin JWT** | Automated 10-Calendar-Day follow-up email dispatcher (`13:00` PHT default / editable `HH:mm`, `&syncReplies=1`), pickup case-close stopper, and >10-day unclaimed auto-dispose (`API_ROUTE_COUNT === 12`) |
+| `GET`/`POST` | `/api/send-email?action=sync-email-replies` | **Cron Secret / Admin JWT** | Automatic 60s Admin & Cron Gmail IMAP `SINCE` (2-day recursive MIME) `.xlsx` reply poller supporting per-item `Supplier Name` edits inside `MANIFEST LINE ITEMS` and `[TEST_MODE]` isolation (`API_ROUTE_COUNT === 12`) |
+| `POST` | `/api/send-email?action=ingest-xlsx-reply` | **Admin JWT / Cron Secret** | Parses & applies edited RMA Alert mirror `.xlsx` bytes directly to `rma_reports`, child `rma_reports`, and `rma_items` (`Serial No.` + legacy headers, Test vs Live guarded, `API_ROUTE_COUNT === 12`) |
 | `GET` | `/api/v1/products/lookup?action=reverse-geocode` | Public | Resolves `lat`/`lon` via Priority 1 `rma_settings.known_gps_locations` geofence anchors, Priority 2 Google Geocoding, or Priority 3 Nominatim `zoom=18` into Street/Barangay/City/Region/ZIP |
 | `POST` | `/api/upload-photo` | **Public / Session** | Photo upload + Gemini Vision OCR endpoints (`?action=inspect-paperwork`, `?action=inspect-driver-id`, `?action=inspect-plate`) |
 | `GET` | `/api/v1/api-keys` | Admin | List all registered API keys (masked) |
@@ -2287,8 +2296,8 @@ LIMIT 5;
       "schedule": "0 5 * * *"
     },
     {
-      "path": "/api/send-email?action=daily-followup&respectSchedule=true",
-      "schedule": "0 0 * * *"
+      "path": "/api/send-email?action=daily-followup&respectSchedule=true&syncReplies=1",
+      "schedule": "0 5 * * *"
     }
   ],
   "rewrites": [
@@ -4502,6 +4511,50 @@ Each test scenario defines:
 
 ---
 
+## Section 28: Phase 28 — Multi-Item QR Consolidated vs Per-Item Studio, Zero `store_branch` on Supplier RTV, `13:00` PHT Automated Follow-Ups & Per-Item `.xlsx` Reply Sync
+
+- [ ] **TC-P28-01 (Public & Admin `ReturnQRModal` Consolidated vs Single/Per-Item QRs & Isolated Iframe Print)**
+  * **Location**: `/` Public Submission Success screen & `/admin` -> `ReturnQRModal.jsx` (`#rma-qr-batch-sheet-root`), `printIsolatedElement.js`, `customStickerCanvas.js`
+  * **Action**:
+    1. Submit a 2+ item Batch Manifest RMA on `/` (or open any multi-item RMA in Admin).
+    2. Click `Resize / Print QR`.
+    3. Verify toolbar shows the `Consolidated (1 QR per RMA)` *(default active)* and `Single / Per-Item QRs (1 QR per Item)` segmented buttons.
+    4. Switch to `Single / Per-Item QRs (1 QR per Item)`, then click `Print` and `Save QR (PNG)`.
+  * **Expected Behavior**:
+    1. Default `Consolidated` renders **1** QR card (`Batch Manifest (N SKUs)`).
+    2. Switching to `Single / Per-Item QRs` expands into `N` separate `.rma-qr-card` items showing each item's own Name, Barcode/SKU, **Qty & Unit**, Expiry Date, and `• ITEM X/N`.
+    3. Clicking `Print` injects **only** `#rma-qr-batch-sheet-root` into an isolated `iframe.srcdoc` with `--u: 1mm !important` — NEVER calling main-window `window.print()` or printing the website header/form (`#root`).
+    4. Both `Print` and `Save QR (PNG)` respect whichever mode is active (`Consolidated` vs `Per-Item`).
+
+- [ ] **TC-P28-02 (Complete Removal of `Store Branch` from Supplier RTV `supplier_outbound`)**
+  * **Location**: `App.jsx` (`handleSubmitReport` + Success screen), `SupplierClaimsTab.jsx`, `QuickRMAActionModal.jsx`, `RmaEmailEditorView.jsx`, `notificationService.js`, `rmaAlertXlsx.js`, `exportMatrixXlsx.js`, `customStickerCanvas.js`
+  * **Action**:
+    1. Submit a `supplier_outbound` (Supplier RTV) RMA (with a Vendor Name typed in Section 3).
+    2. Inspect the Supabase `rma_reports` row, Public Success screen, New RMA Alert `.xlsx`, `SupplierClaimsTab`, `QuickRMAActionModal`, `RmaEmailEditorView`, lifecycle emails, and Supplier Claims `.xlsx` / Matrix export.
+  * **Expected Behavior**:
+    1. Submitted `supplier_outbound` report saves `store_branch: null` in `rma_reports` (Vendor Name is never stored in `store_branch`).
+    2. `Store Branch` / `Store / Customer Branch` labels, inputs, rows, and columns are strictly hidden/omitted across all Supplier RTV UI views, emails, and `.xlsx` files, while remaining active for Customer Hub (`customer_inbound`).
+
+- [ ] **TC-P28-03 (Removal of Manual `Send Follow-Up` & `.xlsx` Sync Buttons + Default `13:00` PHT Follow-Up Time)**
+  * **Location**: `QuickRMAActionModal.jsx`, `SupplierClaimsTab.jsx`, `CustomerHubTab.jsx`, `SupplierFollowUpModal.jsx`, `SettingsTab.jsx`, `followUpWorkflow.js`, `dailyFollowUpHandler.js`, `vercel.json`, `App.jsx`
+  * **Action**: Open `Settings & SMTP`, `Customer Hub`, `Supplier Hub`, `Quick Actions Modal`, and `Supplier Follow-Up Modal`.
+  * **Expected Behavior**:
+    1. Zero `Send Follow-Up`, `Upload Edited .xlsx`, or `Check Email .xlsx Replies` buttons are rendered anywhere in the UI (`✓ Case Close` remains visible on open cases).
+    2. `Follow-Up Auto-Send Time (Asia/Manila HH:mm)` defaults to **`13:00`** (1:00 PM PHT), remains editable & persists to `rma_settings.daily_followup_config`, and `vercel.json` runs `daily-followup` on `"0 5 * * *"` (`13:00 PHT`) with `&syncReplies=1`.
+    3. Admin View polls `/api/send-email?action=sync-email-replies` automatically every 60 seconds and calls `refreshAllData()` whenever `updatedCount > 0`.
+
+- [ ] **TC-P28-04 (Automatic Per-Item `.xlsx` Reply Ingestion in Multi-Item Batch RMAs & Test Mode)**
+  * **Location**: `src/utils/rmaAlertXlsx.js`, `api/_lib/imapReplySyncHandler.js` (`/api/send-email?action=sync-email-replies` & `?action=ingest-xlsx-reply`)
+  * **Action**:
+    1. Generate a 2-item Test Mode Batch RMA `.xlsx` (`RMA-TEST-...`, Item 1 `Gains Group Inc`, Item 2 `Marina Sales Inc`).
+    2. Edit **only** Item 1's `Supplier Name` column inside `MANIFEST LINE ITEMS` to `Suy Sing Commercial Corp`, keeping Item 2 as `Marina Sales Inc`.
+    3. Feed via `imapReplySyncHandler` (`UID SEARCH SINCE` 2-day recursive MIME pipeline or `ingest-xlsx-reply`).
+  * **Expected Behavior**:
+    1. `rmaAlertXlsx.js` renders `'Serial No.'` in Column A and per-item `Supplier Name` in `MANIFEST LINE ITEMS`.
+    2. `imapReplySyncHandler.js` searches `INBOX` via `UID SEARCH SINCE <2 days ago>` (including already-opened emails, deduped via `processed_reply_message_ids`), extracts `.xlsx` inside nested `multipart/*` regardless of MIME content type, matches Item 1 by Barcode/SKU/`Serial No.`, and updates **only** Item 1's `supplier_name` to `Suy Sing Commercial Corp` across `parent.items[0]`, child `rma_reports`, and `rma_items` while leaving Item 2 untouched as `Marina Sales Inc` and preserving `[TEST_MODE]` + `ai_document_metadata.is_test = true`.
+
+---
+
 ## QA Director Sign-Off & Verification Protocol
 
 | Verification Stage | Target System | Status | Lead QA Signature |
@@ -4516,7 +4569,8 @@ Each test scenario defines:
 | **Phase 24: Streamlined UI, US Letter B&W, 4 PDF Emails, Matrix & Consolidation** | End-to-End Platform & Docs | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
 | **Phase 25: OpenAPI Sync, 4-Choice Customer Hub, 5x10 Photos, Plate OCR, 10-Day SLA** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
 | **Phase 26: Mirror `.xlsx` 2-Way Replies, Reverse-Geocode & Watermark, Day 0..10, Supplier Directory** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
-| **Phase 27: `Serial No.` Exports, Test Mode Recipients/Sync, Multi-QR Sheet, Full Reset, Pinpoint GPS & Live Cam** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-08)` | *Lead QA Director* |
+| **Phase 27: `Serial No.` Exports, Test Mode Recipients/Sync, Multi-QR Sheet, Full Reset, Pinpoint GPS & Live Cam** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-09)` | *Lead QA Director* |
+| **Phase 28: QR Consolidated vs Per-Item Toggle, Zero `store_branch` on RTV, `13:00` Auto Follow-Up & Per-Item `.xlsx` Sync** | Live Production & Full E2E | `VERIFIED (PLAYWRIGHT 01-10)` | *Lead QA Director* |
 
 
 --- END FILE: docs/MANUAL_QA_TESTING_CHECKLIST.md ---
@@ -5182,7 +5236,7 @@ Legacy 5/6 triage cards, Condition Grade dropdowns, Automated Lifecycle Stage ca
 1. **Customer Hub & Credit Memos Ledger**: Both Customer Returns and `Credit Memos Ledger` operate side-by-side inside `CustomerHubTab` (in both Live Mode and Test Mode Sandbox).
 2. **Streamlined QuickRMAActionModal**: Keeps strictly Stream Switcher, Current 4-Choice Outcome Banner (`Open 4-Choice / Pickup Window`), `Split Qty` (`-B`/`-C`), `Edit Details & Documents` (`ProductAutoSuggest`), `+ Issue Credit Memo`, and `RMA Audit Trail`.
 3. **Strictly Two Unified Printables**:
-   - **Unified RMA QR Print Studio (`ReturnQRModal.jsx`)**: Single centered Printable QR Card source of truth for on-screen preview, `Save QR (PNG)`, and US Letter `Resize / Print QR` (displaying Quantity & Unit cleanly, supporting individual per-QR mm/scale sizing, **`➕ Add More RMA QRs to Sheet`** + `Add Recent Session QRs`, and multi-QR packed or per-page printing).
+   - **Unified RMA QR Print Studio (`ReturnQRModal.jsx`)**: Single centered Printable QR Card source of truth rendered inside `#rma-qr-batch-sheet-root` and printed via isolated `iframe.srcdoc` (`printIsolatedElement`, never main-window `window.print()`) for on-screen preview, `Save QR (PNG)`, and US Letter `Resize / Print QR` (displaying Quantity & Unit cleanly, supporting individual per-QR mm/scale sizing, **`➕ Add More RMA QRs to Sheet`** + `Add Recent Session QRs`, multi-QR packed or per-page printing, and a **`📦 Consolidated (1 QR per RMA)` *(default)* vs `🏷️ Single / Per-Item QRs (1 QR per Item)`** toggle for multi-item RMAs). Note: `store_branch` is strictly `null`/hidden across all Supplier RTV (`supplier_outbound`) screens, modals (`QuickRMAActionModal`, `RmaEmailEditorView`), emails, and exports.
    - **Unified Debit Claim / Replacement & Pickup Form (`SupplierPickupFormModal.jsx`) & Credit Memo Voucher (`CreditMemoVoucherModal.jsx`)**: US Letter `8.5" x 11"` plain B&W, separated pages by default with presets (`1 + 1`, `2 + 1`) and customizable `Our Company Copies` + `Supplier / Customer Copies` counters (e.g. `2 + 2 = 4`), supporting single & multi-RMA consolidated batches.
 
 ### 12.2 The 4 Lifecycle Email Triggers, Per-Email Recipients & Matrix Dispatch Studio
@@ -5192,15 +5246,15 @@ Legacy 5/6 triage cards, Condition Grade dropdowns, Automated Lifecycle Stage ca
 - `[Driver Picked Up - Replacement]` (`pickup_replacement`): Sent to configured + supplier `To`/`CC` with all pickup photos and **`Replacement-Form-*.pdf`** attached.
 - **Admin-Only Per-Email Recipient Profiles (`email_recipients_by_type` & `test_email_recipients_by_type`)**: Settings -> **Per-Email Recipient Manager** and collapsible `<EmailRecipientsEditor />` controls let Admin/Super Admin customize multi-**To** and **CC** lists per notification type across both Live Mode (`email_recipients_by_type`) and Test Mode (`test_email_recipients` / `test_email_recipients_by_type`) with reset-to-defaults. For security, `<EmailRecipientsEditor />` (`new_rma`) is **strictly removed from the Public Portal (`/`)** in both Live and Test Mode and gated behind `isAdmin` in Wizard views. Test Mode enforces `[TEST] ` as the first subject word and isolates all dispatches from Live recipients.
 - **New RMA Alert Email Editor Button**: Every New RMA Alert email embeds a never-expiring (`expires_at = null`, manually revocable by Admin) Google Identity-locked **`✏️ Edit RMA Details & Documents`** button authorized for **ALL active `To` + `CC` recipients** on that email in Live Mode (`mgan@pingconmarketing.com` or Sandbox override in Test Mode), backed by `CustomerRMAInvitesModal` (`✏️ RMA Details Editor` w/ `Never Expires`), `GatekeeperPinModal`, `RmaEmailEditorView`, and `/api/v1/rma-email-edit`.
-- **Auto Daily PHT Matrix & 10-Calendar-Day Follow-Up SLA (`dailyMatrixEmailHandler.js` & `dailyFollowUpHandler.js`)**: Both `/api/send-email?action=daily-matrix` and `/api/send-email?action=daily-followup` respect Settings-configurable `HH:mm Asia/Manila` schedules (defaults `13:00` Matrix / `08:00` Follow-Up), dispatched via GitHub Actions (every 15 min) + `vercel.json` Cron + Admin browser scheduler while preserving `API_ROUTE_COUNT === 12`. Follow-ups track 4 steps (`Report Date -> Waiting Day N of 10 -> Picked Up/Handover Date -> Case Close`), stop on pickup/`✓ Case Close`, and auto-dispose >10-day unclaimed RMAs to `Scrapped / Disposed` (`Disposal / Scrap Area`).
+- **Auto Daily PHT Matrix & 10-Calendar-Day Follow-Up SLA (`dailyMatrixEmailHandler.js` & `dailyFollowUpHandler.js`)**: Both `/api/send-email?action=daily-matrix` and `/api/send-email?action=daily-followup` respect Settings-configurable `HH:mm Asia/Manila` schedules (default **`13:00` PHT** for both Matrix and Follow-Up), dispatched automatically via GitHub Actions (every 15 min) + `vercel.json` Cron (`0 5 * * *`) + Admin browser scheduler while preserving `API_ROUTE_COUNT === 12` (with zero manual `"Send Follow-Up"` buttons in the UI). Follow-ups track 4 steps (`Report Date -> Waiting Day N of 10 -> Picked Up/Handover Date -> Case Close`), stop on pickup/`✓ Case Close`, and auto-dispose >10-day unclaimed RMAs to `Scrapped / Disposed` (`Disposal / Scrap Area`).
 
 ---
 
 ## Chapter 13: Standardized `Serial No.` Exports, 2-Way Mirror `.xlsx` Email Replies, Pinpoint GPS & Live Watermarked Capture
 
-### 13.1 `Serial No.` Column A Exports, New RMA Mirror `.xlsx` & 2-Way Reply Sync
-- **Standardized `Serial No.` Column**: Every non-Matrix Excel download (`Customer Inbound`, `Supplier Claims`, `Credit Memos Ledger`, `Tickets Vault`) and every New RMA Alert mirror `.xlsx` (`src/utils/rmaAlertXlsx.js`) uses **`'Serial No.'`** strictly as Column A (`1, 2, 3...`), with `Field | Value` and `MANIFEST LINE ITEMS` rows shifted cleanly.
-- **2-Way Email Reply Ingestion (`api/_lib/imapReplySyncHandler.js`)**: Scheduled via `.github/workflows/rma-scheduler.yml` and manually runnable via **📩 Check Email .xlsx Replies** (`/api/send-email?action=sync-email-replies`) or **📤 Upload Edited .xlsx** (`?action=ingest-xlsx-reply`). Supports backward-compatible shifted Column A `Serial No.` workbooks and legacy Column A workbooks, validates sender authorization, enforces strict Test (`RMA-TEST-` + `[TEST_MODE]`) vs Live isolation, updates `rma_reports` + `supplier_directory_store`, and appends `EMAIL_XLSX_REPLY_UPDATE` to `audit_trail`.
+### 13.1 `Serial No.` Column A Exports, New RMA Mirror `.xlsx` & Automatic Per-Item Reply Sync
+- **Standardized `Serial No.` Column**: Every non-Matrix Excel download (`Customer Inbound`, `Supplier Claims`, `Credit Memos Ledger`, `Tickets Vault`) and every New RMA Alert mirror `.xlsx` (`src/utils/rmaAlertXlsx.js`) uses **`'Serial No.'`** strictly as Column A (`1, 2, 3...`), includes per-item **`Supplier Name`** inside `MANIFEST LINE ITEMS`, and omits `Store / Branch` for `supplier_outbound` RTVs.
+- **Automatic 2-Way Email Reply Ingestion (`api/_lib/imapReplySyncHandler.js`)**: Manual `Upload Edited .xlsx` and `Check Email .xlsx Replies` UI buttons have been removed; `/api/send-email?action=sync-email-replies` polls automatically every 60 seconds while Admin View is active plus via `.github/workflows/rma-scheduler.yml` and `vercel.json` (`&syncReplies=1`). Searches Gmail `INBOX` with `UID SEARCH SINCE` (2 days, including already-opened replies, deduplicated via `processed_reply_message_ids`), recursively extracts `.xlsx` inside nested `multipart/*` parts regardless of Content-Type, matches `MANIFEST LINE ITEMS` rows by Barcode, SKU, or 1-based `Serial No.` to update ONLY each edited item's `supplier_name` across `parent.items[idx]`, child `rma_reports`, and `rma_items` without overwriting sibling items, enforces strict Test (`RMA-TEST-` + `[TEST_MODE]`) vs Live isolation, updates `supplier_directory_store`, and appends `EMAIL_XLSX_REPLY_UPDATE` to `audit_trail`.
 
 ### 13.2 Pinpoint Reverse-Geocoded GPS, Settings Dock Anchors & Unified Live Watermarked Cameras
 - **Server Proxy (`/api/v1/products/lookup?action=reverse-geocode`)**: Resolves coordinates using:
@@ -5302,7 +5356,7 @@ export default function handler(req, res) {
     <title>Wholesale RMA Portal v2 | Interactive REST API & SLA Automation Docs</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="OpenAPI 3.1 interactive reference covering Multi-System REST API v1, 4-Choice Customer Hub & Supplier RTV workflows, Day 0..10 SLA Follow-Ups & Full Timeline Reset, Daily Matrix (.xlsx), Standardized Serial No. Exports, 2-Way RMA Alert Mirror .xlsx Reply Sync, Admin-Only Test Email Recipients, Pinpoint Geofence & Street+ZIP Reverse-Geocode, Add More RMA QRs Multi-Print & Truck Plate OCR." />
+    <meta name="description" content="OpenAPI 3.1 interactive reference covering Multi-System REST API v1, 4-Choice Customer Hub & Supplier RTV workflows (zero store_branch on Supplier RTV), Consolidated vs Per-Item QR Studio (#rma-qr-batch-sheet-root), automated 13:00 PHT 10-Day SLA Follow-Ups, Daily Matrix (.xlsx), Standardized Serial No. Exports, and Automatic Per-Item Mirror .xlsx Reply Sync." />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231d6fce' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 7V5a2 2 0 0 1 2-2h2'/><path d='M17 3h2a2 2 0 0 1 2 2v2'/><path d='M21 17v2a2 2 0 0 1-2 2h-2'/><path d='M7 21H5a2 2 0 0 1-2-2v-2'/><rect width='10' height='8' x='7' y='8' rx='1'/></svg>" />
     <style>
       body {
@@ -8809,6 +8863,7 @@ export async function authorizeCronOrAdmin(req) {
 --- START FILE: api/_lib/dailyFollowUpHandler.js ---
 import { supabase } from './supabase.js';
 import { authorizeCronOrAdmin } from './cronAuth.js';
+import { syncEmailRepliesInternal } from './imapReplySyncHandler.js';
 import {
   createSmtpTransport,
   DEFAULT_EMAIL_RECIPIENTS,
@@ -8911,12 +8966,19 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
 
   const operation = String(body.operation || req.query?.operation || 'run_all').trim().toLowerCase();
   const targetRmaNumber = String(body.rmaNumber || req.query?.rmaNumber || '').trim();
-  const isTestMode = Boolean(
-    body.isTestMode === true ||
-    body.isTestMode === 'true' ||
-    req.query?.testMode === 'true' ||
-    req.query?.test === '1' ||
-    targetRmaNumber.toUpperCase().startsWith('TEST-')
+  const isTestMode =
+    auth.callerType !== 'cron' &&
+    Boolean(
+      body.isTestMode === true ||
+      body.isTestMode === 'true' ||
+      req.query?.testMode === 'true' ||
+      req.query?.test === '1' ||
+      targetRmaNumber.toUpperCase().startsWith('TEST-')
+    );
+  const alsoSyncReplies = Boolean(
+    req.query?.syncReplies === '1' ||
+    req.query?.syncReplies === 'true' ||
+    body.syncReplies === true
   );
   const force = Boolean(
     body.force === true ||
@@ -8977,8 +9039,17 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
     ...(rawFollowUpCfg && typeof rawFollowUpCfg === 'object' ? rawFollowUpCfg : {})
   };
   const autoEnabled = followUpConfig.autoEnabled !== false;
-  const targetTimePht = normalizeTimeHhmm(followUpConfig.autoSendTimePht, '08:00');
+  const targetTimePht = normalizeTimeHhmm(followUpConfig.autoSendTimePht, '13:00');
   const customerFollowUpDefaultEnabled = Boolean(followUpConfig.customerFollowUpDefaultEnabled);
+
+  let replySyncSummary = null;
+  if (alsoSyncReplies && !dryRun) {
+    try {
+      replySyncSummary = await syncEmailRepliesInternal();
+    } catch (syncErr) {
+      replySyncSummary = { success: false, error: syncErr?.message || 'Reply sync failed' };
+    }
+  }
 
   if (respectSchedule && operation === 'run_all' && !force) {
     if (!autoEnabled) {
@@ -8988,7 +9059,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
         reason: 'AUTO_DISABLED',
         phtDate: todayManila,
         phtTime: currentHhmm,
-        targetTimePht
+        targetTimePht,
+        ...(replySyncSummary ? { emailReplySync: replySyncSummary } : {})
       });
     }
     if (!hasReachedManilaSchedule(targetTimePht, nowDate)) {
@@ -8998,7 +9070,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
         reason: 'BEFORE_SCHEDULED_TIME',
         phtDate: todayManila,
         phtTime: currentHhmm,
-        targetTimePht
+        targetTimePht,
+        ...(replySyncSummary ? { emailReplySync: replySyncSummary } : {})
       });
     }
   }
@@ -9395,7 +9468,8 @@ export async function handleDailyFollowUp(req, res, preParsedBody = null) {
     followUpsSent,
     autoDisposed,
     skippedItems,
-    errors
+    errors,
+    ...(replySyncSummary ? { emailReplySync: replySyncSummary } : {})
   });
 }
 
@@ -10514,11 +10588,13 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
     const headerRow = Array.from(rows[manifestHeaderRowIdx] || [], (h) => String(h ?? '').trim().toLowerCase());
     const colMap = {
       line: headerRow.findIndex((h) => h && (h.includes('serial') || h.includes('line') || h === 'sn')),
+      supplier_name: headerRow.findIndex((h) => h.includes('supplier') || h.includes('vendor')),
       barcode: headerRow.findIndex((h) => h.includes('barcode')),
-      code: headerRow.findIndex((h) => h.includes('sku')),
+      code: headerRow.findIndex((h) => h.includes('sku') || h.includes('item code')),
       name: headerRow.findIndex((h) => h.includes('description') || h.includes('product')),
       quantity: headerRow.findIndex((h) => h.includes('qty') || h.includes('quantity')),
       unit_name: headerRow.findIndex((h) => h.includes('unit')),
+      price: headerRow.findIndex((h) => h.includes('price')),
       expiry_date: headerRow.findIndex((h) => h.includes('expiry')),
       reason: headerRow.findIndex((h) => h.includes('reason')),
       explanation: headerRow.findIndex((h) => h.includes('explanation'))
@@ -10527,13 +10603,21 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
     for (let r = manifestHeaderRowIdx + 1; r < rows.length; r += 1) {
       const row = rows[r] || [];
       if (!row.some((c) => String(c ?? '').trim())) continue;
+      const rawSerial = colMap.line >= 0 ? parseInt(row[colMap.line], 10) : NaN;
+      const serialNo = Number.isFinite(rawSerial) && rawSerial > 0 ? rawSerial : (manifestUpdates.length + 1);
+      const rawPrice = colMap.price >= 0 && String(row[colMap.price] ?? '').trim() !== ''
+        ? Number(String(row[colMap.price]).replace(/[,\s]/g, ''))
+        : undefined;
       manifestUpdates.push({
-        lineIndex: colMap.line >= 0 ? Math.max(0, (parseInt(row[colMap.line], 10) || 1) - 1) : manifestUpdates.length,
+        serialNo,
+        lineIndex: serialNo - 1,
+        supplier_name: colMap.supplier_name >= 0 ? String(row[colMap.supplier_name] ?? '').trim() : '',
         barcode: colMap.barcode >= 0 ? String(row[colMap.barcode] ?? '').trim() : '',
         code: colMap.code >= 0 ? String(row[colMap.code] ?? '').trim() : '',
         name: colMap.name >= 0 ? String(row[colMap.name] ?? '').trim() : '',
-        quantity: colMap.quantity >= 0 ? Number(row[colMap.quantity]) : undefined,
+        quantity: colMap.quantity >= 0 && String(row[colMap.quantity] ?? '').trim() !== '' ? Number(row[colMap.quantity]) : undefined,
         unit_name: colMap.unit_name >= 0 ? String(row[colMap.unit_name] ?? '').trim() : '',
+        price: Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : undefined,
         expiry_date: colMap.expiry_date >= 0 ? normalizeYmdInput(row[colMap.expiry_date]) : null,
         reason: colMap.reason >= 0 ? String(row[colMap.reason] ?? '').trim() : '',
         explanation: colMap.explanation >= 0 ? String(row[colMap.explanation] ?? '').trim() : ''
@@ -10668,8 +10752,41 @@ function isSenderAuthorizedForReport(senderEmail, report, adminEmailsSet, { live
   return ['pingconmarketing.com', 'a2z2go.net', 'keysysincorporated.com'].includes(domain);
 }
 
+async function safeUpdateTableRow(table, rowId, rowUpdates) {
+  if (!rowId || !rowUpdates || Object.keys(rowUpdates).length === 0) return null;
+  let candidate = { ...rowUpdates };
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (Object.keys(candidate).length === 0) return null;
+    const { data, error } = await supabase
+      .from(table)
+      .update(candidate)
+      .eq('id', rowId)
+      .select();
+    if (!error) {
+      return Array.isArray(data) && data[0] ? data[0] : null;
+    }
+    const errMsg = String(error.message || '');
+    const colM =
+      errMsg.match(/Could not find the '([^']+)' column/i) ||
+      errMsg.match(/column [a-zA-Z0-9_.]*\.([a-zA-Z0-9_]+) does not exist/i);
+    if (colM?.[1] && colM[1] in candidate) {
+      delete candidate[colM[1]];
+      continue;
+    }
+    if (table === 'rma_items') {
+      return null;
+    }
+    throw new Error(errMsg);
+  }
+  return null;
+}
+
+function normMatchKey(val) {
+  return String(val ?? '').trim().toUpperCase();
+}
+
 /**
- * Applies parsed `.xlsx` reply changes onto Supabase `rma_reports` + `supplier_directory_store`.
+ * Applies parsed `.xlsx` reply changes onto Supabase `rma_reports`, child `rma_reports`, `rma_items`, and `supplier_directory_store`.
  */
 export async function applyRmaXlsxUpdates({
   buffer,
@@ -10686,7 +10803,7 @@ export async function applyRmaXlsxUpdates({
   }
 
   const [{ data: matchedRows, error: fetchErr }, { data: adminRows }, { data: settingsRows }] = await Promise.all([
-    supabase.from('rma_reports').select('*').ilike('rma_number', targetRma).limit(5),
+    supabase.from('rma_reports').select('*').ilike('rma_number', targetRma).limit(20),
     supabase.from('admin_users').select('email, is_active'),
     supabase
       .from('rma_settings')
@@ -10732,6 +10849,11 @@ export async function applyRmaXlsxUpdates({
     };
   }
 
+  const [{ data: childReportRows }, { data: rmaItemRows }] = await Promise.all([
+    supabase.from('rma_reports').select('*').eq('parent_rma_id', existing.id),
+    supabase.from('rma_items').select('*').eq('rma_report_id', existing.id)
+  ]);
+
   const patch = parsed.patch || {};
   const updates = {};
   const changedFields = [];
@@ -10746,7 +10868,9 @@ export async function applyRmaXlsxUpdates({
     }
   };
 
-  compareAssignStr('store_branch', patch.store_branch);
+  if (existing.rma_type !== 'supplier_outbound') {
+    compareAssignStr('store_branch', patch.store_branch);
+  }
   compareAssignStr('supplier_name', patch.supplier_name);
   compareAssignStr('code', patch.code);
   compareAssignStr('name', patch.name);
@@ -10810,29 +10934,109 @@ export async function applyRmaXlsxUpdates({
     }
   }
 
-  // Apply Manifest Line Item edits if present
-  if (parsed.manifestUpdates.length > 0 && Array.isArray(existing.items) && existing.items.length > 0) {
-    const nextItems = existing.items.map((item, idx) => {
-      const m = parsed.manifestUpdates[idx];
-      if (!m) return item;
-      return {
-        ...item,
-        code: m.code || item.code,
-        sku: m.code || item.sku,
-        name: m.name || item.name,
-        productName: m.name || item.productName,
-        quantity: Number.isFinite(m.quantity) && m.quantity > 0 ? m.quantity : item.quantity,
-        unit_name: m.unit_name || item.unit_name,
-        unit: m.unit_name || item.unit,
-        expiry_date: m.expiry_date || item.expiry_date,
-        reason: m.reason || item.reason,
-        explanation: m.explanation || item.explanation
-      };
-    });
-    if (JSON.stringify(nextItems) !== JSON.stringify(existing.items)) {
-      updates.items = nextItems;
+  // Apply per-item Manifest Line Item edits independently (by Barcode, SKU, or 1-based Serial No. index)
+  const baseItemsList = Array.isArray(existing.items) && existing.items.length > 0
+    ? existing.items
+    : (Array.isArray(childReportRows) && childReportRows.length > 0 ? childReportRows : []);
+  const editedManifestEntries = [];
+
+  if (parsed.manifestUpdates.length > 0 && baseItemsList.length > 0) {
+    const nextItems = baseItemsList.map((it) => ({ ...it }));
+    const usedIndices = new Set();
+
+    for (const m of parsed.manifestUpdates) {
+      let matchIdx = -1;
+      const mBarcode = normMatchKey(m.barcode);
+      const mSku = normMatchKey(m.code);
+
+      if (mBarcode) {
+        const barcodeMatches = [];
+        nextItems.forEach((it, idx) => {
+          if (!usedIndices.has(idx) && normMatchKey(it.barcode) === mBarcode) barcodeMatches.push(idx);
+        });
+        if (barcodeMatches.length === 1) {
+          matchIdx = barcodeMatches[0];
+        } else if (barcodeMatches.length > 1) {
+          matchIdx = barcodeMatches.includes(m.lineIndex) ? m.lineIndex : barcodeMatches[0];
+        }
+      }
+
+      if (matchIdx === -1 && mSku) {
+        const skuMatches = [];
+        nextItems.forEach((it, idx) => {
+          if (!usedIndices.has(idx) && normMatchKey(it.code || it.sku) === mSku) skuMatches.push(idx);
+        });
+        if (skuMatches.length === 1) {
+          matchIdx = skuMatches[0];
+        } else if (skuMatches.length > 1) {
+          matchIdx = skuMatches.includes(m.lineIndex) ? m.lineIndex : skuMatches[0];
+        }
+      }
+
+      if (matchIdx === -1 && Number.isFinite(m.lineIndex) && m.lineIndex >= 0 && m.lineIndex < nextItems.length && !usedIndices.has(m.lineIndex)) {
+        matchIdx = m.lineIndex;
+      }
+
+      if (matchIdx === -1) continue;
+      usedIndices.add(matchIdx);
+
+      const origItem = nextItems[matchIdx];
+      const itemPatch = {};
+      if (m.supplier_name && m.supplier_name !== String(origItem.supplier_name || origItem.supplierName || '').trim()) {
+        itemPatch.supplier_name = m.supplier_name;
+        itemPatch.supplierName = m.supplier_name;
+        itemPatch.supplier = m.supplier_name;
+      }
+      if (m.code && m.code !== String(origItem.code || origItem.sku || '').trim()) {
+        itemPatch.code = m.code;
+        itemPatch.sku = m.code;
+      }
+      if (m.name && m.name !== String(origItem.name || origItem.productName || origItem.product_name || '').trim()) {
+        itemPatch.name = m.name;
+        itemPatch.productName = m.name;
+      }
+      if (Number.isFinite(m.quantity) && m.quantity > 0 && m.quantity !== Number(origItem.quantity ?? origItem.qty ?? 1)) {
+        itemPatch.quantity = m.quantity;
+      }
+      if (m.unit_name && m.unit_name !== String(origItem.unit_name || origItem.unit || '').trim()) {
+        itemPatch.unit_name = m.unit_name;
+        itemPatch.unit = m.unit_name;
+      }
+      if (Number.isFinite(m.price) && m.price >= 0 && m.price !== Number(origItem.price ?? 0)) {
+        itemPatch.price = m.price;
+      }
+      if (m.expiry_date && m.expiry_date !== String(origItem.expiry_date || '').slice(0, 10)) {
+        itemPatch.expiry_date = m.expiry_date;
+      }
+      if (m.reason && m.reason !== String(origItem.reason || '').trim()) {
+        itemPatch.reason = m.reason;
+      }
+      if (m.explanation && m.explanation !== String(origItem.explanation || '').trim()) {
+        itemPatch.explanation = m.explanation;
+      }
+
+      if (Object.keys(itemPatch).length > 0) {
+        const updatedItem = { ...origItem, ...itemPatch };
+        nextItems[matchIdx] = updatedItem;
+        editedManifestEntries.push({
+          idx: matchIdx,
+          serialNo: m.serialNo || matchIdx + 1,
+          origItem,
+          updatedItem,
+          itemPatch
+        });
+      }
+    }
+
+    if (editedManifestEntries.length > 0) {
+      if (Array.isArray(existing.items) && existing.items.length > 0) {
+        updates.items = nextItems;
+      }
       updates.total_quantity = nextItems.reduce((s, it) => s + (Number(it.quantity) || 1), 0);
       changedFields.push('items');
+      editedManifestEntries.forEach((e) => {
+        if (e.itemPatch.supplier_name) changedFields.push(`item_${e.serialNo}_supplier_name`);
+      });
     }
   }
 
@@ -10878,19 +11082,80 @@ export async function applyRmaXlsxUpdates({
     }
   ];
 
-  let { data: savedRows, error: updateErr } = await supabase
-    .from('rma_reports')
-    .update(updates)
-    .eq('id', existing.id)
-    .select();
+  const savedParent = await safeUpdateTableRow('rma_reports', existing.id, updates);
 
-  if (updateErr) {
-    const fallback = { ...updates };
-    const colM = String(updateErr.message || '').match(/Could not find the '([^']+)' column/i);
-    if (colM?.[1] && colM[1] in fallback) delete fallback[colM[1]];
-    const retry = await supabase.from('rma_reports').update(fallback).eq('id', existing.id).select();
-    if (retry.error) throw new Error(retry.error.message);
-    savedRows = retry.data;
+  // Sync per-item changes onto ONLY the matching child rows in `rma_reports` (parent_rma_id) and `rma_items` (rma_report_id)
+  if (editedManifestEntries.length > 0) {
+    const usedChildReportIds = new Set();
+    const usedRmaItemIds = new Set();
+    const childReportsSorted = Array.isArray(childReportRows) ? childReportRows : [];
+    const rmaItemsSorted = Array.isArray(rmaItemRows) ? rmaItemRows : [];
+
+    for (const entry of editedManifestEntries) {
+      const { idx, origItem, updatedItem, itemPatch } = entry;
+      const origBc = normMatchKey(origItem.barcode || updatedItem.barcode);
+      const origSku = normMatchKey(origItem.code || origItem.sku || updatedItem.code || updatedItem.sku);
+
+      // 1. Matching child row in rma_reports (`parent_rma_id = existing.id`)
+      let matchedChild = childReportsSorted.find((c) => !usedChildReportIds.has(c.id) && origBc && normMatchKey(c.barcode) === origBc);
+      if (!matchedChild && origSku) {
+        matchedChild = childReportsSorted.find((c) => !usedChildReportIds.has(c.id) && normMatchKey(c.code || c.sku) === origSku);
+      }
+      if (!matchedChild && idx < childReportsSorted.length && !usedChildReportIds.has(childReportsSorted[idx]?.id)) {
+        matchedChild = childReportsSorted[idx];
+      }
+      if (matchedChild?.id) {
+        usedChildReportIds.add(matchedChild.id);
+        const childUpdate = {};
+        if ('updated_at' in matchedChild) childUpdate.updated_at = nowIso;
+        if (itemPatch.supplier_name) childUpdate.supplier_name = itemPatch.supplier_name;
+        if (itemPatch.code) childUpdate.code = itemPatch.code;
+        if (itemPatch.name) childUpdate.name = itemPatch.name;
+        if (itemPatch.quantity !== undefined) childUpdate.quantity = itemPatch.quantity;
+        if (itemPatch.unit_name) childUpdate.unit_name = itemPatch.unit_name;
+        if (itemPatch.price !== undefined) childUpdate.price = itemPatch.price;
+        if (itemPatch.expiry_date) childUpdate.expiry_date = itemPatch.expiry_date;
+        if (itemPatch.reason) childUpdate.reason = itemPatch.reason;
+        if (itemPatch.explanation) childUpdate.explanation = itemPatch.explanation;
+        if (existingIsTest) {
+          const prevChildMeta = (matchedChild.ai_document_metadata && typeof matchedChild.ai_document_metadata === 'object')
+            ? matchedChild.ai_document_metadata
+            : {};
+          childUpdate.ai_document_metadata = { ...prevChildMeta, is_test: true, test_mode: true };
+          const cNotes = String(matchedChild.notes || '').trim();
+          if (!cNotes.includes('[TEST_MODE]')) childUpdate.notes = cNotes ? `[TEST_MODE] ${cNotes}` : '[TEST_MODE]';
+        }
+        await safeUpdateTableRow('rma_reports', matchedChild.id, childUpdate).catch(() => {});
+      }
+
+      // 2. Matching child row in rma_items (`rma_report_id = existing.id`)
+      let matchedRmaItem = rmaItemsSorted.find((it) => !usedRmaItemIds.has(it.id) && origBc && normMatchKey(it.barcode) === origBc);
+      if (!matchedRmaItem && origSku) {
+        matchedRmaItem = rmaItemsSorted.find((it) => !usedRmaItemIds.has(it.id) && normMatchKey(it.sku || it.code) === origSku);
+      }
+      if (!matchedRmaItem && idx < rmaItemsSorted.length && !usedRmaItemIds.has(rmaItemsSorted[idx]?.id)) {
+        matchedRmaItem = rmaItemsSorted[idx];
+      }
+      if (matchedRmaItem?.id) {
+        usedRmaItemIds.add(matchedRmaItem.id);
+        const rmaItemUpdate = {};
+        if (itemPatch.supplier_name) rmaItemUpdate.supplier_name = itemPatch.supplier_name;
+        if (itemPatch.code) rmaItemUpdate.sku = itemPatch.code;
+        if (itemPatch.name) {
+          if ('product_name' in matchedRmaItem) rmaItemUpdate.product_name = itemPatch.name;
+          else rmaItemUpdate.name = itemPatch.name;
+        }
+        if (itemPatch.quantity !== undefined) rmaItemUpdate.quantity = itemPatch.quantity;
+        if (itemPatch.unit_name) rmaItemUpdate.unit_name = itemPatch.unit_name;
+        if (itemPatch.price !== undefined) rmaItemUpdate.price = itemPatch.price;
+        if (itemPatch.expiry_date) rmaItemUpdate.expiry_date = itemPatch.expiry_date;
+        if (itemPatch.reason) rmaItemUpdate.reason = itemPatch.reason;
+        if (itemPatch.explanation) rmaItemUpdate.explanation = itemPatch.explanation;
+        if (Object.keys(rmaItemUpdate).length > 0) {
+          await safeUpdateTableRow('rma_items', matchedRmaItem.id, rmaItemUpdate).catch(() => {});
+        }
+      }
+    }
   }
 
   // Upsert Supplier Directory entry if supplier email(s) updated
@@ -10924,7 +11189,7 @@ export async function applyRmaXlsxUpdates({
     success: true,
     rmaNumber: targetRma,
     changedFields,
-    report: Array.isArray(savedRows) && savedRows[0] ? savedRows[0] : { ...existing, ...updates }
+    report: savedParent || { ...existing, ...updates }
   };
 }
 
@@ -10960,34 +11225,95 @@ function parseMimeHeaders(headerText) {
   return headers;
 }
 
+function decodeQuotedPrintableToBuffer(str) {
+  const cleaned = String(str || '').replace(/=\r?\n/g, '');
+  const bytes = [];
+  for (let i = 0; i < cleaned.length; i += 1) {
+    if (cleaned[i] === '=' && /^[0-9A-Fa-f]{2}$/.test(cleaned.slice(i + 1, i + 3))) {
+      bytes.push(parseInt(cleaned.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else {
+      bytes.push(cleaned.charCodeAt(i) & 0xff);
+    }
+  }
+  return Buffer.from(bytes);
+}
+
+function extractMimeFilename(cdisp, ctype) {
+  const combined = `${cdisp}; ${ctype}`;
+  const rfc2231Parts = [];
+  const segRe = /(?:filename|name)\*(\d+)\*?\s*=\s*(?:"([^"]*)"|([^;\s]*))/gi;
+  let sm;
+  while ((sm = segRe.exec(combined)) !== null) {
+    const idx = parseInt(sm[1], 10);
+    const val = (sm[3] ?? sm[4] ?? '').replace(/^[A-Za-z0-9_-]+''/, '');
+    rfc2231Parts[idx] = val;
+  }
+  if (rfc2231Parts.length > 0) {
+    const joined = rfc2231Parts.filter((v) => v !== undefined).join('');
+    try {
+      return decodeMimeHeader(decodeURIComponent(joined));
+    } catch {
+      return decodeMimeHeader(joined);
+    }
+  }
+  const nameM = combined.match(/(?:filename|name)\*?\s*=\s*(?:[A-Za-z0-9_-]+'')?(?:"([^"]+)"|([^;\s]+))/i);
+  const rawName = nameM ? (nameM[1] || nameM[2] || '') : '';
+  if (!rawName) return '';
+  try {
+    return decodeMimeHeader(decodeURIComponent(rawName));
+  } catch {
+    return decodeMimeHeader(rawName);
+  }
+}
+
 function extractXlsxAttachmentsFromMime(rawMessage) {
   const results = [];
   const walkPart = (partStr) => {
+    if (!partStr) return;
     const { headerText, bodyText } = splitHeadersAndBody(partStr);
     const headers = parseMimeHeaders(headerText);
     const ctype = headers['content-type'] || '';
+    const ctypeLower = ctype.toLowerCase();
     const cdisp = headers['content-disposition'] || '';
     const cenc = (headers['content-transfer-encoding'] || '').toLowerCase();
 
+    // Recursively walk nested multipart/* containers (mixed -> related / alternative -> leaf parts)
     const boundaryM = ctype.match(/boundary=(?:"([^"]+)"|([^;\s]+))/i);
-    if (boundaryM) {
-      const boundary = boundaryM[1] || boundaryM[2];
-      const sections = bodyText.split(`--${boundary}`);
-      for (let i = 1; i < sections.length; i += 1) {
-        const sec = sections[i];
-        if (sec.startsWith('--')) break;
-        walkPart(sec.replace(/^\n/, '').replace(/\n$/, ''));
+    if (boundaryM || ctypeLower.startsWith('multipart/')) {
+      const boundary = boundaryM ? (boundaryM[1] || boundaryM[2]) : '';
+      if (boundary) {
+        const sections = bodyText.split(`--${boundary}`);
+        for (let i = 1; i < sections.length; i += 1) {
+          const sec = sections[i];
+          if (sec.startsWith('--')) break;
+          walkPart(sec.replace(/^\r?\n/, '').replace(/\r?\n$/, ''));
+        }
+        return;
       }
+    }
+
+    // Handle forwarded/embedded RFC822 message parts recursively
+    if (ctypeLower.includes('message/rfc822') && bodyText) {
+      walkPart(bodyText);
       return;
     }
 
-    const nameM = (cdisp + ';' + ctype).match(/(?:filename|name)\*?=(?:UTF-8'')?(?:"([^"]+)"|([^;\s]+))/i);
-    const filename = nameM ? decodeURIComponent(nameM[1] || nameM[2] || '') : '';
-    if (/\.xlsx$/i.test(filename) || ctype.toLowerCase().includes('spreadsheetml.sheet')) {
-      const buf = cenc.includes('base64')
-        ? Buffer.from(bodyText.replace(/\s+/g, ''), 'base64')
-        : Buffer.from(bodyText, 'binary');
-      results.push({ filename: filename || 'reply.xlsx', buffer: buf });
+    const filename = extractMimeFilename(cdisp, ctype);
+    const hasXlsxExt = /\.xlsx$/i.test(filename);
+    const hasXlsxMime = ctypeLower.includes('spreadsheetml.sheet');
+    if (hasXlsxExt || hasXlsxMime) {
+      let decodedBuf;
+      if (cenc.includes('base64')) {
+        decodedBuf = Buffer.from(bodyText.replace(/\s+/g, ''), 'base64');
+      } else if (cenc.includes('quoted-printable')) {
+        decodedBuf = decodeQuotedPrintableToBuffer(bodyText);
+      } else {
+        decodedBuf = Buffer.from(bodyText, 'latin1');
+      }
+      if (decodedBuf && decodedBuf.length > 0 && (hasXlsxExt || (decodedBuf[0] === 0x50 && decodedBuf[1] === 0x4b))) {
+        results.push({ filename: filename || 'reply.xlsx', buffer: decodedBuf });
+      }
     }
   };
 
@@ -10999,10 +11325,31 @@ function quoteImapStr(str) {
   return `"${String(str || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-async function fetchUnseenImapXlsxReplies({ host, port, user, pass, onMarkSeen }) {
+function extractImapLiteralPayload(payloadBuf) {
+  const rawStr = payloadBuf.toString('latin1');
+  const litM = /\{(\d+)\}\r\n/.exec(rawStr);
+  if (litM) {
+    const litLen = parseInt(litM[1], 10);
+    const startByte = rawStr.indexOf(litM[0]) + litM[0].length;
+    return payloadBuf.subarray(startByte, startByte + litLen).toString('latin1');
+  }
+  return rawStr;
+}
+
+const IMAP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatImapSinceDate(daysAgo = 2) {
+  const d = new Date(Date.now() - Math.max(0, daysAgo) * 24 * 60 * 60 * 1000);
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mon = IMAP_MONTHS[d.getUTCMonth()] || 'Jan';
+  const yyyy = d.getUTCFullYear();
+  return `${dd}-${mon}-${yyyy}`;
+}
+
+async function fetchRecentImapXlsxReplies({ host, port, user, pass, processedSet, onProcessMessages }) {
   return await new Promise((resolve, reject) => {
     const socket = tls.connect({ host, port, rejectUnauthorized: true });
-    socket.setTimeout(15000);
+    socket.setTimeout(25000);
 
     let buf = Buffer.alloc(0);
     let tagCounter = 1;
@@ -11067,45 +11414,60 @@ async function fetchUnseenImapXlsxReplies({ host, port, user, pass, onMarkSeen }
       });
       await sendCommand(`LOGIN ${quoteImapStr(user)} ${quoteImapStr(pass)}`);
       await sendCommand('SELECT INBOX');
-      const searchRes = await sendCommand('UID SEARCH UNSEEN');
+      const sinceStr = formatImapSinceDate(2);
+      const searchRes = await sendCommand(`UID SEARCH SINCE ${sinceStr}`);
       const searchText = searchRes.payload.toString('utf8');
       const searchLine = (searchText.match(/\* SEARCH([^\r\n]*)/i)?.[1] || '').trim();
       const uids = searchLine ? searchLine.split(/\s+/).filter((u) => /^\d+$/.test(u)) : [];
 
       const messages = [];
-      for (const uid of uids.slice(0, 20)) {
-        const fetchRes = await sendCommand(`UID FETCH ${uid} (BODY.PEEK[])`);
-        const rawStr = fetchRes.payload.toString('latin1');
-        const litM = /\{(\d+)\}\r\n/.exec(rawStr);
-        let rfc822 = '';
-        if (litM) {
-          const litLen = parseInt(litM[1], 10);
-          const startByte = rawStr.indexOf(litM[0]) + litM[0].length;
-          rfc822 = fetchRes.payload.subarray(startByte, startByte + litLen).toString('utf8');
-        } else {
-          rfc822 = rawStr;
+      const scannedNonXlsxKeys = [];
+      const recentUids = uids.slice(-35).reverse();
+
+      for (const uid of recentUids) {
+        // Lightweight header probe first so already-processed messages skip downloading attachments
+        const hdrRes = await sendCommand(`UID FETCH ${uid} (BODY.PEEK[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT)])`);
+        const hdrStr = extractImapLiteralPayload(hdrRes.payload);
+        const hdrs = parseMimeHeaders(hdrStr);
+        const msgIdHeader = String(hdrs['message-id'] || '').trim();
+        const hdrFrom = cleanEmailAddr(hdrs.from || '');
+        const dedupeKey = msgIdHeader || `uid-${uid}-${hdrFrom}`;
+        if (processedSet?.has(dedupeKey)) {
+          continue;
         }
+
+        const fetchRes = await sendCommand(`UID FETCH ${uid} (BODY.PEEK[])`);
+        const rfc822 = extractImapLiteralPayload(fetchRes.payload);
         const { headerText } = splitHeadersAndBody(rfc822);
         const headers = parseMimeHeaders(headerText);
+        const messageId = String(headers['message-id'] || msgIdHeader || '').trim();
+        const from = cleanEmailAddr(headers.from || hdrFrom || '');
+        const fullKey = messageId || dedupeKey;
         const attachments = extractXlsxAttachmentsFromMime(rfc822);
         if (attachments.length > 0) {
           messages.push({
             uid,
-            messageId: String(headers['message-id'] || '').trim(),
-            from: cleanEmailAddr(headers.from || ''),
-            subject: headers.subject || '',
+            dedupeKey: fullKey,
+            messageId,
+            from,
+            subject: headers.subject || hdrs.subject || '',
             attachments
           });
+        } else if (messageId) {
+          scannedNonXlsxKeys.push(messageId);
         }
       }
 
-      const processedUids = await onMarkSeen(messages);
+      const processedUids = await onProcessMessages(messages, scannedNonXlsxKeys);
       if (processedUids.length > 0) {
-        await sendCommand(`UID STORE ${processedUids.join(',')} +FLAGS.SILENT (\\Seen)`);
+        await sendCommand(`UID STORE ${processedUids.join(',')} +FLAGS.SILENT (\\Seen)`).catch(() => {});
       }
       await sendCommand('LOGOUT').catch(() => {});
       cleanup();
-      return messages.length;
+      return {
+        scannedRecentMessages: recentUids.length,
+        messagesWithXlsx: messages.length
+      };
     };
 
     socket.on('data', (chunk) => {
@@ -11164,30 +11526,22 @@ export async function handleIngestXlsxReply(req, res, payload = {}) {
 }
 
 /**
- * Automated Gmail IMAP UNSEEN `.xlsx` reply poller (`GET`/`POST /api/send-email?action=sync-email-replies`).
+ * Reusable internal Gmail IMAP SINCE `.xlsx` reply poller (searches recent INBOX messages,
+ * including read/opened replies, deduplicated via `processed_reply_message_ids`).
  */
-export async function handleSyncEmailReplies(req, res, payload = {}) {
-  const auth = await authorizeCronOrAdmin(req);
-  if (!auth?.authorized) {
-    return res.status(401).json({
-      success: false,
-      error: 'UNAUTHORIZED',
-      message: 'Unauthorized IMAP sync caller. Provide CRON_SECRET or Admin JWT.'
-    });
-  }
-
+export async function syncEmailRepliesInternal() {
   const smtpUser = String(process.env.SMTP_USER || process.env.GMAIL_USER || '').trim();
   const cleanPass = String(process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD || '').replace(/\s+/g, '').trim();
   const imapHost = String(process.env.IMAP_HOST || 'imap.gmail.com').trim();
   const imapPort = Number(process.env.IMAP_PORT || 993);
 
   if (!smtpUser || !cleanPass) {
-    return res.status(200).json({
+    return {
       success: false,
       skipped: true,
       configured: false,
       message: 'Gmail IMAP/SMTP credentials not configured in server environment.'
-    });
+    };
   }
 
   try {
@@ -11205,18 +11559,23 @@ export async function handleSyncEmailReplies(req, res, payload = {}) {
       } catch {}
     }
     const processedSet = new Set(processedIds);
+    const initialSize = processedSet.size;
 
     const results = [];
     const seenUidsToMark = [];
 
-    const totalMsgsWithXlsx = await fetchUnseenImapXlsxReplies({
+    const scanStats = await fetchRecentImapXlsxReplies({
       host: imapHost,
       port: imapPort,
       user: smtpUser,
       pass: cleanPass,
-      onMarkSeen: async (messages) => {
+      processedSet,
+      onProcessMessages: async (messages, nonXlsxKeys = []) => {
+        nonXlsxKeys.forEach((k) => {
+          if (k) processedSet.add(k);
+        });
         for (const msg of messages) {
-          const dedupeKey = msg.messageId || `uid-${msg.uid}-${msg.from}`;
+          const dedupeKey = msg.dedupeKey || msg.messageId || `uid-${msg.uid}-${msg.from}`;
           if (processedSet.has(dedupeKey)) {
             seenUidsToMark.push(msg.uid);
             continue;
@@ -11241,26 +11600,44 @@ export async function handleSyncEmailReplies(req, res, payload = {}) {
       }
     });
 
-    if (seenUidsToMark.length > 0) {
-      const nextList = Array.from(processedSet).slice(-250);
+    if (seenUidsToMark.length > 0 || processedSet.size !== initialSize) {
+      const nextList = Array.from(processedSet).slice(-400);
       await supabase
         .from('rma_settings')
         .upsert({ key: 'processed_reply_message_ids', value: JSON.stringify(nextList) }, { onConflict: 'key' });
     }
 
-    return res.status(200).json({
+    return {
       success: true,
-      scannedUnseenWithXlsx: totalMsgsWithXlsx,
+      scannedUnseenWithXlsx: scanStats?.messagesWithXlsx || 0,
+      scannedRecentMessages: scanStats?.scannedRecentMessages || 0,
       updatedCount: results.filter((r) => r.success && !r.noChanges).length,
       results
-    });
+    };
   } catch (err) {
     console.error('[IMAP Reply Sync Error]:', err);
-    return res.status(200).json({
+    return {
       success: false,
       error: err?.message || 'IMAP reply sync encountered a network/auth error.'
+    };
+  }
+}
+
+/**
+ * Automated Gmail IMAP SINCE `.xlsx` reply poller (`GET`/`POST /api/send-email?action=sync-email-replies`).
+ */
+export async function handleSyncEmailReplies(req, res, payload = {}) {
+  const auth = await authorizeCronOrAdmin(req);
+  if (!auth?.authorized) {
+    return res.status(401).json({
+      success: false,
+      error: 'UNAUTHORIZED',
+      message: 'Unauthorized IMAP sync caller. Provide CRON_SECRET or Admin JWT.'
     });
   }
+
+  const syncResult = await syncEmailRepliesInternal();
+  return res.status(200).json(syncResult);
 }
 
 --- END FILE: api/_lib/imapReplySyncHandler.js ---
@@ -11402,11 +11779,15 @@ function formatStructuredAddress({ street = '', barangay = '', city = '', region
 
 async function loadKnownGpsAnchors() {
   try {
-    const { data, error } = await supabase
+    const queryPromise = supabase
       .from('rma_settings')
       .select('value')
       .eq('key', 'known_gps_locations')
       .maybeSingle();
+    const { data, error } = await Promise.race([
+      queryPromise,
+      new Promise((resolve) => setTimeout(() => resolve({ data: null, error: { message: 'timeout' } }), 3000))
+    ]);
 
     if (!error && data && data.value != null) {
       let parsed = data.value;
@@ -11444,12 +11825,19 @@ async function getCatalogApiKey() {
     return envKey.trim();
   }
 
+  const withTimeout = (p, ms = 3000) => Promise.race([
+    p,
+    new Promise((resolve) => setTimeout(() => resolve({ data: null }), ms))
+  ]);
+
   try {
-    const { data } = await supabase
-      .from('products')
-      .select('code')
-      .eq('barcode', '__CONFIG_PO_API_KEY__')
-      .maybeSingle();
+    const { data } = await withTimeout(
+      supabase
+        .from('products')
+        .select('code')
+        .eq('barcode', '__CONFIG_PO_API_KEY__')
+        .maybeSingle()
+    );
 
     if (data?.code && data.code.trim() && data.code.trim() !== 'pk_live_po_cloud_db_2026_dev_key') {
       return data.code.trim();
@@ -11459,11 +11847,13 @@ async function getCatalogApiKey() {
   }
 
   try {
-    const { data: settingData } = await supabase
-      .from('rma_settings')
-      .select('value')
-      .eq('key', 'EXTERNAL_API_KEY_DANILO')
-      .maybeSingle();
+    const { data: settingData } = await withTimeout(
+      supabase
+        .from('rma_settings')
+        .select('value')
+        .eq('key', 'EXTERNAL_API_KEY_DANILO')
+        .maybeSingle()
+    );
 
     if (settingData?.value && typeof settingData.value === 'string' && settingData.value.trim() !== 'pk_live_po_cloud_db_2026_dev_key') {
       return settingData.value.trim();
@@ -11794,6 +12184,9 @@ export default async function handler(req, res) {
     if (!cleanBarcode) {
       return sendJson(res, 400, { success: false, error: 'BAD_REQUEST', message: 'Barcode is required.' });
     }
+    if (/^(RMA-|MANIFEST|NO-?LABEL-)/i.test(cleanBarcode)) {
+      return sendJson(res, 200, { success: true, found: false, source: 'synthetic' });
+    }
 
     try {
       // 1. Check Supabase 'products' table first (Priority 1)
@@ -11825,7 +12218,7 @@ export default async function handler(req, res) {
         // Priority A: Direct equality on ean_code (Manufacturer / Retail Barcode)
         try {
           const eanUrl = `${baseUrl}/data/erply_products?ean_code=${encodeURIComponent(code)}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
-          const rEan = await fetch(eanUrl, { headers: { 'X-API-Key': key, 'Accept': 'application/json' } });
+          const rEan = await fetch(eanUrl, { headers: { 'X-API-Key': key, 'Accept': 'application/json' }, signal: AbortSignal.timeout(4500) });
           if (rEan.ok) {
             const jEan = await rEan.json();
             if (jEan.data && jEan.data.length > 0) {
@@ -11838,7 +12231,7 @@ export default async function handler(req, res) {
         // Priority B: Direct equality on code2 (Secondary Barcode / UPC)
         try {
           const code2Url = `${baseUrl}/data/erply_products?code2=${encodeURIComponent(code)}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
-          const r2 = await fetch(code2Url, { headers: { 'X-API-Key': key, 'Accept': 'application/json' } });
+          const r2 = await fetch(code2Url, { headers: { 'X-API-Key': key, 'Accept': 'application/json' }, signal: AbortSignal.timeout(4500) });
           if (r2.ok) {
             const j2 = await r2.json();
             if (j2.data && j2.data.length > 0) {
@@ -11851,7 +12244,7 @@ export default async function handler(req, res) {
         // Priority C: Direct equality on code (Internal SKU)
         try {
           const skuUrl = `${baseUrl}/data/erply_products?code=${encodeURIComponent(code)}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
-          const rSku = await fetch(skuUrl, { headers: { 'X-API-Key': key, 'Accept': 'application/json' } });
+          const rSku = await fetch(skuUrl, { headers: { 'X-API-Key': key, 'Accept': 'application/json' }, signal: AbortSignal.timeout(4500) });
           if (rSku.ok) {
             const jSku = await rSku.json();
             if (jSku.data && jSku.data.length > 0) {
@@ -12292,24 +12685,24 @@ Send \`GET /api/v1/rma?queue=rtv_debit\` to retrieve merchandise queued for retu
 Retained for backwards-compatible REST API clients only; the streamlined portal UI routes returns directly through the **4-Choice Outcome & 5-Photo Driver Pickup Wizard** (Debit Claim, Replacement / Exchange, Scrap, or Good Stock Restock).
 
 #### 5. Dual Logistics Streams, Multi-RMA Consolidation & Batch Manifests:
-- **\`rma_type: "customer_inbound"\`**: Customer / branch store returns awaiting 4-Choice disposition, restock, or single/consolidated Credit Memo issuance.
-- **\`rma_type: "supplier_outbound"\`**: Defective merchandise batched for outbound Return to Vendor (RTV) recovery, 5-photo driver pickup verification with US Letter B&W PDF forms, and shared multi-RMA \`RTV-\` claims.
+- **\`rma_type: "customer_inbound"\`**: Customer / branch store returns awaiting 4-Choice disposition, restock, or single/consolidated Credit Memo issuance (collects \`store_branch\`).
+- **\`rma_type: "supplier_outbound"\`**: Defective merchandise batched for outbound Return to Vendor (RTV) recovery, 5-photo driver pickup verification with US Letter B&W PDF forms, and shared multi-RMA \`RTV-\` claims (**\`store_branch\` is completely omitted and saved as \`null\`** across submission UI, Quick Actions, \`RmaEmailEditorView\`, New RMA/lifecycle emails, and Supplier Claims \`.xlsx\`).
 - **Multi-Item Batch Manifests**: Batched returns are represented with \`is_parent: true\`, \`items\` (JSONB breakdown of line items), \`total_items\`, and \`total_quantity\`. Child records link via \`parent_rma_id\`.
 - **Dual-Stream 4-Choice Outcome & Multi-Photo Pickup Forms**:
   - **Customer Hub (\`customer_inbound\`)**: \`customer_credit\` (*Customer Credit Memo / Return Handover*), \`customer_exchange\` (*Customer Buffer Replacement / Good Stock Exchange*), \`scrap\` (*Throw Away / Dispose*), \`restock_good\` (*Put Back on Good Shelf*). Renders plain black-and-white US Letter (\`8.5in x 11in\`) \`CUSTOMER CREDIT MEMO / RETURN HANDOVER FORM\` and \`CUSTOMER BUFFER REPLACEMENT & HANDOVER FORM\`.
   - **Supplier RTV (\`supplier_outbound\`)**: \`supplier_credit\` (*Debit Claim*), \`supplier_exchange\` (*Replacement / Exchange*), \`scrap\`, \`restock_good\`. Renders \`SUPPLIER DEBIT CLAIM & PICKUP VALIDATION FORM\` and \`SUPPLIER REPLACEMENT / EXCHANGE & PICKUP FORM\`.
   - **Custom Multi-Copy B&W Printables**: Both \`SupplierPickupFormModal\` and \`CreditMemoVoucherModal\` support separated full pages vs combined dual-copy cut sheets and customizable \`ourCopyCount\` + \`counterpartyCopyCount\` (e.g., \`2 Ours + 2 Customer = 4 copies\`).
   - **Driver Pickup Multi-Photos & OCR**: Supports \`string[]\` arrays up to **10 photos per slot (50 max across 5 categories)** (\`driver_license_front\`, \`driver_license_back\`, \`truck_plate\`, \`driver_handover\`, \`pickup_items\`), accepts any valid **Philippine Gov't / Legal ID**, runs Truck Plate OCR via \`POST /api/upload-photo?action=inspect-plate\`, requires manual \`processed_by\` entry, and sends \`pickup_debit_claim\` emails with item \`explanation\` included and \`Store / Branch\` + \`Warehouse Location\` omitted.
-- **Unified Printable QR Card & Multi-Select Studio (\`ReturnQRModal.jsx\`)**: Single centered source of truth for \`Save QR (PNG)\` and \`Print QR\` showing **Quantity & Unit** cleanly with **no Supplier Name**, plus US Letter default 1-page / multi-page consolidated packing, independent per-QR mm/scale sizing, and Public Portal / QR Studio **\`Add More RMA QRs\`** (\`➕ Add More RMA QRs to Sheet\` + \`Add Recent Session QRs\`) consolidated multi-QR printing isolated by session/stream/mode.
+- **Unified Printable QR Card & Multi-Select Studio (\`ReturnQRModal.jsx\`)**: Single centered source of truth rendered inside \`#rma-qr-batch-sheet-root\` and printed strictly via isolated \`iframe.srcdoc\` (\`printIsolatedElement\`, never main-window \`window.print()\`) for \`Save QR (PNG)\` and \`Print QR\` showing **Quantity & Unit** cleanly with **no Supplier Name**, plus US Letter default 1-page / multi-page consolidated packing, independent per-QR mm/scale sizing, Public Portal / QR Studio **\`Add More RMA QRs\`** (\`➕ Add More RMA QRs to Sheet\` + \`Add Recent Session QRs\`), and a **\`Consolidated (1 QR per RMA)\` *(default)* vs \`Single / Per-Item QRs (1 QR per Item)\`** segmented toggle when any RMA contains multiple line items.
 - **Relocated Customer RMA Hub Architecture**: \`Credit Memos Ledger\` operates directly as an integrated sub-tab inside \`Customer RMA Hub\` (in both Live Mode and Test Mode Sandbox).
 - **Email-Bound RMA Editor (\`/api/v1/rma-email-edit\`)**: Scoped Google Identity Lock endpoint allowing all authorized **To + CC recipients** (\`No Expiry • Revocable by Admin\`, routed cleanly without extra Vercel functions) to update supplier, product/SKU, pricing, expiry (\`YYYY-MM-DD\`), and SI/DR/PO documents.
 - **Per-Email Recipient Profiles, 4-Step 10-Day Pickup Follow-Up & Editable Schedules (\`/api/send-email?action=daily-matrix\`, \`?action=daily-followup\`)**:
-  - Supports Admin-only customizable per-type **To** and **CC** lists under \`rma_settings.email_recipients_by_type\` (Live) & \`rma_settings.test_email_recipients_by_type\` (Test Sandbox — **never exposed on public \`/\`**), editable \`rma_settings.daily_matrix_config\` (Rolling or Custom \`YYYY-MM-DD\`, scope, \`includeZeroCatalogSkus\`), and adjustable \`autoSendTimePht\` (\`HH:mm Asia/Manila\`, honoring \`respectSchedule=true\`).
+  - Supports Admin-only customizable per-type **To** and **CC** lists under \`rma_settings.email_recipients_by_type\` (Live) & \`rma_settings.test_email_recipients_by_type\` (Test Sandbox — **never exposed on public \`/\`**), editable \`rma_settings.daily_matrix_config\` (Rolling or Custom \`YYYY-MM-DD\`, scope, \`includeZeroCatalogSkus\`), and adjustable \`autoSendTimePht\` (\`HH:mm Asia/Manila\`, defaulting to **\`13:00\` (1:00 PM PHT)** for both Daily Matrix and Daily Follow-Up while honoring \`respectSchedule=true\`). Manual \`Send Follow-Up\` UI buttons are removed; follow-ups dispatch automatically via scheduler/cron.
   - **Strict 4-Choice Statuses, Day 0..10 Timeline & Full Outcome Reset**: Returns default strictly to \`Pending\` (\`pending\`) upon intake (never false \`Scrapped\`), render \`Status (YYYY-MM-DD HH:mm)\` badges alongside explicit **Day 0..10 Step 1–4 Workflow Timelines**, support bundling additional RMAs directly inside the 4-Choice Wizard, allow optional 5 pickup photos with persistent \`rma_settings.supplier_directory_store\` auto-fill, record mandatory \`Prepared Date & Time\` below \`Prepared By\`, append \`formatSaveFileTimestamp\` (\`MMM DD, YYYY HHmm Asia/Manila\`) onto downloaded XLSX/PDF/PNG artifacts, and support **Full Timeline & Outcome Reset** (\`resetReportToPending\` via \`🔄 Reset Timeline\` / \`↩️ Reset to Pending\`, clearing 4-Choice outcome, pickup/scrap/restock/closed state & restarting the 10-day clock back to \`Pending\` while preserving Supplier Name & Emails).
   - Tracks **4-Step SLA Lifecycle**: \`Step 1 Report Date\` -> \`Step 2 Waiting (Day 1..10 Follow-Up)\` -> \`Step 3 Picked Up / Handover Date\` -> \`Step 4 Case Close\` (auto-stops on pickup/\`✓ Case Close\`, or auto-disposes after Day 10 to \`Disposal / Scrap Area\` w/ \`workflow_resolution: "scrapped_no_reorder"\` and notifies \`new_rma\` recipients).
 - **Standardized \`Serial No.\` Exports, 2-Way RMA Alert Mirror \`.xlsx\` & Email Reply Sync (\`/api/send-email?action=sync-email-replies\`, \`?action=ingest-xlsx-reply\`)**:
-  - All non-Matrix Excel tables (\`Customer Inbound\`, \`Supplier Claims\`, \`Credit Memos\`, \`Tickets Vault\`) and every New RMA Alert mirror \`.xlsx\` workbook (\`Serial No. | Field | Value | Format / Notes\` + \`MANIFEST LINE ITEMS\`) enforce **\`'Serial No.'\`** as **Column A** (1-indexed integer sequence) and set \`replyTo\`.
-  - Authorized recipients can reply-all with the edited \`.xlsx\` (polled automatically via TLS IMAP \`UNSEEN\` filter on \`.github/workflows/rma-scheduler.yml\` or manually uploaded in \`QuickRMAActionModal\` / \`SettingsTab\`), with backward-compatible Column A/B shifted & legacy header parsing in \`imapReplySyncHandler.js\`, writing updates to \`rma_reports\` (preserving \`[TEST_MODE]\` on \`RMA-TEST-...\` Test-to-Test replies) + \`supplier_directory_store\` and appending \`EMAIL_XLSX_REPLY_UPDATE\` to \`audit_trail\`.
+  - All non-Matrix Excel tables (\`Customer Inbound\`, \`Supplier Claims\`, \`Credit Memos\`, \`Tickets Vault\`) and every New RMA Alert mirror \`.xlsx\` workbook (\`Serial No. | Field | Value | Format / Notes\` plus \`MANIFEST LINE ITEMS\` including per-item **\`Supplier Name\`**) enforce **\`'Serial No.'\`** as **Column A** (1-indexed integer sequence) and set \`replyTo\`.
+  - **Fully Automatic \`.xlsx\` Reply Ingestion**: Manual \`Upload Edited .xlsx\` and \`Check Email .xlsx Replies\` UI buttons are removed; replies are ingested automatically every 60s while Admin is active and via cron (\`UID SEARCH SINCE\` 2-day window, recursive nested MIME \`.xlsx\` extractor, deduplicated by \`processed_reply_message_ids\`). \`imapReplySyncHandler.js\` matches \`MANIFEST LINE ITEMS\` rows by Barcode, SKU, or 1-based \`Serial No.\` index and updates only that specific item's \`supplier_name\` (plus edited SKU/name/qty/price/expiry/explanation) across \`parentReport.items[idx]\`, child \`rma_reports\` (\`parent_rma_id\`), and \`rma_items\` (\`rma_report_id\`) without overwriting siblings, enforcing strict Live vs Test (\`RMA-TEST-...\` / \`[TEST_MODE]\`) isolation and appending \`EMAIL_XLSX_REPLY_UPDATE\` to \`audit_trail\`.
 - **Pinpoint Reverse-Geocode GPS, Unified Timestamp Camera & Single Section 3 Input (\`/api/v1/products/lookup?action=reverse-geocode\`)**:
   - Resolves coordinates using Priority 1 **Known Warehouse / Dock Geofence Anchors** (\`rma_settings.known_gps_locations\`, seeded \`Pingcon Warehouse\`: \`64 Mendez Rd, Baesa, Quezon City, Metro Manila 1106\` within \`250m\`), Priority 2 **Google Maps Geocoding API**, and Priority 3 **Nominatim (\`zoom=18\`)** prioritizing Street+ZIP resolution, anchoring Google Maps pins via \`/maps/place/{address}/@{lat},{lon},18z\`.
   - Unified live timestamped camera capture everywhere (\`Take Photo\` -> full-bleed \`object-cover\` \`CameraCaptureModal\` + \`Upload from Gallery\`, removing old 3-way \`Capture Mode\` switchers and un-watermarked \`capture="environment"\` triggers) and single bordered stream-aware Section 3 input (\`3. Supplier Name (Optional)\` via \`<SupplierInput />\` on Supplier RTV vs \`3. Company / Store Name (Optional)\` on Customer Hub).
@@ -13486,7 +13879,7 @@ export const RMAReportSchema = z.object({
   reporter_name: z.string().nullable().optional().openapi({ example: 'Juan Dela Cruz' }),
   reporter_contact: z.string().nullable().optional().openapi({ example: '09171234567' }),
   reported_by: z.string().openapi({ example: 'Jarmen (API)' }),
-  store_branch: z.string().nullable().optional().openapi({ example: 'Savemore Taguig - Branch 14' }),
+  store_branch: z.string().nullable().optional().openapi({ example: 'Savemore Taguig - Branch 14', description: 'Customer store / branch (Customer Hub customer_inbound only; always null/omitted on Supplier RTV supplier_outbound)' }),
   invoice_dr_number: z.string().nullable().optional().openapi({ example: 'DR-2026-8891' }),
   si_number: z.string().nullable().optional().openapi({ example: 'SI-2026-9021' }),
   dr_number: z.string().nullable().optional().openapi({ example: 'DR-2026-8891' }),
@@ -13538,7 +13931,7 @@ export const CreateRMAReportSchema = z.object({
   photos: z.array(z.string().url()).optional().default([]).openapi({ example: ['https://example.com/box1.jpg'] }),
   reporter_name: z.string().optional().openapi({ example: 'Warehouse Lead' }),
   reporter_contact: z.string().optional().openapi({ example: '09170001122' }),
-  store_branch: z.string().optional().openapi({ example: 'Savemore Taguig - Branch 14' }),
+  store_branch: z.string().optional().openapi({ example: 'Savemore Taguig - Branch 14', description: 'Customer Hub (customer_inbound) branch only; null/ignored for supplier_outbound' }),
   invoice_dr_number: z.string().optional().openapi({ example: 'DR-2026-8891' }),
   si_number: z.string().optional().openapi({ example: 'SI-2026-9021' }),
   dr_number: z.string().optional().openapi({ example: 'DR-2026-8891' }),
@@ -13567,7 +13960,7 @@ export const UpdateRMAReportSchema = z.object({
   hold_reason: z.string().optional().openapi({ example: 'Packaging seal torn during transit' }),
   rejection_reason: z.string().optional().openapi({ example: 'Outside return window' }),
   quantity: z.number().int().min(1).optional().openapi({ example: 3 }),
-  store_branch: z.string().optional().openapi({ example: 'Savemore Taguig - Branch 14' }),
+  store_branch: z.string().optional().openapi({ example: 'Savemore Taguig - Branch 14', description: 'Customer Hub (customer_inbound) branch only; null/ignored for supplier_outbound' }),
   invoice_dr_number: z.string().optional().openapi({ example: 'DR-2026-8891' }),
   si_number: z.string().optional().openapi({ example: 'SI-2026-9021' }),
   dr_number: z.string().optional().openapi({ example: 'DR-2026-8891' }),
@@ -13988,8 +14381,8 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
     skipped: z.boolean().optional(),
     reason: z.string().optional().openapi({ example: 'BEFORE_SCHEDULED_TIME' }),
     phtDate: z.string().optional().openapi({ example: '2026-11-24' }),
-    phtTime: z.string().optional().openapi({ example: '08:05' }),
-    targetTimePht: z.string().optional().openapi({ example: '08:00', description: 'Editable HH:mm Asia/Manila target schedule persisted in rma_settings' }),
+    phtTime: z.string().optional().openapi({ example: '13:05' }),
+    targetTimePht: z.string().optional().openapi({ example: '13:00', description: 'Editable HH:mm Asia/Manila target schedule persisted in rma_settings (default 13:00 for both Follow-Up & Matrix)' }),
     isTestMode: z.boolean().optional(),
     sandboxEmail: z.string().optional().openapi({ example: 'mgan@pingconmarketing.com' }),
     summary: z.object({
@@ -14006,7 +14399,7 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
     method: 'get',
     path: '/api/send-email',
     summary: 'Execute Scheduled Daily 10-Day Pickup Follow-Up (?action=daily-followup), Daily Matrix (?action=daily-matrix), or IMAP Email .xlsx Reply Sync (?action=sync-email-replies)',
-    description: 'Vercel Cron / GitHub Actions endpoint (protected by CRON_SECRET or Admin Bearer JWT under 12-function cap). Respects adjustable `autoSendTimePht` (`respectSchedule=true`) in `Asia/Manila` (`08:00` default Follow-Up, `13:00` default Matrix), enforces Test Sandbox isolation (`mgan@pingconmarketing.com` + `[TEST] ` subject prefix), and polls UNSEEN Gmail `.xlsx` reply attachments via `?action=sync-email-replies`.',
+    description: 'Vercel Cron / GitHub Actions endpoint (protected by CRON_SECRET or Admin Bearer JWT under 12-function cap). Respects adjustable `autoSendTimePht` (`respectSchedule=true`) in `Asia/Manila` (`13:00` default Follow-Up & Matrix, zero manual Send Follow-Up UI button), enforces Test Sandbox isolation (`mgan@pingconmarketing.com` + `[TEST] ` subject prefix), and polls recent Gmail `SINCE` (2-day window, recursive MIME) `.xlsx` reply attachments via `?action=sync-email-replies` (plus optional `?syncReplies=1` on cron).',
     tags: ['Automation & Email'],
     security: [{ BearerAuth: [] }],
     request: {
@@ -14032,9 +14425,9 @@ curl -X PATCH "https://rma-portal-pingconmarketing.vercel.app/api/v1/rma/RMA-202
     summary: 'Dispatch RMA Email (with Mirror .xlsx), Lifecycle PDF, Daily Matrix (.xlsx), 10-Day SLA Follow-Up, or 2-Way .xlsx Reply Sync',
     description: `Unified serverless mailer & 2-way .xlsx reply processor preserving Vercel's 12-function cap:
 - **Standard, Lifecycle & Admin-Only Test Mode Emails**: Routes Live notifications via \`rma_settings.email_recipients_by_type\` and Test Mode notifications via Admin-only \`rma_settings.test_email_recipients\` / \`test_email_recipients_by_type\` (**never exposed on public \`/\`**), enforcing \`[TEST] \` as the first subject word and Sandbox isolation (default \`mgan@pingconmarketing.com\`). New RMA alerts attach an editable \`Serial No. | Field | Value | Format / Notes\` + \`MANIFEST LINE ITEMS\` (\`Serial No.\` Column A) mirror \`.xlsx\` workbook (matching subject + \`formatSaveFileTimestamp\`) and set \`replyTo\`. \`pickup_debit_claim\` omits \`Store / Branch:\` and \`Warehouse Location:\` while embedding \`Explanation / Defect Notes:\`, optional 5-slot pickup photos (max 50), and \`Debit-Claim-Form-*.pdf\` / \`Customer-Credit-Handover-Form-*.pdf\`.
-- **\`?action=daily-followup\`**: Runs 4-Step Workflow & Day 0..10 Pickup Follow-Up SLA (Day 1..10 reminders w/ 4-Step HTML table & health warning; stops immediately when Picked Up / Case Closed; can be fully reset back to \`Pending\` via \`resetReportToPending\`; auto-disposes >10 calendar days unclaimed to \`Disposal / Scrap Area\` w/ \`workflow_resolution: "scrapped_no_reorder"\` and notifies \`new_rma\` recipients).
+- **\`?action=daily-followup\`**: Runs automated 4-Step Workflow & Day 0..10 Pickup Follow-Up SLA (default \`13:00\` PHT; manual UI \`Send Follow-Up\` buttons removed; stops immediately on Picked Up / \`✓ Case Close\`; resettable via \`resetReportToPending\`; auto-disposes >10 calendar days unclaimed to \`Disposal / Scrap Area\` w/ \`workflow_resolution: "scrapped_no_reorder"\` and notifies \`new_rma\` recipients).
 - **\`?action=daily-matrix\`**: Generates and emails the strict OOXML Overall RMA Matrix (\`.xlsx\`) using \`daily_matrix_config\` (Rolling Days or Custom \`YYYY-MM-DD\`, scope, \`includeZeroCatalogSkus\`, editable \`autoSendTimePht\`).
-- **\`?action=sync-email-replies\` / \`?action=ingest-xlsx-reply\`**: Polls unread Gmail IMAP \`.xlsx\` replies (or accepts base64 \`.xlsx\` uploads from Quick Actions / webhook), supports both standardized \`Serial No.\` Column A workbooks and legacy Column A \`Field | Value\` layouts, validates sender authorization & strict Test (\`RMA-TEST-...\`) vs Live (\`RMA-...\`) isolation, preserves \`[TEST_MODE]\`, updates \`rma_reports\` + \`rma_settings.supplier_directory_store\`, and appends \`EMAIL_XLSX_REPLY_UPDATE\` to \`audit_trail\`.`,
+- **\`?action=sync-email-replies\` / \`?action=ingest-xlsx-reply\`**: Automatically polls recent Gmail IMAP \`.xlsx\` replies via \`UID SEARCH SINCE\` + recursive nested MIME parsing (manual Upload/Check UI buttons removed; Admin UI polls every 60s), supports per-item \`Supplier Name\` updates inside \`MANIFEST LINE ITEMS\` (matching Barcode, SKU, or 1-based \`Serial No.\` across \`parentReport.items\`, child \`rma_reports\`, and \`rma_items\` without overwriting siblings), supports legacy headers, enforces strict Test (\`RMA-TEST-...\`) vs Live (\`RMA-...\`) isolation, preserves \`[TEST_MODE]\`, updates \`rma_settings.supplier_directory_store\`, and appends \`EMAIL_XLSX_REPLY_UPDATE\` to \`audit_trail\`.`,
     tags: ['Automation & Email'],
     security: [{ BearerAuth: [] }],
     request: {
@@ -15514,7 +15907,7 @@ export default function App() {
         const followCfg = notificationService.getDailyFollowUpConfig();
         if (
           followCfg.autoEnabled !== false &&
-          hasReachedManilaSchedule(normalizeTimeHhmm(followCfg.autoSendTimePht, '08:00'))
+          hasReachedManilaSchedule(normalizeTimeHhmm(followCfg.autoSendTimePht, '13:00'))
         ) {
           const lastFollowDay = localStorage.getItem('rma_bg_followup_sent_ymd');
           if (lastFollowDay !== todayYmd) {
@@ -15537,6 +15930,42 @@ export default function App() {
       clearInterval(intervalId);
     };
   }, [isAdminView, currentUser?.role, isTestMode]);
+
+  // Automatic 60-second Gmail IMAP `.xlsx` reply poller while Admin View is active (Live & Test Sandbox isolation preserved server-side)
+  useEffect(() => {
+    const role = currentUser?.role;
+    if (!isAdminView || !['admin', 'super_admin'].includes(role)) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+    const runReplySyncTick = async () => {
+      if (cancelled || inFlight) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      inFlight = true;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const expMs = session?.expires_at ? session.expires_at * 1000 : 0;
+        if (!session?.access_token || expMs <= Date.now() + 30000) {
+          return;
+        }
+        const res = await notificationService.syncEmailRepliesNow();
+        if (!cancelled && res?.success && Number(res?.updatedCount) > 0) {
+          refreshAllData();
+        }
+      } catch {
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const syncIntervalId = setInterval(runReplySyncTick, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(syncIntervalId);
+    };
+  }, [isAdminView, currentUser?.role]);
 
   // Simple 4-Option Supplier RTV Wizard, Letter Pickup Validation Form & Daily Matrix Exporter State
   const [simpleRtvWizard, setSimpleRtvWizard] = useState({ isOpen: false, report: null, reports: [], initialMode: 'wizard' });
@@ -16266,6 +16695,7 @@ export default function App() {
         refreshAllData();
       } else if (deleteModalState.type === 'report') {
         const { id, rmaNumber, item } = deleteModalState;
+        mutationEpochRef.current += 1;
         setRecentReportsList(prev => prev.map(r => {
           if ((id && r.id === id) || (rmaNumber && r.rma_number === rmaNumber)) {
             return {
@@ -16299,6 +16729,7 @@ export default function App() {
         const items = deleteModalState.items || [];
         const idSet = new Set(items.map(r => r.id).filter(Boolean));
         const rmaSet = new Set(items.map(r => r.rma_number).filter(Boolean));
+        mutationEpochRef.current += 1;
         setRecentReportsList(prev => prev.map(r => {
           if (idSet.has(r.id) || (r.rma_number && rmaSet.has(r.rma_number))) {
             return {
@@ -16322,6 +16753,7 @@ export default function App() {
         refreshAllData();
       } else if (deleteModalState.type === 'credit_memo') {
         const memo = deleteModalState.item;
+        mutationEpochRef.current += 1;
         setCreditMemosList(prev => prev.filter(m => m.credit_memo_number !== memo.credit_memo_number));
         await creditMemoService.deleteCreditMemo(memo.credit_memo_number, memo.report_id);
         mutationEpochRef.current += 1;
@@ -16331,6 +16763,7 @@ export default function App() {
         const items = deleteModalState.items || [];
         const memoNumbers = items.map(m => m.credit_memo_number);
         const numSet = new Set(memoNumbers);
+        mutationEpochRef.current += 1;
         setCreditMemosList(prev => prev.filter(m => !numSet.has(m.credit_memo_number)));
         await creditMemoService.deleteMultipleCreditMemos(memoNumbers);
         mutationEpochRef.current += 1;
@@ -17379,7 +17812,7 @@ export default function App() {
         if (latestValidResult.dr_number) setDrNumber(latestValidResult.dr_number);
         if (latestValidResult.po_number) setPoNumber(latestValidResult.po_number);
         if (latestValidResult.invoice_dr_number) setInvoiceDrNumber(latestValidResult.invoice_dr_number);
-        if (latestValidResult.store_branch) setStoreBranch(latestValidResult.store_branch);
+        if (latestValidResult.store_branch && !isSupplierRtvPortal) setStoreBranch(latestValidResult.store_branch);
 
         const detectedNum = latestValidResult.si_number || latestValidResult.dr_number || latestValidResult.po_number || latestValidResult.invoice_dr_number || 'Detected';
         showToast(`✓ Verified ${latestValidResult.document_type || 'Paperwork'} (${detectedNum})`, 'success');
@@ -17634,10 +18067,11 @@ export default function App() {
     const isExplicitNA = /^n\/?a$/i.test(rawBranchInput);
     const cleanBranchInput = (!rawBranchInput || isExplicitNA) ? '' : rawBranchInput;
     const isSuperAdminSupplierOutbound = Boolean(currentUser?.role === 'super_admin' && !gateSession && testModeStreamType === 'supplier_outbound');
-    const isSupplierStream = isSupplierRtvPortal || isSuperAdminSupplierOutbound || gateSession?.stream_type === 'supplier_outbound';
-    const resolvedBranch = isExplicitNA
+    const isSupplierStream = isSupplierRtvPortal || isSuperAdminSupplierOutbound || gateSession?.stream_type === 'supplier_outbound' || (!gateSession?.stream_type && gateSession?.type === 'internal_warehouse');
+    // Supplier Outbound RTV never stores a Customer Store Branch
+    const resolvedBranch = isSupplierStream
       ? null
-      : (cleanBranchInput || (!isSupplierStream ? (inviteEntity || null) : null));
+      : (isExplicitNA ? null : (cleanBranchInput || inviteEntity || null));
     const isPlaceholderSup = (val) => {
       const s = String(val || '').trim().toLowerCase();
       return !s || s === 'warehouse' || s === 'pending assignment' || s === 'unassigned' || s === 'n/a';
@@ -17769,8 +18203,8 @@ export default function App() {
       try {
         const photoMeta = {
           rmaType: determinedRmaType,
-          customerName: capturedStoreBranch,
-          storeBranch: capturedStoreBranch,
+          customerName: determinedRmaType === 'supplier_outbound' ? null : capturedStoreBranch,
+          storeBranch: determinedRmaType === 'supplier_outbound' ? null : capturedStoreBranch,
           supplierName: capturedItems[0]?.supplier_name,
           is_unlabeled: isUnlabeledItem || isUnlabeledBarcode(primaryBarcode)
         };
@@ -18192,10 +18626,12 @@ export default function App() {
                           {formatManifestBreakdown(submitSuccessReport.items, true)}
                         </strong>
                       </div>
-                      <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
-                        <span className="text-slate-500 dark:text-slate-400">Store / Branch:</span>
-                        <strong className="text-slate-800 dark:text-slate-200">{submitSuccessReport.store_branch || 'N/A'}</strong>
-                      </div>
+                      {submitSuccessReport.rma_type !== 'supplier_outbound' && (
+                        <div className="flex justify-between border-b border-emerald-200/80 dark:border-emerald-900/60 pb-1.5">
+                          <span className="text-slate-500 dark:text-slate-400">Store / Branch:</span>
+                          <strong className="text-slate-800 dark:text-slate-200">{submitSuccessReport.store_branch || 'N/A'}</strong>
+                        </div>
+                      )}
                       <div className="pt-1 space-y-1">
                         <span className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 block">
                           Included Manifest Items:
@@ -18270,7 +18706,7 @@ export default function App() {
                             submitSuccessReport.items?.[0]?.pieces_per_case || submitSuccessReport.items?.[0]?.piecesPerCase
                           )}
                       </span>
-                      {submitSuccessReport.store_branch && (
+                      {submitSuccessReport.rma_type !== 'supplier_outbound' && submitSuccessReport.store_branch && (
                         <span className="text-[10px] text-blue-700 dark:text-blue-300 font-bold truncate">
                           • {submitSuccessReport.store_branch}
                         </span>
@@ -18292,7 +18728,7 @@ export default function App() {
                       <div>Reported by: <strong className="text-slate-700 dark:text-slate-300">{submitSuccessReport.reporter_name || 'Staff'}</strong></div>
                       {submitSuccessReport.reporter_contact && <div>Contact: <strong className="font-mono text-slate-700 dark:text-slate-300">{submitSuccessReport.reporter_contact}</strong></div>}
                       {submitSuccessReport.invoice_dr_number && (
-                        <div>DR/Invoice #: <strong className="font-mono text-violet-700 dark:text-violet-300">{submitSuccessReport.invoice_dr_number}</strong> {submitSuccessReport.store_branch ? `(${submitSuccessReport.store_branch})` : ''}</div>
+                        <div>DR/Invoice #: <strong className="font-mono text-violet-700 dark:text-violet-300">{submitSuccessReport.invoice_dr_number}</strong> {submitSuccessReport.rma_type !== 'supplier_outbound' && submitSuccessReport.store_branch ? `(${submitSuccessReport.store_branch})` : ''}</div>
                       )}
                       <div>Date &amp; Time (YYYY-MM-DD HH:mm): <span className="font-mono">{formatDateTimeYmdHm(submitSuccessReport.created_at || Date.now())}</span></div>
                     </div>
@@ -18340,7 +18776,7 @@ export default function App() {
                           reporter: submitSuccessReport.reporter_name || submitSuccessReport.reporter || 'Staff',
                           reporterContact: submitSuccessReport.reporter_contact || '',
                           dateTimeFormatted: dateFormatted,
-                          storeBranch: submitSuccessReport.store_branch,
+                          storeBranch: submitSuccessReport.rma_type === 'supplier_outbound' ? null : submitSuccessReport.store_branch,
                           totalItems: submitSuccessReport.total_items,
                           totalQuantity: submitSuccessReport.total_quantity,
                           items: submitSuccessReport.items,
@@ -25238,43 +25674,6 @@ export default function CustomerHubTab({
     return () => window.removeEventListener('rma-settings-changed', syncCfg);
   }, []);
 
-  const handleCustomerSendFollowUp = async (item) => {
-    const statusInfo = getCleanHumanWorkflowStatus(item, savedProductsList, {
-      customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled
-    });
-    const wf = statusInfo.workflow;
-    if (wf.isClosed) return;
-    if (!wf.party.hasValidSupplier || (!isTestMode && wf.party.toEmails.length === 0)) {
-      setFollowUpModalReport(item);
-      return;
-    }
-    const key = item.id || item.rma_number;
-    setCustomerRowBusyId(key);
-    setCustomerFollowUpBanner(null);
-    try {
-      const res = await notificationService.runDailyFollowUpNow({
-        isTestMode: Boolean(isTestMode),
-        force: true,
-        rmaNumber: item.rma_number,
-        operation: 'send_single'
-      });
-      if (res?.success) {
-        setCustomerFollowUpBanner({
-          type: 'success',
-          text: `Dispatched Day ${wf.calendarDay} of 10 handover follow-up for ${item.rma_number}.`
-        });
-        window.dispatchEvent(new CustomEvent('rma-data-changed', { detail: { type: 'followup-sent', rmaNumber: item.rma_number } }));
-      } else {
-        setCustomerFollowUpBanner({
-          type: 'error',
-          text: res?.error || res?.errors?.[0]?.message || `Could not send follow-up for ${item.rma_number}.`
-        });
-      }
-    } finally {
-      setCustomerRowBusyId(null);
-    }
-  };
-
   const handleCustomerCloseCase = async (item) => {
     const key = item.id || item.rma_number;
     setCustomerRowBusyId(key);
@@ -26702,29 +27101,17 @@ export default function CustomerHubTab({
                             </button>
                           )}
 
-                          {/* Follow-Up & Case Close Quick Actions */}
+                          {/* Follow-Up Case Close Quick Action */}
                           {!computeFourStepWorkflow(item, savedProductsList, { customerFollowUpDefaultEnabled: followUpConfig.customerFollowUpDefaultEnabled }).isClosed && (
-                            <>
-                              <button
-                                type="button"
-                                disabled={customerRowBusyId === (item.id || item.rma_number)}
-                                onClick={() => handleCustomerSendFollowUp(item)}
-                                className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
-                                title="Send 10-Day Pickup / Handover Follow-Up Email now"
-                              >
-                                <Send className="w-2.5 h-2.5" />
-                                <span>📧 Send Follow-Up</span>
-                              </button>
-                              <button
-                                type="button"
-                                disabled={customerRowBusyId === (item.id || item.rma_number)}
-                                onClick={() => handleCustomerCloseCase(item)}
-                                className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap disabled:opacity-50"
-                                title="Close 4-Step Workflow Case & Stop 10-Day Countdown"
-                              >
-                                <span>✓ Case Close</span>
-                              </button>
-                            </>
+                            <button
+                              type="button"
+                              disabled={customerRowBusyId === (item.id || item.rma_number)}
+                              onClick={() => handleCustomerCloseCase(item)}
+                              className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap disabled:opacity-50"
+                              title="Close 4-Step Workflow Case & Stop 10-Day Countdown"
+                            >
+                              <span>✓ Case Close</span>
+                            </button>
                           )}
 
                           {/* Split Qty / Details */}
@@ -27051,6 +27438,11 @@ export default function CustomerHubTab({
                                           {/* Product Description: min-w-[200px] with truncate and title={it.name} */}
                                           <td className="py-2 px-3 font-bold text-slate-900 dark:text-white min-w-[200px] truncate" title={childName}>
                                             <div className="truncate">{childName}</div>
+                                            {child.supplier_name && (
+                                              <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold truncate" title={`Supplier: ${child.supplier_name}`}>
+                                                Supplier: {child.supplier_name}
+                                              </div>
+                                            )}
                                             {child.defect_details && (
                                               <div className="text-[10px] text-slate-400 font-normal italic truncate" title={child.defect_details}>{child.defect_details}</div>
                                             )}
@@ -27444,14 +27836,6 @@ export default function CustomerHubTab({
                             + Set Supplier &amp; Email
                           </button>
                         )}
-                        <button
-                          type="button"
-                          disabled={customerRowBusyId === (item.id || item.rma_number)}
-                          onClick={() => handleCustomerSendFollowUp(item)}
-                          className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-black cursor-pointer whitespace-nowrap disabled:opacity-50"
-                        >
-                          📧 Send Follow-Up
-                        </button>
                         <button
                           type="button"
                           disabled={customerRowBusyId === (item.id || item.rma_number)}
@@ -28177,19 +28561,20 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
     if (!window.confirm('Are you sure you want to revoke this authorization link? Access will be blocked immediately.')) {
       return;
     }
+    loadSeqRef.current += 1;
+    setInvites((prev) =>
+      prev.map((inv) => ((inv.token === token || inv.id === token) ? { ...inv, status: 'revoked' } : inv))
+    );
+    showToast('Invite link revoked.');
+    if (generatedInvite?.token === token) {
+      setGeneratedInvite(null);
+    }
     try {
       await inviteService.revokeInvite(token);
-      loadSeqRef.current += 1;
-      setInvites((prev) =>
-        prev.map((inv) => ((inv.token === token || inv.id === token) ? { ...inv, status: 'revoked' } : inv))
-      );
-      showToast('Invite link revoked.');
       loadInvites();
-      if (generatedInvite?.token === token) {
-        setGeneratedInvite(null);
-      }
     } catch (err) {
       alert(`Failed to revoke invite: ${err.message}`);
+      loadInvites();
     }
   };
 
@@ -28202,17 +28587,20 @@ export default function CustomerRMAInvitesModal({ isOpen, onClose, currentUser }
 
     const tokenKey = inv.token || inv.id;
     setDeletingToken(tokenKey);
+    loadSeqRef.current += 1;
+    setInvites((prev) =>
+      prev.filter((item) => !((inv.token && item.token === inv.token) || (inv.id && item.id === inv.id)))
+    );
+    if (generatedInvite?.token === inv.token) {
+      setGeneratedInvite(null);
+    }
     try {
       await inviteService.deleteInvite(tokenKey);
-      loadSeqRef.current += 1;
-      setInvites((prev) => prev.filter((item) => (item.token || item.id) !== tokenKey));
       showToast('Invite record deleted successfully.');
       loadInvites();
-      if (generatedInvite?.token === inv.token) {
-        setGeneratedInvite(null);
-      }
     } catch (err) {
       alert(`Failed to delete invite: ${err.message}`);
+      loadInvites();
     } finally {
       setDeletingToken(null);
     }
@@ -38280,8 +38668,6 @@ export default function QuickRMAActionModal({
   isEditingAiDetailsRef.current = isEditingAiDetails;
   const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
   const [copyDrSuccess, setCopyDrSuccess] = useState(false);
-  const [isSyncingXlsx, setIsSyncingXlsx] = useState(false);
-  const [xlsxSyncFeedback, setXlsxSyncFeedback] = useState(null);
 
   // Authentication & Verification State
   const [verifiedAdmin, setVerifiedAdmin] = useState(null);
@@ -39594,78 +39980,6 @@ export default function QuickRMAActionModal({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <label
-                      className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 hover:underline cursor-pointer flex items-center gap-1"
-                      title="Upload an edited RMA Alert Mirror .xlsx file to apply updates"
-                    >
-                      <span>📤 Upload Edited .xlsx</span>
-                      <input
-                        type="file"
-                        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        className="hidden"
-                        disabled={isSyncingXlsx}
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          e.target.value = '';
-                          if (!file) return;
-                          setIsSyncingXlsx(true);
-                          setXlsxSyncFeedback(null);
-                          try {
-                            const res = await notificationService.ingestEditedRmaXlsx({
-                              file,
-                              rmaNumber: report.rma_number,
-                              actorName: verifiedAdmin?.name || currentUser?.name || 'Admin'
-                            });
-                            if (res?.success) {
-                              if (res.report) {
-                                setReport(res.report);
-                                onReportUpdated?.(res.report);
-                              }
-                              onRefresh?.();
-                              setXlsxSyncFeedback({
-                                type: 'success',
-                                text: res.noChanges
-                                  ? `No changed cells detected in ${file.name} for ${res.rmaNumber}.`
-                                  : `Applied .xlsx edits to ${res.rmaNumber}: ${(res.changedFields || []).join(', ')}`
-                              });
-                            } else {
-                              setXlsxSyncFeedback({ type: 'error', text: res?.error || 'Could not ingest .xlsx updates.' });
-                            }
-                          } finally {
-                            setIsSyncingXlsx(false);
-                          }
-                        }}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      disabled={isSyncingXlsx}
-                      onClick={async () => {
-                        setIsSyncingXlsx(true);
-                        setXlsxSyncFeedback(null);
-                        try {
-                          const res = await notificationService.syncEmailRepliesNow();
-                          if (res?.success) {
-                            onRefresh?.();
-                            setXlsxSyncFeedback({
-                              type: 'success',
-                              text: `Checked inbox: ${res.scannedUnseenWithXlsx || 0} unread email(s) with .xlsx, updated ${res.updatedCount || 0} RMA record(s).`
-                            });
-                          } else {
-                            setXlsxSyncFeedback({
-                              type: 'error',
-                              text: res?.message || res?.error || 'Could not sync email .xlsx replies.'
-                            });
-                          }
-                        } finally {
-                          setIsSyncingXlsx(false);
-                        }
-                      }}
-                      className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1 disabled:opacity-50"
-                      title="Poll incoming email replies carrying edited .xlsx workbooks"
-                    >
-                      <span>📩 Check Email .xlsx Replies</span>
-                    </button>
                     <button
                       type="button"
                       onClick={() => setIsEditingAiDetails(!isEditingAiDetails)}
@@ -39676,16 +39990,6 @@ export default function QuickRMAActionModal({
                     </button>
                   </div>
                 </div>
-
-                {xlsxSyncFeedback && (
-                  <div className={`p-2 rounded-xl border text-[11px] font-bold ${
-                    xlsxSyncFeedback.type === 'success'
-                      ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200'
-                      : 'bg-rose-50 dark:bg-rose-950/50 border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-200'
-                  }`}>
-                    {xlsxSyncFeedback.text}
-                  </div>
-                )}
 
                 <div className="flex items-start gap-3 bg-violet-50/50 dark:bg-violet-950/20 p-2.5 rounded-2xl border border-violet-100 dark:border-violet-900/50">
                   {paperworkList.length > 0 && (
@@ -39759,7 +40063,7 @@ export default function QuickRMAActionModal({
                           {adminSupplierName || report.supplier_name || 'Pending Assignment'}
                         </strong>
                       </div>
-                      {report.store_branch && report.store_branch !== 'Direct Return' && (
+                      {report.rma_type !== 'supplier_outbound' && report.store_branch && report.store_branch !== 'Direct Return' && (
                         <div className="flex items-center gap-1.5">
                           <span className="text-slate-400 text-[10px] uppercase font-bold">Store Branch:</span>
                           <strong className="text-slate-800 dark:text-slate-200 truncate">{report.store_branch}</strong>
@@ -40336,66 +40640,32 @@ export default function QuickRMAActionModal({
                           <span>{!wf.party.hasValidSupplier ? '+ Set Supplier & Email' : 'Edit Supplier & Email'}</span>
                         </button>
                         {!wf.isClosed && (
-                          <>
-                            <button
-                              type="button"
-                              disabled={isFollowUpBusy}
-                              onClick={async () => {
-                                if (!wf.party.hasValidSupplier || (!isTestRecord(report) && wf.party.toEmails.length === 0)) {
-                                  setIsFollowUpModalOpen(true);
-                                  return;
-                                }
-                                setIsFollowUpBusy(true);
-                                setFollowUpFeedback(null);
-                                try {
-                                  const res = await notificationService.runDailyFollowUpNow({
-                                    isTestMode: Boolean(isTestRecord(report)),
-                                    force: true,
-                                    rmaNumber: report.rma_number,
-                                    operation: 'send_single'
-                                  });
-                                  if (res?.success) {
-                                    setFollowUpFeedback({ type: 'success', text: `Sent Day ${wf.calendarDay} of 10 follow-up for ${report.rma_number}.` });
-                                    onRefresh?.();
-                                  } else {
-                                    setFollowUpFeedback({ type: 'error', text: res?.error || 'Could not send follow-up.' });
-                                  }
-                                } finally {
-                                  setIsFollowUpBusy(false);
-                                }
-                              }}
-                              className="px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                            >
-                              <Send className="w-3.5 h-3.5" />
-                              <span>📧 Send Follow-Up</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isFollowUpBusy}
-                              onClick={async () => {
-                                setIsFollowUpBusy(true);
-                                setFollowUpFeedback(null);
-                                try {
-                                  const updated = await catalogService.closeFollowUpCase(report, {
-                                    markPickedUp: true,
-                                    reason: 'Picked Up — Case Closed',
-                                    actorName: verifiedAdmin?.name || currentUser?.name || 'Admin'
-                                  });
-                                  setReport(updated);
-                                  onReportUpdated?.(updated);
-                                  onRefresh?.();
-                                  setFollowUpFeedback({ type: 'success', text: 'Case closed & 10-day countdown stopped.' });
-                                } catch (e) {
-                                  setFollowUpFeedback({ type: 'error', text: e?.message || 'Failed closing case.' });
-                                } finally {
-                                  setIsFollowUpBusy(false);
-                                }
-                              }}
-                              className="px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-black cursor-pointer disabled:opacity-50"
-                            >
-                              <span>✓ Case Close</span>
-                            </button>
-                          </>
+                          <button
+                            type="button"
+                            disabled={isFollowUpBusy}
+                            onClick={async () => {
+                              setIsFollowUpBusy(true);
+                              setFollowUpFeedback(null);
+                              try {
+                                const updated = await catalogService.closeFollowUpCase(report, {
+                                  markPickedUp: true,
+                                  reason: 'Picked Up — Case Closed',
+                                  actorName: verifiedAdmin?.name || currentUser?.name || 'Admin'
+                                });
+                                setReport(updated);
+                                onReportUpdated?.(updated);
+                                onRefresh?.();
+                                setFollowUpFeedback({ type: 'success', text: 'Case closed & 10-day countdown stopped.' });
+                              } catch (e) {
+                                setFollowUpFeedback({ type: 'error', text: e?.message || 'Failed closing case.' });
+                              } finally {
+                                setIsFollowUpBusy(false);
+                              }
+                            }}
+                            className="px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-black cursor-pointer disabled:opacity-50"
+                          >
+                            <span>✓ Case Close</span>
+                          </button>
                         )}
                       </>
                     );
@@ -40906,7 +41176,13 @@ import {
   downloadConsolidatedQrPagesPng
 } from '../utils/customStickerCanvas';
 import { printIsolatedElement } from '../utils/printIsolatedElement';
-import { buildPortalQrPayload, formatSaveFileTimestamp, isTestRecord, isTrashedRecord } from '../utils/rmaHelpers';
+import {
+  buildPortalQrPayload,
+  formatSaveFileTimestamp,
+  getReportManifestItems,
+  isTestRecord,
+  isTrashedRecord
+} from '../utils/rmaHelpers';
 
 const clampNum = (val, min, max, fallback) => {
   const n = Number(val);
@@ -40957,6 +41233,7 @@ export default function ReturnQRModal({
   const [orientation, setOrientation] = useState('portrait');
   const [marginMm, setMarginMm] = useState(8);
   const [layoutMode, setLayoutMode] = useState('one_page');
+  const [qrSplitMode, setQrSplitMode] = useState('consolidated'); // 'consolidated' | 'per_item'
   const [sizesByKey, setSizesByKey] = useState({});
   const [activeKey, setActiveKey] = useState(null);
 
@@ -40977,6 +41254,7 @@ export default function ReturnQRModal({
     setActiveKey(baseEntries[0]?.key || null);
     setDownloadNotice(null);
     setLayoutMode('one_page');
+    setQrSplitMode('consolidated');
   }, [isOpen, batchSignature]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const modalIsTestScope = useMemo(
@@ -41044,10 +41322,89 @@ export default function ReturnQRModal({
     return out;
   }, [sessionReports, availableReports, modalIsTestScope, visibleRmaKeysSet, addSearchQuery]);
 
-  // Default card size: Medium 90x105mm for single QR, balanced 62x74mm for multi-select consolidated QRs
+  const manifestLookupPool = useMemo(
+    () => [
+      ...(Array.isArray(sessionReports) ? sessionReports : []),
+      ...(Array.isArray(availableReports) ? availableReports : [])
+    ],
+    [sessionReports, availableReports]
+  );
+
+  const hasMultiItemRma = useMemo(() => {
+    return visibleEntries.some((entry) => {
+      const rep = entry.report;
+      const resolvedItems = getReportManifestItems(rep, manifestLookupPool);
+      return resolvedItems.length > 1 || (Array.isArray(rep?.items) && rep.items.length > 1);
+    });
+  }, [visibleEntries, manifestLookupPool]);
+
+  const expandedEntries = useMemo(() => {
+    const out = [];
+    visibleEntries.forEach((entry) => {
+      const rep = entry.report;
+      const resolvedItems = getReportManifestItems(rep, manifestLookupPool);
+      const effectiveItems = resolvedItems.length > 1
+        ? resolvedItems
+        : (Array.isArray(rep?.items) && rep.items.length > 1 ? rep.items : null);
+
+      if (qrSplitMode === 'per_item' && effectiveItems && effectiveItems.length > 1) {
+        effectiveItems.forEach((it, itemIdx) => {
+          const itemKey = `${entry.key}__item-${itemIdx + 1}`;
+          if (removedKeys.has(itemKey)) return;
+          const itemBarcode = String(it?.barcode || rep.barcode || '').trim();
+          const itemSku = String(it?.code || it?.sku || '').trim();
+          const itemName = String(it?.name || it?.productName || it?.product_name || rep.name || 'Returned Merchandise').trim();
+          const itemQty = Number(it?.quantity ?? it?.qty) || 1;
+          const itemUnit = String(it?.unit_name || it?.unit || rep.unit_name || 'pc').trim() || 'pc';
+          out.push({
+            key: itemKey,
+            parentKey: entry.key,
+            itemIndex: itemIdx + 1,
+            totalLines: effectiveItems.length,
+            isPerItemSplit: true,
+            report: {
+              ...rep,
+              items: [{ ...it }],
+              total_items: 1,
+              totalItems: 1,
+              name: itemName,
+              productName: itemName,
+              barcode: itemBarcode || rep.barcode,
+              code: itemSku,
+              sku: itemSku,
+              quantity: itemQty,
+              total_quantity: itemQty,
+              unit_name: itemUnit,
+              unit: itemUnit,
+              pieces_per_case: Number(it?.pieces_per_case ?? it?.piecesPerCase ?? rep.pieces_per_case) || 1,
+              expiry_date: it?.expiry_date || rep.expiry_date || '',
+              reason: it?.reason || rep.reason || '',
+              explanation: it?.explanation || rep.explanation || '',
+              _manifestLineIndex: itemIdx + 1,
+              _manifestTotalLines: effectiveItems.length
+            }
+          });
+        });
+      } else {
+        out.push({
+          key: entry.key,
+          parentKey: entry.key,
+          itemIndex: null,
+          totalLines: null,
+          isPerItemSplit: false,
+          report: effectiveItems && effectiveItems.length > 1 && (!Array.isArray(rep?.items) || rep.items.length <= 1)
+            ? { ...rep, items: effectiveItems, total_items: effectiveItems.length }
+            : rep
+        });
+      }
+    });
+    return out;
+  }, [visibleEntries, manifestLookupPool, qrSplitMode, removedKeys]);
+
+  // Default card size: Medium 90x105mm for single QR, balanced 62x74mm for multi-select consolidated or per-item QRs
   const defaultCardSize = useMemo(
-    () => (visibleEntries.length <= 1 ? { widthMm: 90, heightMm: 105 } : { widthMm: 62, heightMm: 74 }),
-    [visibleEntries.length]
+    () => (expandedEntries.length <= 1 ? { widthMm: 90, heightMm: 105 } : { widthMm: 62, heightMm: 74 }),
+    [expandedEntries.length]
   );
 
   // Compute physical page dimensions based on Paper Preset + Orientation + Margins
@@ -41086,12 +41443,16 @@ export default function ReturnQRModal({
 
   // Build normalized cards list with stable SVG DOM IDs and per-card mm dimensions
   const cards = useMemo(() => {
-    return visibleEntries.map((entry, idx) => {
+    return expandedEntries.map((entry, idx) => {
       const cardData = normalizeRmaQrCardData(entry.report);
       const custom = sizesByKey[entry.key] || defaultCardSize;
       const safeSvgSlug = entry.key.replace(/[^a-zA-Z0-9_-]/g, '_');
       return {
         key: entry.key,
+        parentKey: entry.parentKey,
+        itemIndex: entry.itemIndex,
+        totalLines: entry.totalLines,
+        isPerItemSplit: Boolean(entry.isPerItemSplit),
         index: idx,
         report: entry.report,
         cardData,
@@ -41101,7 +41462,7 @@ export default function ReturnQRModal({
         heightMm: clampNum(custom.heightMm, 40, 280, defaultCardSize.heightMm)
       };
     });
-  }, [visibleEntries, sizesByKey, defaultCardSize]);
+  }, [expandedEntries, sizesByKey, defaultCardSize]);
 
   const activeCard = useMemo(
     () => cards.find((c) => c.key === activeKey) || cards[0] || null,
@@ -41337,10 +41698,25 @@ export default function ReturnQRModal({
     }
   };
 
+  const handleChangeSplitMode = (nextMode) => {
+    const normalized = nextMode === 'per_item' ? 'per_item' : 'consolidated';
+    if (normalized === qrSplitMode) return;
+    setQrSplitMode(normalized);
+    setSizesByKey({});
+    setRemovedKeys((prev) => {
+      const next = new Set();
+      prev.forEach((k) => {
+        if (!String(k).includes('__item-')) next.add(k);
+      });
+      return next;
+    });
+    setDownloadNotice(null);
+  };
+
   const handlePrint = () => {
     setIsPrinting(true);
     try {
-      const rootEl = document.getElementById('rma-qr-print-root');
+      const rootEl = document.getElementById('rma-qr-batch-sheet-root');
       if (!rootEl) {
         setDownloadNotice({ type: 'error', msg: 'QR print canvas not ready.' });
         return;
@@ -41353,13 +41729,13 @@ export default function ReturnQRModal({
       const docTitle = `${baseTitle} ${formatSaveFileTimestamp(new Date())}`;
 
       printIsolatedElement({
-        elementId: 'rma-qr-print-root',
+        elementId: 'rma-qr-batch-sheet-root',
         documentTitle: docTitle,
         pageSize: pageSizeCss,
         pageMargin: '0',
         allowMultiPage: layoutMode === 'multi_page' || packedLayout.pages.length > 1,
         customStyles: `
-          :root, #rma-qr-print-root {
+          :root, #rma-qr-batch-sheet-root {
             --u: 1mm !important;
           }
           .no-print-qr {
@@ -41556,6 +41932,42 @@ export default function ReturnQRModal({
               />
               <span className="text-slate-400">mm</span>
             </label>
+
+            {/* Multi-Item Batch RMA QR Mode Toggle: Consolidated vs Single / Per-Item */}
+            {hasMultiItemRma && (
+              <div
+                role="group"
+                aria-label="Multi-Item QR Split Mode"
+                className="flex items-center rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 p-0.5 text-[11px] font-bold shadow-2xs"
+              >
+                <button
+                  type="button"
+                  onClick={() => handleChangeSplitMode('consolidated')}
+                  aria-pressed={qrSplitMode === 'consolidated'}
+                  className={`px-2.5 py-0.5 rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                    qrSplitMode === 'consolidated'
+                      ? 'bg-indigo-600 text-white'
+                      : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                  title="Print or download 1 consolidated QR card per RMA ticket"
+                >
+                  📦 Consolidated (1 QR per RMA)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleChangeSplitMode('per_item')}
+                  aria-pressed={qrSplitMode === 'per_item'}
+                  className={`px-2.5 py-0.5 rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                    qrSplitMode === 'per_item'
+                      ? 'bg-indigo-600 text-white'
+                      : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                  title="Expand multi-item RMAs into 1 separate QR card per individual line item"
+                >
+                  🏷️ Single / Per-Item QRs (1 QR per Item)
+                </button>
+              </div>
+            )}
 
             {/* Sheet Packing Mode (1 Page Consolidated vs Multiple Pages Multi-Up) */}
             <div className="flex items-center rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 p-0.5 text-[11px] font-bold">
@@ -41797,7 +42209,7 @@ export default function ReturnQRModal({
         {/* Live WYSIWYG Consolidated Paper Sheet(s) Canvas Area */}
         <div className="flex-1 overflow-auto p-4 sm:p-6 bg-slate-200/80 dark:bg-slate-950/90 print:p-0 print:bg-white print:overflow-visible">
           <div
-            id="rma-qr-print-root"
+            id="rma-qr-batch-sheet-root"
             style={{ '--u': `${previewPxPerMm}px` }}
             className="flex flex-col items-center gap-6 print:block print:gap-0"
           >
@@ -41834,7 +42246,7 @@ export default function ReturnQRModal({
 
                   {/* Placed Printable QR Cards on this page */}
                   {pageCards.map((placed) => {
-                    const { cardData, svgId, qrPayload, wMm, hMm, xMm, yMm, key } = placed;
+                    const { cardData, svgId, qrPayload, wMm, hMm, xMm, yMm, key, itemIndex } = placed;
                     const isSelectedCard = isMulti && activeCard?.key === key;
                     // Smooth proportional scaling relative to 90x105mm baseline
                     const s = Math.min(wMm / 90, hMm / 105);
@@ -41844,6 +42256,8 @@ export default function ReturnQRModal({
                       <div
                         key={key}
                         data-rma-qr-card={cardData.rmaNumber}
+                        data-rma-qr-key={key}
+                        {...(itemIndex ? { 'data-rma-qr-item-index': String(itemIndex) } : {})}
                         onClick={() => isMulti && setActiveKey(key)}
                         style={{
                           left: `calc(${effectivePaper.marginMm + xMm} * var(--u))`,
@@ -42344,7 +42758,7 @@ export default function RmaEmailEditorView({
             price: parseFloat(price) || 0,
             price_with_vat: parseFloat(priceWithVat) || 0,
             expiry_date: expiryDate ? expiryDate.slice(0, 10) : '',
-            store_branch: storeBranch.trim(),
+            ...(loadedReport?.rma_type === 'supplier_outbound' ? { store_branch: null } : { store_branch: storeBranch.trim() }),
             si_number: siNumber.trim(),
             dr_number: drNumber.trim(),
             po_number: poNumber.trim(),
@@ -42675,7 +43089,7 @@ export default function RmaEmailEditorView({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+            <div className={`grid grid-cols-1 ${loadedReport?.rma_type === 'supplier_outbound' ? 'sm:grid-cols-2' : 'sm:grid-cols-3'} gap-3 pt-1`}>
               <div>
                 <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Supplier Name</label>
                 <input
@@ -42692,16 +43106,18 @@ export default function RmaEmailEditorView({
                   ))}
                 </datalist>
               </div>
-              <div>
-                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Store / Customer Branch</label>
-                <input
-                  type="text"
-                  value={storeBranch}
-                  onChange={(e) => setStoreBranch(e.target.value)}
-                  placeholder="Branch / Account Name"
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
-                />
-              </div>
+              {loadedReport?.rma_type !== 'supplier_outbound' && (
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Store / Customer Branch</label>
+                  <input
+                    type="text"
+                    value={storeBranch}
+                    onChange={(e) => setStoreBranch(e.target.value)}
+                    placeholder="Branch / Account Name"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+              )}
               <div>
                 <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Expiry Date (YYYY-MM-DD)</label>
                 <div className="flex items-center gap-2">
@@ -45940,13 +46356,6 @@ export default function SettingsTab({
     detail: ''
   });
 
-  const [replySyncStatus, setReplySyncStatus] = useState({
-    loading: false,
-    done: false,
-    success: false,
-    message: ''
-  });
-
   // Per-Email Recipient Manager Active Type & Scope (Live vs Test) + Matrix Config State
   const [activeEmailProfileType, setActiveEmailProfileType] = useState('new_rma');
   const [recipientScopeIsTest, setRecipientScopeIsTest] = useState(() => Boolean(isTestMode));
@@ -46337,19 +46746,6 @@ export default function SettingsTab({
       diagnostic: res.diagnostic || '',
       passLength: res.passLength || null,
       hadSpaces: Boolean(res.hadSpaces)
-    });
-  };
-
-  const handleCheckEmailRepliesNow = async () => {
-    setReplySyncStatus({ loading: true, done: false, success: false, message: 'Checking unread Gmail .xlsx replies...' });
-    const res = await notificationService.syncEmailRepliesNow();
-    setReplySyncStatus({
-      loading: false,
-      done: true,
-      success: Boolean(res?.success),
-      message: res?.success
-        ? `Inbox scanned (${res.scannedUnseenWithXlsx || 0} unread .xlsx reply email(s)) — updated ${res.updatedCount || 0} RMA record(s).`
-        : (res?.message || res?.error || 'Could not check Gmail .xlsx replies.')
     });
   };
 
@@ -47220,16 +47616,6 @@ export default function SettingsTab({
 
             <button
               type="button"
-              onClick={handleCheckEmailRepliesNow}
-              disabled={replySyncStatus.loading}
-              className="px-3.5 py-1.5 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/70 dark:hover:bg-sky-900 text-sky-700 dark:text-sky-300 text-xs font-bold rounded-xl border border-sky-200 dark:border-sky-800 flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs disabled:opacity-60"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${replySyncStatus.loading ? 'animate-spin' : ''}`} />
-              <span>{replySyncStatus.loading ? 'Checking Replies...' : '📩 Check Email .xlsx Replies'}</span>
-            </button>
-
-            <button
-              type="button"
               onClick={handleTestSmtp}
               disabled={smtpStatus.loading}
               className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/70 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold rounded-xl border border-indigo-200 dark:border-indigo-800 flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs"
@@ -47433,7 +47819,7 @@ export default function SettingsTab({
             <div>
               <span className="font-black uppercase tracking-wider text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
                 <Clock className="w-4 h-4 text-amber-600" />
-                <span>10-Calendar-Day Pickup Follow-Up Schedule ({formatTime12hFromHhmm(followUpConfig.autoSendTimePht || '08:00')} PHT)</span>
+                <span>10-Calendar-Day Pickup Follow-Up Schedule ({formatTime12hFromHhmm(followUpConfig.autoSendTimePht || '13:00')} PHT)</span>
               </span>
               <p className="text-[11px] text-amber-900/80 dark:text-amber-300/80 mt-0.5">
                 Automated backend scheduler sends daily pickup reminders up to Day 10, stops on pickup/case close, and auto-scraps overdue unclaimed items after Day 10.
@@ -47497,8 +47883,8 @@ export default function SettingsTab({
               <input
                 type="time"
                 aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"
-                value={followUpConfig.autoSendTimePht || '08:00'}
-                onChange={(e) => setFollowUpConfig((p) => ({ ...p, autoSendTimePht: e.target.value || '08:00' }))}
+                value={followUpConfig.autoSendTimePht || '13:00'}
+                onChange={(e) => setFollowUpConfig((p) => ({ ...p, autoSendTimePht: e.target.value || '13:00' }))}
                 className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-xs text-slate-900 dark:text-white"
               />
             </label>
@@ -47513,17 +47899,6 @@ export default function SettingsTab({
             title="Supplier Follow-Up Extra Internal CCs"
           />
         </div>
-
-        {replySyncStatus.done && (
-          <div className={`p-3 rounded-2xl border text-xs font-bold flex items-center gap-2 ${
-            replySyncStatus.success
-              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
-              : 'bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-700 text-amber-900 dark:text-amber-200'
-          }`}>
-            {replySyncStatus.success ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
-            <span>{replySyncStatus.message}</span>
-          </div>
-        )}
 
         {dailyMatrixStatus.done && (
           <div className={`p-3.5 rounded-2xl border text-xs space-y-1 animate-in fade-in ${
@@ -51418,44 +51793,6 @@ export default function SupplierClaimsTab({
   const [isDirectoryOpen, setIsDirectoryOpen] = useState(false);
   const [followUpBanner, setFollowUpBanner] = useState(null);
 
-  const handleRowSendFollowUp = async (report) => {
-    const statusInfo = getCleanHumanWorkflowStatus(report, savedProductsList);
-    const wf = statusInfo.workflow;
-    if (wf.isClosed) return;
-    if (!wf.party.hasValidSupplier || (!isTestMode && !isTestRecord(report) && wf.party.toEmails.length === 0)) {
-      setFollowUpModalReport(report);
-      return;
-    }
-    const rowKey = report.id || report.rma_number;
-    setUpdatingQueueId(rowKey);
-    setFollowUpBanner(null);
-    try {
-      const res = await notificationService.runDailyFollowUpNow({
-        isTestMode: Boolean(isTestMode || isTestRecord(report)),
-        force: true,
-        rmaNumber: report.rma_number,
-        operation: 'send_single'
-      });
-      if (res?.success) {
-        const disposed = (res?.summary?.autoDisposed || 0) > 0;
-        setFollowUpBanner({
-          type: 'success',
-          text: disposed
-            ? `${report.rma_number} exceeded Day 10 and was auto-disposed & closed.`
-            : `Sent Day ${wf.calendarDay} of 10 follow-up for ${report.rma_number}.`
-        });
-        if (onRefresh) onRefresh();
-      } else {
-        setFollowUpBanner({
-          type: 'error',
-          text: res?.error || res?.errors?.[0]?.message || `Could not send follow-up for ${report.rma_number}.`
-        });
-      }
-    } finally {
-      setUpdatingQueueId(null);
-    }
-  };
-
   const handleRowCloseCase = async (report) => {
     const rowKey = report.id || report.rma_number;
     setUpdatingQueueId(rowKey);
@@ -52888,29 +53225,17 @@ export default function SupplierClaimsTab({
                               </button>
                             )}
 
-                            {/* 1B. Daily 10-Day Pickup Follow-Up & Case Close Controls */}
+                            {/* 1B. Daily 10-Day Pickup Follow-Up Case Close Control */}
                             {!wf.isClosed && (
-                              <>
-                                <button
-                                  type="button"
-                                  disabled={updatingQueueId === (r.id || r.rma_number)}
-                                  onClick={() => handleRowSendFollowUp(r)}
-                                  className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
-                                  title="Send 10-Calendar-Day Pickup Follow-Up Email now"
-                                >
-                                  <Send className="w-2.5 h-2.5" />
-                                  <span>📧 Send Follow-Up</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={updatingQueueId === (r.id || r.rma_number)}
-                                  onClick={() => handleRowCloseCase(r)}
-                                  className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
-                                  title="Mark Picked Up & Close 4-Step Workflow Case (stops 10-day countdown)"
-                                >
-                                  <span>✓ Case Close</span>
-                                </button>
-                              </>
+                              <button
+                                type="button"
+                                disabled={updatingQueueId === (r.id || r.rma_number)}
+                                onClick={() => handleRowCloseCase(r)}
+                                className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                title="Mark Picked Up & Close 4-Step Workflow Case (stops 10-day countdown)"
+                              >
+                                <span>✓ Case Close</span>
+                              </button>
                             )}
 
                             {/* 2. View / Print Debit Claim or Replacement Form when generated */}
@@ -53159,7 +53484,12 @@ export default function SupplierClaimsTab({
                                             #{cIdx + 1}
                                           </td>
                                           <td className="py-2 px-3 font-bold text-slate-900 dark:text-white truncate max-w-xs" title={childName}>
-                                            {childName}
+                                            <div className="truncate">{childName}</div>
+                                            {child.supplier_name && (
+                                              <div className="text-[10px] text-amber-700 dark:text-amber-300 font-semibold truncate" title={`Supplier: ${child.supplier_name}`}>
+                                                Supplier: {child.supplier_name}
+                                              </div>
+                                            )}
                                           </td>
                                           <td className="py-2 px-3 font-mono text-slate-700 dark:text-slate-300 font-bold">
                                             {childBarcode || '—'}
@@ -53768,7 +54098,6 @@ export default function SupplierFollowUpModal({
   const [supplierEmailCc, setSupplierEmailCc] = useState('');
   const [followUpEnabled, setFollowUpEnabled] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isSending, setIsSending] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
@@ -53882,63 +54211,6 @@ export default function SupplierFollowUpModal({
       return null;
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleSendFollowUpNow = async () => {
-    const cleanSup = supplierName.trim() || (isPlaceholderSupplier(wfPreview.party.supplierName) ? '' : wfPreview.party.supplierName);
-    if (!cleanSup) {
-      setFeedback({ type: 'error', message: 'Please set a Supplier / Vendor Name before sending a follow-up.' });
-      return;
-    }
-    if (!recordIsTest && !supplierEmailTo.trim()) {
-      setFeedback({ type: 'error', message: 'Enter at least one Supplier Primary Email (TO) before dispatching a Live follow-up.' });
-      return;
-    }
-    setIsSending(true);
-    setFeedback(null);
-    try {
-      const saved = await catalogService.saveSupplierAndFollowUpSettings(report, {
-        supplier_name: cleanSup,
-        supplier_email_to: supplierEmailTo.trim(),
-        supplier_email_cc: supplierEmailCc.trim(),
-        followUpEnabled: true,
-        actorName
-      });
-      await supplierDirectoryService.upsertFromSubmission({
-        supplier_name: cleanSup,
-        supplier_email_to: supplierEmailTo.trim(),
-        supplier_email_cc: supplierEmailCc.trim()
-      }).catch(() => { });
-
-      const res = await notificationService.runDailyFollowUpNow({
-        isTestMode: recordIsTest,
-        force: true,
-        rmaNumber: report.rma_number,
-        operation: 'send_single',
-        overrideToEmail: supplierEmailTo.trim()
-      });
-
-      if (!res?.success && (res?.errors?.length > 0 || res?.error)) {
-        const msg = res?.error || res?.errors?.[0]?.message || 'Failed to send follow-up email.';
-        setFeedback({ type: 'error', message: msg });
-        onShowToast?.(msg, 'error');
-      } else if (res?.skippedItems?.length > 0 && (res?.summary?.followUpsSent || 0) === 0 && (res?.summary?.autoDisposed || 0) === 0) {
-        const reason = res.skippedItems[0]?.reason || 'SKIPPED';
-        setFeedback({ type: 'error', message: `Follow-up not sent: ${reason}` });
-      } else {
-        const disposed = (res?.summary?.autoDisposed || 0) > 0;
-        const msg = disposed
-          ? `Day >${FOLLOW_UP_MAX_DAYS} threshold reached — ${report.rma_number} auto-disposed & notification sent.`
-          : `Sent Day ${wfPreview.calendarDay} of ${FOLLOW_UP_MAX_DAYS} pickup follow-up${recordIsTest ? ` cleanly to ${sandboxEmail}` : ` to ${supplierEmailTo.trim()}`}.`;
-        setFeedback({ type: 'success', message: msg });
-        onShowToast?.(msg, 'success');
-      }
-      onUpdated?.(saved);
-    } catch (err) {
-      setFeedback({ type: 'error', message: err?.message || 'Error sending follow-up email.' });
-    } finally {
-      setIsSending(false);
     }
   };
 
@@ -54106,7 +54378,7 @@ export default function SupplierFollowUpModal({
               <button
                 type="button"
                 onClick={handleCloseCase}
-                disabled={isClosing || isSaving || isSending}
+                disabled={isClosing || isSaving}
                 className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
                 {isClosing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
@@ -54116,18 +54388,8 @@ export default function SupplierFollowUpModal({
 
             <button
               type="button"
-              onClick={handleSendFollowUpNow}
-              disabled={isSending || isSaving || isClosing || wfPreview.isClosed}
-              className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-            >
-              {isSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-              <span>📧 Send Follow-Up</span>
-            </button>
-
-            <button
-              type="button"
               onClick={handleSave}
-              disabled={isSaving || isSending || isClosing}
+              disabled={isSaving || isClosing}
               className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
               {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
@@ -59141,7 +59403,7 @@ export const catalogService = {
 
   async findProduct(barcodeOrQuery) {
     const clean = String(barcodeOrQuery || '').trim();
-    if (!clean) return null;
+    if (!clean || /^(RMA-|MANIFEST|NO-?LABEL-)/i.test(clean)) return null;
 
     // Fast-path: return cached lookup instantly if available
     if (this._productLookupCache && this._productLookupCache.has(clean)) {
@@ -59869,7 +60131,7 @@ export const catalogService = {
 
     // Auto-resolve product from database if not passed in (skip synthetic MANIFEST / RMA- / NO-LABEL- keys)
     let resolvedProduct = product;
-    const isSyntheticKey = isBatch || is_parent || /^(RMA-|MANIFEST|NO-LABEL-)/i.test(cleanBarcode);
+    const isSyntheticKey = isBatch || is_parent || /^(RMA-|MANIFEST|NO-?LABEL-)/i.test(cleanBarcode);
     if (!isSyntheticKey && (!resolvedProduct || !resolvedProduct.name || resolvedProduct.name.startsWith('Unidentified Item'))) {
       try {
         const found = await this.findProduct(cleanBarcode);
@@ -62703,6 +62965,11 @@ const SETTINGS_KEY = 'customer_rma_invites_store';
 const LOCAL_STORAGE_KEY = 'rma_customer_invites_v1';
 export const NO_EXPIRY_DB_SENTINEL = '9999-12-31T23:59:59.000Z';
 
+// Session tombstones prevent lagging rma_settings JSON mirror writes from resurrecting
+// recently deleted invites or reverting recently revoked invites during concurrent reloads.
+const sessionDeletedInviteKeys = new Set();
+const sessionRevokedInviteKeys = new Set();
+
 function getLocalInvites() {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -62937,11 +63204,18 @@ export const inviteService = {
    */
   async getInvites() {
     const mergedMap = new Map();
+    const isTombstonedDeleted = (item) =>
+      sessionDeletedInviteKeys.has(item?.token) || sessionDeletedInviteKeys.has(item?.id);
+    const isMarkedRevoked = (item) =>
+      sessionRevokedInviteKeys.has(item?.token) || sessionRevokedInviteKeys.has(item?.id);
     const absorbList = (list) => {
       if (!Array.isArray(list)) return;
       list.forEach((i) => {
-        if (!i || !i.token) return;
+        if (!i || !i.token || isTombstonedDeleted(i)) return;
         const hydrated = hydrateInviteRecord(i);
+        if (isMarkedRevoked(hydrated)) {
+          hydrated.status = 'revoked';
+        }
         const prev = mergedMap.get(hydrated.token);
         if (!prev) {
           mergedMap.set(hydrated.token, hydrated);
@@ -62957,16 +63231,19 @@ export const inviteService = {
             no_expiry: permanent,
             expires_at: permanent ? null : (hydrated.expires_at ?? prev.expires_at),
             duration_display: permanent ? 'No Expiry' : (hydrated.duration_display || prev.duration_display),
-            status: (hydrated.status === 'revoked' || prev.status === 'revoked') ? 'revoked' : hydrated.status
+            status: (hydrated.status === 'revoked' || prev.status === 'revoked' || isMarkedRevoked(hydrated)) ? 'revoked' : hydrated.status
           });
         }
       });
     };
 
-    // Fetch public.rma_invites and universal rma_settings store in parallel to halve latency
+    // Fetch public.rma_invites and bounded universal rma_settings store in parallel to halve latency
     const [tblResult, settingsResult] = await Promise.allSettled([
       supabase.from('rma_invites').select('*').order('created_at', { ascending: false }),
-      supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle()
+      Promise.race([
+        supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle(),
+        new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 4500))
+      ])
     ]);
 
     if (tblResult.status === 'fulfilled') {
@@ -62976,7 +63253,7 @@ export const inviteService = {
       }
     }
 
-    if (settingsResult.status === 'fulfilled') {
+    if (settingsResult.status === 'fulfilled' && !settingsResult.value?.timedOut) {
       const { data, error } = settingsResult.value || {};
       if (!error && data?.value && Array.isArray(data.value)) {
         absorbList(data.value);
@@ -62993,7 +63270,7 @@ export const inviteService = {
       return combined;
     }
 
-    return getLocalInvites().map(hydrateInviteRecord);
+    return getLocalInvites().filter((i) => !isTombstonedDeleted(i)).map(hydrateInviteRecord);
   },
 
   /**
@@ -63101,13 +63378,17 @@ export const inviteService = {
       updated_at: now.toISOString()
     };
 
-    // 1. Run primary rma_invites insert and rma_settings read in parallel to halve latency
+    // 1. Run primary rma_invites insert and bounded rma_settings read in parallel
     let createdRecord = null;
     let existingSettingsList = null;
     try {
+      const settingsSelectWithTimeout = Promise.race([
+        supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle(),
+        new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 4000))
+      ]);
       const [tblRes, settingsRes] = await Promise.allSettled([
         supabase.from('rma_invites').insert([dbInsertPayload]).select().maybeSingle(),
-        supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle()
+        settingsSelectWithTimeout
       ]);
 
       if (tblRes.status === 'fulfilled') {
@@ -63124,7 +63405,7 @@ export const inviteService = {
           });
         }
       }
-      if (settingsRes.status === 'fulfilled' && !settingsRes.value?.error && Array.isArray(settingsRes.value?.data?.value)) {
+      if (settingsRes.status === 'fulfilled' && !settingsRes.value?.timedOut && !settingsRes.value?.error && Array.isArray(settingsRes.value?.data?.value)) {
         existingSettingsList = settingsRes.value.data.value.map(hydrateInviteRecord);
       }
     } catch {
@@ -63145,32 +63426,29 @@ export const inviteService = {
       store_branch: cleanStream === 'rma_editor' ? (cleanRmaNum || '') : cleanEntity
     };
 
-    // 2. Always persist to rma_settings for universal sync across all admin sessions
-    // (When primary SQL insert into public.rma_invites already succeeded, cap blocking wait at 3s so 50KB mirror writes never stall email dispatch)
+    // 2. Always persist locally & mirror to rma_settings with bounded wait so slow large blobs never stall the UI
     try {
       const baseList = Array.isArray(existingSettingsList) ? existingSettingsList : getLocalInvites();
       const updated = [newInvite, ...baseList.filter(i => i.token !== token)];
       saveLocalInvites(updated);
 
-      const settingsMirrorWrite = supabase
-        .from('rma_settings')
-        .upsert({
-          key: SETTINGS_KEY,
-          value: updated,
-          updated_at: new Date().toISOString()
-        })
-        .then(
-          () => { },
-          (err) => console.warn('Failed to persist invite to rma_settings:', err?.message || err)
-        );
+      if (Array.isArray(existingSettingsList) || !createdRecord) {
+        const settingsMirrorWrite = supabase
+          .from('rma_settings')
+          .upsert({
+            key: SETTINGS_KEY,
+            value: updated,
+            updated_at: new Date().toISOString()
+          })
+          .then(
+            () => { },
+            (err) => console.warn('Failed to persist invite to rma_settings:', err?.message || err)
+          );
 
-      if (createdRecord) {
         await Promise.race([
           settingsMirrorWrite,
           new Promise((resolve) => setTimeout(resolve, 3000))
         ]);
-      } else {
-        await settingsMirrorWrite;
       }
     } catch (e) {
       console.warn('Failed to persist invite to rma_settings:', e);
@@ -63312,39 +63590,53 @@ export const inviteService = {
    */
   async revokeInvite(tokenOrId) {
     if (!tokenOrId) return false;
+    sessionRevokedInviteKeys.add(tokenOrId);
 
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tokenOrId).trim());
     let updateQuery = supabase.from('rma_invites').update({ status: 'revoked', updated_at: new Date().toISOString() });
     updateQuery = isUUID ? updateQuery.eq('id', tokenOrId) : updateQuery.eq('token', tokenOrId);
 
-    // 1. Update table and fetch current invites in parallel to reduce latency
-    const [tblUpdate, currentResult] = await Promise.allSettled([
+    // 1. Update table and fetch bounded settings mirror in parallel
+    let existingSettingsList = null;
+    const [tblUpdate, settingsRes] = await Promise.allSettled([
       updateQuery,
-      this.getInvites()
+      Promise.race([
+        supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle(),
+        new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 4000))
+      ])
     ]);
     if (tblUpdate.status === 'rejected') {
       console.warn('Failed to update revoked invite in rma_invites:', tblUpdate.reason);
     }
+    if (settingsRes.status === 'fulfilled' && !settingsRes.value?.timedOut && !settingsRes.value?.error && Array.isArray(settingsRes.value?.data?.value)) {
+      existingSettingsList = settingsRes.value.data.value.map(hydrateInviteRecord);
+    }
 
-    // 2. Persist updated status into rma_settings
+    // 2. Persist updated status locally & mirror to rma_settings with bounded wait
     try {
-      const current = currentResult.status === 'fulfilled' && Array.isArray(currentResult.value)
-        ? currentResult.value
-        : getLocalInvites();
-      const updated = current.map(inv => {
+      const baseList = Array.isArray(existingSettingsList) ? existingSettingsList : getLocalInvites();
+      const updated = baseList.map(inv => {
         if (inv.token === tokenOrId || inv.id === tokenOrId) {
           return { ...inv, status: 'revoked' };
         }
         return inv;
       });
-      await supabase
-        .from('rma_settings')
-        .upsert({
-          key: SETTINGS_KEY,
-          value: updated,
-          updated_at: new Date().toISOString()
-        });
       saveLocalInvites(updated);
+
+      if (Array.isArray(existingSettingsList) || tblUpdate.status === 'rejected') {
+        const mirrorUpsert = supabase
+          .from('rma_settings')
+          .upsert({
+            key: SETTINGS_KEY,
+            value: updated,
+            updated_at: new Date().toISOString()
+          })
+          .then(() => { }, (err) => console.warn('Failed to update revoked invite in rma_settings:', err?.message || err));
+        await Promise.race([
+          mirrorUpsert,
+          new Promise((resolve) => setTimeout(resolve, 3000))
+        ]);
+      }
     } catch (e) {
       console.warn('Failed to update revoked invite in rma_settings:', e);
     }
@@ -63368,6 +63660,7 @@ export const inviteService = {
    */
   async deleteInvite(tokenOrId) {
     if (!tokenOrId) return false;
+    sessionDeletedInviteKeys.add(tokenOrId);
 
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tokenOrId).trim());
     let tblDeleteQuery = supabase.from('rma_invites').delete();
@@ -63376,47 +63669,48 @@ export const inviteService = {
     let tableDeleted = false;
     let existingSettingsList = null;
 
-    // 1. Delete from rma_invites table and read rma_settings mirror in parallel to halve latency
+    // 1. Delete from rma_invites table and read bounded rma_settings mirror in parallel
     try {
       const [tblDelRes, settingsRes] = await Promise.allSettled([
         tblDeleteQuery,
-        supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle()
+        Promise.race([
+          supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle(),
+          new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 4000))
+        ])
       ]);
       if (tblDelRes.status === 'fulfilled' && !tblDelRes.value?.error) {
         tableDeleted = true;
       }
-      if (settingsRes.status === 'fulfilled' && !settingsRes.value?.error && Array.isArray(settingsRes.value?.data?.value)) {
+      if (settingsRes.status === 'fulfilled' && !settingsRes.value?.timedOut && !settingsRes.value?.error && Array.isArray(settingsRes.value?.data?.value)) {
         existingSettingsList = settingsRes.value.data.value;
       }
     } catch (e) {
       console.warn('Failed to delete from rma_invites table:', e);
     }
 
-    // 2. Delete from rma_settings mirror & localStorage (time-boxed at 3s if primary SQL delete already succeeded)
+    // 2. Delete from localStorage & bounded rma_settings mirror
     try {
       const baseList = Array.isArray(existingSettingsList) ? existingSettingsList : getLocalInvites();
-      const updated = baseList.filter(inv => inv.token !== tokenOrId && inv.id !== tokenOrId);
+      const updated = baseList.filter(inv => inv.token !== tokenOrId && inv.id !== tokenOrId && !sessionDeletedInviteKeys.has(inv.token) && !sessionDeletedInviteKeys.has(inv.id));
       saveLocalInvites(updated);
 
-      const settingsMirrorWrite = supabase
-        .from('rma_settings')
-        .upsert({
-          key: SETTINGS_KEY,
-          value: updated,
-          updated_at: new Date().toISOString()
-        })
-        .then(
-          () => { },
-          (err) => console.warn('Failed to delete invite from rma_settings:', err?.message || err)
-        );
+      if (Array.isArray(existingSettingsList) || !tableDeleted) {
+        const settingsMirrorWrite = supabase
+          .from('rma_settings')
+          .upsert({
+            key: SETTINGS_KEY,
+            value: updated,
+            updated_at: new Date().toISOString()
+          })
+          .then(
+            () => { },
+            (err) => console.warn('Failed to delete invite from rma_settings:', err?.message || err)
+          );
 
-      if (tableDeleted) {
         await Promise.race([
           settingsMirrorWrite,
           new Promise((resolve) => setTimeout(resolve, 3000))
         ]);
-      } else {
-        await settingsMirrorWrite;
       }
     } catch (e) {
       console.warn('Failed to delete invite from rma_settings:', e);
@@ -63681,7 +63975,7 @@ export const EMAIL_PROFILE_TYPES = [
   { id: 'rma_restocked', label: 'RMA Restocked to Good Stock', badge: 'Lifecycle', description: 'Triggered when an item is returned undamaged to Good Stock Shelf.' },
   { id: 'daily_matrix_auto', label: 'Auto Daily PHT Overall Matrix', badge: 'Cron (.xlsx)', description: 'Scheduled daily Asia/Manila (.xlsx) report recipients, window & HH:mm time (default 1:00 PM PHT).' },
   { id: 'manual_matrix', label: 'Manual Overall Matrix Email', badge: 'Manual (.xlsx)', description: 'On-demand Overall/Hub Matrix (.xlsx) email dispatch recipients.' },
-  { id: 'supplier_followup', label: 'Daily 10-Day Pickup Follow-Up Extra CCs', badge: '10-Day SLA', description: 'Optional internal CCs added on daily supplier/customer pickup follow-up emails (default 8:00 AM PHT).' },
+  { id: 'supplier_followup', label: 'Daily 10-Day Pickup Follow-Up Extra CCs', badge: '10-Day SLA', description: 'Optional internal CCs added on daily supplier/customer pickup follow-up emails (default 1:00 PM PHT).' },
   { id: 'product_update', label: 'Catalog Product Update', badge: 'Catalog', description: 'Dispatched when verified catalog product details or pricing are updated.' },
   { id: 'invite_email', label: 'Portal / RMA Editor Invite Extra CCs', badge: 'Invites', description: 'Optional extra recipients CC’d automatically on generated portal/editor invites.' }
 ];
@@ -65222,7 +65516,7 @@ export const notificationService = {
                   <div class="col-label">${isCustomerStream && isPickupEvent ? 'Customer / Outlet:' : 'Supplier / Vendor:'}</div>
                   <div class="col-val">${escapeEmailHtml(partyDisplayName)}</div>
                 </div>
-                ${!isDebitClaimEvent ? `
+                ${(!isDebitClaimEvent && primaryReport.rma_type !== 'supplier_outbound') ? `
                 <div class="row">
                   <div class="col-label">Store / Branch:</div>
                   <div class="col-val">${escapeEmailHtml(branchSummary)}</div>
@@ -65585,7 +65879,7 @@ export const notificationService = {
               `Explanation / Defect Notes: ${explanationSummary}`
             ]
           : [
-              `Store / Branch: ${branchSummaryText}`,
+              ...(primaryReport.rma_type !== 'supplier_outbound' ? [`Store / Branch: ${branchSummaryText}`] : []),
               `Defect / Return Reason: ${primaryReport.reason || 'Damaged / Defective'}`,
               `Warehouse Location: ${primaryReport.warehouse_location || 'Receiving / Warehouse'}`
             ]),
@@ -68234,10 +68528,12 @@ export function normalizeRmaQrCardData(input = {}) {
   const unit = String(input.unit || input.unit_name || 'pc').trim() || 'pc';
   const piecesPerCase = Number(input.piecesPerCase ?? input.pieces_per_case ?? manifestItems[0]?.pieces_per_case ?? manifestItems[0]?.piecesPerCase) || 1;
   const supplier = String(input.supplier || input.supplier_name || '').trim();
-  const storeBranch = String(input.storeBranch || input.store_branch || input.store || '').trim();
   const streamType = input.streamType === 'supplier_outbound' || input.rma_type === 'supplier_outbound'
     ? 'supplier_outbound'
     : 'customer_inbound';
+  const storeBranch = streamType === 'supplier_outbound'
+    ? ''
+    : String(input.storeBranch || input.store_branch || input.store || '').trim();
   const reason = String(input.reason || input.defect_category || '').trim();
   const reporter = String(input.reporter || input.reporter_name || input.reported_by || '').trim();
 
@@ -68272,13 +68568,19 @@ export function normalizeRmaQrCardData(input = {}) {
     : itemName;
 
   const isPortalAccess = rmaNumber === 'PUBLIC-RMA-PORTAL';
-  const headerTitle = isPortalAccess
+  const lineIndexNum = Number(input._manifestLineIndex || input.manifestLineIndex || 0);
+  const totalLinesNum = Number(input._manifestTotalLines || input.manifestTotalLines || 0);
+  const perItemSuffix = !isManifest && lineIndexNum > 0 && totalLinesNum > 1
+    ? ` • ITEM ${lineIndexNum}/${totalLinesNum}`
+    : '';
+  const baseHeaderTitle = isPortalAccess
     ? 'PUBLIC RMA PORTAL QR'
     : isTest
       ? 'TEST SANDBOX QR'
       : streamType === 'supplier_outbound'
         ? 'SUPPLIER RTV QR'
         : 'WHOLESALE RMA QR';
+  const headerTitle = `${baseHeaderTitle}${perItemSuffix}`;
 
   const entityLabel = supplier && storeBranch && supplier !== storeBranch
     ? `${supplier} • ${storeBranch}`
@@ -69863,7 +70165,7 @@ export function buildRmaMatrixDataset({
         barcode: bc,
         dateReported,
         expiryDate,
-        storeBranch: report.store_branch || '',
+        storeBranch: report.rma_type === 'supplier_outbound' ? '' : (report.store_branch || ''),
         reason: line.reason || report.reason || '',
         workflowOutcome: outcome.hasDecision ? outcome.label : 'Pending Decision',
         reordered: isReordered ? 'Yes' : 'No',
@@ -70792,7 +71094,7 @@ import {
 export const FOLLOW_UP_MAX_DAYS = 10;
 export const DEFAULT_SANDBOX_EMAIL = 'mgan@pingconmarketing.com';
 export const DEFAULT_MATRIX_SEND_TIME_PHT = '13:00';
-export const DEFAULT_FOLLOWUP_SEND_TIME_PHT = '08:00';
+export const DEFAULT_FOLLOWUP_SEND_TIME_PHT = '13:00';
 
 export const DEFAULT_FOLLOWUP_CONFIG = {
   autoEnabled: true,
@@ -72770,6 +73072,13 @@ export function printIsolatedElement({
 
   // Clone target element
   const clone = sourceEl.cloneNode(true);
+  // Ensure pixel preview scaling variables (e.g. --u: 2.9px) convert strictly to physical millimeters in print
+  if (
+    clone?.style &&
+    (clone.id === 'rma-qr-batch-sheet-root' || clone.id === 'rma-qr-print-root' || clone.style.getPropertyValue('--u'))
+  ) {
+    clone.style.setProperty('--u', '1mm', 'important');
+  }
 
   // Synchronize dynamic form controls (inputs, textareas, selects) from live DOM into cloned DOM
   try {
@@ -72921,17 +73230,19 @@ export function printIsolatedElement({
     if (printed) return;
     printed = true;
     const execute = () => {
+      const cleanupIframe = () => {
+        if (iframe && iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
+        }
+      };
       try {
+        iframe.contentWindow?.addEventListener?.('afterprint', cleanupIframe, { once: true });
         iframe.contentWindow?.focus();
         iframe.contentWindow?.print();
       } catch (err) {
         console.warn('Isolated print warning:', err);
       } finally {
-        setTimeout(() => {
-          if (iframe && iframe.parentNode) {
-            iframe.parentNode.removeChild(iframe);
-          }
-        }, 3000);
+        setTimeout(cleanupIframe, 60000);
       }
     };
 
@@ -74001,7 +74312,7 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     ['RMA Number', rmaNumber, 'Identifier — do not rename'],
     ['Test Mode', isTest ? 'YES (Sandbox)' : 'NO (Live)', 'Test vs Live isolation guard'],
     ['Logistics Stream', isSupplierStream ? 'supplier_outbound' : 'customer_inbound', 'customer_inbound or supplier_outbound'],
-    ['Store / Branch', report.store_branch || '', 'Editable text'],
+    ...(isSupplierStream ? [] : [['Store / Branch', report.store_branch || '', 'Editable text']]),
     ['Supplier / Vendor Name', report.supplier_name || report.supplierName || '', 'Editable supplier / updates Supplier Directory'],
     ['Supplier Email (To)', followUpMeta.supplier_email_to || '', 'Comma-separated emails for auto follow-ups'],
     ['Supplier Email (CC)', followUpMeta.supplier_email_cc || '', 'Comma-separated CC emails'],
@@ -74068,7 +74379,7 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     rIdx += 1;
     rowsXml.push(`<row r="${rIdx}" ht="22" customHeight="1">${makeCellXml(`A${rIdx}`, `MANIFEST LINE ITEMS (${items.length})`, 1)}${makeCellXml(`B${rIdx}`, '', 1)}${makeCellXml(`C${rIdx}`, '', 1)}${makeCellXml(`D${rIdx}`, '', 1)}</row>`);
     rIdx += 1;
-    const mHeaders = ['Serial No.', 'Barcode', 'Assigned SKU', 'Product Description', 'Quantity', 'Packaging Unit', 'Expiry Date (YYYY-MM-DD)', 'Defect Reason', 'Explanation'];
+    const mHeaders = ['Serial No.', 'Supplier Name', 'Barcode', 'Assigned SKU', 'Product Description', 'Quantity', 'Packaging Unit', 'Expiry Date (YYYY-MM-DD)', 'Defect Reason', 'Explanation'];
     rowsXml.push(
       `<row r="${rIdx}" ht="22" customHeight="1">` +
       mHeaders.map((h, i) => makeCellXml(`${colToLetter(i)}${rIdx}`, h, 3, 'text')).join('') +
@@ -74078,6 +74389,7 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     items.forEach((it, idx) => {
       const vals = [
         [idx + 1, 'number', 2],
+        [it.supplier_name || it.supplierName || report.supplier_name || '', 'text', 5],
         [it.barcode || '', 'text', 2],
         [it.code || it.sku || '', 'text', 5],
         [it.name || it.productName || '', 'text', 5],
@@ -74096,9 +74408,9 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     });
   }
 
-  const maxCols = items.length > 1 ? 9 : 4;
+  const maxCols = items.length > 1 ? 10 : 4;
   const maxRow = rIdx - 1;
-  const colWidths = [11, 34, 48, 42, 14, 16, 22, 26, 36].slice(0, maxCols);
+  const colWidths = [11, 32, 46, 40, 36, 12, 16, 22, 24, 34].slice(0, maxCols);
   const colsXml = `<cols>${colWidths.map((w, idx) => `<col min="${idx + 1}" max="${idx + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>`;
 
   const sheetXml = [

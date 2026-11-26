@@ -153,10 +153,10 @@ test.describe('Suite 02: Admin Auth/KPIs, NotificationBell, Staff Roles, Invites
       await inviteRow.locator('button[title="Copy Invite Link"]').click();
 
       // Test table stream filter pills (Customer / Supplier / Editor / All) + Refresh
-      await invitesModal.getByRole('button', { name: /Refresh/i }).first().click().catch(() => {});
-      await invitesModal.getByRole('button', { name: /^Customer \(/i }).first().click().catch(() => {});
-      await invitesModal.getByRole('button', { name: /^Editor \(/i }).first().click().catch(() => {});
-      await invitesModal.getByRole('button', { name: /^All \(/i }).first().click().catch(() => {});
+      await invitesModal.getByRole('button', { name: /Refresh/i }).first().click();
+      await invitesModal.getByRole('button', { name: /Customer \(/i }).first().click();
+      await invitesModal.getByRole('button', { name: /Editor \(/i }).first().click();
+      await invitesModal.getByRole('button', { name: /All \(/i }).first().click();
 
       // Send Invite Email button -> captured safely by interceptAndCaptureEmails
       const sendEmailBtn = inviteRow.locator('button[title*="Send" i]').first();

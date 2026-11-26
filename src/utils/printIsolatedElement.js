@@ -127,6 +127,13 @@ export function printIsolatedElement({
 
   // Clone target element
   const clone = sourceEl.cloneNode(true);
+  // Ensure pixel preview scaling variables (e.g. --u: 2.9px) convert strictly to physical millimeters in print
+  if (
+    clone?.style &&
+    (clone.id === 'rma-qr-batch-sheet-root' || clone.id === 'rma-qr-print-root' || clone.style.getPropertyValue('--u'))
+  ) {
+    clone.style.setProperty('--u', '1mm', 'important');
+  }
 
   // Synchronize dynamic form controls (inputs, textareas, selects) from live DOM into cloned DOM
   try {
@@ -278,17 +285,19 @@ export function printIsolatedElement({
     if (printed) return;
     printed = true;
     const execute = () => {
+      const cleanupIframe = () => {
+        if (iframe && iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
+        }
+      };
       try {
+        iframe.contentWindow?.addEventListener?.('afterprint', cleanupIframe, { once: true });
         iframe.contentWindow?.focus();
         iframe.contentWindow?.print();
       } catch (err) {
         console.warn('Isolated print warning:', err);
       } finally {
-        setTimeout(() => {
-          if (iframe && iframe.parentNode) {
-            iframe.parentNode.removeChild(iframe);
-          }
-        }, 3000);
+        setTimeout(cleanupIframe, 60000);
       }
     };
 

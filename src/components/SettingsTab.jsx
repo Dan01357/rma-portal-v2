@@ -74,13 +74,6 @@ export default function SettingsTab({
     detail: ''
   });
 
-  const [replySyncStatus, setReplySyncStatus] = useState({
-    loading: false,
-    done: false,
-    success: false,
-    message: ''
-  });
-
   // Per-Email Recipient Manager Active Type & Scope (Live vs Test) + Matrix Config State
   const [activeEmailProfileType, setActiveEmailProfileType] = useState('new_rma');
   const [recipientScopeIsTest, setRecipientScopeIsTest] = useState(() => Boolean(isTestMode));
@@ -471,19 +464,6 @@ export default function SettingsTab({
       diagnostic: res.diagnostic || '',
       passLength: res.passLength || null,
       hadSpaces: Boolean(res.hadSpaces)
-    });
-  };
-
-  const handleCheckEmailRepliesNow = async () => {
-    setReplySyncStatus({ loading: true, done: false, success: false, message: 'Checking unread Gmail .xlsx replies...' });
-    const res = await notificationService.syncEmailRepliesNow();
-    setReplySyncStatus({
-      loading: false,
-      done: true,
-      success: Boolean(res?.success),
-      message: res?.success
-        ? `Inbox scanned (${res.scannedUnseenWithXlsx || 0} unread .xlsx reply email(s)) — updated ${res.updatedCount || 0} RMA record(s).`
-        : (res?.message || res?.error || 'Could not check Gmail .xlsx replies.')
     });
   };
 
@@ -1354,16 +1334,6 @@ export default function SettingsTab({
 
             <button
               type="button"
-              onClick={handleCheckEmailRepliesNow}
-              disabled={replySyncStatus.loading}
-              className="px-3.5 py-1.5 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/70 dark:hover:bg-sky-900 text-sky-700 dark:text-sky-300 text-xs font-bold rounded-xl border border-sky-200 dark:border-sky-800 flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs disabled:opacity-60"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${replySyncStatus.loading ? 'animate-spin' : ''}`} />
-              <span>{replySyncStatus.loading ? 'Checking Replies...' : '📩 Check Email .xlsx Replies'}</span>
-            </button>
-
-            <button
-              type="button"
               onClick={handleTestSmtp}
               disabled={smtpStatus.loading}
               className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/70 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold rounded-xl border border-indigo-200 dark:border-indigo-800 flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs"
@@ -1567,7 +1537,7 @@ export default function SettingsTab({
             <div>
               <span className="font-black uppercase tracking-wider text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
                 <Clock className="w-4 h-4 text-amber-600" />
-                <span>10-Calendar-Day Pickup Follow-Up Schedule ({formatTime12hFromHhmm(followUpConfig.autoSendTimePht || '08:00')} PHT)</span>
+                <span>10-Calendar-Day Pickup Follow-Up Schedule ({formatTime12hFromHhmm(followUpConfig.autoSendTimePht || '13:00')} PHT)</span>
               </span>
               <p className="text-[11px] text-amber-900/80 dark:text-amber-300/80 mt-0.5">
                 Automated backend scheduler sends daily pickup reminders up to Day 10, stops on pickup/case close, and auto-scraps overdue unclaimed items after Day 10.
@@ -1631,8 +1601,8 @@ export default function SettingsTab({
               <input
                 type="time"
                 aria-label="Follow-Up Auto-Send Time (Asia/Manila HH:mm)"
-                value={followUpConfig.autoSendTimePht || '08:00'}
-                onChange={(e) => setFollowUpConfig((p) => ({ ...p, autoSendTimePht: e.target.value || '08:00' }))}
+                value={followUpConfig.autoSendTimePht || '13:00'}
+                onChange={(e) => setFollowUpConfig((p) => ({ ...p, autoSendTimePht: e.target.value || '13:00' }))}
                 className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-xs text-slate-900 dark:text-white"
               />
             </label>
@@ -1647,17 +1617,6 @@ export default function SettingsTab({
             title="Supplier Follow-Up Extra Internal CCs"
           />
         </div>
-
-        {replySyncStatus.done && (
-          <div className={`p-3 rounded-2xl border text-xs font-bold flex items-center gap-2 ${
-            replySyncStatus.success
-              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
-              : 'bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-700 text-amber-900 dark:text-amber-200'
-          }`}>
-            {replySyncStatus.success ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
-            <span>{replySyncStatus.message}</span>
-          </div>
-        )}
 
         {dailyMatrixStatus.done && (
           <div className={`p-3.5 rounded-2xl border text-xs space-y-1 animate-in fade-in ${

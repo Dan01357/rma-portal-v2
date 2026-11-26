@@ -83,11 +83,15 @@ function formatStructuredAddress({ street = '', barangay = '', city = '', region
 
 async function loadKnownGpsAnchors() {
   try {
-    const { data, error } = await supabase
+    const queryPromise = supabase
       .from('rma_settings')
       .select('value')
       .eq('key', 'known_gps_locations')
       .maybeSingle();
+    const { data, error } = await Promise.race([
+      queryPromise,
+      new Promise((resolve) => setTimeout(() => resolve({ data: null, error: { message: 'timeout' } }), 3000))
+    ]);
 
     if (!error && data && data.value != null) {
       let parsed = data.value;
@@ -125,12 +129,19 @@ async function getCatalogApiKey() {
     return envKey.trim();
   }
 
+  const withTimeout = (p, ms = 3000) => Promise.race([
+    p,
+    new Promise((resolve) => setTimeout(() => resolve({ data: null }), ms))
+  ]);
+
   try {
-    const { data } = await supabase
-      .from('products')
-      .select('code')
-      .eq('barcode', '__CONFIG_PO_API_KEY__')
-      .maybeSingle();
+    const { data } = await withTimeout(
+      supabase
+        .from('products')
+        .select('code')
+        .eq('barcode', '__CONFIG_PO_API_KEY__')
+        .maybeSingle()
+    );
 
     if (data?.code && data.code.trim() && data.code.trim() !== 'pk_live_po_cloud_db_2026_dev_key') {
       return data.code.trim();
@@ -140,11 +151,13 @@ async function getCatalogApiKey() {
   }
 
   try {
-    const { data: settingData } = await supabase
-      .from('rma_settings')
-      .select('value')
-      .eq('key', 'EXTERNAL_API_KEY_DANILO')
-      .maybeSingle();
+    const { data: settingData } = await withTimeout(
+      supabase
+        .from('rma_settings')
+        .select('value')
+        .eq('key', 'EXTERNAL_API_KEY_DANILO')
+        .maybeSingle()
+    );
 
     if (settingData?.value && typeof settingData.value === 'string' && settingData.value.trim() !== 'pk_live_po_cloud_db_2026_dev_key') {
       return settingData.value.trim();
@@ -475,6 +488,9 @@ export default async function handler(req, res) {
     if (!cleanBarcode) {
       return sendJson(res, 400, { success: false, error: 'BAD_REQUEST', message: 'Barcode is required.' });
     }
+    if (/^(RMA-|MANIFEST|NO-?LABEL-)/i.test(cleanBarcode)) {
+      return sendJson(res, 200, { success: true, found: false, source: 'synthetic' });
+    }
 
     try {
       // 1. Check Supabase 'products' table first (Priority 1)
@@ -506,7 +522,7 @@ export default async function handler(req, res) {
         // Priority A: Direct equality on ean_code (Manufacturer / Retail Barcode)
         try {
           const eanUrl = `${baseUrl}/data/erply_products?ean_code=${encodeURIComponent(code)}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
-          const rEan = await fetch(eanUrl, { headers: { 'X-API-Key': key, 'Accept': 'application/json' } });
+          const rEan = await fetch(eanUrl, { headers: { 'X-API-Key': key, 'Accept': 'application/json' }, signal: AbortSignal.timeout(4500) });
           if (rEan.ok) {
             const jEan = await rEan.json();
             if (jEan.data && jEan.data.length > 0) {
@@ -519,7 +535,7 @@ export default async function handler(req, res) {
         // Priority B: Direct equality on code2 (Secondary Barcode / UPC)
         try {
           const code2Url = `${baseUrl}/data/erply_products?code2=${encodeURIComponent(code)}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
-          const r2 = await fetch(code2Url, { headers: { 'X-API-Key': key, 'Accept': 'application/json' } });
+          const r2 = await fetch(code2Url, { headers: { 'X-API-Key': key, 'Accept': 'application/json' }, signal: AbortSignal.timeout(4500) });
           if (r2.ok) {
             const j2 = await r2.json();
             if (j2.data && j2.data.length > 0) {
@@ -532,7 +548,7 @@ export default async function handler(req, res) {
         // Priority C: Direct equality on code (Internal SKU)
         try {
           const skuUrl = `${baseUrl}/data/erply_products?code=${encodeURIComponent(code)}&columns=id,code,code2,ean_code,name,priceWithVat,price,supplierName,brandName,unitName,hasSerialNumbers`;
-          const rSku = await fetch(skuUrl, { headers: { 'X-API-Key': key, 'Accept': 'application/json' } });
+          const rSku = await fetch(skuUrl, { headers: { 'X-API-Key': key, 'Accept': 'application/json' }, signal: AbortSignal.timeout(4500) });
           if (rSku.ok) {
             const jSku = await rSku.json();
             if (jSku.data && jSku.data.length > 0) {

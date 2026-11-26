@@ -310,7 +310,14 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       expect(capturedLiveEditorInvite.duration_display).toBe('No Expiry');
       expect(capturedLiveEditorInvite.expires_at).toBe('9999-12-31T23:59:59.000Z');
       expect(capturedLiveEditorInvite.entity_name).toContain('|');
-      expect(capturedLiveEditorInvite.entity_name).toContain(String(capturedEmails[0].to).toLowerCase());
+      const liveToAddrs = String(capturedEmails[0].to || '')
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+      expect(liveToAddrs.length).toBeGreaterThan(0);
+      for (const toAddr of liveToAddrs) {
+        expect(capturedLiveEditorInvite.entity_name).toContain(toAddr);
+      }
       for (const ccAddr of (capturedEmails[0].cc || [])) {
         expect(capturedLiveEditorInvite.entity_name).toContain(String(ccAddr).toLowerCase());
       }
@@ -1204,31 +1211,30 @@ test.describe('Suite 07: Emails (Intake + 4 Lifecycle Events w/ PDF), mgan@pingc
       await expect(page.locator('#followup-modal-supplier-input')).toBeHidden({ timeout: 15_000 });
       await expect(followUpRow.getByText('Playwright FollowUp Supplier')).toBeVisible({ timeout: 15_000 });
 
-      const followUpUiPayloads = [];
-      await page.route('**/api/send-email*action=daily-followup*', async (route) => {
-        const req = route.request();
-        if (req.method() === 'POST') {
-          try {
-            followUpUiPayloads.push(req.postDataJSON());
-          } catch {}
-          return route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify({
-              success: true,
-              mocked: true,
-              summary: { scanned: 1, followUpsSent: 1, autoDisposed: 0, skippedCount: 0, errorCount: 0 }
-            })
-          });
-        }
-        return route.continue();
+      // Assert manual Send Follow-Up button is removed; exercise real automated ?action=daily-followup dryRun endpoint via Playwright request
+      await expect(followUpRow.getByRole('button', { name: /Send Follow-Up/i })).toHaveCount(0);
+      const fuJwt = await page.evaluate(() => {
+        const supaKey = Object.keys(localStorage).find((k) => k.endsWith('-auth-token'));
+        return supaKey ? JSON.parse(localStorage.getItem(supaKey))?.access_token : '';
       });
-
-      await followUpRow.getByRole('button', { name: /Send Follow-Up/i }).click();
-      await expect(
-        page.getByText(new RegExp(`Dispatched Day .* of 10 handover follow-up for ${followUpRma}`, 'i'))
-      ).toBeVisible({ timeout: 15_000 });
-      expect(followUpUiPayloads.some((p) => p.rmaNumber === followUpRma && p.isTestMode === true)).toBe(true);
+      const dryRunSingleRes = await request.post('/api/send-email?action=daily-followup', {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(fuJwt ? { Authorization: `Bearer ${fuJwt}` } : {})
+        },
+        data: {
+          action: 'daily-followup',
+          rmaNumber: followUpRma,
+          operation: 'send_single',
+          force: true,
+          dryRun: true,
+          isTestMode: true
+        },
+        timeout: 60_000
+      });
+      expect(dryRunSingleRes.status()).toBe(200);
+      const dryRunSingleJson = await dryRunSingleRes.json();
+      expect(dryRunSingleJson?.summary?.followUpsSent).toBeGreaterThanOrEqual(1);
 
       await followUpRow.getByRole('button', { name: /Case Close/i }).click();
       await expect(page.getByText(`${followUpRma} marked Case Closed.`)).toBeVisible({ timeout: 15_000 });

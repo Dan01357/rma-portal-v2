@@ -5,6 +5,11 @@ const SETTINGS_KEY = 'customer_rma_invites_store';
 const LOCAL_STORAGE_KEY = 'rma_customer_invites_v1';
 export const NO_EXPIRY_DB_SENTINEL = '9999-12-31T23:59:59.000Z';
 
+// Session tombstones prevent lagging rma_settings JSON mirror writes from resurrecting
+// recently deleted invites or reverting recently revoked invites during concurrent reloads.
+const sessionDeletedInviteKeys = new Set();
+const sessionRevokedInviteKeys = new Set();
+
 function getLocalInvites() {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -239,11 +244,18 @@ export const inviteService = {
    */
   async getInvites() {
     const mergedMap = new Map();
+    const isTombstonedDeleted = (item) =>
+      sessionDeletedInviteKeys.has(item?.token) || sessionDeletedInviteKeys.has(item?.id);
+    const isMarkedRevoked = (item) =>
+      sessionRevokedInviteKeys.has(item?.token) || sessionRevokedInviteKeys.has(item?.id);
     const absorbList = (list) => {
       if (!Array.isArray(list)) return;
       list.forEach((i) => {
-        if (!i || !i.token) return;
+        if (!i || !i.token || isTombstonedDeleted(i)) return;
         const hydrated = hydrateInviteRecord(i);
+        if (isMarkedRevoked(hydrated)) {
+          hydrated.status = 'revoked';
+        }
         const prev = mergedMap.get(hydrated.token);
         if (!prev) {
           mergedMap.set(hydrated.token, hydrated);
@@ -259,16 +271,19 @@ export const inviteService = {
             no_expiry: permanent,
             expires_at: permanent ? null : (hydrated.expires_at ?? prev.expires_at),
             duration_display: permanent ? 'No Expiry' : (hydrated.duration_display || prev.duration_display),
-            status: (hydrated.status === 'revoked' || prev.status === 'revoked') ? 'revoked' : hydrated.status
+            status: (hydrated.status === 'revoked' || prev.status === 'revoked' || isMarkedRevoked(hydrated)) ? 'revoked' : hydrated.status
           });
         }
       });
     };
 
-    // Fetch public.rma_invites and universal rma_settings store in parallel to halve latency
+    // Fetch public.rma_invites and bounded universal rma_settings store in parallel to halve latency
     const [tblResult, settingsResult] = await Promise.allSettled([
       supabase.from('rma_invites').select('*').order('created_at', { ascending: false }),
-      supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle()
+      Promise.race([
+        supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle(),
+        new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 4500))
+      ])
     ]);
 
     if (tblResult.status === 'fulfilled') {
@@ -278,7 +293,7 @@ export const inviteService = {
       }
     }
 
-    if (settingsResult.status === 'fulfilled') {
+    if (settingsResult.status === 'fulfilled' && !settingsResult.value?.timedOut) {
       const { data, error } = settingsResult.value || {};
       if (!error && data?.value && Array.isArray(data.value)) {
         absorbList(data.value);
@@ -295,7 +310,7 @@ export const inviteService = {
       return combined;
     }
 
-    return getLocalInvites().map(hydrateInviteRecord);
+    return getLocalInvites().filter((i) => !isTombstonedDeleted(i)).map(hydrateInviteRecord);
   },
 
   /**
@@ -403,13 +418,17 @@ export const inviteService = {
       updated_at: now.toISOString()
     };
 
-    // 1. Run primary rma_invites insert and rma_settings read in parallel to halve latency
+    // 1. Run primary rma_invites insert and bounded rma_settings read in parallel
     let createdRecord = null;
     let existingSettingsList = null;
     try {
+      const settingsSelectWithTimeout = Promise.race([
+        supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle(),
+        new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 4000))
+      ]);
       const [tblRes, settingsRes] = await Promise.allSettled([
         supabase.from('rma_invites').insert([dbInsertPayload]).select().maybeSingle(),
-        supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle()
+        settingsSelectWithTimeout
       ]);
 
       if (tblRes.status === 'fulfilled') {
@@ -426,7 +445,7 @@ export const inviteService = {
           });
         }
       }
-      if (settingsRes.status === 'fulfilled' && !settingsRes.value?.error && Array.isArray(settingsRes.value?.data?.value)) {
+      if (settingsRes.status === 'fulfilled' && !settingsRes.value?.timedOut && !settingsRes.value?.error && Array.isArray(settingsRes.value?.data?.value)) {
         existingSettingsList = settingsRes.value.data.value.map(hydrateInviteRecord);
       }
     } catch {
@@ -447,32 +466,29 @@ export const inviteService = {
       store_branch: cleanStream === 'rma_editor' ? (cleanRmaNum || '') : cleanEntity
     };
 
-    // 2. Always persist to rma_settings for universal sync across all admin sessions
-    // (When primary SQL insert into public.rma_invites already succeeded, cap blocking wait at 3s so 50KB mirror writes never stall email dispatch)
+    // 2. Always persist locally & mirror to rma_settings with bounded wait so slow large blobs never stall the UI
     try {
       const baseList = Array.isArray(existingSettingsList) ? existingSettingsList : getLocalInvites();
       const updated = [newInvite, ...baseList.filter(i => i.token !== token)];
       saveLocalInvites(updated);
 
-      const settingsMirrorWrite = supabase
-        .from('rma_settings')
-        .upsert({
-          key: SETTINGS_KEY,
-          value: updated,
-          updated_at: new Date().toISOString()
-        })
-        .then(
-          () => { },
-          (err) => console.warn('Failed to persist invite to rma_settings:', err?.message || err)
-        );
+      if (Array.isArray(existingSettingsList) || !createdRecord) {
+        const settingsMirrorWrite = supabase
+          .from('rma_settings')
+          .upsert({
+            key: SETTINGS_KEY,
+            value: updated,
+            updated_at: new Date().toISOString()
+          })
+          .then(
+            () => { },
+            (err) => console.warn('Failed to persist invite to rma_settings:', err?.message || err)
+          );
 
-      if (createdRecord) {
         await Promise.race([
           settingsMirrorWrite,
           new Promise((resolve) => setTimeout(resolve, 3000))
         ]);
-      } else {
-        await settingsMirrorWrite;
       }
     } catch (e) {
       console.warn('Failed to persist invite to rma_settings:', e);
@@ -614,39 +630,53 @@ export const inviteService = {
    */
   async revokeInvite(tokenOrId) {
     if (!tokenOrId) return false;
+    sessionRevokedInviteKeys.add(tokenOrId);
 
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tokenOrId).trim());
     let updateQuery = supabase.from('rma_invites').update({ status: 'revoked', updated_at: new Date().toISOString() });
     updateQuery = isUUID ? updateQuery.eq('id', tokenOrId) : updateQuery.eq('token', tokenOrId);
 
-    // 1. Update table and fetch current invites in parallel to reduce latency
-    const [tblUpdate, currentResult] = await Promise.allSettled([
+    // 1. Update table and fetch bounded settings mirror in parallel
+    let existingSettingsList = null;
+    const [tblUpdate, settingsRes] = await Promise.allSettled([
       updateQuery,
-      this.getInvites()
+      Promise.race([
+        supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle(),
+        new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 4000))
+      ])
     ]);
     if (tblUpdate.status === 'rejected') {
       console.warn('Failed to update revoked invite in rma_invites:', tblUpdate.reason);
     }
+    if (settingsRes.status === 'fulfilled' && !settingsRes.value?.timedOut && !settingsRes.value?.error && Array.isArray(settingsRes.value?.data?.value)) {
+      existingSettingsList = settingsRes.value.data.value.map(hydrateInviteRecord);
+    }
 
-    // 2. Persist updated status into rma_settings
+    // 2. Persist updated status locally & mirror to rma_settings with bounded wait
     try {
-      const current = currentResult.status === 'fulfilled' && Array.isArray(currentResult.value)
-        ? currentResult.value
-        : getLocalInvites();
-      const updated = current.map(inv => {
+      const baseList = Array.isArray(existingSettingsList) ? existingSettingsList : getLocalInvites();
+      const updated = baseList.map(inv => {
         if (inv.token === tokenOrId || inv.id === tokenOrId) {
           return { ...inv, status: 'revoked' };
         }
         return inv;
       });
-      await supabase
-        .from('rma_settings')
-        .upsert({
-          key: SETTINGS_KEY,
-          value: updated,
-          updated_at: new Date().toISOString()
-        });
       saveLocalInvites(updated);
+
+      if (Array.isArray(existingSettingsList) || tblUpdate.status === 'rejected') {
+        const mirrorUpsert = supabase
+          .from('rma_settings')
+          .upsert({
+            key: SETTINGS_KEY,
+            value: updated,
+            updated_at: new Date().toISOString()
+          })
+          .then(() => { }, (err) => console.warn('Failed to update revoked invite in rma_settings:', err?.message || err));
+        await Promise.race([
+          mirrorUpsert,
+          new Promise((resolve) => setTimeout(resolve, 3000))
+        ]);
+      }
     } catch (e) {
       console.warn('Failed to update revoked invite in rma_settings:', e);
     }
@@ -670,6 +700,7 @@ export const inviteService = {
    */
   async deleteInvite(tokenOrId) {
     if (!tokenOrId) return false;
+    sessionDeletedInviteKeys.add(tokenOrId);
 
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(tokenOrId).trim());
     let tblDeleteQuery = supabase.from('rma_invites').delete();
@@ -678,47 +709,48 @@ export const inviteService = {
     let tableDeleted = false;
     let existingSettingsList = null;
 
-    // 1. Delete from rma_invites table and read rma_settings mirror in parallel to halve latency
+    // 1. Delete from rma_invites table and read bounded rma_settings mirror in parallel
     try {
       const [tblDelRes, settingsRes] = await Promise.allSettled([
         tblDeleteQuery,
-        supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle()
+        Promise.race([
+          supabase.from('rma_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle(),
+          new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 4000))
+        ])
       ]);
       if (tblDelRes.status === 'fulfilled' && !tblDelRes.value?.error) {
         tableDeleted = true;
       }
-      if (settingsRes.status === 'fulfilled' && !settingsRes.value?.error && Array.isArray(settingsRes.value?.data?.value)) {
+      if (settingsRes.status === 'fulfilled' && !settingsRes.value?.timedOut && !settingsRes.value?.error && Array.isArray(settingsRes.value?.data?.value)) {
         existingSettingsList = settingsRes.value.data.value;
       }
     } catch (e) {
       console.warn('Failed to delete from rma_invites table:', e);
     }
 
-    // 2. Delete from rma_settings mirror & localStorage (time-boxed at 3s if primary SQL delete already succeeded)
+    // 2. Delete from localStorage & bounded rma_settings mirror
     try {
       const baseList = Array.isArray(existingSettingsList) ? existingSettingsList : getLocalInvites();
-      const updated = baseList.filter(inv => inv.token !== tokenOrId && inv.id !== tokenOrId);
+      const updated = baseList.filter(inv => inv.token !== tokenOrId && inv.id !== tokenOrId && !sessionDeletedInviteKeys.has(inv.token) && !sessionDeletedInviteKeys.has(inv.id));
       saveLocalInvites(updated);
 
-      const settingsMirrorWrite = supabase
-        .from('rma_settings')
-        .upsert({
-          key: SETTINGS_KEY,
-          value: updated,
-          updated_at: new Date().toISOString()
-        })
-        .then(
-          () => { },
-          (err) => console.warn('Failed to delete invite from rma_settings:', err?.message || err)
-        );
+      if (Array.isArray(existingSettingsList) || !tableDeleted) {
+        const settingsMirrorWrite = supabase
+          .from('rma_settings')
+          .upsert({
+            key: SETTINGS_KEY,
+            value: updated,
+            updated_at: new Date().toISOString()
+          })
+          .then(
+            () => { },
+            (err) => console.warn('Failed to delete invite from rma_settings:', err?.message || err)
+          );
 
-      if (tableDeleted) {
         await Promise.race([
           settingsMirrorWrite,
           new Promise((resolve) => setTimeout(resolve, 3000))
         ]);
-      } else {
-        await settingsMirrorWrite;
       }
     } catch (e) {
       console.warn('Failed to delete invite from rma_settings:', e);

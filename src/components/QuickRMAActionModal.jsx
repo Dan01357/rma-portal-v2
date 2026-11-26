@@ -195,8 +195,6 @@ export default function QuickRMAActionModal({
   isEditingAiDetailsRef.current = isEditingAiDetails;
   const [isSavingAiDetails, setIsSavingAiDetails] = useState(false);
   const [copyDrSuccess, setCopyDrSuccess] = useState(false);
-  const [isSyncingXlsx, setIsSyncingXlsx] = useState(false);
-  const [xlsxSyncFeedback, setXlsxSyncFeedback] = useState(null);
 
   // Authentication & Verification State
   const [verifiedAdmin, setVerifiedAdmin] = useState(null);
@@ -1509,78 +1507,6 @@ export default function QuickRMAActionModal({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <label
-                      className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 hover:underline cursor-pointer flex items-center gap-1"
-                      title="Upload an edited RMA Alert Mirror .xlsx file to apply updates"
-                    >
-                      <span>📤 Upload Edited .xlsx</span>
-                      <input
-                        type="file"
-                        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        className="hidden"
-                        disabled={isSyncingXlsx}
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          e.target.value = '';
-                          if (!file) return;
-                          setIsSyncingXlsx(true);
-                          setXlsxSyncFeedback(null);
-                          try {
-                            const res = await notificationService.ingestEditedRmaXlsx({
-                              file,
-                              rmaNumber: report.rma_number,
-                              actorName: verifiedAdmin?.name || currentUser?.name || 'Admin'
-                            });
-                            if (res?.success) {
-                              if (res.report) {
-                                setReport(res.report);
-                                onReportUpdated?.(res.report);
-                              }
-                              onRefresh?.();
-                              setXlsxSyncFeedback({
-                                type: 'success',
-                                text: res.noChanges
-                                  ? `No changed cells detected in ${file.name} for ${res.rmaNumber}.`
-                                  : `Applied .xlsx edits to ${res.rmaNumber}: ${(res.changedFields || []).join(', ')}`
-                              });
-                            } else {
-                              setXlsxSyncFeedback({ type: 'error', text: res?.error || 'Could not ingest .xlsx updates.' });
-                            }
-                          } finally {
-                            setIsSyncingXlsx(false);
-                          }
-                        }}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      disabled={isSyncingXlsx}
-                      onClick={async () => {
-                        setIsSyncingXlsx(true);
-                        setXlsxSyncFeedback(null);
-                        try {
-                          const res = await notificationService.syncEmailRepliesNow();
-                          if (res?.success) {
-                            onRefresh?.();
-                            setXlsxSyncFeedback({
-                              type: 'success',
-                              text: `Checked inbox: ${res.scannedUnseenWithXlsx || 0} unread email(s) with .xlsx, updated ${res.updatedCount || 0} RMA record(s).`
-                            });
-                          } else {
-                            setXlsxSyncFeedback({
-                              type: 'error',
-                              text: res?.message || res?.error || 'Could not sync email .xlsx replies.'
-                            });
-                          }
-                        } finally {
-                          setIsSyncingXlsx(false);
-                        }
-                      }}
-                      className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1 disabled:opacity-50"
-                      title="Poll incoming email replies carrying edited .xlsx workbooks"
-                    >
-                      <span>📩 Check Email .xlsx Replies</span>
-                    </button>
                     <button
                       type="button"
                       onClick={() => setIsEditingAiDetails(!isEditingAiDetails)}
@@ -1591,16 +1517,6 @@ export default function QuickRMAActionModal({
                     </button>
                   </div>
                 </div>
-
-                {xlsxSyncFeedback && (
-                  <div className={`p-2 rounded-xl border text-[11px] font-bold ${
-                    xlsxSyncFeedback.type === 'success'
-                      ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200'
-                      : 'bg-rose-50 dark:bg-rose-950/50 border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-200'
-                  }`}>
-                    {xlsxSyncFeedback.text}
-                  </div>
-                )}
 
                 <div className="flex items-start gap-3 bg-violet-50/50 dark:bg-violet-950/20 p-2.5 rounded-2xl border border-violet-100 dark:border-violet-900/50">
                   {paperworkList.length > 0 && (
@@ -1674,7 +1590,7 @@ export default function QuickRMAActionModal({
                           {adminSupplierName || report.supplier_name || 'Pending Assignment'}
                         </strong>
                       </div>
-                      {report.store_branch && report.store_branch !== 'Direct Return' && (
+                      {report.rma_type !== 'supplier_outbound' && report.store_branch && report.store_branch !== 'Direct Return' && (
                         <div className="flex items-center gap-1.5">
                           <span className="text-slate-400 text-[10px] uppercase font-bold">Store Branch:</span>
                           <strong className="text-slate-800 dark:text-slate-200 truncate">{report.store_branch}</strong>
@@ -2251,66 +2167,32 @@ export default function QuickRMAActionModal({
                           <span>{!wf.party.hasValidSupplier ? '+ Set Supplier & Email' : 'Edit Supplier & Email'}</span>
                         </button>
                         {!wf.isClosed && (
-                          <>
-                            <button
-                              type="button"
-                              disabled={isFollowUpBusy}
-                              onClick={async () => {
-                                if (!wf.party.hasValidSupplier || (!isTestRecord(report) && wf.party.toEmails.length === 0)) {
-                                  setIsFollowUpModalOpen(true);
-                                  return;
-                                }
-                                setIsFollowUpBusy(true);
-                                setFollowUpFeedback(null);
-                                try {
-                                  const res = await notificationService.runDailyFollowUpNow({
-                                    isTestMode: Boolean(isTestRecord(report)),
-                                    force: true,
-                                    rmaNumber: report.rma_number,
-                                    operation: 'send_single'
-                                  });
-                                  if (res?.success) {
-                                    setFollowUpFeedback({ type: 'success', text: `Sent Day ${wf.calendarDay} of 10 follow-up for ${report.rma_number}.` });
-                                    onRefresh?.();
-                                  } else {
-                                    setFollowUpFeedback({ type: 'error', text: res?.error || 'Could not send follow-up.' });
-                                  }
-                                } finally {
-                                  setIsFollowUpBusy(false);
-                                }
-                              }}
-                              className="px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                            >
-                              <Send className="w-3.5 h-3.5" />
-                              <span>📧 Send Follow-Up</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isFollowUpBusy}
-                              onClick={async () => {
-                                setIsFollowUpBusy(true);
-                                setFollowUpFeedback(null);
-                                try {
-                                  const updated = await catalogService.closeFollowUpCase(report, {
-                                    markPickedUp: true,
-                                    reason: 'Picked Up — Case Closed',
-                                    actorName: verifiedAdmin?.name || currentUser?.name || 'Admin'
-                                  });
-                                  setReport(updated);
-                                  onReportUpdated?.(updated);
-                                  onRefresh?.();
-                                  setFollowUpFeedback({ type: 'success', text: 'Case closed & 10-day countdown stopped.' });
-                                } catch (e) {
-                                  setFollowUpFeedback({ type: 'error', text: e?.message || 'Failed closing case.' });
-                                } finally {
-                                  setIsFollowUpBusy(false);
-                                }
-                              }}
-                              className="px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-black cursor-pointer disabled:opacity-50"
-                            >
-                              <span>✓ Case Close</span>
-                            </button>
-                          </>
+                          <button
+                            type="button"
+                            disabled={isFollowUpBusy}
+                            onClick={async () => {
+                              setIsFollowUpBusy(true);
+                              setFollowUpFeedback(null);
+                              try {
+                                const updated = await catalogService.closeFollowUpCase(report, {
+                                  markPickedUp: true,
+                                  reason: 'Picked Up — Case Closed',
+                                  actorName: verifiedAdmin?.name || currentUser?.name || 'Admin'
+                                });
+                                setReport(updated);
+                                onReportUpdated?.(updated);
+                                onRefresh?.();
+                                setFollowUpFeedback({ type: 'success', text: 'Case closed & 10-day countdown stopped.' });
+                              } catch (e) {
+                                setFollowUpFeedback({ type: 'error', text: e?.message || 'Failed closing case.' });
+                              } finally {
+                                setIsFollowUpBusy(false);
+                              }
+                            }}
+                            className="px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-black cursor-pointer disabled:opacity-50"
+                          >
+                            <span>✓ Case Close</span>
+                          </button>
                         )}
                       </>
                     );

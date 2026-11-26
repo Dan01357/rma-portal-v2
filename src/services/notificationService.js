@@ -61,7 +61,7 @@ export const EMAIL_PROFILE_TYPES = [
   { id: 'rma_restocked', label: 'RMA Restocked to Good Stock', badge: 'Lifecycle', description: 'Triggered when an item is returned undamaged to Good Stock Shelf.' },
   { id: 'daily_matrix_auto', label: 'Auto Daily PHT Overall Matrix', badge: 'Cron (.xlsx)', description: 'Scheduled daily Asia/Manila (.xlsx) report recipients, window & HH:mm time (default 1:00 PM PHT).' },
   { id: 'manual_matrix', label: 'Manual Overall Matrix Email', badge: 'Manual (.xlsx)', description: 'On-demand Overall/Hub Matrix (.xlsx) email dispatch recipients.' },
-  { id: 'supplier_followup', label: 'Daily 10-Day Pickup Follow-Up Extra CCs', badge: '10-Day SLA', description: 'Optional internal CCs added on daily supplier/customer pickup follow-up emails (default 8:00 AM PHT).' },
+  { id: 'supplier_followup', label: 'Daily 10-Day Pickup Follow-Up Extra CCs', badge: '10-Day SLA', description: 'Optional internal CCs added on daily supplier/customer pickup follow-up emails (default 1:00 PM PHT).' },
   { id: 'product_update', label: 'Catalog Product Update', badge: 'Catalog', description: 'Dispatched when verified catalog product details or pricing are updated.' },
   { id: 'invite_email', label: 'Portal / RMA Editor Invite Extra CCs', badge: 'Invites', description: 'Optional extra recipients CC’d automatically on generated portal/editor invites.' }
 ];
@@ -1602,7 +1602,7 @@ export const notificationService = {
                   <div class="col-label">${isCustomerStream && isPickupEvent ? 'Customer / Outlet:' : 'Supplier / Vendor:'}</div>
                   <div class="col-val">${escapeEmailHtml(partyDisplayName)}</div>
                 </div>
-                ${!isDebitClaimEvent ? `
+                ${(!isDebitClaimEvent && primaryReport.rma_type !== 'supplier_outbound') ? `
                 <div class="row">
                   <div class="col-label">Store / Branch:</div>
                   <div class="col-val">${escapeEmailHtml(branchSummary)}</div>
@@ -1965,7 +1965,7 @@ export const notificationService = {
               `Explanation / Defect Notes: ${explanationSummary}`
             ]
           : [
-              `Store / Branch: ${branchSummaryText}`,
+              ...(primaryReport.rma_type !== 'supplier_outbound' ? [`Store / Branch: ${branchSummaryText}`] : []),
               `Defect / Return Reason: ${primaryReport.reason || 'Damaged / Defective'}`,
               `Warehouse Location: ${primaryReport.warehouse_location || 'Receiving / Warehouse'}`
             ]),
