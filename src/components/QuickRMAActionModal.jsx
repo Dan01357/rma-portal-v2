@@ -57,7 +57,11 @@ import {
   formatDateYmd,
   doesCreditMemoLinkReport,
   getGpsAddressDisplay,
-  getGpsMapUrl
+  getGpsMapUrl,
+  sumManifestQuantity,
+  summarizeBatchSuppliers,
+  isMixedSuppliersSummary,
+  isRealSupplierName
 } from '../utils/rmaHelpers';
 import { copyTextSafe } from '../utils/clipboard';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -189,6 +193,7 @@ export default function QuickRMAActionModal({
   const [adminPrice, setAdminPrice] = useState(0);
   const [adminPriceWithVat, setAdminPriceWithVat] = useState(0);
   const [adminPiecesPerCase, setAdminPiecesPerCase] = useState(null);
+  const [editableManifestItems, setEditableManifestItems] = useState([]);
 
   const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
   const isEditingAiDetailsRef = useRef(false);
@@ -307,21 +312,32 @@ export default function QuickRMAActionModal({
     if (directItems.length > 0) {
       setManifestItems(directItems);
     } else if (report.id) {
-      supabase.from('rma_items')
-        .select('*')
-        .eq('rma_report_id', report.id)
-        .then(({ data, error }) => {
-          if (!error && Array.isArray(data) && data.length > 1) {
-            setManifestItems(data);
-          } else {
-            setManifestItems([]);
-          }
-        })
-        .catch(() => setManifestItems([]));
+      const siblingChildRows = (Array.isArray(recentReportsList) ? recentReportsList : []).filter((r) => (
+        r &&
+        String(r.id) !== String(report.id) &&
+        !r.is_parent &&
+        (String(r.parent_rma_id) === String(report.id) || (report.rma_number && r.rma_number === report.rma_number && !isSplitChildTicket(r)))
+      ));
+      if (siblingChildRows.length > 1) {
+        setManifestItems(siblingChildRows);
+      } else {
+        supabase.from('rma_items')
+          .select('*')
+          .eq('rma_report_id', report.id)
+          .order('id', { ascending: true })
+          .then(({ data, error }) => {
+            if (!error && Array.isArray(data) && data.length > 1) {
+              setManifestItems(data);
+            } else {
+              setManifestItems([]);
+            }
+          })
+          .catch(() => setManifestItems([]));
+      }
     } else {
       setManifestItems([]);
     }
-  }, [report]);
+  }, [report, recentReportsList]);
 
   const totalSplitQty = Number(report?.quantity) || 0;
   const maxSplitVal = Math.max(1, totalSplitQty - 1);
@@ -697,6 +713,9 @@ export default function QuickRMAActionModal({
           prev.disposition !== match.disposition ||
           prev.warehouse_location !== match.warehouse_location ||
           prev.supplier_name !== match.supplier_name ||
+          prev.quantity !== match.quantity ||
+          prev.total_quantity !== match.total_quantity ||
+          JSON.stringify(prev.items) !== JSON.stringify(match.items) ||
           prev.code !== match.code ||
           prev.name !== match.name ||
           prev.notes !== match.notes ||
@@ -715,24 +734,39 @@ export default function QuickRMAActionModal({
     const set = new Set();
     (savedProductsList || []).forEach(p => {
       const s = (p.supplier_name || p.supplierName || '').trim();
-      if (s && s !== 'Pending Assignment' && s !== 'Unassigned' && s !== 'Warehouse') {
+      if (isRealSupplierName(s)) {
         set.add(s);
       }
     });
     (recentReportsList || []).forEach(r => {
       const s = (r.supplier_name || '').trim();
-      if (s && s !== 'Pending Assignment' && s !== 'Unassigned' && s !== 'Warehouse') {
+      if (isRealSupplierName(s)) {
         set.add(s);
       }
     });
     (supplierDirectoryService.getCachedDirectory() || []).forEach(c => {
       const s = (c.supplier_name || '').trim();
-      if (s && s !== 'Pending Assignment' && s !== 'Unassigned' && s !== 'Warehouse') {
+      if (isRealSupplierName(s)) {
         set.add(s);
       }
     });
     return Array.from(set).sort();
   }, [savedProductsList, recentReportsList]);
+
+  const handleUpdateEditableManifestItem = (idx, patch) => {
+    setEditableManifestItems((prev) => {
+      const next = prev.map((row, i) => (i === idx ? { ...row, ...patch } : row));
+      if (next.length > 0) {
+        if (patch.quantity !== undefined) {
+          setAdminQuantity(sumManifestQuantity(next, 1));
+        }
+        if (patch.supplier_name !== undefined && next.length > 1) {
+          setAdminSupplierName((currSup) => summarizeBatchSuppliers(next, isMixedSuppliersSummary(currSup) ? '' : currSup));
+        }
+      }
+      return next;
+    });
+  };
 
   // Reset edit mode only when opening modal or switching to a different RMA ticket
   useEffect(() => {
@@ -788,7 +822,28 @@ export default function QuickRMAActionModal({
       setAdminProductName(report.name || '');
       setAdminBarcode(report.barcode || '');
       setAdminSku(report.code || report.sku || '');
-      setAdminQuantity(Number(report.quantity) || 1);
+      const baseManifestList = manifestItems.length > 0
+        ? manifestItems
+        : (Array.isArray(report.items) ? report.items : []);
+      const mappedManifest = baseManifestList.map((it) => {
+        const rawSup = it.supplier_name || it.supplierName || it.supplier || (!isMixedSuppliersSummary(resolvedInitSupplier) ? resolvedInitSupplier : '') || '';
+        return {
+          ...it,
+          name: it.name || it.productName || '',
+          code: it.code || it.sku || '',
+          sku: it.sku || it.code || '',
+          supplier_name: rawSup,
+          supplierName: rawSup,
+          supplier: rawSup,
+          quantity: Math.max(1, Number(it.quantity ?? it.qty) || 1),
+          unit_name: it.unit_name || it.unit || 'pc',
+          price: Number(it.price || 0),
+          price_with_vat: Number(it.price_with_vat || it.priceWithVat || 0),
+          expiry_date: it.expiry_date ? String(it.expiry_date).slice(0, 10) : ''
+        };
+      });
+      setEditableManifestItems(mappedManifest);
+      setAdminQuantity(mappedManifest.length > 1 ? sumManifestQuantity(mappedManifest, report.quantity) : (Number(report.quantity) || 1));
       setAdminUnitName(report.unit_name || 'pc');
       const netP = Number(report.price || 0);
       setAdminPrice(netP);
@@ -805,6 +860,7 @@ export default function QuickRMAActionModal({
     report?.code,
     report?.sku,
     report?.quantity,
+    report?.total_quantity,
     report?.unit_name,
     report?.price,
     report?.price_with_vat,
@@ -814,6 +870,7 @@ export default function QuickRMAActionModal({
     report?.invoice_dr_number,
     report?.supplier_name,
     report?.expiry_date,
+    manifestItems,
     savedProductsList
   ]);
 
@@ -956,6 +1013,7 @@ export default function QuickRMAActionModal({
     setIsSavingAiDetails(true);
     try {
       const isSuperAdminRole = currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin';
+      const isAdminOrSuperRole = isSuperAdminRole || currentUser?.role === 'admin' || verifiedAdmin?.role === 'admin';
       const cleanSi = adminSiNumber.trim();
       const cleanDr = adminDrNumber.trim();
       const cleanPo = adminPoNumber.trim();
@@ -1009,7 +1067,7 @@ export default function QuickRMAActionModal({
         if (Object.keys(prevPu).length > 0 || cleanSupplierEmailTo || cleanSupplierEmailCc) {
           baseMeta.supplier_pickup = {
             ...prevPu,
-            ...(cleanSupplier ? { supplier_name: cleanSupplier } : {}),
+            ...(cleanSupplier && !isMixedSuppliersSummary(cleanSupplier) ? { supplier_name: cleanSupplier } : {}),
             supplier_email_to: cleanSupplierEmailTo,
             supplier_email_cc: cleanSupplierEmailCc
           };
@@ -1017,9 +1075,14 @@ export default function QuickRMAActionModal({
         updates.ai_document_metadata = baseMeta;
       }
 
+      if (isAdminOrSuperRole && adminQuantity) {
+        const singleQty = Math.max(1, Number(adminQuantity) || 1);
+        updates.quantity = singleQty;
+        updates.total_quantity = singleQty;
+      }
+
       if (isSuperAdminRole) {
         if (adminBarcode.trim()) updates.barcode = adminBarcode.trim();
-        if (adminQuantity) updates.quantity = Number(adminQuantity) || 1;
 
         const currentMeta = { ...baseMeta };
         let currentNotes = report.notes || '';
@@ -1039,14 +1102,54 @@ export default function QuickRMAActionModal({
         }
       }
 
+      const isManifestReport = Boolean(
+        report?.is_parent ||
+        editableManifestItems.length > 1 ||
+        manifestItems.length > 1 ||
+        (Array.isArray(report?.items) && report.items.length > 1)
+      );
+
       let updatedItems = report.items;
-      if (Array.isArray(report.items) && report.items.length > 0) {
-        updatedItems = report.items.map(it => ({
-          ...it,
-          ...(cleanSupplier ? { supplier_name: cleanSupplier } : {}),
-          ...(cleanExpiry ? { expiry_date: cleanExpiry } : {})
-        }));
+      const sourceManifestForSave = editableManifestItems.length > 0
+        ? editableManifestItems
+        : (Array.isArray(report.items) ? report.items : []);
+
+      if (sourceManifestForSave.length > 0) {
+        const fallbackSingleSup = isRealSupplierName(cleanSupplier)
+          ? cleanSupplier
+          : (isRealSupplierName(report.supplier_name) ? report.supplier_name : '');
+        updatedItems = sourceManifestForSave.map((it) => {
+          const itemQty = Math.max(1, parseInt(it.quantity ?? it.qty, 10) || 1);
+          const itemSupRaw = String(it.supplier_name || it.supplierName || it.supplier || '').trim();
+          const itemSup = isRealSupplierName(itemSupRaw)
+            ? itemSupRaw
+            : (fallbackSingleSup || 'Pending Assignment');
+          const itemSku = String(it.code || it.sku || '').trim() || null;
+          const itemNet = parseFloat(it.price);
+          const itemVat = parseFloat(it.price_with_vat ?? it.priceWithVat);
+          return {
+            ...it,
+            name: String(it.name || it.productName || '').trim() || 'Item',
+            code: itemSku,
+            sku: itemSku,
+            quantity: itemQty,
+            unit_name: String(it.unit_name || it.unit || 'pc').trim() || 'pc',
+            supplier_name: itemSup,
+            supplierName: itemSup,
+            supplier: itemSup,
+            ...(Number.isFinite(itemNet) && itemNet >= 0 ? { price: Number(itemNet.toFixed(2)) } : {}),
+            ...(Number.isFinite(itemVat) && itemVat >= 0
+              ? { price_with_vat: Number(itemVat.toFixed(2)) }
+              : (Number.isFinite(itemNet) && itemNet >= 0 ? { price_with_vat: Number((itemNet * 1.12).toFixed(2)) } : {})),
+            expiry_date: it.expiry_date ? String(it.expiry_date).slice(0, 10) : (cleanExpiry || null)
+          };
+        });
+        const totalBatchQty = sumManifestQuantity(updatedItems, 1);
         updates.items = updatedItems;
+        updates.total_items = updatedItems.length;
+        updates.total_quantity = totalBatchQty;
+        updates.quantity = totalBatchQty;
+        updates.supplier_name = summarizeBatchSuppliers(updatedItems, fallbackSingleSup);
       }
 
       const updatePromise = supabase
@@ -1081,24 +1184,54 @@ export default function QuickRMAActionModal({
         if (fbErr) throw fbErr;
       }
 
-      const isManifestReport = Boolean(
-        report?.is_parent ||
-        manifestItems.length > 1 ||
-        (Array.isArray(report?.items) && report.items.length > 1)
-      );
       if (report.id && isManifestReport) {
-        const childCascade = {};
-        if (cleanRmaNum && cleanRmaNum !== report.rma_number) childCascade.rma_number = cleanRmaNum;
-        if (cleanSupplier) childCascade.supplier_name = cleanSupplier;
-        if (Object.keys(childCascade).length > 0) {
-          try {
-            await Promise.race([
-              supabase.from('rma_reports').update(childCascade).eq('parent_rma_id', report.id),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('Child cascade timeout')), 3000))
-            ]);
-          } catch (cascadeErr) {
-            console.warn('Child cascade update notice:', cascadeErr?.message);
+        const itemsForSync = Array.isArray(updatedItems) ? updatedItems : [];
+        try {
+          const { data: childDbRows } = await supabase
+            .from('rma_reports')
+            .select('id, barcode')
+            .eq('parent_rma_id', report.id)
+            .order('id', { ascending: true });
+          if (Array.isArray(childDbRows) && childDbRows.length > 0) {
+            for (let i = 0; i < childDbRows.length; i++) {
+              const ch = childDbRows[i];
+              const matched = itemsForSync.find((it) => (it.id != null && String(it.id) === String(ch.id)) || (it.barcode && ch.barcode && String(it.barcode).trim() === String(ch.barcode).trim())) || itemsForSync[i];
+              const childPatch = {};
+              if (cleanRmaNum && cleanRmaNum !== report.rma_number) childPatch.rma_number = cleanRmaNum;
+              if (matched) {
+                childPatch.name = matched.name;
+                childPatch.code = matched.code || null;
+                childPatch.quantity = matched.quantity;
+                if (matched.supplier_name) childPatch.supplier_name = matched.supplier_name;
+                if (matched.expiry_date !== undefined) childPatch.expiry_date = matched.expiry_date || null;
+              }
+              if (Object.keys(childPatch).length > 0 && ch.id) {
+                await supabase.from('rma_reports').update(childPatch).eq('id', ch.id).catch(() => {});
+              }
+            }
           }
+
+          const { data: rmaItemDbRows } = await supabase
+            .from('rma_items')
+            .select('id, barcode')
+            .eq('rma_report_id', report.id)
+            .order('id', { ascending: true });
+          if (Array.isArray(rmaItemDbRows) && rmaItemDbRows.length > 0) {
+            for (let i = 0; i < rmaItemDbRows.length; i++) {
+              const ri = rmaItemDbRows[i];
+              const matched = itemsForSync.find((it) => (it.id != null && String(it.id) === String(ri.id)) || (it.barcode && ri.barcode && String(it.barcode).trim() === String(ri.barcode).trim())) || itemsForSync[i];
+              if (!matched || !ri.id) continue;
+              await supabase.from('rma_items').update({
+                name: matched.name,
+                sku: matched.code || matched.sku || null,
+                quantity: matched.quantity,
+                ...(matched.supplier_name ? { supplier_name: matched.supplier_name } : {}),
+                ...(matched.expiry_date !== undefined ? { expiry_date: matched.expiry_date || null } : {})
+              }).eq('id', ri.id).catch(() => {});
+            }
+          }
+        } catch (cascadeErr) {
+          console.warn('Child cascade update notice:', cascadeErr?.message);
         }
       }
 
@@ -1109,8 +1242,8 @@ export default function QuickRMAActionModal({
         dr_number: cleanDr || null,
         po_number: cleanPo || null,
         invoice_dr_number: primaryDoc,
-        supplier_name: cleanSupplier || report.supplier_name || 'Pending Assignment',
-        supplier: cleanSupplier || report.supplier_name || 'Pending Assignment',
+        supplier_name: updates.supplier_name || cleanSupplier || report.supplier_name || 'Pending Assignment',
+        supplier: updates.supplier_name || cleanSupplier || report.supplier_name || 'Pending Assignment',
         expiry_date: cleanExpiry,
         ...(adminPiecesPerCase ? { pieces_per_case: adminPiecesPerCase } : {}),
         ...(updatedItems ? { items: updatedItems } : {})
@@ -1172,6 +1305,7 @@ export default function QuickRMAActionModal({
   const totalClaimValue = itemQty * itemUnitPrice;
   const isHighValueClaim = totalClaimValue > 10000;
   const isSuperAdmin = (verifiedAdmin?.role === 'super_admin' || currentUser?.role === 'super_admin');
+  const isAdminOrSuper = isSuperAdmin || verifiedAdmin?.role === 'admin' || currentUser?.role === 'admin';
   const canIssueCreditMemo = !isHighValueClaim || isSuperAdmin;
 
   const photoList = getRealPhotos(
@@ -1415,35 +1549,57 @@ export default function QuickRMAActionModal({
                 </div>
               </div>
 
-              {/* Multi-item Manifest List (Read-Only Summary) */}
-              {Boolean(report?.is_parent || (Array.isArray(report.items) && report.items.length > 1)) && (
-                <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2 text-xs">
-                  <div className="flex items-center justify-between font-bold">
-                    <span className="flex items-center gap-1.5 text-slate-800 dark:text-slate-200 uppercase tracking-wide text-[10px]">
-                      <Package className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Multi-Item Return Manifest ({report.items.length} Line Items)</span>
-                    </span>
-                    <span className="text-[10px] font-mono font-black text-slate-600 dark:text-slate-400">
-                      Total: {report.total_quantity || report.items.reduce((s, it) => s + (Number(it.quantity) || 1), 0)} Units
-                    </span>
-                  </div>
-                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                    {report.items.map((it, idx) => (
-                      <div key={idx} className="p-2 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80 rounded-lg flex items-center justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="font-extrabold text-slate-900 dark:text-white truncate">{it.name || it.productName}</div>
-                          <div className="font-mono text-[10px] text-slate-500 truncate">
-                            BC: {it.barcode} {(it.code || it.sku) ? `• SKU: ${it.code || it.sku}` : ''}
-                          </div>
-                        </div>
-                        <span className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono font-black text-[11px] shrink-0">
-                          {it.quantity} {it.unit_name || it.unit || 'pc'}
+              {/* Multi-item Manifest List (Summary + Quick Edit Trigger) */}
+              {(() => {
+                const displayItems = manifestItems.length > 0
+                  ? manifestItems
+                  : (Array.isArray(report.items) ? report.items : []);
+                if (!report?.is_parent && displayItems.length <= 1) return null;
+                return (
+                  <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2 text-xs">
+                    <div className="flex items-center justify-between gap-2 flex-wrap font-bold">
+                      <span className="flex items-center gap-1.5 text-slate-800 dark:text-slate-200 uppercase tracking-wide text-[10px]">
+                        <Package className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Multi-Item Return Manifest ({displayItems.length} Line Items)</span>
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-mono font-black text-slate-600 dark:text-slate-400">
+                          Total: {sumManifestQuantity(displayItems, report.total_quantity || report.quantity)} Units
                         </span>
+                        {isAdminOrSuper && (
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingAiDetails(true)}
+                            className="px-2 py-0.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[10px] font-black cursor-pointer"
+                          >
+                            ✏️ Edit Batch Qty &amp; Suppliers
+                          </button>
+                        )}
                       </div>
-                    ))}
+                    </div>
+                    <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                      {displayItems.map((it, idx) => (
+                        <div key={idx} className="p-2 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80 rounded-lg flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-extrabold text-slate-900 dark:text-white truncate">{it.name || it.productName}</div>
+                            <div className="font-mono text-[10px] text-slate-500 truncate flex items-center gap-1.5 flex-wrap">
+                              <span>BC: {it.barcode} {(it.code || it.sku) ? `• SKU: ${it.code || it.sku}` : ''}</span>
+                              {isRealSupplierName(it.supplier_name || it.supplierName || it.supplier) && (
+                                <span className="font-sans px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold border border-indigo-200 dark:border-indigo-800">
+                                  Supplier: {it.supplier_name || it.supplierName || it.supplier}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <span className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono font-black text-[11px] shrink-0">
+                            {it.quantity} {it.unit_name || it.unit || 'pc'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* (d) Proof Photos + Google Drive Folder Link */}
               {(photoList.length > 0 || report?.google_drive_folder_url) && (
@@ -1778,17 +1934,24 @@ export default function QuickRMAActionModal({
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Quantity &amp; Unit</label>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">
+                            {editableManifestItems.length > 1 ? 'Total Quantity (Auto) & Unit' : 'Quantity & Unit'}
+                          </label>
                           <div className="flex gap-1">
                             <input
                               type="number"
                               min="1"
-                              value={adminQuantity}
-                              readOnly={!isSuperAdmin}
-                              disabled={!isSuperAdmin}
-                              onChange={(e) => isSuperAdmin && setAdminQuantity(e.target.value)}
+                              aria-label="Ticket total quantity"
+                              value={editableManifestItems.length > 1 ? sumManifestQuantity(editableManifestItems, adminQuantity) : adminQuantity}
+                              readOnly={!isAdminOrSuper || editableManifestItems.length > 1}
+                              disabled={!isAdminOrSuper || editableManifestItems.length > 1}
+                              onChange={(e) => {
+                                if (isAdminOrSuper && editableManifestItems.length <= 1) {
+                                  setAdminQuantity(e.target.value);
+                                }
+                              }}
                               className={`w-16 px-2 py-1.5 border rounded-xl text-xs font-bold text-center ${
-                                isSuperAdmin
+                                isAdminOrSuper && editableManifestItems.length <= 1
                                   ? 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700'
                                   : 'bg-slate-100 dark:bg-slate-800/70 border-slate-200 dark:border-slate-700 text-slate-500 cursor-not-allowed'
                               }`}
@@ -1821,6 +1984,74 @@ export default function QuickRMAActionModal({
                         </div>
                       </div>
                     </div>
+
+                    {/* Editable Batch Line Items (Qty & Supplier per Item) */}
+                    {editableManifestItems.length > 1 && (
+                      <div className="space-y-2 p-2.5 bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-xl">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 dark:text-indigo-200">
+                            Batch Line Items — Edit Quantity &amp; Supplier ({editableManifestItems.length} Items)
+                          </span>
+                          <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700">
+                            Total Qty: {sumManifestQuantity(editableManifestItems, 1)} pcs
+                          </span>
+                        </div>
+                        <div className="space-y-2 max-h-60 overflow-y-auto pr-0.5">
+                          {editableManifestItems.map((it, idx) => (
+                            <div key={idx} className="p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-black text-slate-800 dark:text-slate-100 truncate">
+                                  #{idx + 1}: {it.name || it.barcode}
+                                </span>
+                                <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                                  BC: {it.barcode}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                                <div className="sm:col-span-3">
+                                  <label className="text-[9.5px] font-bold text-slate-400 block">Qty ({it.unit_name || 'pc'})</label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    aria-label={`Batch item ${idx + 1} quantity`}
+                                    value={it.quantity ?? 1}
+                                    onChange={(e) => {
+                                      const parsed = parseInt(e.target.value, 10);
+                                      handleUpdateEditableManifestItem(idx, { quantity: Number.isFinite(parsed) && parsed >= 1 ? parsed : 1 });
+                                    }}
+                                    className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                                  />
+                                </div>
+                                <div className="sm:col-span-5">
+                                  <label className="text-[9.5px] font-bold text-slate-400 block">Supplier Name</label>
+                                  <input
+                                    type="text"
+                                    list="admin-supplier-suggestions"
+                                    aria-label={`Batch item ${idx + 1} supplier`}
+                                    value={it.supplier_name || ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      handleUpdateEditableManifestItem(idx, { supplier_name: val, supplierName: val, supplier: val });
+                                    }}
+                                    placeholder="Supplier for this item..."
+                                    className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                                  />
+                                </div>
+                                <div className="sm:col-span-4">
+                                  <label className="text-[9.5px] font-bold text-slate-400 block">Expiry (YYYY-MM-DD)</label>
+                                  <input
+                                    type="date"
+                                    value={it.expiry_date || ''}
+                                    onChange={(e) => handleUpdateEditableManifestItem(idx, { expiry_date: e.target.value })}
+                                    className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Commercial Documents: SI, DR, PO */}
                     <div className="space-y-1">

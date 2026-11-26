@@ -737,7 +737,7 @@ function renderItemsAndPhotosHtml(report, allReports, catalogProducts) {
             <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;">
               <div style="font-weight: 700; color: #0f172a;">${escapeHtml(it.name)}</div>
               <div style="font-size: 11px; color: #64748b; font-family: monospace;">
-                ${it.cleanSku ? `SKU: ${escapeHtml(it.cleanSku)}` : ''}${it.cleanSku && it.barcode ? ' • ' : ''}${it.barcode ? `BC: ${escapeHtml(it.barcode)}` : ''}
+                ${it.cleanSku ? `SKU: ${escapeHtml(it.cleanSku)}` : ''}${it.cleanSku && it.barcode ? ' • ' : ''}${it.barcode ? `BC: ${escapeHtml(it.barcode)}` : ''}${it.supplierName && !isPlaceholderSupplier(it.supplierName) ? ` • Supplier: ${escapeHtml(it.supplierName)}` : ''}
               </div>
             </td>
             <td style="padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 800; font-family: monospace; white-space: nowrap;">

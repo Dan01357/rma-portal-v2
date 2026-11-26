@@ -18,7 +18,14 @@ import {
 } from 'lucide-react';
 import ProductAutoSuggest from './ProductAutoSuggest';
 import { supabase } from '../supabaseClient';
-import { formatDateTimeYmdHm, formatDateYmd } from '../utils/rmaHelpers';
+import {
+  formatDateTimeYmdHm,
+  formatDateYmd,
+  sumManifestQuantity,
+  summarizeBatchSuppliers,
+  isMixedSuppliersSummary,
+  isRealSupplierName
+} from '../utils/rmaHelpers';
 
 async function resolveBearerToken() {
   try {
@@ -83,25 +90,58 @@ export default function RmaEmailEditorView({
     const set = new Set();
     (catalogProducts || []).forEach((p) => {
       const s = String(p?.supplier_name || p?.supplierName || '').trim();
-      if (s && !/^(pending assignment|unassigned|n\/a)$/i.test(s)) set.add(s);
+      if (isRealSupplierName(s)) set.add(s);
     });
     (allReports || []).forEach((r) => {
       const s = String(r?.supplier_name || '').trim();
-      if (s && !/^(pending assignment|unassigned|n\/a)$/i.test(s)) set.add(s);
+      if (isRealSupplierName(s)) set.add(s);
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [catalogProducts, allReports]);
+
+  const handleUpdateManifestRow = (idx, patch) => {
+    setManifestItems((prev) => {
+      const next = prev.map((row, i) => (i === idx ? { ...row, ...patch } : row));
+      if (next.length > 0) {
+        if (patch.quantity !== undefined) {
+          setQuantity(sumManifestQuantity(next, 1));
+        }
+        if (patch.supplier_name !== undefined && next.length > 1) {
+          setSupplierName((currSup) => summarizeBatchSuppliers(next, isMixedSuppliersSummary(currSup) ? '' : currSup));
+        }
+      }
+      return next;
+    });
+  };
 
   const hydrateFromReport = (rep) => {
     if (!rep) return;
     setLoadedReport(rep);
     setActiveRmaNumber(rep.rma_number || '');
     setLookupRmaInput(rep.rma_number || '');
-    setSupplierName(rep.supplier_name || '');
+    const repSup = String(rep.supplier_name || '').trim();
+    const rawItems = Array.isArray(rep.items) ? rep.items : [];
+    const mappedItems = rawItems.map((it) => {
+      const itemSup = it.supplier_name || it.supplierName || it.supplier || (!isMixedSuppliersSummary(repSup) ? repSup : '') || '';
+      return {
+        ...it,
+        name: it.name || it.productName || '',
+        code: it.code || it.sku || '',
+        supplier_name: itemSup,
+        supplierName: itemSup,
+        supplier: itemSup,
+        quantity: Math.max(1, Number(it.quantity ?? it.qty) || 1),
+        unit_name: it.unit_name || it.unit || 'pc',
+        price: Number(it.price || 0),
+        price_with_vat: Number(it.price_with_vat || it.priceWithVat || 0),
+        expiry_date: it.expiry_date ? String(it.expiry_date).slice(0, 10) : ''
+      };
+    });
+    setSupplierName(mappedItems.length > 1 ? summarizeBatchSuppliers(mappedItems, isMixedSuppliersSummary(repSup) ? '' : repSup) : repSup);
     setProductName(rep.name || '');
     setSkuCode(rep.code || '');
     setBarcode(rep.barcode || '');
-    setQuantity(Number(rep.quantity) || 1);
+    setQuantity(mappedItems.length > 1 ? sumManifestQuantity(mappedItems, rep.quantity) : (Number(rep.quantity) || 1));
     setUnitName(rep.unit_name || 'pc');
     const netP = Number(rep.price || 0);
     setPrice(netP);
@@ -113,21 +153,7 @@ export default function RmaEmailEditorView({
     setDrNumber(rep.dr_number || rep.invoice_dr_number || '');
     setPoNumber(rep.po_number || '');
     setNotes(String(rep.notes || '').replace(/\[TEST_MODE\]/gi, '').trim());
-    setManifestItems(
-      Array.isArray(rep.items)
-        ? rep.items.map((it) => ({
-            ...it,
-            name: it.name || it.productName || '',
-            code: it.code || it.sku || '',
-            supplier_name: it.supplier_name || it.supplierName || rep.supplier_name || '',
-            quantity: Number(it.quantity) || 1,
-            unit_name: it.unit_name || it.unit || 'pc',
-            price: Number(it.price || 0),
-            price_with_vat: Number(it.price_with_vat || it.priceWithVat || 0),
-            expiry_date: it.expiry_date ? String(it.expiry_date).slice(0, 10) : ''
-          }))
-        : []
-    );
+    setManifestItems(mappedItems);
   };
 
   const fetchScopedReport = async (targetRma) => {
@@ -216,6 +242,12 @@ export default function RmaEmailEditorView({
         throw new Error('Your Google Sign-In session expired. Please Lock & re-verify with Google.');
       }
 
+      const isBatchEdit = manifestItems.length > 1;
+      const computedBatchQty = isBatchEdit ? sumManifestQuantity(manifestItems, quantity) : Math.max(1, Number(quantity) || 1);
+      const computedBatchSupplier = isBatchEdit
+        ? summarizeBatchSuppliers(manifestItems, isMixedSuppliersSummary(supplierName) ? '' : supplierName.trim())
+        : supplierName.trim();
+
       const res = await fetch('/api/v1/rma-email-edit', {
         method: 'PATCH',
         headers: {
@@ -226,10 +258,11 @@ export default function RmaEmailEditorView({
           token: gateSession.token,
           rma_number: activeRmaNumber,
           updates: {
-            supplier_name: supplierName.trim(),
+            supplier_name: computedBatchSupplier,
             name: productName.trim(),
             code: skuCode.trim(),
-            quantity: Math.max(1, Number(quantity) || 1),
+            quantity: computedBatchQty,
+            total_quantity: computedBatchQty,
             unit_name: unitName.trim() || 'pc',
             price: parseFloat(price) || 0,
             price_with_vat: parseFloat(priceWithVat) || 0,
@@ -468,13 +501,22 @@ export default function RmaEmailEditorView({
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
-                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Quantity</label>
+                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                  {manifestItems.length > 1 ? 'Total Quantity (Auto)' : 'Quantity'}
+                </label>
                 <input
                   type="number"
                   min="1"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
+                  readOnly={manifestItems.length > 1}
+                  value={manifestItems.length > 1 ? sumManifestQuantity(manifestItems, quantity) : quantity}
+                  onChange={(e) => {
+                    if (manifestItems.length <= 1) setQuantity(e.target.value);
+                  }}
+                  className={`w-full px-3 py-2 border rounded-xl text-xs font-bold ${
+                    manifestItems.length > 1
+                      ? 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 cursor-not-allowed'
+                      : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white'
+                  }`}
                 />
               </div>
               <div>
@@ -614,21 +656,38 @@ export default function RmaEmailEditorView({
           {/* Multi-Item Manifest Line Items (if batch ticket) */}
           {manifestItems.length > 0 && (
             <div className="space-y-2 p-3.5 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 rounded-2xl">
-              <div className="text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                Manifest Line Items ({manifestItems.length})
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                  Manifest Line Items ({manifestItems.length})
+                </div>
+                <span className="text-[11px] font-mono font-black px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800">
+                  Total Batch Qty: {sumManifestQuantity(manifestItems, 1)} pcs
+                </span>
               </div>
               <div className="space-y-2">
                 {manifestItems.map((it, idx) => (
-                  <div key={idx} className="grid grid-cols-2 sm:grid-cols-6 gap-2 p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <div key={idx} className="grid grid-cols-2 sm:grid-cols-8 gap-2 p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700">
                     <div className="col-span-2">
                       <label className="text-[9.5px] font-bold text-slate-400 block">Item #{idx + 1} Name</label>
                       <input
                         type="text"
                         value={it.name || ''}
+                        onChange={(e) => handleUpdateManifestRow(idx, { name: e.target.value })}
+                        className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-[9.5px] font-bold text-slate-400 block">Supplier Name</label>
+                      <input
+                        type="text"
+                        list="email-editor-supplier-list"
+                        aria-label={`Item #${idx + 1} Supplier Name`}
+                        value={it.supplier_name || ''}
                         onChange={(e) => {
                           const val = e.target.value;
-                          setManifestItems((prev) => prev.map((row, i) => i === idx ? { ...row, name: val } : row));
+                          handleUpdateManifestRow(idx, { supplier_name: val, supplierName: val, supplier: val });
                         }}
+                        placeholder="Supplier / Vendor..."
                         className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
                       />
                     </div>
@@ -639,7 +698,7 @@ export default function RmaEmailEditorView({
                         value={it.code || ''}
                         onChange={(e) => {
                           const val = e.target.value;
-                          setManifestItems((prev) => prev.map((row, i) => i === idx ? { ...row, code: val, sku: val } : row));
+                          handleUpdateManifestRow(idx, { code: val, sku: val });
                         }}
                         className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold bg-slate-50 dark:bg-slate-800"
                       />
@@ -649,10 +708,12 @@ export default function RmaEmailEditorView({
                       <input
                         type="number"
                         min="1"
+                        aria-label={`Item #${idx + 1} Qty`}
                         value={it.quantity ?? 1}
                         onChange={(e) => {
-                          const val = Number(e.target.value) || 1;
-                          setManifestItems((prev) => prev.map((row, i) => i === idx ? { ...row, quantity: val } : row));
+                          const parsed = parseInt(e.target.value, 10);
+                          const val = Number.isFinite(parsed) && parsed >= 1 ? parsed : 1;
+                          handleUpdateManifestRow(idx, { quantity: val });
                         }}
                         className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
                       />
@@ -665,11 +726,10 @@ export default function RmaEmailEditorView({
                         value={it.price ?? 0}
                         onChange={(e) => {
                           const net = parseFloat(e.target.value);
-                          setManifestItems((prev) => prev.map((row, i) => i === idx ? {
-                            ...row,
+                          handleUpdateManifestRow(idx, {
                             price: e.target.value,
                             ...(Number.isFinite(net) ? { price_with_vat: Number((net * 1.12).toFixed(2)) } : {})
-                          } : row));
+                          });
                         }}
                         className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
                       />
@@ -679,10 +739,7 @@ export default function RmaEmailEditorView({
                       <input
                         type="date"
                         value={it.expiry_date || ''}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setManifestItems((prev) => prev.map((row, i) => i === idx ? { ...row, expiry_date: val } : row));
-                        }}
+                        onChange={(e) => handleUpdateManifestRow(idx, { expiry_date: e.target.value })}
                         className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
                       />
                     </div>

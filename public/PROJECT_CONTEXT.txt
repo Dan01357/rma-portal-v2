@@ -1,6 +1,6 @@
 ================================================================================
 WHOLESALE RMA PORTAL V2 - CONSOLIDATED PROJECT CONTEXT
-Generated At: 2026-11-26T07:16:33.900Z
+Generated At: 2026-11-26T08:09:23.953Z
 Application Version: 2.0.1
 ================================================================================
 
@@ -74,13 +74,12 @@ rma-portal-v2/
 │   │   └── WHOLESALE_RMA_OPERATIONS_GUIDE.md
 ├── playwright-report/
 │   │   ├── data/
-│   │   │   │   ├── 0c220f960f960753a65afa4a6f5f1b482201f2f4.png
-│   │   │   │   ├── 3d0cff4776545cf056272477270f1cb1c8168b6a.zip
-│   │   │   │   ├── 471dfed4cd81233c7e96174c7e8490eef5ace460.png
-│   │   │   │   ├── d1f3d344abccf829b5ce07e4bc1837c01f6bac51.zip
-│   │   │   │   ├── e54eb552b95b22d0b46268eb6cfd18fe8e397906.md
-│   │   │   │   ├── e7e8fde6d90a76287da6c064879a3c1ca28c0a60.png
-│   │   │   │   └── f1bae13b3524f6ad82cee9ce4a88c7dd039f8697.md
+│   │   │   │   ├── 1c808c12fefb7f296485584bf48196c7768567ca.md
+│   │   │   │   ├── 27aa75595a56051c68b55a8cf6d6d545220b5b59.zip
+│   │   │   │   ├── 282c640b000ed4beae0aa4ecb9a726a7cb05bccf.png
+│   │   │   │   ├── 52f878d70b61a2d6fb33b4ff43ce6487d21bf512.md
+│   │   │   │   ├── 884116519626ad15c37ffa3cb2d457eb6c106fb1.zip
+│   │   │   │   └── e899fa7de5fed248d361f7434630429bbcc28ad5.png
 │   │   ├── trace/
 │   │   │   │   ├── assets/
 │   │   │   │   │   │   ├── codeMirrorModule-DNqxPF-E.js
@@ -208,6 +207,14 @@ rma-portal-v2/
 │   │   ├── main.jsx
 │   │   └── supabaseClient.js
 ├── test-results/
+│   │   ├── 09-prompt7a-7b-qa-Suite-09-3f023-n-Test-xlsx-reply-ingestion/
+│   │   │   │   ├── error-context.md
+│   │   │   │   ├── test-failed-1.png
+│   │   │   │   └── trace.zip
+│   │   ├── 10-prompt8a-qa-Suite-10-Pr-ee965--Admin-multi-row-selections/
+│   │   │   │   ├── error-context.md
+│   │   │   │   ├── test-failed-1.png
+│   │   │   │   └── trace.zip
 │   │   └── .last-run.json
 ├── tests/
 │   │   ├── .auth/
@@ -10367,6 +10374,12 @@ import zlib from 'node:zlib';
 import { supabase } from './supabase.js';
 import { authorizeCronOrAdmin } from './cronAuth.js';
 import { DEFAULT_EMAIL_RECIPIENTS, DEFAULT_SANDBOX_EMAIL } from './smtpMailer.js';
+import {
+  sumManifestQuantity,
+  summarizeBatchSuppliers,
+  isMixedSuppliersSummary,
+  isRealSupplierName
+} from '../../src/utils/rmaHelpers.js';
 
 function decodeXmlEntities(str) {
   return String(str || '')
@@ -10629,6 +10642,9 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
       const rawPrice = colMap.price >= 0 && String(row[colMap.price] ?? '').trim() !== ''
         ? Number(String(row[colMap.price]).replace(/[,\s]/g, ''))
         : undefined;
+      const rawQty = colMap.quantity >= 0 && String(row[colMap.quantity] ?? '').trim() !== ''
+        ? Number(String(row[colMap.quantity]).replace(/[,\s]/g, ''))
+        : undefined;
       manifestUpdates.push({
         serialNo,
         lineIndex: serialNo - 1,
@@ -10636,7 +10652,7 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
         barcode: colMap.barcode >= 0 ? String(row[colMap.barcode] ?? '').trim() : '',
         code: colMap.code >= 0 ? String(row[colMap.code] ?? '').trim() : '',
         name: colMap.name >= 0 ? String(row[colMap.name] ?? '').trim() : '',
-        quantity: colMap.quantity >= 0 && String(row[colMap.quantity] ?? '').trim() !== '' ? Number(row[colMap.quantity]) : undefined,
+        quantity: Number.isFinite(rawQty) && rawQty >= 1 ? Math.round(rawQty) : undefined,
         unit_name: colMap.unit_name >= 0 ? String(row[colMap.unit_name] ?? '').trim() : '',
         price: Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : undefined,
         expiry_date: colMap.expiry_date >= 0 ? normalizeYmdInput(row[colMap.expiry_date]) : null,
@@ -11044,7 +11060,9 @@ export async function applyRmaXlsxUpdates({
   // Apply per-item Manifest Line Item edits independently (by Barcode, SKU, or 1-based Serial No. index)
   const baseItemsList = Array.isArray(existing.items) && existing.items.length > 0
     ? existing.items
-    : (Array.isArray(childReportRows) && childReportRows.length > 0 ? childReportRows : []);
+    : (Array.isArray(childReportRows) && childReportRows.length > 0
+        ? childReportRows
+        : (Array.isArray(rmaItemRows) && rmaItemRows.length > 0 ? rmaItemRows : []));
   const editedManifestEntries = [];
 
   if (parsed.manifestUpdates.length > 0 && baseItemsList.length > 0) {
@@ -11136,13 +11154,33 @@ export async function applyRmaXlsxUpdates({
     }
 
     if (editedManifestEntries.length > 0) {
-      if (Array.isArray(existing.items) && existing.items.length > 0) {
-        updates.items = nextItems;
+      updates.items = nextItems;
+      const batchTotalQty = sumManifestQuantity(nextItems, 1);
+      updates.total_quantity = batchTotalQty;
+      updates.quantity = batchTotalQty;
+      updates.total_items = nextItems.length;
+
+      const supFallback = (!isMixedSuppliersSummary(updates.supplier_name) && isRealSupplierName(updates.supplier_name))
+        ? updates.supplier_name
+        : ((!isMixedSuppliersSummary(existing.supplier_name) && isRealSupplierName(existing.supplier_name)) ? existing.supplier_name : '');
+      const nextSummarySupplier = summarizeBatchSuppliers(nextItems, supFallback);
+      if (nextSummarySupplier && nextSummarySupplier !== 'Pending Assignment' && nextSummarySupplier !== String(existing.supplier_name || '').trim()) {
+        updates.supplier_name = nextSummarySupplier;
+        if (!changedFields.includes('supplier_name')) changedFields.push('supplier_name');
       }
-      updates.total_quantity = nextItems.reduce((s, it) => s + (Number(it.quantity) || 1), 0);
-      changedFields.push('items');
+
+      if (!changedFields.includes('items')) changedFields.push('items');
+      if (batchTotalQty !== Number(existing.total_quantity ?? existing.quantity ?? 0)) {
+        if (!changedFields.includes('total_quantity')) changedFields.push('total_quantity');
+        if (!changedFields.includes('quantity')) changedFields.push('quantity');
+      }
       editedManifestEntries.forEach((e) => {
         if (e.itemPatch.supplier_name) changedFields.push(`item_${e.serialNo}_supplier_name`);
+        if (e.itemPatch.quantity !== undefined) changedFields.push(`item_${e.serialNo}_quantity`);
+        if (e.itemPatch.code) changedFields.push(`item_${e.serialNo}_code`);
+        if (e.itemPatch.name) changedFields.push(`item_${e.serialNo}_name`);
+        if (e.itemPatch.price !== undefined) changedFields.push(`item_${e.serialNo}_price`);
+        if (e.itemPatch.expiry_date) changedFields.push(`item_${e.serialNo}_expiry_date`);
       });
     }
   } else if (Array.isArray(existing.items) && existing.items.length === 1) {
@@ -11332,7 +11370,7 @@ export async function applyRmaXlsxUpdates({
   const effectiveSupplier = String(updates.supplier_name || existing.supplier_name || '').trim();
   const effectiveSupTo = nextFollowUp.supplier_email_to || '';
   const effectiveSupCc = nextFollowUp.supplier_email_cc || '';
-  if (effectiveSupplier && (effectiveSupTo || effectiveSupCc)) {
+  if (effectiveSupplier && !isMixedSuppliersSummary(effectiveSupplier) && isRealSupplierName(effectiveSupplier) && (effectiveSupTo || effectiveSupCc)) {
     try {
       const dirRow = (settingsRows || []).find((s) => s.key === 'supplier_directory_store');
       let dirList = [];
@@ -13389,6 +13427,13 @@ Click **Authorize** on the top right to test live endpoints directly from this i
 --- START FILE: api/_lib/rmaEmailEditHandler.js ---
 import { supabase } from './supabase.js';
 import { sendJson, setCorsHeaders } from './auth.js';
+import {
+  sumManifestQuantity,
+  summarizeBatchSuppliers,
+  isMixedSuppliersSummary,
+  isRealSupplierName,
+  extractDistinctSuppliersFromItems
+} from '../../src/utils/rmaHelpers.js';
 
 const INVITES_SETTINGS_KEY = 'customer_rma_invites_store';
 
@@ -13656,9 +13701,26 @@ export async function handleRmaEmailEdit(req, res) {
 
   // 4. GET: Return scoped RMA details for standalone editor view
   if (req.method === 'GET') {
-    const manifestItems = Array.isArray(report.items) && report.items.length > 0
+    let manifestItems = Array.isArray(report.items) && report.items.length > 0
       ? report.items
       : (found.allRows.length > 1 ? found.allRows.filter((r) => r.id !== report.id) : []);
+
+    if (manifestItems.length === 0 && report.id) {
+      try {
+        const { data: riRows } = await supabase
+          .from('rma_items')
+          .select('*')
+          .eq('rma_report_id', report.id)
+          .order('id', { ascending: true });
+        if (Array.isArray(riRows) && riRows.length > 0) {
+          manifestItems = riRows;
+        }
+      } catch {}
+    }
+
+    const totalQty = manifestItems.length > 1
+      ? sumManifestQuantity(manifestItems, report.quantity)
+      : (Number(report.quantity) || 1);
 
     return sendJson(res, 200, {
       success: true,
@@ -13677,7 +13739,8 @@ export async function handleRmaEmailEdit(req, res) {
         name: report.name || '',
         supplier_name: report.supplier_name || '',
         store_branch: report.store_branch || '',
-        quantity: report.quantity ?? 1,
+        quantity: totalQty,
+        total_quantity: report.total_quantity ?? totalQty,
         unit_name: report.unit_name || 'pc',
         price: report.price ?? 0,
         price_with_vat: report.price_with_vat ?? 0,
@@ -13764,16 +13827,25 @@ export async function handleRmaEmailEdit(req, res) {
   }
 
   if (Array.isArray(u.items) && u.items.length > 0) {
+    const fallbackSingleSup =
+      (!isMixedSuppliersSummary(updates.supplier_name) && isRealSupplierName(updates.supplier_name))
+        ? updates.supplier_name
+        : ((!isMixedSuppliersSummary(report.supplier_name) && isRealSupplierName(report.supplier_name)) ? report.supplier_name : '');
+
     const sanitizedItems = u.items.map((it) => {
-      const qtyVal = Number(it.quantity);
+      const qtyVal = Number(it.quantity ?? it.qty);
       const netVal = parseFloat(it.price);
       const vatVal = parseFloat(it.price_with_vat ?? it.priceWithVat);
+      const rawSup = String(it.supplier_name || it.supplierName || it.supplier || '').trim();
+      const resolvedItemSup = isRealSupplierName(rawSup) ? rawSup : (fallbackSingleSup || 'Pending Assignment');
       return {
         ...it,
         name: String(it.name || it.productName || '').trim() || 'Item',
         code: String(it.code || it.sku || '').trim() || null,
         sku: String(it.sku || it.code || '').trim() || null,
-        supplier_name: String(it.supplier_name || updates.supplier_name || report.supplier_name || '').trim() || null,
+        supplier_name: resolvedItemSup,
+        supplierName: resolvedItemSup,
+        supplier: resolvedItemSup,
         quantity: Number.isFinite(qtyVal) && qtyVal >= 1 ? Math.round(qtyVal) : 1,
         unit_name: String(it.unit_name || it.unit || 'pc').trim() || 'pc',
         price: Number.isFinite(netVal) && netVal >= 0 ? Number(netVal.toFixed(2)) : 0,
@@ -13783,15 +13855,23 @@ export async function handleRmaEmailEdit(req, res) {
         expiry_date: it.expiry_date ? String(it.expiry_date).slice(0, 10) : null
       };
     });
+    const totalBatchQty = sumManifestQuantity(sanitizedItems, 1);
     updates.items = sanitizedItems;
     updates.total_items = sanitizedItems.length;
-    updates.total_quantity = sanitizedItems.reduce((s, it) => s + (Number(it.quantity) || 1), 0);
+    updates.total_quantity = totalBatchQty;
+    updates.quantity = totalBatchQty;
+    updates.supplier_name = summarizeBatchSuppliers(sanitizedItems, fallbackSingleSup);
   } else if (Array.isArray(report.items) && report.items.length > 0 && (updates.supplier_name || updates.expiry_date !== undefined)) {
-    updates.items = report.items.map((it) => ({
-      ...it,
-      ...(updates.supplier_name ? { supplier_name: updates.supplier_name } : {}),
-      ...(updates.expiry_date !== undefined ? { expiry_date: updates.expiry_date } : {})
-    }));
+    const existingDistinctSups = extractDistinctSuppliersFromItems(report.items);
+    const hasMixedSups = existingDistinctSups.length > 1;
+    updates.items = report.items.map((it) => {
+      const shouldCascadeSup = updates.supplier_name && !isMixedSuppliersSummary(updates.supplier_name) && (!hasMixedSups || !isRealSupplierName(it.supplier_name));
+      return {
+        ...it,
+        ...(shouldCascadeSup ? { supplier_name: updates.supplier_name, supplierName: updates.supplier_name, supplier: updates.supplier_name } : {}),
+        ...(updates.expiry_date !== undefined ? { expiry_date: updates.expiry_date } : {})
+      };
+    });
   }
 
   const prevMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
@@ -13857,20 +13937,73 @@ export async function handleRmaEmailEdit(req, res) {
     }, req);
   }
 
-  // Cascade commercial documents & supplier to child lines if present
+  // Cascade commercial documents & per-item qty/supplier/details to child rma_reports & rma_items rows
   const childRows = found.allRows.filter((r) => r.parent_rma_id === report.id);
-  if (childRows.length > 0) {
-    const childUpdates = {};
-    if (updates.si_number !== undefined) childUpdates.si_number = updates.si_number;
-    if (updates.dr_number !== undefined) childUpdates.dr_number = updates.dr_number;
-    if (updates.po_number !== undefined) childUpdates.po_number = updates.po_number;
-    if (updates.invoice_dr_number !== undefined) childUpdates.invoice_dr_number = updates.invoice_dr_number;
-    if (updates.store_branch !== undefined) childUpdates.store_branch = updates.store_branch;
-    if (updates.supplier_name !== undefined && childRows.length === 1) childUpdates.supplier_name = updates.supplier_name;
+  const editedItemsList = Array.isArray(updates.items) ? updates.items : [];
 
-    if (Object.keys(childUpdates).length > 0) {
-      await supabase.from('rma_reports').update(childUpdates).eq('parent_rma_id', report.id).catch(() => {});
+  if (childRows.length > 0) {
+    const commonChildDocPatch = {};
+    if (updates.si_number !== undefined) commonChildDocPatch.si_number = updates.si_number;
+    if (updates.dr_number !== undefined) commonChildDocPatch.dr_number = updates.dr_number;
+    if (updates.po_number !== undefined) commonChildDocPatch.po_number = updates.po_number;
+    if (updates.invoice_dr_number !== undefined) commonChildDocPatch.invoice_dr_number = updates.invoice_dr_number;
+    if (updates.store_branch !== undefined) commonChildDocPatch.store_branch = updates.store_branch;
+
+    if (editedItemsList.length > 0) {
+      const sortedChildren = [...childRows].sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+      for (let i = 0; i < sortedChildren.length; i++) {
+        const ch = sortedChildren[i];
+        const matchedItem = editedItemsList.find((it) => (it.id != null && String(it.id) === String(ch.id)) || (it.barcode && ch.barcode && String(it.barcode).trim() === String(ch.barcode).trim())) || editedItemsList[i];
+        const rowPatch = { ...commonChildDocPatch };
+        if (matchedItem) {
+          rowPatch.name = matchedItem.name;
+          rowPatch.code = matchedItem.code || null;
+          rowPatch.quantity = matchedItem.quantity;
+          rowPatch.price = matchedItem.price;
+          rowPatch.price_with_vat = matchedItem.price_with_vat;
+          rowPatch.expiry_date = matchedItem.expiry_date || null;
+          if (matchedItem.supplier_name) rowPatch.supplier_name = matchedItem.supplier_name;
+        }
+        if (Object.keys(rowPatch).length > 0 && ch.id) {
+          await supabase.from('rma_reports').update(rowPatch).eq('id', ch.id).catch(() => {});
+        }
+      }
+    } else {
+      const childUpdates = { ...commonChildDocPatch };
+      if (updates.supplier_name !== undefined && !isMixedSuppliersSummary(updates.supplier_name) && childRows.length === 1) {
+        childUpdates.supplier_name = updates.supplier_name;
+      }
+      if (Object.keys(childUpdates).length > 0) {
+        await supabase.from('rma_reports').update(childUpdates).eq('parent_rma_id', report.id).catch(() => {});
+      }
     }
+  }
+
+  if (editedItemsList.length > 0 && report.id) {
+    try {
+      const { data: rmaItemRows } = await supabase
+        .from('rma_items')
+        .select('*')
+        .eq('rma_report_id', report.id)
+        .order('id', { ascending: true });
+      if (Array.isArray(rmaItemRows) && rmaItemRows.length > 0) {
+        for (let i = 0; i < rmaItemRows.length; i++) {
+          const ri = rmaItemRows[i];
+          const matchedItem = editedItemsList.find((it) => (it.id != null && String(it.id) === String(ri.id)) || (it.barcode && ri.barcode && String(it.barcode).trim() === String(ri.barcode).trim())) || editedItemsList[i];
+          if (!matchedItem || !ri.id) continue;
+          const riPatch = {
+            name: matchedItem.name,
+            sku: matchedItem.code || matchedItem.sku || null,
+            quantity: matchedItem.quantity,
+            price: matchedItem.price,
+            price_with_vat: matchedItem.price_with_vat,
+            expiry_date: matchedItem.expiry_date || null,
+            ...(matchedItem.supplier_name ? { supplier_name: matchedItem.supplier_name } : {})
+          };
+          await supabase.from('rma_items').update(riPatch).eq('id', ri.id).catch(() => {});
+        }
+      }
+    } catch {}
   }
 
   return sendJson(res, 200, {
@@ -13878,7 +14011,14 @@ export async function handleRmaEmailEdit(req, res) {
     message: `RMA ${report.rma_number} updated successfully.`,
     edited_by_email: userEmail,
     updated_at: updatedRecord.updated_at || nowIso,
-    report: updatedRecord
+    report: {
+      ...updatedRecord,
+      ...(editedItemsList.length > 0 ? {
+        items: editedItemsList,
+        total_quantity: updates.total_quantity,
+        quantity: updates.quantity
+      } : {})
+    }
   }, req);
 }
 
@@ -15790,7 +15930,9 @@ import {
   findConsolidatedRtvBatchReports,
   doesCreditMemoLinkReport,
   getCreditMemoRmaNumbers,
-  isManifestSubItem
+  isManifestSubItem,
+  sumManifestQuantity,
+  summarizeBatchSuppliers
 } from './utils/rmaHelpers';
 
 /**
@@ -17497,6 +17639,8 @@ export default function App() {
   const [manifestItems, setManifestItems] = useState([]); // Queued return line items for Multi-Item Batch Return
   const [barcodeInput, setBarcodeInput] = useState('');
   const [customItemName, setCustomItemName] = useState('');
+  const [itemSupplierName, setItemSupplierName] = useState('');
+  const lastAutoSupplierRef = useRef('');
   const [detectedProduct, setDetectedProduct] = useState(null);
   const [isCheckingBarcode, setIsCheckingBarcode] = useState(false);
   const [quantity, setQuantity] = useState(1);
@@ -17596,6 +17740,47 @@ export default function App() {
       const isOwnEmail = Boolean(reporterEmail && allowedEmails.has(reporterEmail));
       if (!isOwnSession && !isOwnEmail) return false;
       seen.add(k);
+      return true;
+    });
+  }, [currentUser, gateSession, qrScopedSessionReports, recentReportsList, qrModalTargetIsTest]);
+
+  const qrScopedLookupReports = React.useMemo(() => {
+    const merged = [...qrScopedSessionReports, ...(recentReportsList || [])];
+    const seen = new Set();
+
+    if (currentUser) {
+      return merged.filter((r) => {
+        if (!r || isTrashedRecord(r) || isArchivedRecord(r)) return false;
+        if (Boolean(isTestRecord(r)) !== Boolean(qrModalTargetIsTest)) return false;
+        const k = String(r.id ?? `${r.rma_number || ''}::${r.barcode || ''}::${r.is_parent ? 'P' : 'C'}`).trim().toUpperCase();
+        if (!k || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+    }
+
+    const allowedEmails = new Set(
+      (gateSession ? getInviteAllowedEmails(gateSession) : [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const sessionRmaSet = new Set(
+      qrScopedSessionReports
+        .map((r) => String(r.rma_number || r.rmaNumber || r.id || '').trim().toUpperCase())
+        .filter(Boolean)
+    );
+
+    return merged.filter((r) => {
+      if (!r || isTrashedRecord(r)) return false;
+      if (Boolean(isTestRecord(r)) !== Boolean(qrModalTargetIsTest)) return false;
+      const rmaKey = String(r.rma_number || r.rmaNumber || r.id || '').trim().toUpperCase();
+      const isOwnSession = sessionRmaSet.has(rmaKey);
+      const reporterEmail = String(r.reporter_contact || '').trim().toLowerCase();
+      const isOwnEmail = Boolean(reporterEmail && allowedEmails.has(reporterEmail));
+      if (!isOwnSession && !isOwnEmail) return false;
+      const rowKey = String(r.id ?? `${rmaKey}::${r.barcode || ''}::${r.is_parent ? 'P' : 'C'}`).trim().toUpperCase();
+      if (!rowKey || seen.has(rowKey)) return false;
+      seen.add(rowKey);
       return true;
     });
   }, [currentUser, gateSession, qrScopedSessionReports, recentReportsList, qrModalTargetIsTest]);
@@ -18146,6 +18331,8 @@ export default function App() {
     if (!clean) {
       setDetectedProduct(null);
       setCustomItemName('');
+      setItemSupplierName((prev) => (prev === lastAutoSupplierRef.current ? '' : prev));
+      lastAutoSupplierRef.current = '';
       setIsCheckingBarcode(false);
       return;
     }
@@ -18167,12 +18354,15 @@ export default function App() {
           setUnitName(u.includes('case') ? 'case' : 'pc');
         }
         const foundSup = String(found?.supplier_name || found?.supplierName || found?.supplier || '').trim();
-        if (
-          foundSup &&
-          !/^(pending assignment|pending|unassigned|warehouse|n\/a)$/i.test(foundSup) &&
-          isSupplierRtvPortal
-        ) {
-          setStoreBranch((prev) => (prev && prev.trim() ? prev : foundSup));
+        if (foundSup && !/^(pending assignment|pending|unassigned|warehouse|n\/a)$/i.test(foundSup)) {
+          setItemSupplierName(foundSup);
+          lastAutoSupplierRef.current = foundSup;
+          if (isSupplierRtvPortal) {
+            setStoreBranch((prev) => (prev && prev.trim() ? prev : foundSup));
+          }
+        } else {
+          setItemSupplierName((prev) => (prev === lastAutoSupplierRef.current ? '' : prev));
+          lastAutoSupplierRef.current = '';
         }
       } catch (e) {
         if (!isCurrent) return;
@@ -18547,14 +18737,15 @@ export default function App() {
       ? detectedProduct.code
       : ((detectedProduct?.sku && detectedProduct.sku !== cleanBarcode) ? detectedProduct.sku : '');
 
-    const resolvedDetectedSupplier = (
-      isSupplierRtvPortal && !isPlaceholderSupplier(storeBranch) ? storeBranch.trim() : ''
-    ) || String(
+    const explicitItemSup = !isPlaceholderSupplier(itemSupplierName) ? itemSupplierName.trim() : '';
+    const catalogSup = String(
       detectedProduct?.supplier_name ||
       detectedProduct?.supplierName ||
       detectedProduct?.supplier ||
       ''
-    ).trim() || 'Pending Assignment';
+    ).trim();
+    const defaultPortalSup = isSupplierRtvPortal && !isPlaceholderSupplier(storeBranch) ? storeBranch.trim() : '';
+    const resolvedDetectedSupplier = explicitItemSup || (!isPlaceholderSupplier(catalogSup) ? catalogSup : '') || defaultPortalSup || 'Pending Assignment';
 
     const newItem = {
       id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
@@ -18586,6 +18777,8 @@ export default function App() {
     setIsUnlabeledItem(false);
     setBarcodeInput('');
     setCustomItemName('');
+    setItemSupplierName('');
+    lastAutoSupplierRef.current = '';
     setDetectedProduct(null);
     setQuantity(1);
     setUnitName('pc');
@@ -18595,6 +18788,24 @@ export default function App() {
     setPhotoFiles([]);
 
     showToast(`Added "${newItem.name}" (${newItem.quantity} ${newItem.unit}) to manifest`, 'success');
+  };
+
+  // Update quantity or supplier inline on a queued manifest item
+  const handleUpdateManifestItem = (itemId, patch) => {
+    setManifestItems(prev => prev.map((it) => {
+      if (it.id !== itemId) return it;
+      const next = { ...it, ...patch };
+      if (patch.quantity !== undefined) {
+        next.quantity = Math.max(1, parseInt(patch.quantity, 10) || 1);
+      }
+      if (patch.supplier_name !== undefined) {
+        const cleanSup = String(patch.supplier_name || '').trim() || 'Pending Assignment';
+        next.supplier_name = cleanSup;
+        next.supplierName = cleanSup;
+        next.supplier = cleanSup;
+      }
+      return next;
+    }));
   };
 
   // Remove an item from the manifest queue
@@ -18666,14 +18877,15 @@ export default function App() {
         ? detectedProduct.code
         : ((detectedProduct?.sku && detectedProduct.sku !== activeBarcode) ? detectedProduct.sku : '');
 
-      const resolvedActiveSupplier = (
-        isSupplierRtvPortal && !isPlaceholderSupplier(storeBranch) ? storeBranch.trim() : ''
-      ) || String(
+      const explicitActiveSup = !isPlaceholderSupplier(itemSupplierName) ? itemSupplierName.trim() : '';
+      const catalogActiveSup = String(
         detectedProduct?.supplier_name ||
         detectedProduct?.supplierName ||
         detectedProduct?.supplier ||
         ''
-      ).trim() || 'Pending Assignment';
+      ).trim();
+      const defaultPortalSup = isSupplierRtvPortal && !isPlaceholderSupplier(storeBranch) ? storeBranch.trim() : '';
+      const resolvedActiveSupplier = explicitActiveSup || (!isPlaceholderSupplier(catalogActiveSup) ? catalogActiveSup : '') || defaultPortalSup || 'Pending Assignment';
 
       itemsToSubmit.push({
         id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
@@ -18742,15 +18954,9 @@ export default function App() {
       const s = String(val || '').trim().toLowerCase();
       return !s || s === 'warehouse' || s === 'pending assignment' || s === 'unassigned' || s === 'n/a';
     };
-    const itemSup = itemsToSubmit[0]?.supplier_name || itemsToSubmit[0]?.supplierName || itemsToSubmit[0]?.supplier;
     const manualSupTrimmed = (isSupplierStream && !isPlaceholderSup(cleanBranchInput)) ? cleanBranchInput : '';
-    const resolvedSupplierFromPortal = manualSupTrimmed || (
-      !isPlaceholderSup(itemSup)
-        ? itemSup
-        : (isSupplierStream && inviteEntity)
-          ? inviteEntity
-          : (itemSup || 'Pending Assignment')
-    );
+    const fallbackPortalSup = manualSupTrimmed || (isSupplierStream && inviteEntity ? inviteEntity : '');
+    const resolvedSupplierFromPortal = summarizeBatchSuppliers(itemsToSubmit, fallbackPortalSup);
 
     // Persist reporter contact info in localStorage for 1-tap zero-typing returns
     try {
@@ -18766,7 +18972,7 @@ export default function App() {
     // 3. Generate ONE unique RMA Number with isolated sequence (Test Mode vs Live Mode)
     const rmaNumber = catalogService.generateRMANumber(recentReportsList, effectiveIsTestMode);
     const totalItemsCount = itemsToSubmit.length;
-    const totalQuantityCount = itemsToSubmit.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0);
+    const totalQuantityCount = sumManifestQuantity(itemsToSubmit, quantity);
     const commonUnit = itemsToSubmit.every(it => it.unit_name === itemsToSubmit[0].unit_name) ? itemsToSubmit[0].unit_name : 'mixed';
     const isBatchManifestTicket = itemsToSubmit.length > 1;
     // For batch manifests, barcode is strictly rmaNumber to completely prevent child item barcode contamination
@@ -18844,6 +19050,8 @@ export default function App() {
     setManifestItems([]);
     setBarcodeInput('');
     setCustomItemName('');
+    setItemSupplierName('');
+    lastAutoSupplierRef.current = '';
     setDetectedProduct(null);
     setQuantity(1);
     setUnitName('pc');
@@ -19731,6 +19939,45 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Per-Item Supplier / Vendor Name (supports different suppliers inside a batch RMA) */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <label htmlFor="intake-item-supplier-input" className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                        Line-Item Supplier (Optional)
+                      </label>
+                      {itemSupplierName && !isPlaceholderSupplier(itemSupplierName) ? (
+                        <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 px-2 py-0.5 rounded-full">
+                          Per-item supplier set
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
+                          Supports multi-supplier batches
+                        </span>
+                      )}
+                    </div>
+                    <div className="relative w-full">
+                      <Building className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none z-10" />
+                      <SupplierInput
+                        id="intake-item-supplier-input"
+                        name="intakeItemSupplierName"
+                        value={itemSupplierName}
+                        onChange={setItemSupplierName}
+                        placeholder="Optional: e.g., Supplier A, Suysing (set per item)"
+                        className="w-full pl-10 pr-8 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 shadow-2xs"
+                      />
+                      {itemSupplierName && (
+                        <button
+                          type="button"
+                          onClick={() => setItemSupplierName('')}
+                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full cursor-pointer z-10"
+                          title="Clear item supplier"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Recognized Product Banner */}
                   {isCheckingBarcode ? (
                     <div className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs flex items-center gap-2 text-slate-500 dark:text-slate-400">
@@ -19987,60 +20234,112 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    <div className="space-y-2 overflow-visible pr-1">
                       {manifestItems.map((item, idx) => (
                         <div
                           key={item.id || idx}
-                          className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-between gap-3 shadow-2xs hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
+                          data-manifest-item-index={idx}
+                          className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl flex flex-col gap-2.5 shadow-2xs hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
                         >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            {item.photoFiles && item.photoFiles.length > 0 ? (
-                              <img
-                                src={item.photoFiles[0].previewUrl}
-                                alt={item.name}
-                                className="w-11 h-11 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0"
-                              />
-                            ) : (
-                              <div className="w-11 h-11 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 shrink-0">
-                                <Package className="w-5 h-5" />
-                              </div>
-                            )}
-                            <div className="min-w-0">
-                              <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
-                                {item.name}
-                              </div>
-                              <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-2 flex-wrap mt-0.5">
-                                <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-bold">
-                                  {item.code || item.barcode}
-                                </span>
-                                <span className="font-black text-blue-600 dark:text-blue-400">
-                                  Qty: {formatQuantityWithPackSize(item.quantity, item.unit_name || item.unit, item.pieces_per_case || item.piecesPerCase)}
-                                </span>
-                                {item.expiry_date && (
-                                  <span className="bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-1.5 py-0.2 rounded-full font-bold">
-                                    Expiry Date (YYYY-MM-DD): {formatDateYmd(item.expiry_date) || item.expiry_date}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {item.photoFiles && item.photoFiles.length > 0 ? (
+                                <img
+                                  src={item.photoFiles[0].previewUrl}
+                                  alt={item.name}
+                                  className="w-11 h-11 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-11 h-11 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 shrink-0">
+                                  <Package className="w-5 h-5" />
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                                  {item.name}
+                                </div>
+                                <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-2 flex-wrap mt-0.5">
+                                  <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-bold">
+                                    {item.code || item.barcode}
                                   </span>
-                                )}
-                                <span className="bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 px-1.5 py-0.2 rounded-full font-bold">
-                                  {item.reason}
-                                </span>
+                                  <span className="font-black text-blue-600 dark:text-blue-400">
+                                    Qty: {formatQuantityWithPackSize(item.quantity, item.unit_name || item.unit, item.pieces_per_case || item.piecesPerCase)}
+                                  </span>
+                                  {item.expiry_date && (
+                                    <span className="bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-1.5 py-0.2 rounded-full font-bold">
+                                      Expiry Date (YYYY-MM-DD): {formatDateYmd(item.expiry_date) || item.expiry_date}
+                                    </span>
+                                  )}
+                                  <span className="bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 px-1.5 py-0.2 rounded-full font-bold">
+                                    {item.reason}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveManifestItem(item.id)}
+                              className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer shrink-0"
+                              title="Remove this item from return manifest"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          {/* Inline Editable Qty & Supplier per Batch Manifest Item */}
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 items-center">
+                            <div className="sm:col-span-5 flex items-center gap-1.5">
+                              <span className="text-[10px] font-black uppercase text-slate-500 shrink-0">Qty:</span>
+                              <div className="inline-flex items-center border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 p-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateManifestItem(item.id, { quantity: Math.max(1, (Number(item.quantity) || 1) - 1) })}
+                                  aria-label={`Decrease quantity for ${item.name}`}
+                                  className="w-6 h-6 rounded bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-black flex items-center justify-center cursor-pointer hover:text-blue-600"
+                                >
+                                  <Minus className="w-3 h-3" />
+                                </button>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="99999"
+                                  aria-label={`Quantity for ${item.name}`}
+                                  value={item.quantity ?? 1}
+                                  onChange={(e) => handleUpdateManifestItem(item.id, { quantity: e.target.value })}
+                                  className="w-12 text-center text-xs font-black text-slate-900 dark:text-white bg-transparent border-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateManifestItem(item.id, { quantity: (Number(item.quantity) || 1) + 1 })}
+                                  aria-label={`Increase quantity for ${item.name}`}
+                                  className="w-6 h-6 rounded bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-black flex items-center justify-center cursor-pointer hover:text-blue-600"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </button>
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-500">{item.unit_name || item.unit || 'pc'}</span>
+                            </div>
+
+                            <div className="sm:col-span-7 flex items-center gap-1.5 min-w-0">
+                              <span className="text-[10px] font-black uppercase text-slate-500 shrink-0">Supplier:</span>
+                              <div className="flex-1 min-w-0">
+                                <SupplierInput
+                                  id={`manifest-item-supplier-${idx}`}
+                                  name={`manifestItemSupplier_${idx}`}
+                                  value={!isPlaceholderSupplier(item.supplier_name) ? item.supplier_name : ''}
+                                  onChange={(val) => handleUpdateManifestItem(item.id, { supplier_name: val })}
+                                  placeholder="Supplier name (optional)"
+                                  className="w-full px-2.5 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-[11px] font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600"
+                                />
                               </div>
                             </div>
                           </div>
-
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveManifestItem(item.id)}
-                            className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer shrink-0"
-                            title="Remove this item from return manifest"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
                         </div>
                       ))}
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
-                      💡 All queued items will be bundled under ONE RMA Box Label & tracking number.
+                      💡 All queued items will be bundled under ONE RMA Box Label & tracking number. Total batch quantity updates automatically ({sumManifestQuantity(manifestItems, 0)} units across {manifestItems.length} item{manifestItems.length === 1 ? '' : 's'}).
                     </p>
                   </div>
                 )}
@@ -20362,7 +20661,7 @@ export default function App() {
                   </div>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">
                     {isSupplierRtvPortal
-                      ? 'Optional: Auto-filled from product catalog or invite link. Leave blank or type N/A if not applicable.'
+                      ? 'Optional default fallback supplier (individual items queued above with their own supplier keep their own vendor name). Leave blank or type N/A if not applicable.'
                       : 'Optional: Enter your company or store name, or leave blank / type N/A if not applicable.'}
                   </p>
                 </div>
@@ -21497,6 +21796,7 @@ export default function App() {
         report={qrModalReport}
         reports={qrModalReports}
         availableReports={qrScopedAvailableReports}
+        lookupReports={qrScopedLookupReports}
         sessionReports={qrScopedSessionReports}
         onOpenQuickAction={(rmaOrReport) => {
           setPendingQuickRmaNumber(null);
@@ -26283,7 +26583,10 @@ import {
   doesCreditMemoLinkReport,
   findConsolidatedRtvBatchReports,
   getGpsAddressDisplay,
-  getGpsMapUrl
+  getGpsMapUrl,
+  isRealSupplierName,
+  isMixedSuppliersSummary,
+  sumManifestQuantity
 } from '../utils/rmaHelpers';
 
 export default function CustomerHubTab({
@@ -27983,10 +28286,18 @@ export default function CustomerHubTab({
                                   RMA: {item.rma_number}
                                 </span>
                               </div>
-                              <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-3 flex-wrap">
                                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
                                   Total manifest breakdown: <strong className="text-slate-900 dark:text-white font-bold">{formatManifestBreakdown(manifestChildren, true)}</strong>
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() => onInspectTriage(item)}
+                                  className="text-xs text-blue-700 dark:text-blue-300 hover:text-blue-900 font-bold px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 border border-blue-200 dark:border-blue-800 transition-colors cursor-pointer"
+                                  title="Edit individual batch line item quantities and suppliers"
+                                >
+                                  ✏️ Edit Qty / Suppliers
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => toggleManifestExpand(manifestKey)}
@@ -28063,7 +28374,9 @@ export default function CustomerHubTab({
                                         unit_name: childUnit,
                                         price: Number(child.price || matchedChild?.price || 0),
                                         price_with_vat: Number(child.price_with_vat || child.price || matchedChild?.price_with_vat || matchedChild?.price || 0),
-                                        supplier_name: child.supplier_name || matchedChild?.supplier_name || item.supplier_name || 'Savemore',
+                                        supplier_name: isRealSupplierName(child.supplier_name)
+                                          ? child.supplier_name
+                                          : (matchedChild?.supplier_name || (isRealSupplierName(item.supplier_name) ? item.supplier_name : 'Savemore')),
                                         store_branch: item.store_branch,
                                         customer_branch: item.store_branch,
                                         ae_name: item.ae_name,
@@ -28237,7 +28550,9 @@ export default function CustomerHubTab({
                                                       price: child.price || 0,
                                                       price_with_vat: child.price_with_vat || child.price || 0,
                                                       unit_name: childUnit,
-                                                      supplier_name: child.supplier_name || item.supplier_name || 'Savemore',
+                                                      supplier_name: isRealSupplierName(child.supplier_name)
+                                                        ? child.supplier_name
+                                                        : (isRealSupplierName(item.supplier_name) ? item.supplier_name : 'Savemore'),
                                                       rma_number: item.rma_number,
                                                       is_manifest_child: true,
                                                       parent_rma_id: item.id
@@ -39196,7 +39511,11 @@ import {
   formatDateYmd,
   doesCreditMemoLinkReport,
   getGpsAddressDisplay,
-  getGpsMapUrl
+  getGpsMapUrl,
+  sumManifestQuantity,
+  summarizeBatchSuppliers,
+  isMixedSuppliersSummary,
+  isRealSupplierName
 } from '../utils/rmaHelpers';
 import { copyTextSafe } from '../utils/clipboard';
 import RMATimelineAudit from './RMATimelineAudit';
@@ -39328,6 +39647,7 @@ export default function QuickRMAActionModal({
   const [adminPrice, setAdminPrice] = useState(0);
   const [adminPriceWithVat, setAdminPriceWithVat] = useState(0);
   const [adminPiecesPerCase, setAdminPiecesPerCase] = useState(null);
+  const [editableManifestItems, setEditableManifestItems] = useState([]);
 
   const [isEditingAiDetails, setIsEditingAiDetails] = useState(false);
   const isEditingAiDetailsRef = useRef(false);
@@ -39446,21 +39766,32 @@ export default function QuickRMAActionModal({
     if (directItems.length > 0) {
       setManifestItems(directItems);
     } else if (report.id) {
-      supabase.from('rma_items')
-        .select('*')
-        .eq('rma_report_id', report.id)
-        .then(({ data, error }) => {
-          if (!error && Array.isArray(data) && data.length > 1) {
-            setManifestItems(data);
-          } else {
-            setManifestItems([]);
-          }
-        })
-        .catch(() => setManifestItems([]));
+      const siblingChildRows = (Array.isArray(recentReportsList) ? recentReportsList : []).filter((r) => (
+        r &&
+        String(r.id) !== String(report.id) &&
+        !r.is_parent &&
+        (String(r.parent_rma_id) === String(report.id) || (report.rma_number && r.rma_number === report.rma_number && !isSplitChildTicket(r)))
+      ));
+      if (siblingChildRows.length > 1) {
+        setManifestItems(siblingChildRows);
+      } else {
+        supabase.from('rma_items')
+          .select('*')
+          .eq('rma_report_id', report.id)
+          .order('id', { ascending: true })
+          .then(({ data, error }) => {
+            if (!error && Array.isArray(data) && data.length > 1) {
+              setManifestItems(data);
+            } else {
+              setManifestItems([]);
+            }
+          })
+          .catch(() => setManifestItems([]));
+      }
     } else {
       setManifestItems([]);
     }
-  }, [report]);
+  }, [report, recentReportsList]);
 
   const totalSplitQty = Number(report?.quantity) || 0;
   const maxSplitVal = Math.max(1, totalSplitQty - 1);
@@ -39836,6 +40167,9 @@ export default function QuickRMAActionModal({
           prev.disposition !== match.disposition ||
           prev.warehouse_location !== match.warehouse_location ||
           prev.supplier_name !== match.supplier_name ||
+          prev.quantity !== match.quantity ||
+          prev.total_quantity !== match.total_quantity ||
+          JSON.stringify(prev.items) !== JSON.stringify(match.items) ||
           prev.code !== match.code ||
           prev.name !== match.name ||
           prev.notes !== match.notes ||
@@ -39854,24 +40188,39 @@ export default function QuickRMAActionModal({
     const set = new Set();
     (savedProductsList || []).forEach(p => {
       const s = (p.supplier_name || p.supplierName || '').trim();
-      if (s && s !== 'Pending Assignment' && s !== 'Unassigned' && s !== 'Warehouse') {
+      if (isRealSupplierName(s)) {
         set.add(s);
       }
     });
     (recentReportsList || []).forEach(r => {
       const s = (r.supplier_name || '').trim();
-      if (s && s !== 'Pending Assignment' && s !== 'Unassigned' && s !== 'Warehouse') {
+      if (isRealSupplierName(s)) {
         set.add(s);
       }
     });
     (supplierDirectoryService.getCachedDirectory() || []).forEach(c => {
       const s = (c.supplier_name || '').trim();
-      if (s && s !== 'Pending Assignment' && s !== 'Unassigned' && s !== 'Warehouse') {
+      if (isRealSupplierName(s)) {
         set.add(s);
       }
     });
     return Array.from(set).sort();
   }, [savedProductsList, recentReportsList]);
+
+  const handleUpdateEditableManifestItem = (idx, patch) => {
+    setEditableManifestItems((prev) => {
+      const next = prev.map((row, i) => (i === idx ? { ...row, ...patch } : row));
+      if (next.length > 0) {
+        if (patch.quantity !== undefined) {
+          setAdminQuantity(sumManifestQuantity(next, 1));
+        }
+        if (patch.supplier_name !== undefined && next.length > 1) {
+          setAdminSupplierName((currSup) => summarizeBatchSuppliers(next, isMixedSuppliersSummary(currSup) ? '' : currSup));
+        }
+      }
+      return next;
+    });
+  };
 
   // Reset edit mode only when opening modal or switching to a different RMA ticket
   useEffect(() => {
@@ -39927,7 +40276,28 @@ export default function QuickRMAActionModal({
       setAdminProductName(report.name || '');
       setAdminBarcode(report.barcode || '');
       setAdminSku(report.code || report.sku || '');
-      setAdminQuantity(Number(report.quantity) || 1);
+      const baseManifestList = manifestItems.length > 0
+        ? manifestItems
+        : (Array.isArray(report.items) ? report.items : []);
+      const mappedManifest = baseManifestList.map((it) => {
+        const rawSup = it.supplier_name || it.supplierName || it.supplier || (!isMixedSuppliersSummary(resolvedInitSupplier) ? resolvedInitSupplier : '') || '';
+        return {
+          ...it,
+          name: it.name || it.productName || '',
+          code: it.code || it.sku || '',
+          sku: it.sku || it.code || '',
+          supplier_name: rawSup,
+          supplierName: rawSup,
+          supplier: rawSup,
+          quantity: Math.max(1, Number(it.quantity ?? it.qty) || 1),
+          unit_name: it.unit_name || it.unit || 'pc',
+          price: Number(it.price || 0),
+          price_with_vat: Number(it.price_with_vat || it.priceWithVat || 0),
+          expiry_date: it.expiry_date ? String(it.expiry_date).slice(0, 10) : ''
+        };
+      });
+      setEditableManifestItems(mappedManifest);
+      setAdminQuantity(mappedManifest.length > 1 ? sumManifestQuantity(mappedManifest, report.quantity) : (Number(report.quantity) || 1));
       setAdminUnitName(report.unit_name || 'pc');
       const netP = Number(report.price || 0);
       setAdminPrice(netP);
@@ -39944,6 +40314,7 @@ export default function QuickRMAActionModal({
     report?.code,
     report?.sku,
     report?.quantity,
+    report?.total_quantity,
     report?.unit_name,
     report?.price,
     report?.price_with_vat,
@@ -39953,6 +40324,7 @@ export default function QuickRMAActionModal({
     report?.invoice_dr_number,
     report?.supplier_name,
     report?.expiry_date,
+    manifestItems,
     savedProductsList
   ]);
 
@@ -40095,6 +40467,7 @@ export default function QuickRMAActionModal({
     setIsSavingAiDetails(true);
     try {
       const isSuperAdminRole = currentUser?.role === 'super_admin' || verifiedAdmin?.role === 'super_admin';
+      const isAdminOrSuperRole = isSuperAdminRole || currentUser?.role === 'admin' || verifiedAdmin?.role === 'admin';
       const cleanSi = adminSiNumber.trim();
       const cleanDr = adminDrNumber.trim();
       const cleanPo = adminPoNumber.trim();
@@ -40148,7 +40521,7 @@ export default function QuickRMAActionModal({
         if (Object.keys(prevPu).length > 0 || cleanSupplierEmailTo || cleanSupplierEmailCc) {
           baseMeta.supplier_pickup = {
             ...prevPu,
-            ...(cleanSupplier ? { supplier_name: cleanSupplier } : {}),
+            ...(cleanSupplier && !isMixedSuppliersSummary(cleanSupplier) ? { supplier_name: cleanSupplier } : {}),
             supplier_email_to: cleanSupplierEmailTo,
             supplier_email_cc: cleanSupplierEmailCc
           };
@@ -40156,9 +40529,14 @@ export default function QuickRMAActionModal({
         updates.ai_document_metadata = baseMeta;
       }
 
+      if (isAdminOrSuperRole && adminQuantity) {
+        const singleQty = Math.max(1, Number(adminQuantity) || 1);
+        updates.quantity = singleQty;
+        updates.total_quantity = singleQty;
+      }
+
       if (isSuperAdminRole) {
         if (adminBarcode.trim()) updates.barcode = adminBarcode.trim();
-        if (adminQuantity) updates.quantity = Number(adminQuantity) || 1;
 
         const currentMeta = { ...baseMeta };
         let currentNotes = report.notes || '';
@@ -40178,14 +40556,54 @@ export default function QuickRMAActionModal({
         }
       }
 
+      const isManifestReport = Boolean(
+        report?.is_parent ||
+        editableManifestItems.length > 1 ||
+        manifestItems.length > 1 ||
+        (Array.isArray(report?.items) && report.items.length > 1)
+      );
+
       let updatedItems = report.items;
-      if (Array.isArray(report.items) && report.items.length > 0) {
-        updatedItems = report.items.map(it => ({
-          ...it,
-          ...(cleanSupplier ? { supplier_name: cleanSupplier } : {}),
-          ...(cleanExpiry ? { expiry_date: cleanExpiry } : {})
-        }));
+      const sourceManifestForSave = editableManifestItems.length > 0
+        ? editableManifestItems
+        : (Array.isArray(report.items) ? report.items : []);
+
+      if (sourceManifestForSave.length > 0) {
+        const fallbackSingleSup = isRealSupplierName(cleanSupplier)
+          ? cleanSupplier
+          : (isRealSupplierName(report.supplier_name) ? report.supplier_name : '');
+        updatedItems = sourceManifestForSave.map((it) => {
+          const itemQty = Math.max(1, parseInt(it.quantity ?? it.qty, 10) || 1);
+          const itemSupRaw = String(it.supplier_name || it.supplierName || it.supplier || '').trim();
+          const itemSup = isRealSupplierName(itemSupRaw)
+            ? itemSupRaw
+            : (fallbackSingleSup || 'Pending Assignment');
+          const itemSku = String(it.code || it.sku || '').trim() || null;
+          const itemNet = parseFloat(it.price);
+          const itemVat = parseFloat(it.price_with_vat ?? it.priceWithVat);
+          return {
+            ...it,
+            name: String(it.name || it.productName || '').trim() || 'Item',
+            code: itemSku,
+            sku: itemSku,
+            quantity: itemQty,
+            unit_name: String(it.unit_name || it.unit || 'pc').trim() || 'pc',
+            supplier_name: itemSup,
+            supplierName: itemSup,
+            supplier: itemSup,
+            ...(Number.isFinite(itemNet) && itemNet >= 0 ? { price: Number(itemNet.toFixed(2)) } : {}),
+            ...(Number.isFinite(itemVat) && itemVat >= 0
+              ? { price_with_vat: Number(itemVat.toFixed(2)) }
+              : (Number.isFinite(itemNet) && itemNet >= 0 ? { price_with_vat: Number((itemNet * 1.12).toFixed(2)) } : {})),
+            expiry_date: it.expiry_date ? String(it.expiry_date).slice(0, 10) : (cleanExpiry || null)
+          };
+        });
+        const totalBatchQty = sumManifestQuantity(updatedItems, 1);
         updates.items = updatedItems;
+        updates.total_items = updatedItems.length;
+        updates.total_quantity = totalBatchQty;
+        updates.quantity = totalBatchQty;
+        updates.supplier_name = summarizeBatchSuppliers(updatedItems, fallbackSingleSup);
       }
 
       const updatePromise = supabase
@@ -40220,24 +40638,54 @@ export default function QuickRMAActionModal({
         if (fbErr) throw fbErr;
       }
 
-      const isManifestReport = Boolean(
-        report?.is_parent ||
-        manifestItems.length > 1 ||
-        (Array.isArray(report?.items) && report.items.length > 1)
-      );
       if (report.id && isManifestReport) {
-        const childCascade = {};
-        if (cleanRmaNum && cleanRmaNum !== report.rma_number) childCascade.rma_number = cleanRmaNum;
-        if (cleanSupplier) childCascade.supplier_name = cleanSupplier;
-        if (Object.keys(childCascade).length > 0) {
-          try {
-            await Promise.race([
-              supabase.from('rma_reports').update(childCascade).eq('parent_rma_id', report.id),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('Child cascade timeout')), 3000))
-            ]);
-          } catch (cascadeErr) {
-            console.warn('Child cascade update notice:', cascadeErr?.message);
+        const itemsForSync = Array.isArray(updatedItems) ? updatedItems : [];
+        try {
+          const { data: childDbRows } = await supabase
+            .from('rma_reports')
+            .select('id, barcode')
+            .eq('parent_rma_id', report.id)
+            .order('id', { ascending: true });
+          if (Array.isArray(childDbRows) && childDbRows.length > 0) {
+            for (let i = 0; i < childDbRows.length; i++) {
+              const ch = childDbRows[i];
+              const matched = itemsForSync.find((it) => (it.id != null && String(it.id) === String(ch.id)) || (it.barcode && ch.barcode && String(it.barcode).trim() === String(ch.barcode).trim())) || itemsForSync[i];
+              const childPatch = {};
+              if (cleanRmaNum && cleanRmaNum !== report.rma_number) childPatch.rma_number = cleanRmaNum;
+              if (matched) {
+                childPatch.name = matched.name;
+                childPatch.code = matched.code || null;
+                childPatch.quantity = matched.quantity;
+                if (matched.supplier_name) childPatch.supplier_name = matched.supplier_name;
+                if (matched.expiry_date !== undefined) childPatch.expiry_date = matched.expiry_date || null;
+              }
+              if (Object.keys(childPatch).length > 0 && ch.id) {
+                await supabase.from('rma_reports').update(childPatch).eq('id', ch.id).catch(() => {});
+              }
+            }
           }
+
+          const { data: rmaItemDbRows } = await supabase
+            .from('rma_items')
+            .select('id, barcode')
+            .eq('rma_report_id', report.id)
+            .order('id', { ascending: true });
+          if (Array.isArray(rmaItemDbRows) && rmaItemDbRows.length > 0) {
+            for (let i = 0; i < rmaItemDbRows.length; i++) {
+              const ri = rmaItemDbRows[i];
+              const matched = itemsForSync.find((it) => (it.id != null && String(it.id) === String(ri.id)) || (it.barcode && ri.barcode && String(it.barcode).trim() === String(ri.barcode).trim())) || itemsForSync[i];
+              if (!matched || !ri.id) continue;
+              await supabase.from('rma_items').update({
+                name: matched.name,
+                sku: matched.code || matched.sku || null,
+                quantity: matched.quantity,
+                ...(matched.supplier_name ? { supplier_name: matched.supplier_name } : {}),
+                ...(matched.expiry_date !== undefined ? { expiry_date: matched.expiry_date || null } : {})
+              }).eq('id', ri.id).catch(() => {});
+            }
+          }
+        } catch (cascadeErr) {
+          console.warn('Child cascade update notice:', cascadeErr?.message);
         }
       }
 
@@ -40248,8 +40696,8 @@ export default function QuickRMAActionModal({
         dr_number: cleanDr || null,
         po_number: cleanPo || null,
         invoice_dr_number: primaryDoc,
-        supplier_name: cleanSupplier || report.supplier_name || 'Pending Assignment',
-        supplier: cleanSupplier || report.supplier_name || 'Pending Assignment',
+        supplier_name: updates.supplier_name || cleanSupplier || report.supplier_name || 'Pending Assignment',
+        supplier: updates.supplier_name || cleanSupplier || report.supplier_name || 'Pending Assignment',
         expiry_date: cleanExpiry,
         ...(adminPiecesPerCase ? { pieces_per_case: adminPiecesPerCase } : {}),
         ...(updatedItems ? { items: updatedItems } : {})
@@ -40311,6 +40759,7 @@ export default function QuickRMAActionModal({
   const totalClaimValue = itemQty * itemUnitPrice;
   const isHighValueClaim = totalClaimValue > 10000;
   const isSuperAdmin = (verifiedAdmin?.role === 'super_admin' || currentUser?.role === 'super_admin');
+  const isAdminOrSuper = isSuperAdmin || verifiedAdmin?.role === 'admin' || currentUser?.role === 'admin';
   const canIssueCreditMemo = !isHighValueClaim || isSuperAdmin;
 
   const photoList = getRealPhotos(
@@ -40554,35 +41003,57 @@ export default function QuickRMAActionModal({
                 </div>
               </div>
 
-              {/* Multi-item Manifest List (Read-Only Summary) */}
-              {Boolean(report?.is_parent || (Array.isArray(report.items) && report.items.length > 1)) && (
-                <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2 text-xs">
-                  <div className="flex items-center justify-between font-bold">
-                    <span className="flex items-center gap-1.5 text-slate-800 dark:text-slate-200 uppercase tracking-wide text-[10px]">
-                      <Package className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Multi-Item Return Manifest ({report.items.length} Line Items)</span>
-                    </span>
-                    <span className="text-[10px] font-mono font-black text-slate-600 dark:text-slate-400">
-                      Total: {report.total_quantity || report.items.reduce((s, it) => s + (Number(it.quantity) || 1), 0)} Units
-                    </span>
-                  </div>
-                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                    {report.items.map((it, idx) => (
-                      <div key={idx} className="p-2 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80 rounded-lg flex items-center justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="font-extrabold text-slate-900 dark:text-white truncate">{it.name || it.productName}</div>
-                          <div className="font-mono text-[10px] text-slate-500 truncate">
-                            BC: {it.barcode} {(it.code || it.sku) ? `• SKU: ${it.code || it.sku}` : ''}
-                          </div>
-                        </div>
-                        <span className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono font-black text-[11px] shrink-0">
-                          {it.quantity} {it.unit_name || it.unit || 'pc'}
+              {/* Multi-item Manifest List (Summary + Quick Edit Trigger) */}
+              {(() => {
+                const displayItems = manifestItems.length > 0
+                  ? manifestItems
+                  : (Array.isArray(report.items) ? report.items : []);
+                if (!report?.is_parent && displayItems.length <= 1) return null;
+                return (
+                  <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2 text-xs">
+                    <div className="flex items-center justify-between gap-2 flex-wrap font-bold">
+                      <span className="flex items-center gap-1.5 text-slate-800 dark:text-slate-200 uppercase tracking-wide text-[10px]">
+                        <Package className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Multi-Item Return Manifest ({displayItems.length} Line Items)</span>
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-mono font-black text-slate-600 dark:text-slate-400">
+                          Total: {sumManifestQuantity(displayItems, report.total_quantity || report.quantity)} Units
                         </span>
+                        {isAdminOrSuper && (
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingAiDetails(true)}
+                            className="px-2 py-0.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[10px] font-black cursor-pointer"
+                          >
+                            ✏️ Edit Batch Qty &amp; Suppliers
+                          </button>
+                        )}
                       </div>
-                    ))}
+                    </div>
+                    <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                      {displayItems.map((it, idx) => (
+                        <div key={idx} className="p-2 bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80 rounded-lg flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-extrabold text-slate-900 dark:text-white truncate">{it.name || it.productName}</div>
+                            <div className="font-mono text-[10px] text-slate-500 truncate flex items-center gap-1.5 flex-wrap">
+                              <span>BC: {it.barcode} {(it.code || it.sku) ? `• SKU: ${it.code || it.sku}` : ''}</span>
+                              {isRealSupplierName(it.supplier_name || it.supplierName || it.supplier) && (
+                                <span className="font-sans px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold border border-indigo-200 dark:border-indigo-800">
+                                  Supplier: {it.supplier_name || it.supplierName || it.supplier}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <span className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono font-black text-[11px] shrink-0">
+                            {it.quantity} {it.unit_name || it.unit || 'pc'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* (d) Proof Photos + Google Drive Folder Link */}
               {(photoList.length > 0 || report?.google_drive_folder_url) && (
@@ -40917,17 +41388,24 @@ export default function QuickRMAActionModal({
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">Quantity &amp; Unit</label>
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-0.5">
+                            {editableManifestItems.length > 1 ? 'Total Quantity (Auto) & Unit' : 'Quantity & Unit'}
+                          </label>
                           <div className="flex gap-1">
                             <input
                               type="number"
                               min="1"
-                              value={adminQuantity}
-                              readOnly={!isSuperAdmin}
-                              disabled={!isSuperAdmin}
-                              onChange={(e) => isSuperAdmin && setAdminQuantity(e.target.value)}
+                              aria-label="Ticket total quantity"
+                              value={editableManifestItems.length > 1 ? sumManifestQuantity(editableManifestItems, adminQuantity) : adminQuantity}
+                              readOnly={!isAdminOrSuper || editableManifestItems.length > 1}
+                              disabled={!isAdminOrSuper || editableManifestItems.length > 1}
+                              onChange={(e) => {
+                                if (isAdminOrSuper && editableManifestItems.length <= 1) {
+                                  setAdminQuantity(e.target.value);
+                                }
+                              }}
                               className={`w-16 px-2 py-1.5 border rounded-xl text-xs font-bold text-center ${
-                                isSuperAdmin
+                                isAdminOrSuper && editableManifestItems.length <= 1
                                   ? 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700'
                                   : 'bg-slate-100 dark:bg-slate-800/70 border-slate-200 dark:border-slate-700 text-slate-500 cursor-not-allowed'
                               }`}
@@ -40960,6 +41438,74 @@ export default function QuickRMAActionModal({
                         </div>
                       </div>
                     </div>
+
+                    {/* Editable Batch Line Items (Qty & Supplier per Item) */}
+                    {editableManifestItems.length > 1 && (
+                      <div className="space-y-2 p-2.5 bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-xl">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 dark:text-indigo-200">
+                            Batch Line Items — Edit Quantity &amp; Supplier ({editableManifestItems.length} Items)
+                          </span>
+                          <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700">
+                            Total Qty: {sumManifestQuantity(editableManifestItems, 1)} pcs
+                          </span>
+                        </div>
+                        <div className="space-y-2 max-h-60 overflow-y-auto pr-0.5">
+                          {editableManifestItems.map((it, idx) => (
+                            <div key={idx} className="p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-black text-slate-800 dark:text-slate-100 truncate">
+                                  #{idx + 1}: {it.name || it.barcode}
+                                </span>
+                                <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                                  BC: {it.barcode}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                                <div className="sm:col-span-3">
+                                  <label className="text-[9.5px] font-bold text-slate-400 block">Qty ({it.unit_name || 'pc'})</label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    aria-label={`Batch item ${idx + 1} quantity`}
+                                    value={it.quantity ?? 1}
+                                    onChange={(e) => {
+                                      const parsed = parseInt(e.target.value, 10);
+                                      handleUpdateEditableManifestItem(idx, { quantity: Number.isFinite(parsed) && parsed >= 1 ? parsed : 1 });
+                                    }}
+                                    className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                                  />
+                                </div>
+                                <div className="sm:col-span-5">
+                                  <label className="text-[9.5px] font-bold text-slate-400 block">Supplier Name</label>
+                                  <input
+                                    type="text"
+                                    list="admin-supplier-suggestions"
+                                    aria-label={`Batch item ${idx + 1} supplier`}
+                                    value={it.supplier_name || ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      handleUpdateEditableManifestItem(idx, { supplier_name: val, supplierName: val, supplier: val });
+                                    }}
+                                    placeholder="Supplier for this item..."
+                                    className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                                  />
+                                </div>
+                                <div className="sm:col-span-4">
+                                  <label className="text-[9.5px] font-bold text-slate-400 block">Expiry (YYYY-MM-DD)</label>
+                                  <input
+                                    type="date"
+                                    value={it.expiry_date || ''}
+                                    onChange={(e) => handleUpdateEditableManifestItem(idx, { expiry_date: e.target.value })}
+                                    className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Commercial Documents: SI, DR, PO */}
                     <div className="space-y-1">
@@ -41846,9 +42392,14 @@ import {
   buildPortalQrPayload,
   formatSaveFileTimestamp,
   getReportManifestItems,
+  resolveBatchManifestForQr,
+  sumManifestQuantity,
+  isRealSupplierName,
+  isMixedSuppliersSummary,
   isTestRecord,
   isTrashedRecord
 } from '../utils/rmaHelpers';
+import { supabase } from '../supabaseClient';
 
 const clampNum = (val, min, max, fallback) => {
   const n = Number(val);
@@ -41862,24 +42413,43 @@ export default function ReturnQRModal({
   report,
   reports = [],
   availableReports = [],
+  lookupReports = [],
   sessionReports = [],
   onOpenQuickAction
 }) {
-  // Base initial entries passed into the modal (used for reset signature ONLY, excluding picker additions)
+  // Base initial entries passed into the modal (used for reset signature ONLY, excluding picker additions).
+  // Deduplicates by RMA key while preferring richer parent/manifest objects over unpacked child shells.
   const baseEntries = useMemo(() => {
     const rawList = Array.isArray(reports) && reports.length > 0
       ? reports
       : report
         ? [report]
         : [];
-    const seen = new Set();
+    const indexByUpperKey = new Map();
     const deduped = [];
     rawList.forEach((item, idx) => {
       if (!item || typeof item !== 'object') return;
       const key = String(item.rma_number || item.rmaNumber || item.id || `row-${idx}`).trim();
-      if (!key || seen.has(key)) return;
-      seen.add(key);
-      deduped.push({ key, report: item });
+      const upperKey = key.toUpperCase();
+      if (!key) return;
+      if (!indexByUpperKey.has(upperKey)) {
+        indexByUpperKey.set(upperKey, deduped.length);
+        deduped.push({ key, report: item });
+        return;
+      }
+      const existingIdx = indexByUpperKey.get(upperKey);
+      const prevRep = deduped[existingIdx].report;
+      const prevScore = (prevRep?.is_parent ? 10 : 0) + (Array.isArray(prevRep?.items) ? prevRep.items.length : 0);
+      const nextScore = (item?.is_parent ? 10 : 0) + (Array.isArray(item?.items) ? item.items.length : 0);
+      if (nextScore > prevScore) {
+        deduped[existingIdx] = {
+          key: deduped[existingIdx].key,
+          report: {
+            ...item,
+            ...(Array.isArray(prevRep?.manifest_items) && !item.manifest_items ? { manifest_items: prevRep.manifest_items } : {})
+          }
+        };
+      }
     });
     return deduped;
   }, [reports, report]);
@@ -41892,6 +42462,7 @@ export default function ReturnQRModal({
   // ALL state hooks strictly declared BEFORE any conditional return (prevents React Error #310)
   const [removedKeys, setRemovedKeys] = useState(() => new Set());
   const [extraReports, setExtraReports] = useState([]);
+  const [hydratedPoolRows, setHydratedPoolRows] = useState([]);
   const [isAddPickerOpen, setIsAddPickerOpen] = useState(false);
   const [addSearchQuery, setAddSearchQuery] = useState('');
   const [paperPresetId, setPaperPresetId] = useState('letter');
@@ -41914,6 +42485,7 @@ export default function ReturnQRModal({
     if (!isOpen) return;
     setRemovedKeys(new Set());
     setExtraReports([]);
+    setHydratedPoolRows([]);
     setIsAddPickerOpen(false);
     setAddSearchQuery('');
     setSizesByKey({});
@@ -41988,40 +42560,134 @@ export default function ReturnQRModal({
     return out;
   }, [sessionReports, availableReports, modalIsTestScope, visibleRmaKeysSet, addSearchQuery]);
 
-  const manifestLookupPool = useMemo(
-    () => [
+  const manifestLookupPool = useMemo(() => {
+    const merged = [
       ...(Array.isArray(sessionReports) ? sessionReports : []),
-      ...(Array.isArray(availableReports) ? availableReports : [])
-    ],
-    [sessionReports, availableReports]
-  );
+      ...(Array.isArray(lookupReports) ? lookupReports : []),
+      ...(Array.isArray(availableReports) ? availableReports : []),
+      ...(Array.isArray(hydratedPoolRows) ? hydratedPoolRows : [])
+    ];
+    const seen = new Set();
+    return merged.filter((r) => {
+      if (!r || typeof r !== 'object') return false;
+      const k = r.id != null
+        ? `id:${String(r.id)}`
+        : `row:${String(r.rma_number || '').toUpperCase()}::${String(r.barcode || '').toUpperCase()}::${r.is_parent ? 'P' : 'C'}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }, [sessionReports, lookupReports, availableReports, hydratedPoolRows]);
+
+  // Hydrate missing parent/child/rma_items manifests when an Admin selects unpacked or child-only rows
+  useEffect(() => {
+    if (!isOpen || inputReports.length === 0) return;
+    let isMounted = true;
+    const neededRmas = [];
+
+    inputReports.forEach((entry) => {
+      const rep = entry.report;
+      const resolved = resolveBatchManifestForQr(rep, manifestLookupPool);
+      if (resolved.items.length > 1) return;
+      const looksLikeBatch = Boolean(
+        rep?.is_parent ||
+        rep?.is_unpacked_manifest_item ||
+        rep?.parent_rma_id != null ||
+        Number(rep?.total_items || rep?.totalItems || rep?.manifest_total_lines || 0) > 1 ||
+        String(rep?.name || '').toLowerCase().startsWith('batch return manifest')
+      );
+      if (looksLikeBatch && rep?.rma_number) {
+        neededRmas.push(String(rep.rma_number).trim());
+      }
+    });
+
+    const uniqueRmas = Array.from(new Set(neededRmas)).filter(Boolean);
+    if (uniqueRmas.length === 0) return;
+
+    (async () => {
+      try {
+        const [{ data: rmaRows }, { data: riRows }] = await Promise.all([
+          supabase.from('rma_reports').select('*').in('rma_number', uniqueRmas),
+          supabase.from('rma_items').select('*').in('rma_number', uniqueRmas).order('id', { ascending: true })
+        ]);
+        if (!isMounted) return;
+        const additions = [];
+        if (Array.isArray(rmaRows)) {
+          additions.push(...rmaRows.filter((r) => Boolean(isTestRecord(r)) === Boolean(modalIsTestScope) && !isTrashedRecord(r)));
+        }
+        if (Array.isArray(riRows) && riRows.length > 0) {
+          uniqueRmas.forEach((rmaNum) => {
+            const matchedItems = riRows.filter((ri) => String(ri.rma_number || '').toUpperCase() === rmaNum.toUpperCase());
+            if (matchedItems.length > 1) {
+              additions.push({
+                rma_number: rmaNum,
+                is_parent: true,
+                is_test: modalIsTestScope,
+                items: matchedItems,
+                total_items: matchedItems.length
+              });
+            }
+          });
+        }
+        if (additions.length > 0) {
+          setHydratedPoolRows(additions);
+        }
+      } catch {}
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, batchSignature, inputReports.length, modalIsTestScope]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const resolvedEntriesByKey = useMemo(() => {
+    const map = new Map();
+    visibleEntries.forEach((entry) => {
+      const rep = entry.report;
+      const resolved = resolveBatchManifestForQr(rep, manifestLookupPool);
+      const effectiveItems = resolved.items.length > 1
+        ? resolved.items
+        : (Array.isArray(rep?.items) && rep.items.length > 1 ? rep.items : null);
+      const canonicalParent = resolved.parentReport && resolved.items.length > 1
+        ? resolved.parentReport
+        : rep;
+      map.set(entry.key, { canonicalParent, effectiveItems });
+    });
+    return map;
+  }, [visibleEntries, manifestLookupPool]);
 
   const hasMultiItemRma = useMemo(() => {
     return visibleEntries.some((entry) => {
       const rep = entry.report;
-      const resolvedItems = getReportManifestItems(rep, manifestLookupPool);
-      return resolvedItems.length > 1 || (Array.isArray(rep?.items) && rep.items.length > 1);
+      const res = resolvedEntriesByKey.get(entry.key);
+      return Boolean(
+        (res?.effectiveItems && res.effectiveItems.length > 1) ||
+        Number(rep?.total_items || rep?.totalItems || rep?.manifest_total_lines || 0) > 1
+      );
     });
-  }, [visibleEntries, manifestLookupPool]);
+  }, [visibleEntries, resolvedEntriesByKey]);
 
   const expandedEntries = useMemo(() => {
     const out = [];
     visibleEntries.forEach((entry) => {
       const rep = entry.report;
-      const resolvedItems = getReportManifestItems(rep, manifestLookupPool);
-      const effectiveItems = resolvedItems.length > 1
-        ? resolvedItems
-        : (Array.isArray(rep?.items) && rep.items.length > 1 ? rep.items : null);
+      const res = resolvedEntriesByKey.get(entry.key);
+      const canonicalRep = res?.canonicalParent || rep;
+      const effectiveItems = res?.effectiveItems || null;
 
       if (qrSplitMode === 'per_item' && effectiveItems && effectiveItems.length > 1) {
         effectiveItems.forEach((it, itemIdx) => {
           const itemKey = `${entry.key}__item-${itemIdx + 1}`;
           if (removedKeys.has(itemKey)) return;
-          const itemBarcode = String(it?.barcode || rep.barcode || '').trim();
+          const itemBarcode = String(it?.barcode || canonicalRep.barcode || '').trim();
           const itemSku = String(it?.code || it?.sku || '').trim();
-          const itemName = String(it?.name || it?.productName || it?.product_name || rep.name || 'Returned Merchandise').trim();
-          const itemQty = Number(it?.quantity ?? it?.qty) || 1;
-          const itemUnit = String(it?.unit_name || it?.unit || rep.unit_name || 'pc').trim() || 'pc';
+          const itemName = String(it?.name || it?.productName || it?.product_name || canonicalRep.name || 'Returned Merchandise').trim();
+          const itemQty = Math.max(1, Number(it?.quantity ?? it?.qty) || 1);
+          const itemUnit = String(it?.unit_name || it?.unit || canonicalRep.unit_name || 'pc').trim() || 'pc';
+          const itemSupplierCandidate = it?.supplier_name || it?.supplierName || it?.supplier || '';
+          const itemSupplier = isRealSupplierName(itemSupplierCandidate)
+            ? String(itemSupplierCandidate).trim()
+            : (!isMixedSuppliersSummary(canonicalRep.supplier_name) ? (canonicalRep.supplier_name || '') : '');
           out.push({
             key: itemKey,
             parentKey: entry.key,
@@ -42029,43 +42695,51 @@ export default function ReturnQRModal({
             totalLines: effectiveItems.length,
             isPerItemSplit: true,
             report: {
-              ...rep,
+              ...canonicalRep,
               items: [{ ...it }],
               total_items: 1,
               totalItems: 1,
               name: itemName,
               productName: itemName,
-              barcode: itemBarcode || rep.barcode,
+              barcode: itemBarcode || canonicalRep.barcode,
               code: itemSku,
               sku: itemSku,
               quantity: itemQty,
               total_quantity: itemQty,
               unit_name: itemUnit,
               unit: itemUnit,
-              pieces_per_case: Number(it?.pieces_per_case ?? it?.piecesPerCase ?? rep.pieces_per_case) || 1,
-              expiry_date: it?.expiry_date || rep.expiry_date || '',
-              reason: it?.reason || rep.reason || '',
-              explanation: it?.explanation || rep.explanation || '',
+              supplier_name: itemSupplier || canonicalRep.supplier_name,
+              pieces_per_case: Number(it?.pieces_per_case ?? it?.piecesPerCase ?? canonicalRep.pieces_per_case) || 1,
+              expiry_date: it?.expiry_date || canonicalRep.expiry_date || '',
+              reason: it?.reason || canonicalRep.reason || '',
+              explanation: it?.explanation || canonicalRep.explanation || '',
               _manifestLineIndex: itemIdx + 1,
               _manifestTotalLines: effectiveItems.length
             }
           });
         });
       } else {
+        const consolidatedReport = effectiveItems && effectiveItems.length > 1
+          ? {
+              ...canonicalRep,
+              is_parent: true,
+              items: effectiveItems,
+              total_items: effectiveItems.length,
+              total_quantity: sumManifestQuantity(effectiveItems, canonicalRep.total_quantity || canonicalRep.quantity)
+            }
+          : canonicalRep;
         out.push({
           key: entry.key,
           parentKey: entry.key,
           itemIndex: null,
           totalLines: null,
           isPerItemSplit: false,
-          report: effectiveItems && effectiveItems.length > 1 && (!Array.isArray(rep?.items) || rep.items.length <= 1)
-            ? { ...rep, items: effectiveItems, total_items: effectiveItems.length }
-            : rep
+          report: consolidatedReport
         });
       }
     });
     return out;
-  }, [visibleEntries, manifestLookupPool, qrSplitMode, removedKeys]);
+  }, [visibleEntries, resolvedEntriesByKey, qrSplitMode, removedKeys]);
 
   // Default card size: Medium 90x105mm for single QR, balanced 62x74mm for multi-select consolidated or per-item QRs
   const defaultCardSize = useMemo(
@@ -43208,7 +43882,14 @@ import {
 } from 'lucide-react';
 import ProductAutoSuggest from './ProductAutoSuggest';
 import { supabase } from '../supabaseClient';
-import { formatDateTimeYmdHm, formatDateYmd } from '../utils/rmaHelpers';
+import {
+  formatDateTimeYmdHm,
+  formatDateYmd,
+  sumManifestQuantity,
+  summarizeBatchSuppliers,
+  isMixedSuppliersSummary,
+  isRealSupplierName
+} from '../utils/rmaHelpers';
 
 async function resolveBearerToken() {
   try {
@@ -43273,25 +43954,58 @@ export default function RmaEmailEditorView({
     const set = new Set();
     (catalogProducts || []).forEach((p) => {
       const s = String(p?.supplier_name || p?.supplierName || '').trim();
-      if (s && !/^(pending assignment|unassigned|n\/a)$/i.test(s)) set.add(s);
+      if (isRealSupplierName(s)) set.add(s);
     });
     (allReports || []).forEach((r) => {
       const s = String(r?.supplier_name || '').trim();
-      if (s && !/^(pending assignment|unassigned|n\/a)$/i.test(s)) set.add(s);
+      if (isRealSupplierName(s)) set.add(s);
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [catalogProducts, allReports]);
+
+  const handleUpdateManifestRow = (idx, patch) => {
+    setManifestItems((prev) => {
+      const next = prev.map((row, i) => (i === idx ? { ...row, ...patch } : row));
+      if (next.length > 0) {
+        if (patch.quantity !== undefined) {
+          setQuantity(sumManifestQuantity(next, 1));
+        }
+        if (patch.supplier_name !== undefined && next.length > 1) {
+          setSupplierName((currSup) => summarizeBatchSuppliers(next, isMixedSuppliersSummary(currSup) ? '' : currSup));
+        }
+      }
+      return next;
+    });
+  };
 
   const hydrateFromReport = (rep) => {
     if (!rep) return;
     setLoadedReport(rep);
     setActiveRmaNumber(rep.rma_number || '');
     setLookupRmaInput(rep.rma_number || '');
-    setSupplierName(rep.supplier_name || '');
+    const repSup = String(rep.supplier_name || '').trim();
+    const rawItems = Array.isArray(rep.items) ? rep.items : [];
+    const mappedItems = rawItems.map((it) => {
+      const itemSup = it.supplier_name || it.supplierName || it.supplier || (!isMixedSuppliersSummary(repSup) ? repSup : '') || '';
+      return {
+        ...it,
+        name: it.name || it.productName || '',
+        code: it.code || it.sku || '',
+        supplier_name: itemSup,
+        supplierName: itemSup,
+        supplier: itemSup,
+        quantity: Math.max(1, Number(it.quantity ?? it.qty) || 1),
+        unit_name: it.unit_name || it.unit || 'pc',
+        price: Number(it.price || 0),
+        price_with_vat: Number(it.price_with_vat || it.priceWithVat || 0),
+        expiry_date: it.expiry_date ? String(it.expiry_date).slice(0, 10) : ''
+      };
+    });
+    setSupplierName(mappedItems.length > 1 ? summarizeBatchSuppliers(mappedItems, isMixedSuppliersSummary(repSup) ? '' : repSup) : repSup);
     setProductName(rep.name || '');
     setSkuCode(rep.code || '');
     setBarcode(rep.barcode || '');
-    setQuantity(Number(rep.quantity) || 1);
+    setQuantity(mappedItems.length > 1 ? sumManifestQuantity(mappedItems, rep.quantity) : (Number(rep.quantity) || 1));
     setUnitName(rep.unit_name || 'pc');
     const netP = Number(rep.price || 0);
     setPrice(netP);
@@ -43303,21 +44017,7 @@ export default function RmaEmailEditorView({
     setDrNumber(rep.dr_number || rep.invoice_dr_number || '');
     setPoNumber(rep.po_number || '');
     setNotes(String(rep.notes || '').replace(/\[TEST_MODE\]/gi, '').trim());
-    setManifestItems(
-      Array.isArray(rep.items)
-        ? rep.items.map((it) => ({
-            ...it,
-            name: it.name || it.productName || '',
-            code: it.code || it.sku || '',
-            supplier_name: it.supplier_name || it.supplierName || rep.supplier_name || '',
-            quantity: Number(it.quantity) || 1,
-            unit_name: it.unit_name || it.unit || 'pc',
-            price: Number(it.price || 0),
-            price_with_vat: Number(it.price_with_vat || it.priceWithVat || 0),
-            expiry_date: it.expiry_date ? String(it.expiry_date).slice(0, 10) : ''
-          }))
-        : []
-    );
+    setManifestItems(mappedItems);
   };
 
   const fetchScopedReport = async (targetRma) => {
@@ -43406,6 +44106,12 @@ export default function RmaEmailEditorView({
         throw new Error('Your Google Sign-In session expired. Please Lock & re-verify with Google.');
       }
 
+      const isBatchEdit = manifestItems.length > 1;
+      const computedBatchQty = isBatchEdit ? sumManifestQuantity(manifestItems, quantity) : Math.max(1, Number(quantity) || 1);
+      const computedBatchSupplier = isBatchEdit
+        ? summarizeBatchSuppliers(manifestItems, isMixedSuppliersSummary(supplierName) ? '' : supplierName.trim())
+        : supplierName.trim();
+
       const res = await fetch('/api/v1/rma-email-edit', {
         method: 'PATCH',
         headers: {
@@ -43416,10 +44122,11 @@ export default function RmaEmailEditorView({
           token: gateSession.token,
           rma_number: activeRmaNumber,
           updates: {
-            supplier_name: supplierName.trim(),
+            supplier_name: computedBatchSupplier,
             name: productName.trim(),
             code: skuCode.trim(),
-            quantity: Math.max(1, Number(quantity) || 1),
+            quantity: computedBatchQty,
+            total_quantity: computedBatchQty,
             unit_name: unitName.trim() || 'pc',
             price: parseFloat(price) || 0,
             price_with_vat: parseFloat(priceWithVat) || 0,
@@ -43658,13 +44365,22 @@ export default function RmaEmailEditorView({
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
-                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Quantity</label>
+                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                  {manifestItems.length > 1 ? 'Total Quantity (Auto)' : 'Quantity'}
+                </label>
                 <input
                   type="number"
                   min="1"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
+                  readOnly={manifestItems.length > 1}
+                  value={manifestItems.length > 1 ? sumManifestQuantity(manifestItems, quantity) : quantity}
+                  onChange={(e) => {
+                    if (manifestItems.length <= 1) setQuantity(e.target.value);
+                  }}
+                  className={`w-full px-3 py-2 border rounded-xl text-xs font-bold ${
+                    manifestItems.length > 1
+                      ? 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 cursor-not-allowed'
+                      : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white'
+                  }`}
                 />
               </div>
               <div>
@@ -43804,21 +44520,38 @@ export default function RmaEmailEditorView({
           {/* Multi-Item Manifest Line Items (if batch ticket) */}
           {manifestItems.length > 0 && (
             <div className="space-y-2 p-3.5 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 rounded-2xl">
-              <div className="text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                Manifest Line Items ({manifestItems.length})
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                  Manifest Line Items ({manifestItems.length})
+                </div>
+                <span className="text-[11px] font-mono font-black px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800">
+                  Total Batch Qty: {sumManifestQuantity(manifestItems, 1)} pcs
+                </span>
               </div>
               <div className="space-y-2">
                 {manifestItems.map((it, idx) => (
-                  <div key={idx} className="grid grid-cols-2 sm:grid-cols-6 gap-2 p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <div key={idx} className="grid grid-cols-2 sm:grid-cols-8 gap-2 p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700">
                     <div className="col-span-2">
                       <label className="text-[9.5px] font-bold text-slate-400 block">Item #{idx + 1} Name</label>
                       <input
                         type="text"
                         value={it.name || ''}
+                        onChange={(e) => handleUpdateManifestRow(idx, { name: e.target.value })}
+                        className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-[9.5px] font-bold text-slate-400 block">Supplier Name</label>
+                      <input
+                        type="text"
+                        list="email-editor-supplier-list"
+                        aria-label={`Item #${idx + 1} Supplier Name`}
+                        value={it.supplier_name || ''}
                         onChange={(e) => {
                           const val = e.target.value;
-                          setManifestItems((prev) => prev.map((row, i) => i === idx ? { ...row, name: val } : row));
+                          handleUpdateManifestRow(idx, { supplier_name: val, supplierName: val, supplier: val });
                         }}
+                        placeholder="Supplier / Vendor..."
                         className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
                       />
                     </div>
@@ -43829,7 +44562,7 @@ export default function RmaEmailEditorView({
                         value={it.code || ''}
                         onChange={(e) => {
                           const val = e.target.value;
-                          setManifestItems((prev) => prev.map((row, i) => i === idx ? { ...row, code: val, sku: val } : row));
+                          handleUpdateManifestRow(idx, { code: val, sku: val });
                         }}
                         className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold bg-slate-50 dark:bg-slate-800"
                       />
@@ -43839,10 +44572,12 @@ export default function RmaEmailEditorView({
                       <input
                         type="number"
                         min="1"
+                        aria-label={`Item #${idx + 1} Qty`}
                         value={it.quantity ?? 1}
                         onChange={(e) => {
-                          const val = Number(e.target.value) || 1;
-                          setManifestItems((prev) => prev.map((row, i) => i === idx ? { ...row, quantity: val } : row));
+                          const parsed = parseInt(e.target.value, 10);
+                          const val = Number.isFinite(parsed) && parsed >= 1 ? parsed : 1;
+                          handleUpdateManifestRow(idx, { quantity: val });
                         }}
                         className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
                       />
@@ -43855,11 +44590,10 @@ export default function RmaEmailEditorView({
                         value={it.price ?? 0}
                         onChange={(e) => {
                           const net = parseFloat(e.target.value);
-                          setManifestItems((prev) => prev.map((row, i) => i === idx ? {
-                            ...row,
+                          handleUpdateManifestRow(idx, {
                             price: e.target.value,
                             ...(Number.isFinite(net) ? { price_with_vat: Number((net * 1.12).toFixed(2)) } : {})
-                          } : row));
+                          });
                         }}
                         className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
                       />
@@ -43869,10 +44603,7 @@ export default function RmaEmailEditorView({
                       <input
                         type="date"
                         value={it.expiry_date || ''}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setManifestItems((prev) => prev.map((row, i) => i === idx ? { ...row, expiry_date: val } : row));
-                        }}
+                        onChange={(e) => handleUpdateManifestRow(idx, { expiry_date: e.target.value })}
                         className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-slate-50 dark:bg-slate-800"
                       />
                     </div>
@@ -49294,7 +50025,10 @@ import {
   isManifestSubItem,
   formatDateYmd,
   normalizePhotoUrlArray,
-  getGpsAddressDisplay
+  getGpsAddressDisplay,
+  extractDistinctSuppliersFromItems,
+  isMixedSuppliersSummary,
+  isRealSupplierName
 } from '../utils/rmaHelpers';
 import { stampWatermarkOnFiles } from '../utils/cameraWatermark';
 import SupplierPickupFormModal from './SupplierPickupFormModal';
@@ -49798,21 +50532,30 @@ export default function SimpleSupplierRtvWizardModal({
 
   const distinctSuppliersInBatch = useMemo(() => {
     const map = new Map();
+    const addCandidate = (rawVal) => {
+      if (!isRealSupplierName(rawVal) || isPendingSupplierName(rawVal)) return;
+      const clean = String(rawVal).trim();
+      const k = clean.toLowerCase();
+      if (!map.has(k)) map.set(k, clean);
+    };
+
     workingBatchReports.forEach((r) => {
-      const cand = [
-        r?.ai_document_metadata?.supplier_pickup?.supplier_name,
-        r?.supplier_name,
-        r?.supplierName,
-        r?.supplier
-      ].find((s) => !isPendingSupplierName(s));
-      if (cand) {
-        const clean = String(cand).trim();
-        const k = clean.toLowerCase();
-        if (!map.has(k)) map.set(k, clean);
+      const items = getReportManifestItems(r, allReports);
+      const itemSuppliers = extractDistinctSuppliersFromItems(items);
+      if (itemSuppliers.length > 0) {
+        itemSuppliers.forEach(addCandidate);
+      } else {
+        const cand = [
+          r?.ai_document_metadata?.supplier_pickup?.supplier_name,
+          r?.supplier_name,
+          r?.supplierName,
+          r?.supplier
+        ].find((s) => isRealSupplierName(s) && !isPendingSupplierName(s));
+        addCandidate(cand);
       }
     });
     return Array.from(map.values());
-  }, [workingBatchReports]);
+  }, [workingBatchReports, allReports]);
 
   const wizardCurrentIsTest = useMemo(
     () => workingBatchReports.some((r) => isTestRecord(r)),
@@ -50205,6 +50948,7 @@ export default function SimpleSupplierRtvWizardModal({
           status: nextStatus,
           warehouse_location: nextLocation,
           supplier_name: isSupplierStream ? effectiveSupplier : (rep.supplier_name || effectiveSupplier),
+          unifyMixedSuppliers: Boolean(confirmUnifySupplier),
           actorName: cleanProcessedBy,
           inspected_by: cleanProcessedBy,
           clearWorkflowResolution: true,
@@ -50478,6 +51222,7 @@ export default function SimpleSupplierRtvWizardModal({
           status: 'picked_up',
           warehouse_location: nextLocation,
           supplier_name: isSupplierStream ? cleanSupplier : (rep.supplier_name || cleanSupplier),
+          unifyMixedSuppliers: Boolean(confirmUnifySupplier),
           actorName: cleanProcessedBy,
           inspected_by: cleanProcessedBy,
           clearWorkflowResolution: true,
@@ -52640,7 +53385,10 @@ import {
   formatDateYmd,
   findConsolidatedRtvBatchReports,
   getGpsAddressDisplay,
-  getGpsMapUrl
+  getGpsMapUrl,
+  summarizeBatchSuppliers,
+  isRealSupplierName,
+  isMixedSuppliersSummary
 } from '../utils/rmaHelpers';
 
 export default function SupplierClaimsTab({
@@ -52792,7 +53540,10 @@ export default function SupplierClaimsTab({
         return sum + (cPrice * cQty);
       }, 0);
       const avgPrice = totalUnits > 0 ? (totalSum / totalUnits) : 0;
-      const supplier = r.supplier_name && r.supplier_name !== 'Warehouse' ? r.supplier_name : (children[0]?.supplier_name || 'Savemore');
+      const supplier = summarizeBatchSuppliers(
+        children,
+        !isMixedSuppliersSummary(r.supplier_name) && r.supplier_name !== 'Warehouse' ? r.supplier_name : 'Savemore'
+      );
 
       return {
         name: `Batch Return Manifest (${children.length} Line Items)`,
@@ -52922,11 +53673,10 @@ export default function SupplierClaimsTab({
           const childQty = Number(child.quantity || child.qty) || 1;
           const childUnit = child.unit_name || child.unit || r.unit_name || 'pc';
           const childPrice = Number(child.price_with_vat || child.price || matchedChild?.price_with_vat || matchedChild?.price || 0);
-          const rawChildSupplier = String(child.supplier_name || '').trim();
-          const isChildVendorPending = !rawChildSupplier || rawChildSupplier.toLowerCase().includes('pending') || rawChildSupplier.toLowerCase().includes('unassigned') || rawChildSupplier.toLowerCase() === 'warehouse';
-          const resolvedChildSupplier = !isChildVendorPending
+          const rawChildSupplier = String(child.supplier_name || child.supplierName || child.supplier || '').trim();
+          const resolvedChildSupplier = isRealSupplierName(rawChildSupplier)
             ? rawChildSupplier
-            : (matchedChild?.supplier_name || (r.supplier_name && !String(r.supplier_name).toLowerCase().includes('pending') && String(r.supplier_name).toLowerCase() !== 'warehouse' ? r.supplier_name : 'Pending Assignment'));
+            : (matchedChild?.supplier_name || (isRealSupplierName(r.supplier_name) ? r.supplier_name : 'Pending Assignment'));
           const childPhotos = (Array.isArray(child.photos) && child.photos.length > 0)
             ? child.photos
             : (Array.isArray(r.photos) ? r.photos : []);
@@ -52940,6 +53690,7 @@ export default function SupplierClaimsTab({
             is_unpacked_manifest_item: true,
             manifest_line_index: cIdx,
             manifest_total_lines: manifestChildren.length,
+            manifest_items: manifestChildren,
             items: [],
             total_items: 1,
             rma_number: r.rma_number,
@@ -59698,7 +60449,11 @@ import {
   isTrashedRecord, 
   isArchivedRecord,
   isTestRecord,
-  getTrashDaysRemaining 
+  getTrashDaysRemaining,
+  sumManifestQuantity,
+  summarizeBatchSuppliers,
+  isMixedSuppliersSummary,
+  extractDistinctSuppliersFromItems
 } from '../utils/rmaHelpers';
 import { isPlaceholderSupplier } from '../utils/followUpWorkflow';
 import { supplierDirectoryService } from './supplierDirectoryService';
@@ -61036,8 +61791,8 @@ export const catalogService = {
     );
 
     const calculatedTotalItems = total_items || (hasItems ? items.length : 1);
-    const calculatedTotalQuantity = total_quantity || (hasItems 
-      ? items.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0)
+    const calculatedTotalQuantity = total_quantity || (hasItems
+      ? sumManifestQuantity(items, quantity)
       : (Number(quantity) || 1));
 
     const userProvidedName = (name || productName || '').trim();
@@ -61057,15 +61812,18 @@ export const catalogService = {
     const effectiveRmaType = (rma_type === 'supplier_outbound' || (typeof rmaType !== 'undefined' && rmaType === 'supplier_outbound')) ? 'supplier_outbound' : 'customer_inbound';
     const effectiveGrade = condition_grade || mapReasonToConditionGrade(reason || (hasItems && items[0]?.reason));
 
-    const resolvedSupplierName = this._pickRealSupplier(
-      supplier_name,
-      supplier,
+    const singleFallbackSupplier = this._pickRealSupplier(
+      isMixedSuppliersSummary(supplier_name) ? null : supplier_name,
+      isMixedSuppliersSummary(supplier) ? null : supplier,
       resolvedProduct?.supplier_name,
       resolvedProduct?.supplierName,
       resolvedProduct?.supplier,
       hasItems ? items[0]?.supplier_name : null,
       hasItems ? items[0]?.supplierName : null
     );
+    const resolvedSupplierName = isBatch
+      ? summarizeBatchSuppliers(items, singleFallbackSupplier)
+      : singleFallbackSupplier;
 
     const nowIso = new Date().toISOString();
     const existingFollowUpMeta = (ai_document_metadata?.follow_up && typeof ai_document_metadata.follow_up === 'object')
@@ -61236,6 +61994,7 @@ export const catalogService = {
     // 1.1 If this is a multi-item batch return, only insert child rows into rma_items and child rma_reports if isBatch && items.length > 1
     // Single-item returns are already recorded as finalReport itself; inserting child rows for single-items creates duplicate records.
     if (finalReport?.id && isBatch && items.length > 1) {
+      const childFallbackSupplier = isMixedSuppliersSummary(reportRow.supplier_name) ? null : reportRow.supplier_name;
       try {
         const rmaItemRows = items.map(it => ({
           rma_report_id: finalReport.id,
@@ -61247,7 +62006,7 @@ export const catalogService = {
           unit_name: it.unit_name || it.unit || 'pc',
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
-          supplier_name: this._pickRealSupplier(it.supplier_name, it.supplierName, it.supplier, reportRow.supplier_name),
+          supplier_name: this._pickRealSupplier(it.supplier_name, it.supplierName, it.supplier, childFallbackSupplier),
           reason: it.reason || 'Damaged Box / Crushed Packaging',
           explanation: it.explanation || null,
           expiry_date: it.expiry_date || null,
@@ -61269,7 +62028,7 @@ export const catalogService = {
           name: it.name || it.productName || `Item (${it.barcode})`,
           quantity: Number(it.quantity) || 1,
           unit_name: it.unit_name || it.unit || 'pc',
-          supplier_name: this._pickRealSupplier(it.supplier_name, it.supplierName, it.supplier, reportRow.supplier_name),
+          supplier_name: this._pickRealSupplier(it.supplier_name, it.supplierName, it.supplier, childFallbackSupplier),
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
           status: reportRow.status,
@@ -62845,14 +63604,26 @@ export const catalogService = {
       updates.photos = [...new Set([...prevPhotos, ...payload.appendPhotoUrls.filter(Boolean)])];
     }
 
-    // Update manifest item array if batch manifest
-    if (Array.isArray(existing?.items) && existing.items.length > 0) {
-      updates.items = existing.items.map(it => ({
-        ...it,
-        ...(updates.supplier_name ? { supplier_name: updates.supplier_name, supplier: updates.supplier_name } : {}),
-        ...(payload.disposition ? { disposition: payload.disposition } : {}),
-        ...(payload.status ? { status: payload.status } : {})
-      }));
+    const existingItemsArr = Array.isArray(existing?.items) ? existing.items : [];
+    const existingItemSups = extractDistinctSuppliersFromItems(existingItemsArr);
+    const hasMixedItemSuppliers = existingItemSups.length > 1;
+    const allowCascadeSupplier = Boolean(updates.supplier_name) && (!hasMixedItemSuppliers || Boolean(payload.unifyMixedSuppliers));
+
+    // Update manifest item array if batch manifest (never clobbering mixed suppliers unless explicitly unifying)
+    if (existingItemsArr.length > 0) {
+      updates.items = existingItemsArr.map(it => {
+        const itemHasRealSup = !this._isPlaceholderSupplier(it?.supplier_name) && !isMixedSuppliersSummary(it?.supplier_name);
+        const shouldSetSup = Boolean(updates.supplier_name) && !isMixedSuppliersSummary(updates.supplier_name) && (allowCascadeSupplier || !itemHasRealSup);
+        return {
+          ...it,
+          ...(shouldSetSup ? { supplier_name: updates.supplier_name, supplier: updates.supplier_name } : {}),
+          ...(payload.disposition ? { disposition: payload.disposition } : {}),
+          ...(payload.status ? { status: payload.status } : {})
+        };
+      });
+      if (hasMixedItemSuppliers && !payload.unifyMixedSuppliers) {
+        updates.supplier_name = summarizeBatchSuppliers(updates.items, existing?.supplier_name);
+      }
     }
 
     const existingAudit = Array.isArray(existing?.audit_trail) ? existing.audit_trail : [];
@@ -62909,10 +63680,10 @@ export const catalogService = {
     } catch {}
 
     // Sync child rows only if this record is a multi-item parent manifest
-    if (resolvedId && (existing?.is_parent === true || (Array.isArray(existing?.items) && existing.items.length > 0))) {
+    if (resolvedId && (existing?.is_parent === true || existingItemsArr.length > 0)) {
       try {
         await supabase.from('rma_reports').update({
-          ...(updates.supplier_name ? { supplier_name: updates.supplier_name } : {}),
+          ...(allowCascadeSupplier && !isMixedSuppliersSummary(updates.supplier_name) ? { supplier_name: updates.supplier_name } : {}),
           disposition: updates.disposition,
           status: savedRow?.status || updates.status,
           warehouse_location: updates.warehouse_location
@@ -62993,12 +63764,23 @@ export const catalogService = {
       ]
     };
 
-    if (cleanSupplier && Array.isArray(existing?.items) && existing.items.length > 0) {
-      updates.items = existing.items.map((it) => ({
-        ...it,
-        supplier_name: cleanSupplier,
-        supplier: cleanSupplier
-      }));
+    const existingItemsArr = Array.isArray(existing?.items) ? existing.items : [];
+    const hasMixedFollowUpSups = extractDistinctSuppliersFromItems(existingItemsArr).length > 1;
+    const allowCascadeFollowUpSup = Boolean(cleanSupplier) && (!hasMixedFollowUpSups || Boolean(payload.unifyMixedSuppliers));
+
+    if (cleanSupplier && existingItemsArr.length > 0) {
+      updates.items = existingItemsArr.map((it) => {
+        const itemHasRealSup = !this._isPlaceholderSupplier(it?.supplier_name) && !isMixedSuppliersSummary(it?.supplier_name);
+        if (!allowCascadeFollowUpSup && itemHasRealSup) return it;
+        return {
+          ...it,
+          supplier_name: cleanSupplier,
+          supplier: cleanSupplier
+        };
+      });
+      if (hasMixedFollowUpSups && !payload.unifyMixedSuppliers) {
+        updates.supplier_name = summarizeBatchSuppliers(updates.items, cleanSupplier);
+      }
     }
 
     let { data: savedRows, error: updateErr } = await supabase
@@ -63015,7 +63797,7 @@ export const catalogService = {
       savedRows = retry.data;
     }
 
-    if (cleanSupplier) {
+    if (allowCascadeFollowUpSup && !isMixedSuppliersSummary(cleanSupplier)) {
       try {
         await supabase.from('rma_reports').update({ supplier_name: cleanSupplier }).eq('parent_rma_id', resolvedId);
       } catch {}
@@ -64834,7 +65616,8 @@ import {
   cleanExplanationText,
   normalizePhotoUrlArray,
   getGpsAddressDisplay,
-  getGpsMapUrl
+  getGpsMapUrl,
+  isRealSupplierName
 } from '../utils/rmaHelpers';
 import { generatePickupFormPdfAttachment } from '../utils/pickupFormPdf';
 import { buildRmaAlertXlsxAttachment } from '../utils/rmaAlertXlsx';
@@ -65827,12 +66610,15 @@ export const notificationService = {
             ${manifestItems.length > 1 ? `
             <div class="section-title">Manifest Items Breakdown (${manifestItems.length} Lines)</div>
             <div class="card" style="padding: 12px;">
-              ${manifestItems.map((it, idx) => `
+              ${manifestItems.map((it, idx) => {
+                const itSup = it.supplier_name || it.supplierName || it.supplier || '';
+                const supBadge = isRealSupplierName(itSup) ? ` • Supplier: ${escapeEmailHtml(itSup)}` : '';
+                return `
                 <div style="padding: 6px 0; ${idx > 0 ? 'border-top: 1px solid #e2e8f0;' : ''} font-size: 12px;">
                   <strong>${idx + 1}. ${escapeEmailHtml(it.name || it.productName || it.barcode || 'Item')}</strong>
-                  <span style="color: #64748b; font-family: monospace;"> • Qty: ${Number(it.quantity) || 1} ${escapeEmailHtml(it.unit_name || it.unit || 'pc')} • Exp (YYYY-MM-DD): ${escapeEmailHtml(formatDateYmd(it.expiry_date) || 'N/A')}</span>
-                </div>
-              `).join('')}
+                  <span style="color: #64748b; font-family: monospace;"> • Qty: ${Number(it.quantity) || 1} ${escapeEmailHtml(it.unit_name || it.unit || 'pc')}${supBadge} • Exp (YYYY-MM-DD): ${escapeEmailHtml(formatDateYmd(it.expiry_date) || 'N/A')}</span>
+                </div>`;
+              }).join('')}
             </div>` : ''}
 
             ${editUrl ? `
@@ -70235,7 +71021,10 @@ import {
   formatSaveFileTimestamp,
   stripCreditMemoMetaTag,
   getGpsAddressDisplay,
-  getGpsMapUrl
+  getGpsMapUrl,
+  summarizeBatchSuppliers,
+  isRealSupplierName,
+  isMixedSuppliersSummary
 } from './rmaHelpers';
 import { getCleanHumanWorkflowStatus } from './followUpWorkflow';
 import { downloadTableXlsx } from './exportXlsx';
@@ -70312,12 +71101,17 @@ function extractPhotoLink(r) {
  */
 export function resolveExportSupplier(r, savedProducts = []) {
   if (!r) return 'Pending Assignment';
+  if (Array.isArray(r.items) && r.items.length > 1) {
+    const rawParentSup = isRealSupplierName(r.supplier_name) ? r.supplier_name : (isRealSupplierName(r.supplier) ? r.supplier : '');
+    return summarizeBatchSuppliers(r.items, rawParentSup);
+  }
   const cleanBarcode = String(r.barcode || '').trim();
   const matched = (Array.isArray(savedProducts) && cleanBarcode)
     ? savedProducts.find(p => p.barcode && String(p.barcode).trim() === cleanBarcode)
     : null;
 
   const rawSup = String(r.supplier_name || r.supplier || '').trim();
+  if (isMixedSuppliersSummary(rawSup)) return rawSup;
   const isInvalid = !rawSup || rawSup.toLowerCase().includes('pending') || rawSup.toLowerCase().includes('unassigned') || rawSup.toLowerCase() === 'warehouse';
 
   if (!isInvalid) return rawSup;
@@ -72736,7 +73530,7 @@ function renderItemsAndPhotosHtml(report, allReports, catalogProducts) {
             <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;">
               <div style="font-weight: 700; color: #0f172a;">${escapeHtml(it.name)}</div>
               <div style="font-size: 11px; color: #64748b; font-family: monospace;">
-                ${it.cleanSku ? `SKU: ${escapeHtml(it.cleanSku)}` : ''}${it.cleanSku && it.barcode ? ' • ' : ''}${it.barcode ? `BC: ${escapeHtml(it.barcode)}` : ''}
+                ${it.cleanSku ? `SKU: ${escapeHtml(it.cleanSku)}` : ''}${it.cleanSku && it.barcode ? ' • ' : ''}${it.barcode ? `BC: ${escapeHtml(it.barcode)}` : ''}${it.supplierName && !isPlaceholderSupplier(it.supplierName) ? ` • Supplier: ${escapeHtml(it.supplierName)}` : ''}
               </div>
             </td>
             <td style="padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 800; font-family: monospace; white-space: nowrap;">
@@ -75141,7 +75935,11 @@ import {
   formatSaveFileTimestamp,
   getGpsAddressDisplay,
   getGpsMapUrl,
-  getReportManifestItems
+  getReportManifestItems,
+  sumManifestQuantity,
+  summarizeBatchSuppliers,
+  isMixedSuppliersSummary,
+  isRealSupplierName
 } from './rmaHelpers.js';
 
 function sanitizeFilenameSegment(raw) {
@@ -75217,14 +76015,23 @@ function buildMirrorStylesXml() {
  * Builds strict OOXML `.xlsx` bytes mirroring a New RMA Email Alert payload.
  * Preserves Field | Value mapping and optional MANIFEST LINE ITEMS table for 2-way reply ingestion.
  */
-export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = '', resolvedRecipients = null } = {}) {
+export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = '', resolvedRecipients = null, allReports = [] } = {}) {
   const rmaNumber = String(report.rma_number || report.rmaNumber || 'RMA-PENDING').trim();
   const isTest = isTestRecord(report);
   const meta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
     ? report.ai_document_metadata
     : {};
   const followUpMeta = (meta.follow_up && typeof meta.follow_up === 'object') ? meta.follow_up : {};
-  const items = getReportManifestItems(report);
+  const items = getReportManifestItems(report, allReports);
+
+  const isMultiItemBatch = items.length > 1;
+  const effectiveQuantity = isMultiItemBatch
+    ? sumManifestQuantity(items, report.quantity ?? report.total_quantity ?? 1)
+    : (Number(report.quantity ?? report.total_quantity ?? 1) || 1);
+  const rawTopSupplier = String(report.supplier_name || report.supplierName || '').trim();
+  const effectiveTopSupplier = isMultiItemBatch
+    ? summarizeBatchSuppliers(items, isMixedSuppliersSummary(rawTopSupplier) ? '' : rawTopSupplier)
+    : rawTopSupplier;
 
   const gpsAddress = getGpsAddressDisplay(report) || '';
   const gpsMapUrl = getGpsMapUrl(report) || '';
@@ -75237,13 +76044,13 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     ['Test Mode', isTest ? 'YES (Sandbox)' : 'NO (Live)', 'Test vs Live isolation guard'],
     ['Logistics Stream', isSupplierStream ? 'supplier_outbound' : 'customer_inbound', 'customer_inbound or supplier_outbound'],
     ...(isSupplierStream ? [] : [['Store / Branch', report.store_branch || '', 'Editable text']]),
-    ['Supplier / Vendor Name', report.supplier_name || report.supplierName || '', 'Editable supplier / updates Supplier Directory'],
+    ['Supplier / Vendor Name', effectiveTopSupplier, isMultiItemBatch ? 'Auto-summarized from item suppliers below' : 'Editable supplier / updates Supplier Directory'],
     ['Supplier Email (To)', followUpMeta.supplier_email_to || '', 'Comma-separated emails for auto follow-ups'],
     ['Supplier Email (CC)', followUpMeta.supplier_email_cc || '', 'Comma-separated CC emails'],
     ['Barcode', report.barcode || '', 'Plain text barcode'],
     ['Assigned SKU', report.code || report.sku || '', 'Editable SKU / Item Code'],
     ['Product Description', report.name || report.productName || report.product_name || '', 'Editable product name'],
-    ['Quantity', Number(report.quantity ?? report.total_quantity ?? 1) || 1, 'Numeric quantity', 'number'],
+    ['Quantity', effectiveQuantity, isMultiItemBatch ? 'Auto-calculated sum of MANIFEST LINE ITEMS Qty on reply' : 'Numeric quantity', 'number'],
     ['Packaging Unit', report.unit_name || report.unitName || 'pc', 'pc / pack / box / case'],
     ['Unit Price (PHP)', Number(report.price || 0), 'Net unit price', 'currency'],
     ['Price w/ VAT (PHP)', Number(report.price_with_vat || report.priceWithVat || 0), 'VAT-inclusive unit price', 'currency'],
@@ -75311,13 +76118,18 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     );
     rIdx += 1;
     items.forEach((it, idx) => {
+      const itemSup = isRealSupplierName(it.supplier_name)
+        ? String(it.supplier_name).trim()
+        : (isRealSupplierName(it.supplierName)
+            ? String(it.supplierName).trim()
+            : (!isMixedSuppliersSummary(report.supplier_name) ? String(report.supplier_name || '').trim() : ''));
       const vals = [
         [idx + 1, 'number', 2],
-        [it.supplier_name || it.supplierName || report.supplier_name || '', 'text', 5],
+        [itemSup, 'text', 5],
         [it.barcode || '', 'text', 2],
         [it.code || it.sku || '', 'text', 5],
         [it.name || it.productName || '', 'text', 5],
-        [Number(it.quantity) || 1, 'number', 5],
+        [Math.max(1, Number(it.quantity ?? it.qty) || 1), 'number', 5],
         [it.unit_name || it.unit || 'pc', 'text', 5],
         [formatDateYmd(it.expiry_date) || '', 'text', 5],
         [it.reason || report.reason || '', 'text', 5],
@@ -75696,6 +76508,155 @@ export function hasAssignedSku(report, savedProductsList = []) {
   if (price <= 0) return false;
 
   return true;
+}
+
+/**
+ * Returns true if a string is a wrapped multi-supplier parent summary
+ * e.g. "Multiple Suppliers (Supplier A, Suysing)".
+ */
+export function isMixedSuppliersSummary(val) {
+  return /^multiple suppliers\s*\(/i.test(String(val || '').trim());
+}
+
+/**
+ * Pure check for whether a supplier string represents an assigned vendor
+ * (ignoring empty strings, placeholders, and wrapped multi-supplier summaries).
+ */
+export function isRealSupplierName(val) {
+  const s = String(val || '').trim();
+  if (!s) return false;
+  const lower = s.toLowerCase();
+  if (
+    lower === 'pending assignment' ||
+    lower === 'pending' ||
+    lower === 'unassigned' ||
+    lower === 'warehouse' ||
+    lower === 'n/a' ||
+    lower === 'direct return' ||
+    isMixedSuppliersSummary(s)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Computes total item quantity across normalized manifest line items.
+ */
+export function sumManifestQuantity(items = [], fallback = 1) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return Math.max(1, Number(fallback) || 1);
+  }
+  return items.reduce((sum, it) => sum + Math.max(1, Number(it?.quantity ?? it?.qty) || 1), 0);
+}
+
+/**
+ * Extracts deduplicated, non-placeholder supplier names from manifest line items
+ * while preserving first-seen display casing.
+ */
+export function extractDistinctSuppliersFromItems(items = []) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const seen = new Set();
+  const out = [];
+  items.forEach((it) => {
+    const cand = [it?.supplier_name, it?.supplierName, it?.supplier].find((v) => isRealSupplierName(v));
+    if (!cand) return;
+    const clean = String(cand).trim();
+    const key = clean.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(clean);
+    }
+  });
+  return out;
+}
+
+/**
+ * Produces parent rma_reports.supplier_name summary from manifest line items:
+ * - Single unique supplier -> that supplier name
+ * - Multiple unique suppliers -> "Multiple Suppliers (Supplier A, Suysing)"
+ * - None -> fallbackSupplier (if real) or 'Pending Assignment'
+ */
+export function summarizeBatchSuppliers(items = [], fallbackSupplier = '') {
+  const unique = extractDistinctSuppliersFromItems(items);
+  if (unique.length === 1) return unique[0];
+  if (unique.length > 1) return `Multiple Suppliers (${unique.join(', ')})`;
+  if (isRealSupplierName(fallbackSupplier)) return String(fallbackSupplier).trim();
+  return 'Pending Assignment';
+}
+
+/**
+ * Resolves the full batch manifest items (and canonical parent record) for a report,
+ * including unpacked child rows from Supplier Claims or DB child rma_reports rows.
+ */
+export function resolveBatchManifestForQr(report, allReports = []) {
+  if (!report) return { parentReport: report, items: [] };
+
+  const direct = getReportManifestItems(report, allReports);
+  if (direct.length > 1) {
+    return { parentReport: report, items: direct };
+  }
+
+  if (Array.isArray(report.manifest_items) && report.manifest_items.length > 1) {
+    return { parentReport: report, items: report.manifest_items };
+  }
+
+  const rawList = Array.isArray(allReports) ? allReports : [];
+  const seenListKeys = new Set();
+  const list = rawList.filter((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const dedupKey = item.id != null
+      ? `id:${String(item.id)}`
+      : `row:${String(item.rma_number || '').toUpperCase()}::${String(item.barcode || '').toUpperCase()}::${item.is_parent ? 'P' : 'C'}`;
+    if (seenListKeys.has(dedupKey)) return false;
+    seenListKeys.add(dedupKey);
+    return true;
+  });
+  const parentMatch = list.find((p) => {
+    if (!p || String(p.id) === String(report.id)) return false;
+    if (report.parent_rma_id != null && String(p.id) === String(report.parent_rma_id)) return true;
+    if (report.rma_number && p.rma_number === report.rma_number) {
+      const pItems = Array.isArray(p.items) ? p.items : [];
+      return (
+        p.is_parent === true ||
+        pItems.length > 1 ||
+        Number(p.total_items || 0) > 1 ||
+        String(p.name || '').toLowerCase().startsWith('batch return manifest')
+      );
+    }
+    return false;
+  });
+
+  if (parentMatch) {
+    const parentItems = getReportManifestItems(parentMatch, list);
+    if (parentItems.length > 1) {
+      return { parentReport: parentMatch, items: parentItems };
+    }
+  }
+
+  if (report.rma_number && !isSplitChildTicket(report) && list.length > 0) {
+    const rawSiblings = list.filter((s) => (
+      s &&
+      s.rma_number === report.rma_number &&
+      !s.is_parent &&
+      !isSplitChildTicket(s)
+    ));
+    const persistentBarcodes = new Set(
+      rawSiblings
+        .filter((s) => s.id != null && s.barcode)
+        .map((s) => String(s.barcode).trim().toUpperCase())
+    );
+    const siblings = rawSiblings.filter((s) => (
+      s.id != null ||
+      !s.barcode ||
+      !persistentBarcodes.has(String(s.barcode).trim().toUpperCase())
+    ));
+    if (siblings.length > 1) {
+      return { parentReport: parentMatch || report, items: siblings };
+    }
+  }
+
+  return { parentReport: parentMatch || report, items: direct };
 }
 
 /**

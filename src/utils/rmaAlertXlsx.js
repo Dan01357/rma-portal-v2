@@ -6,7 +6,11 @@ import {
   formatSaveFileTimestamp,
   getGpsAddressDisplay,
   getGpsMapUrl,
-  getReportManifestItems
+  getReportManifestItems,
+  sumManifestQuantity,
+  summarizeBatchSuppliers,
+  isMixedSuppliersSummary,
+  isRealSupplierName
 } from './rmaHelpers.js';
 
 function sanitizeFilenameSegment(raw) {
@@ -82,14 +86,23 @@ function buildMirrorStylesXml() {
  * Builds strict OOXML `.xlsx` bytes mirroring a New RMA Email Alert payload.
  * Preserves Field | Value mapping and optional MANIFEST LINE ITEMS table for 2-way reply ingestion.
  */
-export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = '', resolvedRecipients = null } = {}) {
+export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = '', resolvedRecipients = null, allReports = [] } = {}) {
   const rmaNumber = String(report.rma_number || report.rmaNumber || 'RMA-PENDING').trim();
   const isTest = isTestRecord(report);
   const meta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
     ? report.ai_document_metadata
     : {};
   const followUpMeta = (meta.follow_up && typeof meta.follow_up === 'object') ? meta.follow_up : {};
-  const items = getReportManifestItems(report);
+  const items = getReportManifestItems(report, allReports);
+
+  const isMultiItemBatch = items.length > 1;
+  const effectiveQuantity = isMultiItemBatch
+    ? sumManifestQuantity(items, report.quantity ?? report.total_quantity ?? 1)
+    : (Number(report.quantity ?? report.total_quantity ?? 1) || 1);
+  const rawTopSupplier = String(report.supplier_name || report.supplierName || '').trim();
+  const effectiveTopSupplier = isMultiItemBatch
+    ? summarizeBatchSuppliers(items, isMixedSuppliersSummary(rawTopSupplier) ? '' : rawTopSupplier)
+    : rawTopSupplier;
 
   const gpsAddress = getGpsAddressDisplay(report) || '';
   const gpsMapUrl = getGpsMapUrl(report) || '';
@@ -102,13 +115,13 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     ['Test Mode', isTest ? 'YES (Sandbox)' : 'NO (Live)', 'Test vs Live isolation guard'],
     ['Logistics Stream', isSupplierStream ? 'supplier_outbound' : 'customer_inbound', 'customer_inbound or supplier_outbound'],
     ...(isSupplierStream ? [] : [['Store / Branch', report.store_branch || '', 'Editable text']]),
-    ['Supplier / Vendor Name', report.supplier_name || report.supplierName || '', 'Editable supplier / updates Supplier Directory'],
+    ['Supplier / Vendor Name', effectiveTopSupplier, isMultiItemBatch ? 'Auto-summarized from item suppliers below' : 'Editable supplier / updates Supplier Directory'],
     ['Supplier Email (To)', followUpMeta.supplier_email_to || '', 'Comma-separated emails for auto follow-ups'],
     ['Supplier Email (CC)', followUpMeta.supplier_email_cc || '', 'Comma-separated CC emails'],
     ['Barcode', report.barcode || '', 'Plain text barcode'],
     ['Assigned SKU', report.code || report.sku || '', 'Editable SKU / Item Code'],
     ['Product Description', report.name || report.productName || report.product_name || '', 'Editable product name'],
-    ['Quantity', Number(report.quantity ?? report.total_quantity ?? 1) || 1, 'Numeric quantity', 'number'],
+    ['Quantity', effectiveQuantity, isMultiItemBatch ? 'Auto-calculated sum of MANIFEST LINE ITEMS Qty on reply' : 'Numeric quantity', 'number'],
     ['Packaging Unit', report.unit_name || report.unitName || 'pc', 'pc / pack / box / case'],
     ['Unit Price (PHP)', Number(report.price || 0), 'Net unit price', 'currency'],
     ['Price w/ VAT (PHP)', Number(report.price_with_vat || report.priceWithVat || 0), 'VAT-inclusive unit price', 'currency'],
@@ -176,13 +189,18 @@ export function buildRmaAlertXlsxBytes(report = {}, { subject = '', editUrl = ''
     );
     rIdx += 1;
     items.forEach((it, idx) => {
+      const itemSup = isRealSupplierName(it.supplier_name)
+        ? String(it.supplier_name).trim()
+        : (isRealSupplierName(it.supplierName)
+            ? String(it.supplierName).trim()
+            : (!isMixedSuppliersSummary(report.supplier_name) ? String(report.supplier_name || '').trim() : ''));
       const vals = [
         [idx + 1, 'number', 2],
-        [it.supplier_name || it.supplierName || report.supplier_name || '', 'text', 5],
+        [itemSup, 'text', 5],
         [it.barcode || '', 'text', 2],
         [it.code || it.sku || '', 'text', 5],
         [it.name || it.productName || '', 'text', 5],
-        [Number(it.quantity) || 1, 'number', 5],
+        [Math.max(1, Number(it.quantity ?? it.qty) || 1), 'number', 5],
         [it.unit_name || it.unit || 'pc', 'text', 5],
         [formatDateYmd(it.expiry_date) || '', 'text', 5],
         [it.reason || report.reason || '', 'text', 5],

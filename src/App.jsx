@@ -149,7 +149,9 @@ import {
   findConsolidatedRtvBatchReports,
   doesCreditMemoLinkReport,
   getCreditMemoRmaNumbers,
-  isManifestSubItem
+  isManifestSubItem,
+  sumManifestQuantity,
+  summarizeBatchSuppliers
 } from './utils/rmaHelpers';
 
 /**
@@ -1856,6 +1858,8 @@ export default function App() {
   const [manifestItems, setManifestItems] = useState([]); // Queued return line items for Multi-Item Batch Return
   const [barcodeInput, setBarcodeInput] = useState('');
   const [customItemName, setCustomItemName] = useState('');
+  const [itemSupplierName, setItemSupplierName] = useState('');
+  const lastAutoSupplierRef = useRef('');
   const [detectedProduct, setDetectedProduct] = useState(null);
   const [isCheckingBarcode, setIsCheckingBarcode] = useState(false);
   const [quantity, setQuantity] = useState(1);
@@ -1955,6 +1959,47 @@ export default function App() {
       const isOwnEmail = Boolean(reporterEmail && allowedEmails.has(reporterEmail));
       if (!isOwnSession && !isOwnEmail) return false;
       seen.add(k);
+      return true;
+    });
+  }, [currentUser, gateSession, qrScopedSessionReports, recentReportsList, qrModalTargetIsTest]);
+
+  const qrScopedLookupReports = React.useMemo(() => {
+    const merged = [...qrScopedSessionReports, ...(recentReportsList || [])];
+    const seen = new Set();
+
+    if (currentUser) {
+      return merged.filter((r) => {
+        if (!r || isTrashedRecord(r) || isArchivedRecord(r)) return false;
+        if (Boolean(isTestRecord(r)) !== Boolean(qrModalTargetIsTest)) return false;
+        const k = String(r.id ?? `${r.rma_number || ''}::${r.barcode || ''}::${r.is_parent ? 'P' : 'C'}`).trim().toUpperCase();
+        if (!k || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+    }
+
+    const allowedEmails = new Set(
+      (gateSession ? getInviteAllowedEmails(gateSession) : [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const sessionRmaSet = new Set(
+      qrScopedSessionReports
+        .map((r) => String(r.rma_number || r.rmaNumber || r.id || '').trim().toUpperCase())
+        .filter(Boolean)
+    );
+
+    return merged.filter((r) => {
+      if (!r || isTrashedRecord(r)) return false;
+      if (Boolean(isTestRecord(r)) !== Boolean(qrModalTargetIsTest)) return false;
+      const rmaKey = String(r.rma_number || r.rmaNumber || r.id || '').trim().toUpperCase();
+      const isOwnSession = sessionRmaSet.has(rmaKey);
+      const reporterEmail = String(r.reporter_contact || '').trim().toLowerCase();
+      const isOwnEmail = Boolean(reporterEmail && allowedEmails.has(reporterEmail));
+      if (!isOwnSession && !isOwnEmail) return false;
+      const rowKey = String(r.id ?? `${rmaKey}::${r.barcode || ''}::${r.is_parent ? 'P' : 'C'}`).trim().toUpperCase();
+      if (!rowKey || seen.has(rowKey)) return false;
+      seen.add(rowKey);
       return true;
     });
   }, [currentUser, gateSession, qrScopedSessionReports, recentReportsList, qrModalTargetIsTest]);
@@ -2505,6 +2550,8 @@ export default function App() {
     if (!clean) {
       setDetectedProduct(null);
       setCustomItemName('');
+      setItemSupplierName((prev) => (prev === lastAutoSupplierRef.current ? '' : prev));
+      lastAutoSupplierRef.current = '';
       setIsCheckingBarcode(false);
       return;
     }
@@ -2526,12 +2573,15 @@ export default function App() {
           setUnitName(u.includes('case') ? 'case' : 'pc');
         }
         const foundSup = String(found?.supplier_name || found?.supplierName || found?.supplier || '').trim();
-        if (
-          foundSup &&
-          !/^(pending assignment|pending|unassigned|warehouse|n\/a)$/i.test(foundSup) &&
-          isSupplierRtvPortal
-        ) {
-          setStoreBranch((prev) => (prev && prev.trim() ? prev : foundSup));
+        if (foundSup && !/^(pending assignment|pending|unassigned|warehouse|n\/a)$/i.test(foundSup)) {
+          setItemSupplierName(foundSup);
+          lastAutoSupplierRef.current = foundSup;
+          if (isSupplierRtvPortal) {
+            setStoreBranch((prev) => (prev && prev.trim() ? prev : foundSup));
+          }
+        } else {
+          setItemSupplierName((prev) => (prev === lastAutoSupplierRef.current ? '' : prev));
+          lastAutoSupplierRef.current = '';
         }
       } catch (e) {
         if (!isCurrent) return;
@@ -2906,14 +2956,15 @@ export default function App() {
       ? detectedProduct.code
       : ((detectedProduct?.sku && detectedProduct.sku !== cleanBarcode) ? detectedProduct.sku : '');
 
-    const resolvedDetectedSupplier = (
-      isSupplierRtvPortal && !isPlaceholderSupplier(storeBranch) ? storeBranch.trim() : ''
-    ) || String(
+    const explicitItemSup = !isPlaceholderSupplier(itemSupplierName) ? itemSupplierName.trim() : '';
+    const catalogSup = String(
       detectedProduct?.supplier_name ||
       detectedProduct?.supplierName ||
       detectedProduct?.supplier ||
       ''
-    ).trim() || 'Pending Assignment';
+    ).trim();
+    const defaultPortalSup = isSupplierRtvPortal && !isPlaceholderSupplier(storeBranch) ? storeBranch.trim() : '';
+    const resolvedDetectedSupplier = explicitItemSup || (!isPlaceholderSupplier(catalogSup) ? catalogSup : '') || defaultPortalSup || 'Pending Assignment';
 
     const newItem = {
       id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
@@ -2945,6 +2996,8 @@ export default function App() {
     setIsUnlabeledItem(false);
     setBarcodeInput('');
     setCustomItemName('');
+    setItemSupplierName('');
+    lastAutoSupplierRef.current = '';
     setDetectedProduct(null);
     setQuantity(1);
     setUnitName('pc');
@@ -2954,6 +3007,24 @@ export default function App() {
     setPhotoFiles([]);
 
     showToast(`Added "${newItem.name}" (${newItem.quantity} ${newItem.unit}) to manifest`, 'success');
+  };
+
+  // Update quantity or supplier inline on a queued manifest item
+  const handleUpdateManifestItem = (itemId, patch) => {
+    setManifestItems(prev => prev.map((it) => {
+      if (it.id !== itemId) return it;
+      const next = { ...it, ...patch };
+      if (patch.quantity !== undefined) {
+        next.quantity = Math.max(1, parseInt(patch.quantity, 10) || 1);
+      }
+      if (patch.supplier_name !== undefined) {
+        const cleanSup = String(patch.supplier_name || '').trim() || 'Pending Assignment';
+        next.supplier_name = cleanSup;
+        next.supplierName = cleanSup;
+        next.supplier = cleanSup;
+      }
+      return next;
+    }));
   };
 
   // Remove an item from the manifest queue
@@ -3025,14 +3096,15 @@ export default function App() {
         ? detectedProduct.code
         : ((detectedProduct?.sku && detectedProduct.sku !== activeBarcode) ? detectedProduct.sku : '');
 
-      const resolvedActiveSupplier = (
-        isSupplierRtvPortal && !isPlaceholderSupplier(storeBranch) ? storeBranch.trim() : ''
-      ) || String(
+      const explicitActiveSup = !isPlaceholderSupplier(itemSupplierName) ? itemSupplierName.trim() : '';
+      const catalogActiveSup = String(
         detectedProduct?.supplier_name ||
         detectedProduct?.supplierName ||
         detectedProduct?.supplier ||
         ''
-      ).trim() || 'Pending Assignment';
+      ).trim();
+      const defaultPortalSup = isSupplierRtvPortal && !isPlaceholderSupplier(storeBranch) ? storeBranch.trim() : '';
+      const resolvedActiveSupplier = explicitActiveSup || (!isPlaceholderSupplier(catalogActiveSup) ? catalogActiveSup : '') || defaultPortalSup || 'Pending Assignment';
 
       itemsToSubmit.push({
         id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
@@ -3101,15 +3173,9 @@ export default function App() {
       const s = String(val || '').trim().toLowerCase();
       return !s || s === 'warehouse' || s === 'pending assignment' || s === 'unassigned' || s === 'n/a';
     };
-    const itemSup = itemsToSubmit[0]?.supplier_name || itemsToSubmit[0]?.supplierName || itemsToSubmit[0]?.supplier;
     const manualSupTrimmed = (isSupplierStream && !isPlaceholderSup(cleanBranchInput)) ? cleanBranchInput : '';
-    const resolvedSupplierFromPortal = manualSupTrimmed || (
-      !isPlaceholderSup(itemSup)
-        ? itemSup
-        : (isSupplierStream && inviteEntity)
-          ? inviteEntity
-          : (itemSup || 'Pending Assignment')
-    );
+    const fallbackPortalSup = manualSupTrimmed || (isSupplierStream && inviteEntity ? inviteEntity : '');
+    const resolvedSupplierFromPortal = summarizeBatchSuppliers(itemsToSubmit, fallbackPortalSup);
 
     // Persist reporter contact info in localStorage for 1-tap zero-typing returns
     try {
@@ -3125,7 +3191,7 @@ export default function App() {
     // 3. Generate ONE unique RMA Number with isolated sequence (Test Mode vs Live Mode)
     const rmaNumber = catalogService.generateRMANumber(recentReportsList, effectiveIsTestMode);
     const totalItemsCount = itemsToSubmit.length;
-    const totalQuantityCount = itemsToSubmit.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0);
+    const totalQuantityCount = sumManifestQuantity(itemsToSubmit, quantity);
     const commonUnit = itemsToSubmit.every(it => it.unit_name === itemsToSubmit[0].unit_name) ? itemsToSubmit[0].unit_name : 'mixed';
     const isBatchManifestTicket = itemsToSubmit.length > 1;
     // For batch manifests, barcode is strictly rmaNumber to completely prevent child item barcode contamination
@@ -3203,6 +3269,8 @@ export default function App() {
     setManifestItems([]);
     setBarcodeInput('');
     setCustomItemName('');
+    setItemSupplierName('');
+    lastAutoSupplierRef.current = '';
     setDetectedProduct(null);
     setQuantity(1);
     setUnitName('pc');
@@ -4090,6 +4158,45 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Per-Item Supplier / Vendor Name (supports different suppliers inside a batch RMA) */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <label htmlFor="intake-item-supplier-input" className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                        Line-Item Supplier (Optional)
+                      </label>
+                      {itemSupplierName && !isPlaceholderSupplier(itemSupplierName) ? (
+                        <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 px-2 py-0.5 rounded-full">
+                          Per-item supplier set
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
+                          Supports multi-supplier batches
+                        </span>
+                      )}
+                    </div>
+                    <div className="relative w-full">
+                      <Building className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none z-10" />
+                      <SupplierInput
+                        id="intake-item-supplier-input"
+                        name="intakeItemSupplierName"
+                        value={itemSupplierName}
+                        onChange={setItemSupplierName}
+                        placeholder="Optional: e.g., Supplier A, Suysing (set per item)"
+                        className="w-full pl-10 pr-8 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 shadow-2xs"
+                      />
+                      {itemSupplierName && (
+                        <button
+                          type="button"
+                          onClick={() => setItemSupplierName('')}
+                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full cursor-pointer z-10"
+                          title="Clear item supplier"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Recognized Product Banner */}
                   {isCheckingBarcode ? (
                     <div className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs flex items-center gap-2 text-slate-500 dark:text-slate-400">
@@ -4346,60 +4453,112 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    <div className="space-y-2 overflow-visible pr-1">
                       {manifestItems.map((item, idx) => (
                         <div
                           key={item.id || idx}
-                          className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-between gap-3 shadow-2xs hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
+                          data-manifest-item-index={idx}
+                          className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl flex flex-col gap-2.5 shadow-2xs hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
                         >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            {item.photoFiles && item.photoFiles.length > 0 ? (
-                              <img
-                                src={item.photoFiles[0].previewUrl}
-                                alt={item.name}
-                                className="w-11 h-11 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0"
-                              />
-                            ) : (
-                              <div className="w-11 h-11 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 shrink-0">
-                                <Package className="w-5 h-5" />
-                              </div>
-                            )}
-                            <div className="min-w-0">
-                              <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
-                                {item.name}
-                              </div>
-                              <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-2 flex-wrap mt-0.5">
-                                <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-bold">
-                                  {item.code || item.barcode}
-                                </span>
-                                <span className="font-black text-blue-600 dark:text-blue-400">
-                                  Qty: {formatQuantityWithPackSize(item.quantity, item.unit_name || item.unit, item.pieces_per_case || item.piecesPerCase)}
-                                </span>
-                                {item.expiry_date && (
-                                  <span className="bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-1.5 py-0.2 rounded-full font-bold">
-                                    Expiry Date (YYYY-MM-DD): {formatDateYmd(item.expiry_date) || item.expiry_date}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {item.photoFiles && item.photoFiles.length > 0 ? (
+                                <img
+                                  src={item.photoFiles[0].previewUrl}
+                                  alt={item.name}
+                                  className="w-11 h-11 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                                />
+                              ) : (
+                                <div className="w-11 h-11 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 shrink-0">
+                                  <Package className="w-5 h-5" />
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                                  {item.name}
+                                </div>
+                                <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-2 flex-wrap mt-0.5">
+                                  <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-bold">
+                                    {item.code || item.barcode}
                                   </span>
-                                )}
-                                <span className="bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 px-1.5 py-0.2 rounded-full font-bold">
-                                  {item.reason}
-                                </span>
+                                  <span className="font-black text-blue-600 dark:text-blue-400">
+                                    Qty: {formatQuantityWithPackSize(item.quantity, item.unit_name || item.unit, item.pieces_per_case || item.piecesPerCase)}
+                                  </span>
+                                  {item.expiry_date && (
+                                    <span className="bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-1.5 py-0.2 rounded-full font-bold">
+                                      Expiry Date (YYYY-MM-DD): {formatDateYmd(item.expiry_date) || item.expiry_date}
+                                    </span>
+                                  )}
+                                  <span className="bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 px-1.5 py-0.2 rounded-full font-bold">
+                                    {item.reason}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveManifestItem(item.id)}
+                              className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer shrink-0"
+                              title="Remove this item from return manifest"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          {/* Inline Editable Qty & Supplier per Batch Manifest Item */}
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 items-center">
+                            <div className="sm:col-span-5 flex items-center gap-1.5">
+                              <span className="text-[10px] font-black uppercase text-slate-500 shrink-0">Qty:</span>
+                              <div className="inline-flex items-center border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 p-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateManifestItem(item.id, { quantity: Math.max(1, (Number(item.quantity) || 1) - 1) })}
+                                  aria-label={`Decrease quantity for ${item.name}`}
+                                  className="w-6 h-6 rounded bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-black flex items-center justify-center cursor-pointer hover:text-blue-600"
+                                >
+                                  <Minus className="w-3 h-3" />
+                                </button>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="99999"
+                                  aria-label={`Quantity for ${item.name}`}
+                                  value={item.quantity ?? 1}
+                                  onChange={(e) => handleUpdateManifestItem(item.id, { quantity: e.target.value })}
+                                  className="w-12 text-center text-xs font-black text-slate-900 dark:text-white bg-transparent border-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateManifestItem(item.id, { quantity: (Number(item.quantity) || 1) + 1 })}
+                                  aria-label={`Increase quantity for ${item.name}`}
+                                  className="w-6 h-6 rounded bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-black flex items-center justify-center cursor-pointer hover:text-blue-600"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </button>
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-500">{item.unit_name || item.unit || 'pc'}</span>
+                            </div>
+
+                            <div className="sm:col-span-7 flex items-center gap-1.5 min-w-0">
+                              <span className="text-[10px] font-black uppercase text-slate-500 shrink-0">Supplier:</span>
+                              <div className="flex-1 min-w-0">
+                                <SupplierInput
+                                  id={`manifest-item-supplier-${idx}`}
+                                  name={`manifestItemSupplier_${idx}`}
+                                  value={!isPlaceholderSupplier(item.supplier_name) ? item.supplier_name : ''}
+                                  onChange={(val) => handleUpdateManifestItem(item.id, { supplier_name: val })}
+                                  placeholder="Supplier name (optional)"
+                                  className="w-full px-2.5 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-[11px] font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600"
+                                />
                               </div>
                             </div>
                           </div>
-
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveManifestItem(item.id)}
-                            className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer shrink-0"
-                            title="Remove this item from return manifest"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
                         </div>
                       ))}
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
-                      💡 All queued items will be bundled under ONE RMA Box Label & tracking number.
+                      💡 All queued items will be bundled under ONE RMA Box Label & tracking number. Total batch quantity updates automatically ({sumManifestQuantity(manifestItems, 0)} units across {manifestItems.length} item{manifestItems.length === 1 ? '' : 's'}).
                     </p>
                   </div>
                 )}
@@ -4721,7 +4880,7 @@ export default function App() {
                   </div>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">
                     {isSupplierRtvPortal
-                      ? 'Optional: Auto-filled from product catalog or invite link. Leave blank or type N/A if not applicable.'
+                      ? 'Optional default fallback supplier (individual items queued above with their own supplier keep their own vendor name). Leave blank or type N/A if not applicable.'
                       : 'Optional: Enter your company or store name, or leave blank / type N/A if not applicable.'}
                   </p>
                 </div>
@@ -5856,6 +6015,7 @@ export default function App() {
         report={qrModalReport}
         reports={qrModalReports}
         availableReports={qrScopedAvailableReports}
+        lookupReports={qrScopedLookupReports}
         sessionReports={qrScopedSessionReports}
         onOpenQuickAction={(rmaOrReport) => {
           setPendingQuickRmaNumber(null);

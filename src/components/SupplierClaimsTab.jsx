@@ -56,7 +56,10 @@ import {
   formatDateYmd,
   findConsolidatedRtvBatchReports,
   getGpsAddressDisplay,
-  getGpsMapUrl
+  getGpsMapUrl,
+  summarizeBatchSuppliers,
+  isRealSupplierName,
+  isMixedSuppliersSummary
 } from '../utils/rmaHelpers';
 
 export default function SupplierClaimsTab({
@@ -208,7 +211,10 @@ export default function SupplierClaimsTab({
         return sum + (cPrice * cQty);
       }, 0);
       const avgPrice = totalUnits > 0 ? (totalSum / totalUnits) : 0;
-      const supplier = r.supplier_name && r.supplier_name !== 'Warehouse' ? r.supplier_name : (children[0]?.supplier_name || 'Savemore');
+      const supplier = summarizeBatchSuppliers(
+        children,
+        !isMixedSuppliersSummary(r.supplier_name) && r.supplier_name !== 'Warehouse' ? r.supplier_name : 'Savemore'
+      );
 
       return {
         name: `Batch Return Manifest (${children.length} Line Items)`,
@@ -338,11 +344,10 @@ export default function SupplierClaimsTab({
           const childQty = Number(child.quantity || child.qty) || 1;
           const childUnit = child.unit_name || child.unit || r.unit_name || 'pc';
           const childPrice = Number(child.price_with_vat || child.price || matchedChild?.price_with_vat || matchedChild?.price || 0);
-          const rawChildSupplier = String(child.supplier_name || '').trim();
-          const isChildVendorPending = !rawChildSupplier || rawChildSupplier.toLowerCase().includes('pending') || rawChildSupplier.toLowerCase().includes('unassigned') || rawChildSupplier.toLowerCase() === 'warehouse';
-          const resolvedChildSupplier = !isChildVendorPending
+          const rawChildSupplier = String(child.supplier_name || child.supplierName || child.supplier || '').trim();
+          const resolvedChildSupplier = isRealSupplierName(rawChildSupplier)
             ? rawChildSupplier
-            : (matchedChild?.supplier_name || (r.supplier_name && !String(r.supplier_name).toLowerCase().includes('pending') && String(r.supplier_name).toLowerCase() !== 'warehouse' ? r.supplier_name : 'Pending Assignment'));
+            : (matchedChild?.supplier_name || (isRealSupplierName(r.supplier_name) ? r.supplier_name : 'Pending Assignment'));
           const childPhotos = (Array.isArray(child.photos) && child.photos.length > 0)
             ? child.photos
             : (Array.isArray(r.photos) ? r.photos : []);
@@ -356,6 +361,7 @@ export default function SupplierClaimsTab({
             is_unpacked_manifest_item: true,
             manifest_line_index: cIdx,
             manifest_total_lines: manifestChildren.length,
+            manifest_items: manifestChildren,
             items: [],
             total_items: 1,
             rma_number: r.rma_number,

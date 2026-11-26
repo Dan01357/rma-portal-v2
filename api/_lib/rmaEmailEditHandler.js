@@ -1,5 +1,12 @@
 import { supabase } from './supabase.js';
 import { sendJson, setCorsHeaders } from './auth.js';
+import {
+  sumManifestQuantity,
+  summarizeBatchSuppliers,
+  isMixedSuppliersSummary,
+  isRealSupplierName,
+  extractDistinctSuppliersFromItems
+} from '../../src/utils/rmaHelpers.js';
 
 const INVITES_SETTINGS_KEY = 'customer_rma_invites_store';
 
@@ -267,9 +274,26 @@ export async function handleRmaEmailEdit(req, res) {
 
   // 4. GET: Return scoped RMA details for standalone editor view
   if (req.method === 'GET') {
-    const manifestItems = Array.isArray(report.items) && report.items.length > 0
+    let manifestItems = Array.isArray(report.items) && report.items.length > 0
       ? report.items
       : (found.allRows.length > 1 ? found.allRows.filter((r) => r.id !== report.id) : []);
+
+    if (manifestItems.length === 0 && report.id) {
+      try {
+        const { data: riRows } = await supabase
+          .from('rma_items')
+          .select('*')
+          .eq('rma_report_id', report.id)
+          .order('id', { ascending: true });
+        if (Array.isArray(riRows) && riRows.length > 0) {
+          manifestItems = riRows;
+        }
+      } catch {}
+    }
+
+    const totalQty = manifestItems.length > 1
+      ? sumManifestQuantity(manifestItems, report.quantity)
+      : (Number(report.quantity) || 1);
 
     return sendJson(res, 200, {
       success: true,
@@ -288,7 +312,8 @@ export async function handleRmaEmailEdit(req, res) {
         name: report.name || '',
         supplier_name: report.supplier_name || '',
         store_branch: report.store_branch || '',
-        quantity: report.quantity ?? 1,
+        quantity: totalQty,
+        total_quantity: report.total_quantity ?? totalQty,
         unit_name: report.unit_name || 'pc',
         price: report.price ?? 0,
         price_with_vat: report.price_with_vat ?? 0,
@@ -375,16 +400,25 @@ export async function handleRmaEmailEdit(req, res) {
   }
 
   if (Array.isArray(u.items) && u.items.length > 0) {
+    const fallbackSingleSup =
+      (!isMixedSuppliersSummary(updates.supplier_name) && isRealSupplierName(updates.supplier_name))
+        ? updates.supplier_name
+        : ((!isMixedSuppliersSummary(report.supplier_name) && isRealSupplierName(report.supplier_name)) ? report.supplier_name : '');
+
     const sanitizedItems = u.items.map((it) => {
-      const qtyVal = Number(it.quantity);
+      const qtyVal = Number(it.quantity ?? it.qty);
       const netVal = parseFloat(it.price);
       const vatVal = parseFloat(it.price_with_vat ?? it.priceWithVat);
+      const rawSup = String(it.supplier_name || it.supplierName || it.supplier || '').trim();
+      const resolvedItemSup = isRealSupplierName(rawSup) ? rawSup : (fallbackSingleSup || 'Pending Assignment');
       return {
         ...it,
         name: String(it.name || it.productName || '').trim() || 'Item',
         code: String(it.code || it.sku || '').trim() || null,
         sku: String(it.sku || it.code || '').trim() || null,
-        supplier_name: String(it.supplier_name || updates.supplier_name || report.supplier_name || '').trim() || null,
+        supplier_name: resolvedItemSup,
+        supplierName: resolvedItemSup,
+        supplier: resolvedItemSup,
         quantity: Number.isFinite(qtyVal) && qtyVal >= 1 ? Math.round(qtyVal) : 1,
         unit_name: String(it.unit_name || it.unit || 'pc').trim() || 'pc',
         price: Number.isFinite(netVal) && netVal >= 0 ? Number(netVal.toFixed(2)) : 0,
@@ -394,15 +428,23 @@ export async function handleRmaEmailEdit(req, res) {
         expiry_date: it.expiry_date ? String(it.expiry_date).slice(0, 10) : null
       };
     });
+    const totalBatchQty = sumManifestQuantity(sanitizedItems, 1);
     updates.items = sanitizedItems;
     updates.total_items = sanitizedItems.length;
-    updates.total_quantity = sanitizedItems.reduce((s, it) => s + (Number(it.quantity) || 1), 0);
+    updates.total_quantity = totalBatchQty;
+    updates.quantity = totalBatchQty;
+    updates.supplier_name = summarizeBatchSuppliers(sanitizedItems, fallbackSingleSup);
   } else if (Array.isArray(report.items) && report.items.length > 0 && (updates.supplier_name || updates.expiry_date !== undefined)) {
-    updates.items = report.items.map((it) => ({
-      ...it,
-      ...(updates.supplier_name ? { supplier_name: updates.supplier_name } : {}),
-      ...(updates.expiry_date !== undefined ? { expiry_date: updates.expiry_date } : {})
-    }));
+    const existingDistinctSups = extractDistinctSuppliersFromItems(report.items);
+    const hasMixedSups = existingDistinctSups.length > 1;
+    updates.items = report.items.map((it) => {
+      const shouldCascadeSup = updates.supplier_name && !isMixedSuppliersSummary(updates.supplier_name) && (!hasMixedSups || !isRealSupplierName(it.supplier_name));
+      return {
+        ...it,
+        ...(shouldCascadeSup ? { supplier_name: updates.supplier_name, supplierName: updates.supplier_name, supplier: updates.supplier_name } : {}),
+        ...(updates.expiry_date !== undefined ? { expiry_date: updates.expiry_date } : {})
+      };
+    });
   }
 
   const prevMeta = (report.ai_document_metadata && typeof report.ai_document_metadata === 'object')
@@ -468,20 +510,73 @@ export async function handleRmaEmailEdit(req, res) {
     }, req);
   }
 
-  // Cascade commercial documents & supplier to child lines if present
+  // Cascade commercial documents & per-item qty/supplier/details to child rma_reports & rma_items rows
   const childRows = found.allRows.filter((r) => r.parent_rma_id === report.id);
-  if (childRows.length > 0) {
-    const childUpdates = {};
-    if (updates.si_number !== undefined) childUpdates.si_number = updates.si_number;
-    if (updates.dr_number !== undefined) childUpdates.dr_number = updates.dr_number;
-    if (updates.po_number !== undefined) childUpdates.po_number = updates.po_number;
-    if (updates.invoice_dr_number !== undefined) childUpdates.invoice_dr_number = updates.invoice_dr_number;
-    if (updates.store_branch !== undefined) childUpdates.store_branch = updates.store_branch;
-    if (updates.supplier_name !== undefined && childRows.length === 1) childUpdates.supplier_name = updates.supplier_name;
+  const editedItemsList = Array.isArray(updates.items) ? updates.items : [];
 
-    if (Object.keys(childUpdates).length > 0) {
-      await supabase.from('rma_reports').update(childUpdates).eq('parent_rma_id', report.id).catch(() => {});
+  if (childRows.length > 0) {
+    const commonChildDocPatch = {};
+    if (updates.si_number !== undefined) commonChildDocPatch.si_number = updates.si_number;
+    if (updates.dr_number !== undefined) commonChildDocPatch.dr_number = updates.dr_number;
+    if (updates.po_number !== undefined) commonChildDocPatch.po_number = updates.po_number;
+    if (updates.invoice_dr_number !== undefined) commonChildDocPatch.invoice_dr_number = updates.invoice_dr_number;
+    if (updates.store_branch !== undefined) commonChildDocPatch.store_branch = updates.store_branch;
+
+    if (editedItemsList.length > 0) {
+      const sortedChildren = [...childRows].sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+      for (let i = 0; i < sortedChildren.length; i++) {
+        const ch = sortedChildren[i];
+        const matchedItem = editedItemsList.find((it) => (it.id != null && String(it.id) === String(ch.id)) || (it.barcode && ch.barcode && String(it.barcode).trim() === String(ch.barcode).trim())) || editedItemsList[i];
+        const rowPatch = { ...commonChildDocPatch };
+        if (matchedItem) {
+          rowPatch.name = matchedItem.name;
+          rowPatch.code = matchedItem.code || null;
+          rowPatch.quantity = matchedItem.quantity;
+          rowPatch.price = matchedItem.price;
+          rowPatch.price_with_vat = matchedItem.price_with_vat;
+          rowPatch.expiry_date = matchedItem.expiry_date || null;
+          if (matchedItem.supplier_name) rowPatch.supplier_name = matchedItem.supplier_name;
+        }
+        if (Object.keys(rowPatch).length > 0 && ch.id) {
+          await supabase.from('rma_reports').update(rowPatch).eq('id', ch.id).catch(() => {});
+        }
+      }
+    } else {
+      const childUpdates = { ...commonChildDocPatch };
+      if (updates.supplier_name !== undefined && !isMixedSuppliersSummary(updates.supplier_name) && childRows.length === 1) {
+        childUpdates.supplier_name = updates.supplier_name;
+      }
+      if (Object.keys(childUpdates).length > 0) {
+        await supabase.from('rma_reports').update(childUpdates).eq('parent_rma_id', report.id).catch(() => {});
+      }
     }
+  }
+
+  if (editedItemsList.length > 0 && report.id) {
+    try {
+      const { data: rmaItemRows } = await supabase
+        .from('rma_items')
+        .select('*')
+        .eq('rma_report_id', report.id)
+        .order('id', { ascending: true });
+      if (Array.isArray(rmaItemRows) && rmaItemRows.length > 0) {
+        for (let i = 0; i < rmaItemRows.length; i++) {
+          const ri = rmaItemRows[i];
+          const matchedItem = editedItemsList.find((it) => (it.id != null && String(it.id) === String(ri.id)) || (it.barcode && ri.barcode && String(it.barcode).trim() === String(ri.barcode).trim())) || editedItemsList[i];
+          if (!matchedItem || !ri.id) continue;
+          const riPatch = {
+            name: matchedItem.name,
+            sku: matchedItem.code || matchedItem.sku || null,
+            quantity: matchedItem.quantity,
+            price: matchedItem.price,
+            price_with_vat: matchedItem.price_with_vat,
+            expiry_date: matchedItem.expiry_date || null,
+            ...(matchedItem.supplier_name ? { supplier_name: matchedItem.supplier_name } : {})
+          };
+          await supabase.from('rma_items').update(riPatch).eq('id', ri.id).catch(() => {});
+        }
+      }
+    } catch {}
   }
 
   return sendJson(res, 200, {
@@ -489,6 +584,13 @@ export async function handleRmaEmailEdit(req, res) {
     message: `RMA ${report.rma_number} updated successfully.`,
     edited_by_email: userEmail,
     updated_at: updatedRecord.updated_at || nowIso,
-    report: updatedRecord
+    report: {
+      ...updatedRecord,
+      ...(editedItemsList.length > 0 ? {
+        items: editedItemsList,
+        total_quantity: updates.total_quantity,
+        quantity: updates.quantity
+      } : {})
+    }
   }, req);
 }

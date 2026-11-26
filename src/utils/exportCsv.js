@@ -12,7 +12,10 @@ import {
   formatSaveFileTimestamp,
   stripCreditMemoMetaTag,
   getGpsAddressDisplay,
-  getGpsMapUrl
+  getGpsMapUrl,
+  summarizeBatchSuppliers,
+  isRealSupplierName,
+  isMixedSuppliersSummary
 } from './rmaHelpers';
 import { getCleanHumanWorkflowStatus } from './followUpWorkflow';
 import { downloadTableXlsx } from './exportXlsx';
@@ -89,12 +92,17 @@ function extractPhotoLink(r) {
  */
 export function resolveExportSupplier(r, savedProducts = []) {
   if (!r) return 'Pending Assignment';
+  if (Array.isArray(r.items) && r.items.length > 1) {
+    const rawParentSup = isRealSupplierName(r.supplier_name) ? r.supplier_name : (isRealSupplierName(r.supplier) ? r.supplier : '');
+    return summarizeBatchSuppliers(r.items, rawParentSup);
+  }
   const cleanBarcode = String(r.barcode || '').trim();
   const matched = (Array.isArray(savedProducts) && cleanBarcode)
     ? savedProducts.find(p => p.barcode && String(p.barcode).trim() === cleanBarcode)
     : null;
 
   const rawSup = String(r.supplier_name || r.supplier || '').trim();
+  if (isMixedSuppliersSummary(rawSup)) return rawSup;
   const isInvalid = !rawSup || rawSup.toLowerCase().includes('pending') || rawSup.toLowerCase().includes('unassigned') || rawSup.toLowerCase() === 'warehouse';
 
   if (!isInvalid) return rawSup;

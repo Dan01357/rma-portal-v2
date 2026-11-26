@@ -437,4 +437,70 @@ test('syncEmailRepliesInternal caches non-RMA Statement of Account Message-IDs w
   assert.equal(res2.errorCount, 0);
 });
 
+test('batch helper summaries and .xlsx per-item quantity + mixed supplier extraction work accurately', async () => {
+  const {
+    sumManifestQuantity,
+    summarizeBatchSuppliers,
+    resolveBatchManifestForQr
+  } = await import('../src/utils/rmaHelpers.js');
+
+  const mixedItems = [
+    { barcode: '480001', name: 'Item One', supplier_name: 'Supplier A', quantity: 2, unit_name: 'pc' },
+    { barcode: '480002', name: 'Item Two', supplier_name: 'Suysing', quantity: 3, unit_name: 'pc' }
+  ];
+
+  assert.equal(sumManifestQuantity(mixedItems), 5);
+  assert.equal(summarizeBatchSuppliers(mixedItems), 'Multiple Suppliers (Supplier A, Suysing)');
+
+  // Unpacked Supplier Claims child row resolves full parent batch manifest cleanly
+  const parent = { id: 101, rma_number: 'RMA-TEST-2026-8888', is_parent: true, items: mixedItems, total_items: 2, total_quantity: 5 };
+  const unpackedChild = { id: '101_item_1', parent_rma_id: 101, rma_number: 'RMA-TEST-2026-8888', is_parent: false, is_unpacked_manifest_item: true, items: [], total_items: 1 };
+  const resolved = resolveBatchManifestForQr(unpackedChild, [parent]);
+  assert.equal(resolved.items.length, 2);
+  assert.equal(resolved.parentReport.rma_number, 'RMA-TEST-2026-8888');
+
+  // Strict single-item RMA duplicated across lookup pools must NOT misclassify as multi-item
+  const singleRow = { id: 505, rma_number: 'RMA-TEST-2026-SINGLE', is_parent: false, barcode: '480999', name: 'Single Item', items: [], total_items: 1 };
+  const singleOptimisticDup = { rma_number: 'RMA-TEST-2026-SINGLE', is_parent: false, barcode: '480999', name: 'Single Item', items: [], total_items: 1 };
+  const resolvedSingle = resolveBatchManifestForQr(singleRow, [singleRow, { ...singleRow }, singleOptimisticDup]);
+  assert.equal(resolvedSingle.items.length, 0);
+
+  // Build mirror .xlsx -> edit ONLY Item 1 Quantity (2 -> 5) in Col F -> verify extractRmaUpdatesFromXlsxBuffer
+  const origBytes = Buffer.from(
+    buildRmaAlertXlsxBytes(
+      {
+        rma_number: 'RMA-TEST-2026-8888',
+        barcode: 'RMA-TEST-2026-8888',
+        name: 'Batch Return Manifest (2 items)',
+        quantity: 5,
+        total_quantity: 5,
+        total_items: 2,
+        is_parent: true,
+        supplier_name: 'Multiple Suppliers (Supplier A, Suysing)',
+        items: mixedItems,
+        rma_type: 'supplier_outbound',
+        ai_document_metadata: { is_test: true, test_mode: true }
+      },
+      { subject: '[TEST] [RMA Alert] RMA-TEST-2026-8888' }
+    )
+  );
+  const entries = parseZipEntriesFromBuffer(origBytes);
+  const xml = entries.get('xl/worksheets/sheet1.xml').toString('utf8');
+  const marker = xml.indexOf('MANIFEST LINE ITEMS');
+  assert.ok(marker > -1);
+  const editedSheetXml = xml.slice(0, marker) + xml.slice(marker).replace(/(<c r="F\d+"[^>]*><v>)2(<\/v><\/c>)/, '$15$2');
+  const repacked = [];
+  for (const [k, v] of entries.entries()) {
+    repacked.push({ name: k, content: k === 'xl/worksheets/sheet1.xml' ? editedSheetXml : v });
+  }
+  const parsed = extractRmaUpdatesFromXlsxBuffer(Buffer.from(buildStoredZip(repacked)), {
+    subjectHint: 'Re: [TEST] [RMA Alert] RMA-TEST-2026-8888'
+  });
+  assert.equal(parsed.manifestUpdates.length, 2);
+  assert.equal(parsed.manifestUpdates[0].supplier_name, 'Supplier A');
+  assert.equal(parsed.manifestUpdates[0].quantity, 5);
+  assert.equal(parsed.manifestUpdates[1].supplier_name, 'Suysing');
+  assert.equal(parsed.manifestUpdates[1].quantity, 3);
+});
+
 

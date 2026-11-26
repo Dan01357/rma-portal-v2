@@ -19,9 +19,14 @@ import {
   buildPortalQrPayload,
   formatSaveFileTimestamp,
   getReportManifestItems,
+  resolveBatchManifestForQr,
+  sumManifestQuantity,
+  isRealSupplierName,
+  isMixedSuppliersSummary,
   isTestRecord,
   isTrashedRecord
 } from '../utils/rmaHelpers';
+import { supabase } from '../supabaseClient';
 
 const clampNum = (val, min, max, fallback) => {
   const n = Number(val);
@@ -35,24 +40,43 @@ export default function ReturnQRModal({
   report,
   reports = [],
   availableReports = [],
+  lookupReports = [],
   sessionReports = [],
   onOpenQuickAction
 }) {
-  // Base initial entries passed into the modal (used for reset signature ONLY, excluding picker additions)
+  // Base initial entries passed into the modal (used for reset signature ONLY, excluding picker additions).
+  // Deduplicates by RMA key while preferring richer parent/manifest objects over unpacked child shells.
   const baseEntries = useMemo(() => {
     const rawList = Array.isArray(reports) && reports.length > 0
       ? reports
       : report
         ? [report]
         : [];
-    const seen = new Set();
+    const indexByUpperKey = new Map();
     const deduped = [];
     rawList.forEach((item, idx) => {
       if (!item || typeof item !== 'object') return;
       const key = String(item.rma_number || item.rmaNumber || item.id || `row-${idx}`).trim();
-      if (!key || seen.has(key)) return;
-      seen.add(key);
-      deduped.push({ key, report: item });
+      const upperKey = key.toUpperCase();
+      if (!key) return;
+      if (!indexByUpperKey.has(upperKey)) {
+        indexByUpperKey.set(upperKey, deduped.length);
+        deduped.push({ key, report: item });
+        return;
+      }
+      const existingIdx = indexByUpperKey.get(upperKey);
+      const prevRep = deduped[existingIdx].report;
+      const prevScore = (prevRep?.is_parent ? 10 : 0) + (Array.isArray(prevRep?.items) ? prevRep.items.length : 0);
+      const nextScore = (item?.is_parent ? 10 : 0) + (Array.isArray(item?.items) ? item.items.length : 0);
+      if (nextScore > prevScore) {
+        deduped[existingIdx] = {
+          key: deduped[existingIdx].key,
+          report: {
+            ...item,
+            ...(Array.isArray(prevRep?.manifest_items) && !item.manifest_items ? { manifest_items: prevRep.manifest_items } : {})
+          }
+        };
+      }
     });
     return deduped;
   }, [reports, report]);
@@ -65,6 +89,7 @@ export default function ReturnQRModal({
   // ALL state hooks strictly declared BEFORE any conditional return (prevents React Error #310)
   const [removedKeys, setRemovedKeys] = useState(() => new Set());
   const [extraReports, setExtraReports] = useState([]);
+  const [hydratedPoolRows, setHydratedPoolRows] = useState([]);
   const [isAddPickerOpen, setIsAddPickerOpen] = useState(false);
   const [addSearchQuery, setAddSearchQuery] = useState('');
   const [paperPresetId, setPaperPresetId] = useState('letter');
@@ -87,6 +112,7 @@ export default function ReturnQRModal({
     if (!isOpen) return;
     setRemovedKeys(new Set());
     setExtraReports([]);
+    setHydratedPoolRows([]);
     setIsAddPickerOpen(false);
     setAddSearchQuery('');
     setSizesByKey({});
@@ -161,40 +187,134 @@ export default function ReturnQRModal({
     return out;
   }, [sessionReports, availableReports, modalIsTestScope, visibleRmaKeysSet, addSearchQuery]);
 
-  const manifestLookupPool = useMemo(
-    () => [
+  const manifestLookupPool = useMemo(() => {
+    const merged = [
       ...(Array.isArray(sessionReports) ? sessionReports : []),
-      ...(Array.isArray(availableReports) ? availableReports : [])
-    ],
-    [sessionReports, availableReports]
-  );
+      ...(Array.isArray(lookupReports) ? lookupReports : []),
+      ...(Array.isArray(availableReports) ? availableReports : []),
+      ...(Array.isArray(hydratedPoolRows) ? hydratedPoolRows : [])
+    ];
+    const seen = new Set();
+    return merged.filter((r) => {
+      if (!r || typeof r !== 'object') return false;
+      const k = r.id != null
+        ? `id:${String(r.id)}`
+        : `row:${String(r.rma_number || '').toUpperCase()}::${String(r.barcode || '').toUpperCase()}::${r.is_parent ? 'P' : 'C'}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }, [sessionReports, lookupReports, availableReports, hydratedPoolRows]);
+
+  // Hydrate missing parent/child/rma_items manifests when an Admin selects unpacked or child-only rows
+  useEffect(() => {
+    if (!isOpen || inputReports.length === 0) return;
+    let isMounted = true;
+    const neededRmas = [];
+
+    inputReports.forEach((entry) => {
+      const rep = entry.report;
+      const resolved = resolveBatchManifestForQr(rep, manifestLookupPool);
+      if (resolved.items.length > 1) return;
+      const looksLikeBatch = Boolean(
+        rep?.is_parent ||
+        rep?.is_unpacked_manifest_item ||
+        rep?.parent_rma_id != null ||
+        Number(rep?.total_items || rep?.totalItems || rep?.manifest_total_lines || 0) > 1 ||
+        String(rep?.name || '').toLowerCase().startsWith('batch return manifest')
+      );
+      if (looksLikeBatch && rep?.rma_number) {
+        neededRmas.push(String(rep.rma_number).trim());
+      }
+    });
+
+    const uniqueRmas = Array.from(new Set(neededRmas)).filter(Boolean);
+    if (uniqueRmas.length === 0) return;
+
+    (async () => {
+      try {
+        const [{ data: rmaRows }, { data: riRows }] = await Promise.all([
+          supabase.from('rma_reports').select('*').in('rma_number', uniqueRmas),
+          supabase.from('rma_items').select('*').in('rma_number', uniqueRmas).order('id', { ascending: true })
+        ]);
+        if (!isMounted) return;
+        const additions = [];
+        if (Array.isArray(rmaRows)) {
+          additions.push(...rmaRows.filter((r) => Boolean(isTestRecord(r)) === Boolean(modalIsTestScope) && !isTrashedRecord(r)));
+        }
+        if (Array.isArray(riRows) && riRows.length > 0) {
+          uniqueRmas.forEach((rmaNum) => {
+            const matchedItems = riRows.filter((ri) => String(ri.rma_number || '').toUpperCase() === rmaNum.toUpperCase());
+            if (matchedItems.length > 1) {
+              additions.push({
+                rma_number: rmaNum,
+                is_parent: true,
+                is_test: modalIsTestScope,
+                items: matchedItems,
+                total_items: matchedItems.length
+              });
+            }
+          });
+        }
+        if (additions.length > 0) {
+          setHydratedPoolRows(additions);
+        }
+      } catch {}
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, batchSignature, inputReports.length, modalIsTestScope]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const resolvedEntriesByKey = useMemo(() => {
+    const map = new Map();
+    visibleEntries.forEach((entry) => {
+      const rep = entry.report;
+      const resolved = resolveBatchManifestForQr(rep, manifestLookupPool);
+      const effectiveItems = resolved.items.length > 1
+        ? resolved.items
+        : (Array.isArray(rep?.items) && rep.items.length > 1 ? rep.items : null);
+      const canonicalParent = resolved.parentReport && resolved.items.length > 1
+        ? resolved.parentReport
+        : rep;
+      map.set(entry.key, { canonicalParent, effectiveItems });
+    });
+    return map;
+  }, [visibleEntries, manifestLookupPool]);
 
   const hasMultiItemRma = useMemo(() => {
     return visibleEntries.some((entry) => {
       const rep = entry.report;
-      const resolvedItems = getReportManifestItems(rep, manifestLookupPool);
-      return resolvedItems.length > 1 || (Array.isArray(rep?.items) && rep.items.length > 1);
+      const res = resolvedEntriesByKey.get(entry.key);
+      return Boolean(
+        (res?.effectiveItems && res.effectiveItems.length > 1) ||
+        Number(rep?.total_items || rep?.totalItems || rep?.manifest_total_lines || 0) > 1
+      );
     });
-  }, [visibleEntries, manifestLookupPool]);
+  }, [visibleEntries, resolvedEntriesByKey]);
 
   const expandedEntries = useMemo(() => {
     const out = [];
     visibleEntries.forEach((entry) => {
       const rep = entry.report;
-      const resolvedItems = getReportManifestItems(rep, manifestLookupPool);
-      const effectiveItems = resolvedItems.length > 1
-        ? resolvedItems
-        : (Array.isArray(rep?.items) && rep.items.length > 1 ? rep.items : null);
+      const res = resolvedEntriesByKey.get(entry.key);
+      const canonicalRep = res?.canonicalParent || rep;
+      const effectiveItems = res?.effectiveItems || null;
 
       if (qrSplitMode === 'per_item' && effectiveItems && effectiveItems.length > 1) {
         effectiveItems.forEach((it, itemIdx) => {
           const itemKey = `${entry.key}__item-${itemIdx + 1}`;
           if (removedKeys.has(itemKey)) return;
-          const itemBarcode = String(it?.barcode || rep.barcode || '').trim();
+          const itemBarcode = String(it?.barcode || canonicalRep.barcode || '').trim();
           const itemSku = String(it?.code || it?.sku || '').trim();
-          const itemName = String(it?.name || it?.productName || it?.product_name || rep.name || 'Returned Merchandise').trim();
-          const itemQty = Number(it?.quantity ?? it?.qty) || 1;
-          const itemUnit = String(it?.unit_name || it?.unit || rep.unit_name || 'pc').trim() || 'pc';
+          const itemName = String(it?.name || it?.productName || it?.product_name || canonicalRep.name || 'Returned Merchandise').trim();
+          const itemQty = Math.max(1, Number(it?.quantity ?? it?.qty) || 1);
+          const itemUnit = String(it?.unit_name || it?.unit || canonicalRep.unit_name || 'pc').trim() || 'pc';
+          const itemSupplierCandidate = it?.supplier_name || it?.supplierName || it?.supplier || '';
+          const itemSupplier = isRealSupplierName(itemSupplierCandidate)
+            ? String(itemSupplierCandidate).trim()
+            : (!isMixedSuppliersSummary(canonicalRep.supplier_name) ? (canonicalRep.supplier_name || '') : '');
           out.push({
             key: itemKey,
             parentKey: entry.key,
@@ -202,43 +322,51 @@ export default function ReturnQRModal({
             totalLines: effectiveItems.length,
             isPerItemSplit: true,
             report: {
-              ...rep,
+              ...canonicalRep,
               items: [{ ...it }],
               total_items: 1,
               totalItems: 1,
               name: itemName,
               productName: itemName,
-              barcode: itemBarcode || rep.barcode,
+              barcode: itemBarcode || canonicalRep.barcode,
               code: itemSku,
               sku: itemSku,
               quantity: itemQty,
               total_quantity: itemQty,
               unit_name: itemUnit,
               unit: itemUnit,
-              pieces_per_case: Number(it?.pieces_per_case ?? it?.piecesPerCase ?? rep.pieces_per_case) || 1,
-              expiry_date: it?.expiry_date || rep.expiry_date || '',
-              reason: it?.reason || rep.reason || '',
-              explanation: it?.explanation || rep.explanation || '',
+              supplier_name: itemSupplier || canonicalRep.supplier_name,
+              pieces_per_case: Number(it?.pieces_per_case ?? it?.piecesPerCase ?? canonicalRep.pieces_per_case) || 1,
+              expiry_date: it?.expiry_date || canonicalRep.expiry_date || '',
+              reason: it?.reason || canonicalRep.reason || '',
+              explanation: it?.explanation || canonicalRep.explanation || '',
               _manifestLineIndex: itemIdx + 1,
               _manifestTotalLines: effectiveItems.length
             }
           });
         });
       } else {
+        const consolidatedReport = effectiveItems && effectiveItems.length > 1
+          ? {
+              ...canonicalRep,
+              is_parent: true,
+              items: effectiveItems,
+              total_items: effectiveItems.length,
+              total_quantity: sumManifestQuantity(effectiveItems, canonicalRep.total_quantity || canonicalRep.quantity)
+            }
+          : canonicalRep;
         out.push({
           key: entry.key,
           parentKey: entry.key,
           itemIndex: null,
           totalLines: null,
           isPerItemSplit: false,
-          report: effectiveItems && effectiveItems.length > 1 && (!Array.isArray(rep?.items) || rep.items.length <= 1)
-            ? { ...rep, items: effectiveItems, total_items: effectiveItems.length }
-            : rep
+          report: consolidatedReport
         });
       }
     });
     return out;
-  }, [visibleEntries, manifestLookupPool, qrSplitMode, removedKeys]);
+  }, [visibleEntries, resolvedEntriesByKey, qrSplitMode, removedKeys]);
 
   // Default card size: Medium 90x105mm for single QR, balanced 62x74mm for multi-select consolidated or per-item QRs
   const defaultCardSize = useMemo(

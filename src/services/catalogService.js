@@ -9,7 +9,11 @@ import {
   isTrashedRecord, 
   isArchivedRecord,
   isTestRecord,
-  getTrashDaysRemaining 
+  getTrashDaysRemaining,
+  sumManifestQuantity,
+  summarizeBatchSuppliers,
+  isMixedSuppliersSummary,
+  extractDistinctSuppliersFromItems
 } from '../utils/rmaHelpers';
 import { isPlaceholderSupplier } from '../utils/followUpWorkflow';
 import { supplierDirectoryService } from './supplierDirectoryService';
@@ -1347,8 +1351,8 @@ export const catalogService = {
     );
 
     const calculatedTotalItems = total_items || (hasItems ? items.length : 1);
-    const calculatedTotalQuantity = total_quantity || (hasItems 
-      ? items.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0)
+    const calculatedTotalQuantity = total_quantity || (hasItems
+      ? sumManifestQuantity(items, quantity)
       : (Number(quantity) || 1));
 
     const userProvidedName = (name || productName || '').trim();
@@ -1368,15 +1372,18 @@ export const catalogService = {
     const effectiveRmaType = (rma_type === 'supplier_outbound' || (typeof rmaType !== 'undefined' && rmaType === 'supplier_outbound')) ? 'supplier_outbound' : 'customer_inbound';
     const effectiveGrade = condition_grade || mapReasonToConditionGrade(reason || (hasItems && items[0]?.reason));
 
-    const resolvedSupplierName = this._pickRealSupplier(
-      supplier_name,
-      supplier,
+    const singleFallbackSupplier = this._pickRealSupplier(
+      isMixedSuppliersSummary(supplier_name) ? null : supplier_name,
+      isMixedSuppliersSummary(supplier) ? null : supplier,
       resolvedProduct?.supplier_name,
       resolvedProduct?.supplierName,
       resolvedProduct?.supplier,
       hasItems ? items[0]?.supplier_name : null,
       hasItems ? items[0]?.supplierName : null
     );
+    const resolvedSupplierName = isBatch
+      ? summarizeBatchSuppliers(items, singleFallbackSupplier)
+      : singleFallbackSupplier;
 
     const nowIso = new Date().toISOString();
     const existingFollowUpMeta = (ai_document_metadata?.follow_up && typeof ai_document_metadata.follow_up === 'object')
@@ -1547,6 +1554,7 @@ export const catalogService = {
     // 1.1 If this is a multi-item batch return, only insert child rows into rma_items and child rma_reports if isBatch && items.length > 1
     // Single-item returns are already recorded as finalReport itself; inserting child rows for single-items creates duplicate records.
     if (finalReport?.id && isBatch && items.length > 1) {
+      const childFallbackSupplier = isMixedSuppliersSummary(reportRow.supplier_name) ? null : reportRow.supplier_name;
       try {
         const rmaItemRows = items.map(it => ({
           rma_report_id: finalReport.id,
@@ -1558,7 +1566,7 @@ export const catalogService = {
           unit_name: it.unit_name || it.unit || 'pc',
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
-          supplier_name: this._pickRealSupplier(it.supplier_name, it.supplierName, it.supplier, reportRow.supplier_name),
+          supplier_name: this._pickRealSupplier(it.supplier_name, it.supplierName, it.supplier, childFallbackSupplier),
           reason: it.reason || 'Damaged Box / Crushed Packaging',
           explanation: it.explanation || null,
           expiry_date: it.expiry_date || null,
@@ -1580,7 +1588,7 @@ export const catalogService = {
           name: it.name || it.productName || `Item (${it.barcode})`,
           quantity: Number(it.quantity) || 1,
           unit_name: it.unit_name || it.unit || 'pc',
-          supplier_name: this._pickRealSupplier(it.supplier_name, it.supplierName, it.supplier, reportRow.supplier_name),
+          supplier_name: this._pickRealSupplier(it.supplier_name, it.supplierName, it.supplier, childFallbackSupplier),
           price: Number(it.price || 0),
           price_with_vat: Number(it.price_with_vat || it.priceWithVat || it.price || 0),
           status: reportRow.status,
@@ -3156,14 +3164,26 @@ export const catalogService = {
       updates.photos = [...new Set([...prevPhotos, ...payload.appendPhotoUrls.filter(Boolean)])];
     }
 
-    // Update manifest item array if batch manifest
-    if (Array.isArray(existing?.items) && existing.items.length > 0) {
-      updates.items = existing.items.map(it => ({
-        ...it,
-        ...(updates.supplier_name ? { supplier_name: updates.supplier_name, supplier: updates.supplier_name } : {}),
-        ...(payload.disposition ? { disposition: payload.disposition } : {}),
-        ...(payload.status ? { status: payload.status } : {})
-      }));
+    const existingItemsArr = Array.isArray(existing?.items) ? existing.items : [];
+    const existingItemSups = extractDistinctSuppliersFromItems(existingItemsArr);
+    const hasMixedItemSuppliers = existingItemSups.length > 1;
+    const allowCascadeSupplier = Boolean(updates.supplier_name) && (!hasMixedItemSuppliers || Boolean(payload.unifyMixedSuppliers));
+
+    // Update manifest item array if batch manifest (never clobbering mixed suppliers unless explicitly unifying)
+    if (existingItemsArr.length > 0) {
+      updates.items = existingItemsArr.map(it => {
+        const itemHasRealSup = !this._isPlaceholderSupplier(it?.supplier_name) && !isMixedSuppliersSummary(it?.supplier_name);
+        const shouldSetSup = Boolean(updates.supplier_name) && !isMixedSuppliersSummary(updates.supplier_name) && (allowCascadeSupplier || !itemHasRealSup);
+        return {
+          ...it,
+          ...(shouldSetSup ? { supplier_name: updates.supplier_name, supplier: updates.supplier_name } : {}),
+          ...(payload.disposition ? { disposition: payload.disposition } : {}),
+          ...(payload.status ? { status: payload.status } : {})
+        };
+      });
+      if (hasMixedItemSuppliers && !payload.unifyMixedSuppliers) {
+        updates.supplier_name = summarizeBatchSuppliers(updates.items, existing?.supplier_name);
+      }
     }
 
     const existingAudit = Array.isArray(existing?.audit_trail) ? existing.audit_trail : [];
@@ -3220,10 +3240,10 @@ export const catalogService = {
     } catch {}
 
     // Sync child rows only if this record is a multi-item parent manifest
-    if (resolvedId && (existing?.is_parent === true || (Array.isArray(existing?.items) && existing.items.length > 0))) {
+    if (resolvedId && (existing?.is_parent === true || existingItemsArr.length > 0)) {
       try {
         await supabase.from('rma_reports').update({
-          ...(updates.supplier_name ? { supplier_name: updates.supplier_name } : {}),
+          ...(allowCascadeSupplier && !isMixedSuppliersSummary(updates.supplier_name) ? { supplier_name: updates.supplier_name } : {}),
           disposition: updates.disposition,
           status: savedRow?.status || updates.status,
           warehouse_location: updates.warehouse_location
@@ -3304,12 +3324,23 @@ export const catalogService = {
       ]
     };
 
-    if (cleanSupplier && Array.isArray(existing?.items) && existing.items.length > 0) {
-      updates.items = existing.items.map((it) => ({
-        ...it,
-        supplier_name: cleanSupplier,
-        supplier: cleanSupplier
-      }));
+    const existingItemsArr = Array.isArray(existing?.items) ? existing.items : [];
+    const hasMixedFollowUpSups = extractDistinctSuppliersFromItems(existingItemsArr).length > 1;
+    const allowCascadeFollowUpSup = Boolean(cleanSupplier) && (!hasMixedFollowUpSups || Boolean(payload.unifyMixedSuppliers));
+
+    if (cleanSupplier && existingItemsArr.length > 0) {
+      updates.items = existingItemsArr.map((it) => {
+        const itemHasRealSup = !this._isPlaceholderSupplier(it?.supplier_name) && !isMixedSuppliersSummary(it?.supplier_name);
+        if (!allowCascadeFollowUpSup && itemHasRealSup) return it;
+        return {
+          ...it,
+          supplier_name: cleanSupplier,
+          supplier: cleanSupplier
+        };
+      });
+      if (hasMixedFollowUpSups && !payload.unifyMixedSuppliers) {
+        updates.supplier_name = summarizeBatchSuppliers(updates.items, cleanSupplier);
+      }
     }
 
     let { data: savedRows, error: updateErr } = await supabase
@@ -3326,7 +3357,7 @@ export const catalogService = {
       savedRows = retry.data;
     }
 
-    if (cleanSupplier) {
+    if (allowCascadeFollowUpSup && !isMixedSuppliersSummary(cleanSupplier)) {
       try {
         await supabase.from('rma_reports').update({ supplier_name: cleanSupplier }).eq('parent_rma_id', resolvedId);
       } catch {}

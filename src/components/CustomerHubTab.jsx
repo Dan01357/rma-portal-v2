@@ -62,7 +62,10 @@ import {
   doesCreditMemoLinkReport,
   findConsolidatedRtvBatchReports,
   getGpsAddressDisplay,
-  getGpsMapUrl
+  getGpsMapUrl,
+  isRealSupplierName,
+  isMixedSuppliersSummary,
+  sumManifestQuantity
 } from '../utils/rmaHelpers';
 
 export default function CustomerHubTab({
@@ -1762,10 +1765,18 @@ export default function CustomerHubTab({
                                   RMA: {item.rma_number}
                                 </span>
                               </div>
-                              <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-3 flex-wrap">
                                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
                                   Total manifest breakdown: <strong className="text-slate-900 dark:text-white font-bold">{formatManifestBreakdown(manifestChildren, true)}</strong>
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() => onInspectTriage(item)}
+                                  className="text-xs text-blue-700 dark:text-blue-300 hover:text-blue-900 font-bold px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 border border-blue-200 dark:border-blue-800 transition-colors cursor-pointer"
+                                  title="Edit individual batch line item quantities and suppliers"
+                                >
+                                  ✏️ Edit Qty / Suppliers
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => toggleManifestExpand(manifestKey)}
@@ -1842,7 +1853,9 @@ export default function CustomerHubTab({
                                         unit_name: childUnit,
                                         price: Number(child.price || matchedChild?.price || 0),
                                         price_with_vat: Number(child.price_with_vat || child.price || matchedChild?.price_with_vat || matchedChild?.price || 0),
-                                        supplier_name: child.supplier_name || matchedChild?.supplier_name || item.supplier_name || 'Savemore',
+                                        supplier_name: isRealSupplierName(child.supplier_name)
+                                          ? child.supplier_name
+                                          : (matchedChild?.supplier_name || (isRealSupplierName(item.supplier_name) ? item.supplier_name : 'Savemore')),
                                         store_branch: item.store_branch,
                                         customer_branch: item.store_branch,
                                         ae_name: item.ae_name,
@@ -2016,7 +2029,9 @@ export default function CustomerHubTab({
                                                       price: child.price || 0,
                                                       price_with_vat: child.price_with_vat || child.price || 0,
                                                       unit_name: childUnit,
-                                                      supplier_name: child.supplier_name || item.supplier_name || 'Savemore',
+                                                      supplier_name: isRealSupplierName(child.supplier_name)
+                                                        ? child.supplier_name
+                                                        : (isRealSupplierName(item.supplier_name) ? item.supplier_name : 'Savemore'),
                                                       rma_number: item.rma_number,
                                                       is_manifest_child: true,
                                                       parent_rma_id: item.id

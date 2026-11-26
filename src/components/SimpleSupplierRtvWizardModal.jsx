@@ -25,7 +25,10 @@ import {
   isManifestSubItem,
   formatDateYmd,
   normalizePhotoUrlArray,
-  getGpsAddressDisplay
+  getGpsAddressDisplay,
+  extractDistinctSuppliersFromItems,
+  isMixedSuppliersSummary,
+  isRealSupplierName
 } from '../utils/rmaHelpers';
 import { stampWatermarkOnFiles } from '../utils/cameraWatermark';
 import SupplierPickupFormModal from './SupplierPickupFormModal';
@@ -529,21 +532,30 @@ export default function SimpleSupplierRtvWizardModal({
 
   const distinctSuppliersInBatch = useMemo(() => {
     const map = new Map();
+    const addCandidate = (rawVal) => {
+      if (!isRealSupplierName(rawVal) || isPendingSupplierName(rawVal)) return;
+      const clean = String(rawVal).trim();
+      const k = clean.toLowerCase();
+      if (!map.has(k)) map.set(k, clean);
+    };
+
     workingBatchReports.forEach((r) => {
-      const cand = [
-        r?.ai_document_metadata?.supplier_pickup?.supplier_name,
-        r?.supplier_name,
-        r?.supplierName,
-        r?.supplier
-      ].find((s) => !isPendingSupplierName(s));
-      if (cand) {
-        const clean = String(cand).trim();
-        const k = clean.toLowerCase();
-        if (!map.has(k)) map.set(k, clean);
+      const items = getReportManifestItems(r, allReports);
+      const itemSuppliers = extractDistinctSuppliersFromItems(items);
+      if (itemSuppliers.length > 0) {
+        itemSuppliers.forEach(addCandidate);
+      } else {
+        const cand = [
+          r?.ai_document_metadata?.supplier_pickup?.supplier_name,
+          r?.supplier_name,
+          r?.supplierName,
+          r?.supplier
+        ].find((s) => isRealSupplierName(s) && !isPendingSupplierName(s));
+        addCandidate(cand);
       }
     });
     return Array.from(map.values());
-  }, [workingBatchReports]);
+  }, [workingBatchReports, allReports]);
 
   const wizardCurrentIsTest = useMemo(
     () => workingBatchReports.some((r) => isTestRecord(r)),
@@ -936,6 +948,7 @@ export default function SimpleSupplierRtvWizardModal({
           status: nextStatus,
           warehouse_location: nextLocation,
           supplier_name: isSupplierStream ? effectiveSupplier : (rep.supplier_name || effectiveSupplier),
+          unifyMixedSuppliers: Boolean(confirmUnifySupplier),
           actorName: cleanProcessedBy,
           inspected_by: cleanProcessedBy,
           clearWorkflowResolution: true,
@@ -1209,6 +1222,7 @@ export default function SimpleSupplierRtvWizardModal({
           status: 'picked_up',
           warehouse_location: nextLocation,
           supplier_name: isSupplierStream ? cleanSupplier : (rep.supplier_name || cleanSupplier),
+          unifyMixedSuppliers: Boolean(confirmUnifySupplier),
           actorName: cleanProcessedBy,
           inspected_by: cleanProcessedBy,
           clearWorkflowResolution: true,

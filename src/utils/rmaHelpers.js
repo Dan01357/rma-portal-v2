@@ -275,6 +275,155 @@ export function hasAssignedSku(report, savedProductsList = []) {
 }
 
 /**
+ * Returns true if a string is a wrapped multi-supplier parent summary
+ * e.g. "Multiple Suppliers (Supplier A, Suysing)".
+ */
+export function isMixedSuppliersSummary(val) {
+  return /^multiple suppliers\s*\(/i.test(String(val || '').trim());
+}
+
+/**
+ * Pure check for whether a supplier string represents an assigned vendor
+ * (ignoring empty strings, placeholders, and wrapped multi-supplier summaries).
+ */
+export function isRealSupplierName(val) {
+  const s = String(val || '').trim();
+  if (!s) return false;
+  const lower = s.toLowerCase();
+  if (
+    lower === 'pending assignment' ||
+    lower === 'pending' ||
+    lower === 'unassigned' ||
+    lower === 'warehouse' ||
+    lower === 'n/a' ||
+    lower === 'direct return' ||
+    isMixedSuppliersSummary(s)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Computes total item quantity across normalized manifest line items.
+ */
+export function sumManifestQuantity(items = [], fallback = 1) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return Math.max(1, Number(fallback) || 1);
+  }
+  return items.reduce((sum, it) => sum + Math.max(1, Number(it?.quantity ?? it?.qty) || 1), 0);
+}
+
+/**
+ * Extracts deduplicated, non-placeholder supplier names from manifest line items
+ * while preserving first-seen display casing.
+ */
+export function extractDistinctSuppliersFromItems(items = []) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const seen = new Set();
+  const out = [];
+  items.forEach((it) => {
+    const cand = [it?.supplier_name, it?.supplierName, it?.supplier].find((v) => isRealSupplierName(v));
+    if (!cand) return;
+    const clean = String(cand).trim();
+    const key = clean.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(clean);
+    }
+  });
+  return out;
+}
+
+/**
+ * Produces parent rma_reports.supplier_name summary from manifest line items:
+ * - Single unique supplier -> that supplier name
+ * - Multiple unique suppliers -> "Multiple Suppliers (Supplier A, Suysing)"
+ * - None -> fallbackSupplier (if real) or 'Pending Assignment'
+ */
+export function summarizeBatchSuppliers(items = [], fallbackSupplier = '') {
+  const unique = extractDistinctSuppliersFromItems(items);
+  if (unique.length === 1) return unique[0];
+  if (unique.length > 1) return `Multiple Suppliers (${unique.join(', ')})`;
+  if (isRealSupplierName(fallbackSupplier)) return String(fallbackSupplier).trim();
+  return 'Pending Assignment';
+}
+
+/**
+ * Resolves the full batch manifest items (and canonical parent record) for a report,
+ * including unpacked child rows from Supplier Claims or DB child rma_reports rows.
+ */
+export function resolveBatchManifestForQr(report, allReports = []) {
+  if (!report) return { parentReport: report, items: [] };
+
+  const direct = getReportManifestItems(report, allReports);
+  if (direct.length > 1) {
+    return { parentReport: report, items: direct };
+  }
+
+  if (Array.isArray(report.manifest_items) && report.manifest_items.length > 1) {
+    return { parentReport: report, items: report.manifest_items };
+  }
+
+  const rawList = Array.isArray(allReports) ? allReports : [];
+  const seenListKeys = new Set();
+  const list = rawList.filter((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const dedupKey = item.id != null
+      ? `id:${String(item.id)}`
+      : `row:${String(item.rma_number || '').toUpperCase()}::${String(item.barcode || '').toUpperCase()}::${item.is_parent ? 'P' : 'C'}`;
+    if (seenListKeys.has(dedupKey)) return false;
+    seenListKeys.add(dedupKey);
+    return true;
+  });
+  const parentMatch = list.find((p) => {
+    if (!p || String(p.id) === String(report.id)) return false;
+    if (report.parent_rma_id != null && String(p.id) === String(report.parent_rma_id)) return true;
+    if (report.rma_number && p.rma_number === report.rma_number) {
+      const pItems = Array.isArray(p.items) ? p.items : [];
+      return (
+        p.is_parent === true ||
+        pItems.length > 1 ||
+        Number(p.total_items || 0) > 1 ||
+        String(p.name || '').toLowerCase().startsWith('batch return manifest')
+      );
+    }
+    return false;
+  });
+
+  if (parentMatch) {
+    const parentItems = getReportManifestItems(parentMatch, list);
+    if (parentItems.length > 1) {
+      return { parentReport: parentMatch, items: parentItems };
+    }
+  }
+
+  if (report.rma_number && !isSplitChildTicket(report) && list.length > 0) {
+    const rawSiblings = list.filter((s) => (
+      s &&
+      s.rma_number === report.rma_number &&
+      !s.is_parent &&
+      !isSplitChildTicket(s)
+    ));
+    const persistentBarcodes = new Set(
+      rawSiblings
+        .filter((s) => s.id != null && s.barcode)
+        .map((s) => String(s.barcode).trim().toUpperCase())
+    );
+    const siblings = rawSiblings.filter((s) => (
+      s.id != null ||
+      !s.barcode ||
+      !persistentBarcodes.has(String(s.barcode).trim().toUpperCase())
+    ));
+    if (siblings.length > 1) {
+      return { parentReport: parentMatch || report, items: siblings };
+    }
+  }
+
+  return { parentReport: parentMatch || report, items: direct };
+}
+
+/**
  * Safely extracts child line items from a batch manifest report
  */
 export function getReportManifestItems(report, allReports = []) {

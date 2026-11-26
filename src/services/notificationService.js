@@ -35,7 +35,8 @@ import {
   cleanExplanationText,
   normalizePhotoUrlArray,
   getGpsAddressDisplay,
-  getGpsMapUrl
+  getGpsMapUrl,
+  isRealSupplierName
 } from '../utils/rmaHelpers';
 import { generatePickupFormPdfAttachment } from '../utils/pickupFormPdf';
 import { buildRmaAlertXlsxAttachment } from '../utils/rmaAlertXlsx';
@@ -1028,12 +1029,15 @@ export const notificationService = {
             ${manifestItems.length > 1 ? `
             <div class="section-title">Manifest Items Breakdown (${manifestItems.length} Lines)</div>
             <div class="card" style="padding: 12px;">
-              ${manifestItems.map((it, idx) => `
+              ${manifestItems.map((it, idx) => {
+                const itSup = it.supplier_name || it.supplierName || it.supplier || '';
+                const supBadge = isRealSupplierName(itSup) ? ` • Supplier: ${escapeEmailHtml(itSup)}` : '';
+                return `
                 <div style="padding: 6px 0; ${idx > 0 ? 'border-top: 1px solid #e2e8f0;' : ''} font-size: 12px;">
                   <strong>${idx + 1}. ${escapeEmailHtml(it.name || it.productName || it.barcode || 'Item')}</strong>
-                  <span style="color: #64748b; font-family: monospace;"> • Qty: ${Number(it.quantity) || 1} ${escapeEmailHtml(it.unit_name || it.unit || 'pc')} • Exp (YYYY-MM-DD): ${escapeEmailHtml(formatDateYmd(it.expiry_date) || 'N/A')}</span>
-                </div>
-              `).join('')}
+                  <span style="color: #64748b; font-family: monospace;"> • Qty: ${Number(it.quantity) || 1} ${escapeEmailHtml(it.unit_name || it.unit || 'pc')}${supBadge} • Exp (YYYY-MM-DD): ${escapeEmailHtml(formatDateYmd(it.expiry_date) || 'N/A')}</span>
+                </div>`;
+              }).join('')}
             </div>` : ''}
 
             ${editUrl ? `

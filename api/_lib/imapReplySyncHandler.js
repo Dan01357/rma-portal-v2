@@ -3,6 +3,12 @@ import zlib from 'node:zlib';
 import { supabase } from './supabase.js';
 import { authorizeCronOrAdmin } from './cronAuth.js';
 import { DEFAULT_EMAIL_RECIPIENTS, DEFAULT_SANDBOX_EMAIL } from './smtpMailer.js';
+import {
+  sumManifestQuantity,
+  summarizeBatchSuppliers,
+  isMixedSuppliersSummary,
+  isRealSupplierName
+} from '../../src/utils/rmaHelpers.js';
 
 function decodeXmlEntities(str) {
   return String(str || '')
@@ -265,6 +271,9 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
       const rawPrice = colMap.price >= 0 && String(row[colMap.price] ?? '').trim() !== ''
         ? Number(String(row[colMap.price]).replace(/[,\s]/g, ''))
         : undefined;
+      const rawQty = colMap.quantity >= 0 && String(row[colMap.quantity] ?? '').trim() !== ''
+        ? Number(String(row[colMap.quantity]).replace(/[,\s]/g, ''))
+        : undefined;
       manifestUpdates.push({
         serialNo,
         lineIndex: serialNo - 1,
@@ -272,7 +281,7 @@ export function extractRmaUpdatesFromXlsxBuffer(buffer, { subjectHint = '' } = {
         barcode: colMap.barcode >= 0 ? String(row[colMap.barcode] ?? '').trim() : '',
         code: colMap.code >= 0 ? String(row[colMap.code] ?? '').trim() : '',
         name: colMap.name >= 0 ? String(row[colMap.name] ?? '').trim() : '',
-        quantity: colMap.quantity >= 0 && String(row[colMap.quantity] ?? '').trim() !== '' ? Number(row[colMap.quantity]) : undefined,
+        quantity: Number.isFinite(rawQty) && rawQty >= 1 ? Math.round(rawQty) : undefined,
         unit_name: colMap.unit_name >= 0 ? String(row[colMap.unit_name] ?? '').trim() : '',
         price: Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : undefined,
         expiry_date: colMap.expiry_date >= 0 ? normalizeYmdInput(row[colMap.expiry_date]) : null,
@@ -680,7 +689,9 @@ export async function applyRmaXlsxUpdates({
   // Apply per-item Manifest Line Item edits independently (by Barcode, SKU, or 1-based Serial No. index)
   const baseItemsList = Array.isArray(existing.items) && existing.items.length > 0
     ? existing.items
-    : (Array.isArray(childReportRows) && childReportRows.length > 0 ? childReportRows : []);
+    : (Array.isArray(childReportRows) && childReportRows.length > 0
+        ? childReportRows
+        : (Array.isArray(rmaItemRows) && rmaItemRows.length > 0 ? rmaItemRows : []));
   const editedManifestEntries = [];
 
   if (parsed.manifestUpdates.length > 0 && baseItemsList.length > 0) {
@@ -772,13 +783,33 @@ export async function applyRmaXlsxUpdates({
     }
 
     if (editedManifestEntries.length > 0) {
-      if (Array.isArray(existing.items) && existing.items.length > 0) {
-        updates.items = nextItems;
+      updates.items = nextItems;
+      const batchTotalQty = sumManifestQuantity(nextItems, 1);
+      updates.total_quantity = batchTotalQty;
+      updates.quantity = batchTotalQty;
+      updates.total_items = nextItems.length;
+
+      const supFallback = (!isMixedSuppliersSummary(updates.supplier_name) && isRealSupplierName(updates.supplier_name))
+        ? updates.supplier_name
+        : ((!isMixedSuppliersSummary(existing.supplier_name) && isRealSupplierName(existing.supplier_name)) ? existing.supplier_name : '');
+      const nextSummarySupplier = summarizeBatchSuppliers(nextItems, supFallback);
+      if (nextSummarySupplier && nextSummarySupplier !== 'Pending Assignment' && nextSummarySupplier !== String(existing.supplier_name || '').trim()) {
+        updates.supplier_name = nextSummarySupplier;
+        if (!changedFields.includes('supplier_name')) changedFields.push('supplier_name');
       }
-      updates.total_quantity = nextItems.reduce((s, it) => s + (Number(it.quantity) || 1), 0);
-      changedFields.push('items');
+
+      if (!changedFields.includes('items')) changedFields.push('items');
+      if (batchTotalQty !== Number(existing.total_quantity ?? existing.quantity ?? 0)) {
+        if (!changedFields.includes('total_quantity')) changedFields.push('total_quantity');
+        if (!changedFields.includes('quantity')) changedFields.push('quantity');
+      }
       editedManifestEntries.forEach((e) => {
         if (e.itemPatch.supplier_name) changedFields.push(`item_${e.serialNo}_supplier_name`);
+        if (e.itemPatch.quantity !== undefined) changedFields.push(`item_${e.serialNo}_quantity`);
+        if (e.itemPatch.code) changedFields.push(`item_${e.serialNo}_code`);
+        if (e.itemPatch.name) changedFields.push(`item_${e.serialNo}_name`);
+        if (e.itemPatch.price !== undefined) changedFields.push(`item_${e.serialNo}_price`);
+        if (e.itemPatch.expiry_date) changedFields.push(`item_${e.serialNo}_expiry_date`);
       });
     }
   } else if (Array.isArray(existing.items) && existing.items.length === 1) {
@@ -968,7 +999,7 @@ export async function applyRmaXlsxUpdates({
   const effectiveSupplier = String(updates.supplier_name || existing.supplier_name || '').trim();
   const effectiveSupTo = nextFollowUp.supplier_email_to || '';
   const effectiveSupCc = nextFollowUp.supplier_email_cc || '';
-  if (effectiveSupplier && (effectiveSupTo || effectiveSupCc)) {
+  if (effectiveSupplier && !isMixedSuppliersSummary(effectiveSupplier) && isRealSupplierName(effectiveSupplier) && (effectiveSupTo || effectiveSupCc)) {
     try {
       const dirRow = (settingsRows || []).find((s) => s.key === 'supplier_directory_store');
       let dirList = [];
